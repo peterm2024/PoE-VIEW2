@@ -46,3 +46,45 @@ def test_set_stashes_builds_recursive_tree(qapp) -> None:
     folder_node = root.child(1)
     assert folder_node.childCount() == 1
     assert folder_node.child(0).text(0) == "Sub"
+
+
+def test_set_stashes_marks_unloaded_tabs_and_adds_refresh_button(qapp) -> None:
+    data = [{"id": "root1", "name": "#", "type": "QuadStash", "metadata": {}}]
+    stashes = [StashTab.model_validate(d) for d in data]
+    tree = StashTree()
+    tree.set_stashes(stashes, loaded_ids=frozenset())
+    node = tree._stash_nodes["root1"]
+    assert node.text(1) == "⬇"
+    assert tree.itemWidget(node, 2) is not None  # Refresh-Button vorhanden
+
+
+def test_set_stashes_respects_loaded_ids(qapp) -> None:
+    data = [{"id": "root1", "name": "#", "type": "QuadStash", "metadata": {}}]
+    stashes = [StashTab.model_validate(d) for d in data]
+    tree = StashTree()
+    tree.set_stashes(stashes, loaded_ids=frozenset({"root1"}))
+    assert tree._stash_nodes["root1"].text(1) == ""
+
+
+def test_mark_loaded_clears_unloaded_marker(qapp) -> None:
+    data = [{"id": "root1", "name": "#", "type": "QuadStash", "metadata": {}}]
+    stashes = [StashTab.model_validate(d) for d in data]
+    tree = StashTree()
+    tree.set_stashes(stashes)
+    assert tree._stash_nodes["root1"].text(1) == "⬇"
+    tree.mark_loaded("root1")
+    assert tree._stash_nodes["root1"].text(1) == ""
+
+
+def test_refresh_button_click_emits_signal(qapp) -> None:
+    data = [{"id": "root1", "name": "Currency 1", "type": "QuadStash", "metadata": {}}]
+    stashes = [StashTab.model_validate(d) for d in data]
+    tree = StashTree()
+    tree.set_stashes(stashes)
+    node = tree._stash_nodes["root1"]
+    button = tree.itemWidget(node, 2)
+
+    received = []
+    tree.stash_refresh_requested.connect(lambda sid, name: received.append((sid, name)))
+    button.click()
+    assert received == [("root1", "Currency 1")]

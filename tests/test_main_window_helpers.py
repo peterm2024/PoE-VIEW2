@@ -63,3 +63,29 @@ def test_default_export_filename_falls_back_to_tab_name(qapp) -> None:
 
     win.worker.stop()
     win.worker.wait(5000)
+
+
+def test_default_export_filename_includes_league(qapp) -> None:
+    win = MainWindow()
+    win._current_league = "Settlers"
+    win._current_tab_name = "Currency 1"
+    assert win._default_export_filename() == "poe-view2-Settlers-Currency-1.csv"
+
+    win._filter_edit.setText("Chaos Orb")
+    assert win._default_export_filename() == "poe-view2-Settlers-Chaos-Orb.csv"
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_busy_indicator_toggles_with_status_text(qapp) -> None:
+    # isHidden() statt isVisible(): win.show() läuft hier nicht, isVisible()
+    # wäre also unabhängig vom Widget-Zustand immer False (Ancestor-Kette).
+    win = MainWindow()
+    win._on_status("Lade Items: Currency 1 …")
+    assert not win._busy_indicator.isHidden()
+    win._on_status("Bereit")
+    assert win._busy_indicator.isHidden()
+
+    win.worker.stop()
+    win.worker.wait(5000)

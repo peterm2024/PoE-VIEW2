@@ -342,11 +342,11 @@ Artifact-Link im Projektverlauf / `docs/ui-mockup.html`.)
 
 | Bereich | Widget | Verhalten |
 |---|---|---|
-| Navigation links | `QTreeWidget` | Zwei Wurzelknoten: *Charaktere* und *Stash*, beide **flach** (kein Liga-Level). Stash-Ordner rekursiv (children). Tab-Farbe aus API als Farbpunkt/Hintergrund. Klick auf Tab/Char → `FetchStashItems`/`FetchCharacter`-Job. Bereits geladene Tabs kommen aus dem Speicher-Cache (kein erneuter API-Call, außer via "Aktualisieren"). |
-| Item-Tabelle rechts oben | `QTableView` + `QSortFilterProxyModel` | Spalten: Icon, Name, Typ, Level, Quality, Stack, iLvl. Klick auf Spaltenkopf sortiert; Suchfeld filtert live über Name+Typ (kein API-Call — gefiltert wird lokal). |
+| Navigation links | `QTreeWidget`, 3 Spalten | Zwei Wurzelknoten: *Charaktere* und *Stash*, beide **flach** (kein Liga-Level). Stash-Ordner rekursiv (children). Tab-Farbe aus API als Farbpunkt/Hintergrund. Klick auf Tab/Char → `FetchStashItems`/`FetchCharacter`-Job. Bereits geladene Tabs kommen aus dem Speicher-Cache (kein erneuter API-Call, außer via "Aktualisieren"). Spalte 2: **⬇**-Marker, solange der Tab noch nicht geladen ist (`StashTree.mark_loaded`). Spalte 3: **⟳-Button** je Tab, lädt genau diesen Tab bewusst AM Cache vorbei neu (`stash_refresh_requested`-Signal). |
+| Item-Tabelle rechts oben | `QTableView` + `QSortFilterProxyModel` | Spalten: Icon, Tab, Name, Typ, Level, Quality, Stack, iLvl. Klick auf Spaltenkopf sortiert; Suchfeld filtert live über Name+Typ+Tab (kein API-Call — gefiltert wird lokal). |
 | Item-Detail rechts unten | eigenes Widget | Großes Icon, Name in Rarity-Farbe (frameType), Properties, Mods. Aktualisiert bei Zeilenauswahl. |
 | Rate-Limit-Dashboard | `QProgressBar` pro Regel + Status-LED + Countdown | Wird ausschließlich über das Signal `rate_limit_changed` gefüttert. Farbe: grün < 60 %, gelb < 90 %, rot ab 90 %/Wartephase. Countdown zeigt verbleibende Wartezeit. *Intention: Der User soll immer sehen, WARUM die App gerade wartet.* |
-| Statusbar | `QStatusBar` | Login-Status, laufender Job, permanenter GGG-Disclaimer. |
+| Statusbar | `QStatusBar` + `QProgressBar` (busy) | Login-Status, laufender Job, permanenter GGG-Disclaimer. Die `QProgressBar` läuft mit `setRange(0, 0)` im "busy"-Modus (Qt animiert das eingebaut, kein eigener Timer nötig) und ist sichtbar, solange das `status`-Signal des Workers etwas anderes als `"Bereit"` meldet (`MainWindow._on_status`) — deckt damit jeden laufenden Job inkl. Rate-Limit-Wartezeit ab. |
 
 **"Alle Tabs laden" (Bulk) und CSV-Export:** Über den Toolbar-Button "⇊ Alle
 Tabs laden" holt der `ApiWorker` (`FetchAllItemsJob`) die Items sämtlicher
@@ -362,9 +362,11 @@ Der Toolbar-Button "💾 CSV exportieren" schreibt die aktuell sichtbaren
 `services/csv_export.py` als Semikolon-CSV mit UTF-8-BOM (Excel/de-DE-kompatibel).
 Der Speicherdialog startet im echten Windows-Downloads-Ordner
 (`config.downloads_dir()`, per Registry ermittelt — respektiert eine vom User
-verschobene Downloads-Location) und schlägt einen Dateinamen vor: aktiver
-Item-Filtertext, sonst der Name des Tabs bzw. "alle-tabs-\<liga\>" im
-Aggregat (`MainWindow._default_export_filename`).
+verschobene Downloads-Location) und schlägt einen Dateinamen vor
+(`MainWindow._default_export_filename`): **immer** die aktuelle Liga voran
+(Items sind nie liga-übergreifend gültig), danach aktiver Item-Filtertext,
+sonst der Name des Tabs bzw. "Alle Tabs" im Aggregat — z. B.
+`poe-view2-Settlers-Chaos-Orb.csv` oder `poe-view2-Settlers-Alle-Tabs.csv`.
 
 **Liga-Dropdown als einzige Quelle der Wahrheit:** Charaktere kommen von
 `/character` ligenübergreifend, werden aber NICHT mehr im Baum nach Liga

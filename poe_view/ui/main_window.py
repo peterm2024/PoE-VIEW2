@@ -13,9 +13,9 @@ import logging
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction, QPixmap
 from PySide6.QtWidgets import (QComboBox, QFileDialog, QLabel, QLineEdit,
-                               QMainWindow, QMessageBox, QProgressDialog,
-                               QSizePolicy, QSplitter, QTableView, QToolBar,
-                               QVBoxLayout, QWidget)
+                               QMainWindow, QMessageBox, QProgressBar,
+                               QProgressDialog, QSizePolicy, QSplitter,
+                               QTableView, QToolBar, QVBoxLayout, QWidget)
 
 from poe_view import config
 from poe_view.api.models import Character, Item, StashTab
@@ -103,6 +103,7 @@ class MainWindow(QMainWindow):
         # Linke Seite: Baum
         self.tree = StashTree()
         self.tree.stash_selected.connect(self._on_stash_selected)
+        self.tree.stash_refresh_requested.connect(self._on_stash_refresh)
         self.tree.character_selected.connect(self._on_character_selected)
 
         # Rechte Seite: Tabelle + Detail
@@ -144,6 +145,14 @@ class MainWindow(QMainWindow):
 
         self._status_msg = QLabel("Starte …")
         self.statusBar().addWidget(self._status_msg, stretch=1)
+        # Range (0, 0) macht aus der QProgressBar einen "busy"-Indikator mit
+        # eingebauter Lauf-Animation (kein eigener QTimer/keine Assets nötig).
+        self._busy_indicator = QProgressBar()
+        self._busy_indicator.setRange(0, 0)
+        self._busy_indicator.setFixedSize(90, 14)
+        self._busy_indicator.setTextVisible(False)
+        self._busy_indicator.hide()
+        self.statusBar().addWidget(self._busy_indicator)
         self.statusBar().addPermanentWidget(QLabel(config.DISCLAIMER))
 
     def _connect_worker(self) -> None:
@@ -156,7 +165,7 @@ class MainWindow(QMainWindow):
         w.stash_items_loaded.connect(self._on_stash_items)
         w.icon_loaded.connect(self._on_icon)
         w.rate_limit_changed.connect(self.dashboard.update_state)
-        w.status.connect(self._status_msg.setText)
+        w.status.connect(self._on_status)
         w.job_error.connect(self._on_error)
         w.bulk_progress.connect(self._on_bulk_progress)
         w.bulk_finished.connect(self._on_bulk_finished)
@@ -206,7 +215,7 @@ class MainWindow(QMainWindow):
         self.tree.set_characters(filtered)
 
     def _on_stash_list(self, stashes: list[StashTab]) -> None:
-        self.tree.set_stashes(stashes)
+        self.tree.set_stashes(stashes, loaded_ids=frozenset(self._items_cache.keys()))
         self._leaf_stashes = self._flatten_stashes(stashes)
 
     @staticmethod
@@ -228,8 +237,14 @@ class MainWindow(QMainWindow):
             return
         self.worker.submit(FetchStashItemsJob(self._current_league, stash_id, name))
 
+    def _on_stash_refresh(self, stash_id: str, name: str) -> None:
+        """Klick auf den Refresh-Button eines Tabs — bewusst AM Cache vorbei."""
+        self._showing_aggregate = False
+        self.worker.submit(FetchStashItemsJob(self._current_league, stash_id, name))
+
     def _on_stash_items(self, stash_id: str, name: str, items: list[Item]) -> None:
         self._items_cache[stash_id] = items
+        self.tree.mark_loaded(stash_id)
         if not self._showing_aggregate:
             self._show_items(items, name)
 
@@ -275,7 +290,7 @@ class MainWindow(QMainWindow):
     def _show_aggregate(self) -> None:
         """Items aller bereits geladenen Tabs zusammen anzeigen (lokal filter-/exportierbar)."""
         self._showing_aggregate = True
-        self._current_tab_name = f"alle-tabs-{self._current_league}"
+        self._current_tab_name = "Alle Tabs"
         items: list[Item] = []
         sources: list[str] = []
         for stash in self._leaf_stashes:
@@ -303,11 +318,16 @@ class MainWindow(QMainWindow):
         self._status_msg.setText(f"{count} Items nach {path} exportiert.")
 
     def _default_export_filename(self) -> str:
-        """Dateiname-Vorschlag: aktiver Filtertext, sonst der Tab-/Aggregat-Name."""
+        """Dateiname-Vorschlag: Liga + (aktiver Filtertext, sonst Tab-/Aggregat-Name).
+
+        Die Liga gehört immer mit rein — Items sind nie liga-übergreifend
+        gültig, das soll auch am Dateinamen erkennbar sein (Nutzer-Feedback).
+        """
         filter_text = self._filter_edit.text().strip()
         base = sanitize_filename(filter_text) if filter_text \
             else sanitize_filename(self._current_tab_name)
-        return f"poe-view2-{base}.csv"
+        parts = [p for p in (sanitize_filename(self._current_league, ""), base) if p]
+        return f"poe-view2-{'-'.join(parts)}.csv"
 
     def _visible_rows(self) -> list[tuple[str, Item]]:
         """(Tab-Name, Item)-Paare für die AKTUELL sichtbaren (gefilterten) Zeilen."""
@@ -335,8 +355,13 @@ class MainWindow(QMainWindow):
         if item:
             self.detail.show_item(item, self.table_model.pixmap_for(item))
 
+    def _on_status(self, text: str) -> None:
+        self._status_msg.setText(text)
+        self._busy_indicator.setVisible(text != "Bereit")
+
     def _on_error(self, message: str) -> None:
         self._status_msg.setText(f"Fehler: {message}")
+        self._busy_indicator.hide()
         log.error("%s", message)
 
     def _refresh(self) -> None:

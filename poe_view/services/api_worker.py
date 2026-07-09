@@ -171,6 +171,7 @@ class ApiWorker(QThread):
             case FetchIconJob(url=url):
                 self._fetch_icon(url)
             case FetchAllItemsJob(league=league, stashes=stashes):
+                self.status.emit(f"Lade alle Tabs ({league}) …")
                 self._fetch_all_items(league, stashes)
         self.status.emit("Bereit")
 
