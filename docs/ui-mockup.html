@@ -1,0 +1,320 @@
+<title>PoE-VIEW2 — UI-Konzept</title>
+<style>
+  /* ===== Seiten-Theme (hell/dunkel), App-Fenster bleibt bewusst dunkel ===== */
+  :root {
+    --page-bg: #f2efe8;
+    --page-fg: #2b2721;
+    --page-muted: #6d6558;
+    --page-card: #ffffff;
+    --page-line: #ddd6c8;
+    --accent: #8a6d1f;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page-bg: #14120e; --page-fg: #e8e2d4; --page-muted: #9a917f;
+      --page-card: #1d1a14; --page-line: #342f25; --accent: #c8a959;
+    }
+  }
+  :root[data-theme="dark"] {
+    --page-bg: #14120e; --page-fg: #e8e2d4; --page-muted: #9a917f;
+    --page-card: #1d1a14; --page-line: #342f25; --accent: #c8a959;
+  }
+  :root[data-theme="light"] {
+    --page-bg: #f2efe8; --page-fg: #2b2721; --page-muted: #6d6558;
+    --page-card: #ffffff; --page-line: #ddd6c8; --accent: #8a6d1f;
+  }
+
+  body {
+    background: var(--page-bg); color: var(--page-fg);
+    font-family: "Segoe UI", system-ui, sans-serif;
+    line-height: 1.55; margin: 0; padding: 2.5rem 1.25rem 4rem;
+  }
+  .wrap { max-width: 1040px; margin: 0 auto; }
+  h1 { font-size: 1.7rem; font-weight: 650; margin: 0 0 .3rem; text-wrap: balance; }
+  .sub { color: var(--page-muted); margin: 0 0 2rem; max-width: 65ch; }
+  .eyebrow {
+    text-transform: uppercase; letter-spacing: .12em; font-size: .72rem;
+    color: var(--accent); font-weight: 600; margin: 0 0 .4rem;
+  }
+
+  /* ===== App-Fenster-Mockup (festes dunkles PoE-Thema) ===== */
+  .win {
+    --bg0: #12100c;   /* tiefster Grund */
+    --bg1: #1a1712;   /* Panels */
+    --bg2: #23201a;   /* erhöhte Flächen */
+    --bg3: #2c2820;   /* Hover/Selektion */
+    --line: #3a352a;
+    --fg: #d6cfbf; --fg-dim: #8d8574;
+    --gold: #c8a959;
+    --ok: #6fae5c; --warn: #d3a94e; --bad: #c05b4d;
+    border: 1px solid var(--line); border-radius: 8px; overflow: hidden;
+    background: var(--bg1); color: var(--fg);
+    box-shadow: 0 18px 50px rgba(0,0,0,.35);
+    font-size: 13px;
+  }
+  .win, .win * { box-sizing: border-box; }
+  .win-scroll { overflow-x: auto; }
+  .win-inner { min-width: 880px; }
+
+  .titlebar {
+    display: flex; align-items: center; gap: .6rem;
+    background: var(--bg0); padding: .45rem .8rem; border-bottom: 1px solid var(--line);
+  }
+  .titlebar .appicon {
+    width: 16px; height: 16px; border-radius: 3px;
+    background: linear-gradient(135deg, #c8a959, #7a5f22);
+  }
+  .titlebar .t { flex: 1; color: var(--fg-dim); }
+  .winbtns { display: flex; gap: .9rem; color: var(--fg-dim); font-size: 12px; }
+
+  .menubar { display: flex; gap: 1.3rem; padding: .35rem .9rem; background: var(--bg1);
+    border-bottom: 1px solid var(--line); color: var(--fg-dim); }
+  .menubar span:hover { color: var(--fg); cursor: default; }
+
+  .toolbar { display: flex; align-items: center; gap: .6rem; padding: .5rem .9rem;
+    background: var(--bg2); border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  .btn {
+    background: var(--bg3); border: 1px solid var(--line); color: var(--fg);
+    border-radius: 4px; padding: .3rem .7rem; cursor: default;
+  }
+  .btn.primary { border-color: var(--gold); color: var(--gold); }
+  .field, .select {
+    background: var(--bg0); border: 1px solid var(--line); color: var(--fg-dim);
+    border-radius: 4px; padding: .3rem .55rem;
+  }
+  .toolbar .grow { flex: 1; }
+  .lbl { color: var(--fg-dim); }
+
+  .main { display: grid; grid-template-columns: 250px 1fr; min-height: 430px; }
+
+  /* --- Navigation / Tree --- */
+  .tree { background: var(--bg1); border-right: 1px solid var(--line); padding: .55rem 0; }
+  .tree .hd { padding: .2rem .9rem .45rem; color: var(--fg-dim);
+    text-transform: uppercase; font-size: 10.5px; letter-spacing: .1em; }
+  .node { display: flex; align-items: center; gap: .45rem; padding: .22rem .9rem; white-space: nowrap; }
+  .node .tw { color: var(--fg-dim); width: .8em; display: inline-block; }
+  .node.d1 { padding-left: 1.8rem; } .node.d2 { padding-left: 2.7rem; }
+  .node.sel { background: var(--bg3); border-left: 2px solid var(--gold); padding-left: calc(2.7rem - 2px); }
+  .node:hover { background: var(--bg2); }
+  .dot { width: 8px; height: 8px; border-radius: 2px; display: inline-block; }
+  .muted { color: var(--fg-dim); }
+
+  /* --- rechte Seite --- */
+  .right { display: grid; grid-template-rows: auto 1fr auto; background: var(--bg0); }
+  .panel-hd { display: flex; justify-content: space-between; align-items: baseline;
+    padding: .5rem .9rem .35rem; color: var(--fg-dim); }
+  .panel-hd b { color: var(--fg); font-weight: 600; }
+
+  table.items { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  .items th {
+    text-align: left; font-weight: 600; font-size: 11px; letter-spacing: .06em;
+    color: var(--fg-dim); text-transform: uppercase;
+    padding: .35rem .7rem; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line);
+    background: var(--bg1);
+  }
+  .items th.sorted { color: var(--gold); }
+  .items td { padding: .32rem .7rem; border-bottom: 1px solid #23201a; }
+  .items tr:hover td { background: var(--bg2); }
+  .items tr.rowsel td { background: var(--bg3); }
+  .items td.num, .items th.num { text-align: right; }
+  .ico { width: 20px; height: 20px; border-radius: 3px; display: inline-block; vertical-align: middle; }
+
+  /* Rarity-Farben (frameType) */
+  .r-normal { color: #e8e6e3; } .r-magic { color: #8f8fe8; } .r-rare { color: #d9d955; }
+  .r-unique { color: #c96f2e; } .r-gem { color: #3fb8ae; } .r-curr { color: #b3a06a; }
+
+  /* --- Detail-Panel --- */
+  .detail { display: flex; gap: .9rem; padding: .7rem .9rem; background: var(--bg1);
+    border-top: 1px solid var(--line); align-items: center; }
+  .detail .bigicon { width: 52px; height: 52px; border-radius: 5px; flex: none;
+    background: radial-gradient(circle at 35% 30%, #4ed3c8, #114f4a 70%);
+    border: 1px solid var(--line); }
+  .detail .nm { font-weight: 600; margin-bottom: .1rem; }
+  .detail .props { color: var(--fg-dim); font-size: 12.5px; }
+  .detail .props b { color: var(--fg); font-weight: 600; }
+  .tag { border: 1px solid #7a3535; color: #c07070; border-radius: 3px;
+    padding: 0 .35rem; font-size: 11px; margin-left: .5rem; }
+
+  /* --- Rate-Limit-Dashboard --- */
+  .dash { display: flex; align-items: center; gap: 1.1rem; flex-wrap: wrap;
+    padding: .55rem .9rem; background: var(--bg2); border-top: 1px solid var(--line); }
+  .dash .policy { color: var(--fg-dim); }
+  .dash .policy b { color: var(--fg); font-weight: 600; }
+  .meter { display: flex; align-items: center; gap: .45rem; }
+  .bar { width: 130px; height: 9px; border-radius: 4px; background: var(--bg0);
+    border: 1px solid var(--line); overflow: hidden; }
+  .bar i { display: block; height: 100%; background: var(--ok); }
+  .bar.warn i { background: var(--warn); }
+  .meter small { color: var(--fg-dim); font-variant-numeric: tabular-nums; }
+  .led { width: 9px; height: 9px; border-radius: 50%; background: var(--ok);
+    box-shadow: 0 0 6px var(--ok); }
+  .dash .cd { margin-left: auto; color: var(--fg-dim); }
+
+  .statusbar { display: flex; gap: 1rem; padding: .35rem .9rem; background: var(--bg0);
+    border-top: 1px solid var(--line); color: var(--fg-dim); font-size: 12px; }
+  .statusbar .sp { flex: 1; }
+
+  /* Marker-Chips im Fenster + Legende */
+  .mark {
+    display: inline-flex; width: 17px; height: 17px; border-radius: 50%;
+    background: var(--gold); color: #1a1712; font-size: 11px; font-weight: 700;
+    align-items: center; justify-content: center; margin-left: .45rem; flex: none;
+  }
+  .legend { margin-top: 2.2rem; display: grid; gap: .9rem;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+  .lg {
+    background: var(--page-card); border: 1px solid var(--page-line);
+    border-radius: 7px; padding: .85rem 1rem; display: flex; gap: .7rem;
+  }
+  .lg .mark { margin: .15rem 0 0; }
+  .lg b { display: block; margin-bottom: .15rem; }
+  .lg p { margin: 0; color: var(--page-muted); font-size: .88rem; }
+  .lg code { font-size: .82rem; color: var(--accent); }
+</style>
+
+<div class="wrap">
+  <p class="eyebrow">PoE-VIEW2 · Oberflächenvorschlag v0.1</p>
+  <h1>Hauptfenster — Konzept-Mockup</h1>
+  <p class="sub">Statisches Mockup des PySide6-Hauptfensters. Die goldenen Nummern markieren
+  die sechs UI-Regionen; die Zuordnung zu Widgets und Architektur-Komponenten steht in der
+  Legende darunter (Details: <em>docs/ARCHITEKTUR.md, Abschnitt 5</em>).</p>
+
+  <div class="win-scroll"><div class="win"><div class="win-inner">
+    <div class="titlebar">
+      <span class="appicon"></span>
+      <span class="t">PoE-VIEW2</span>
+      <span class="winbtns"><span>—</span><span>□</span><span>✕</span></span>
+    </div>
+    <div class="menubar">
+      <span>Datei</span><span>Account</span><span>Ansicht</span><span>Hilfe</span>
+    </div>
+    <div class="toolbar">
+      <span class="btn primary">⚷ Eingeloggt: PeterM</span>
+      <span class="btn">⟳ Aktualisieren</span>
+      <span class="lbl">Liga:</span><span class="select">Settlers ▾</span>
+      <span class="grow"></span>
+      <span class="field">🔍 Item-Filter … (lokal, ohne API-Call)</span>
+      <span class="mark">2</span>
+    </div>
+
+    <div class="main">
+      <div class="tree">
+        <div class="hd">Navigation <span class="mark">1</span></div>
+        <div class="node"><span class="tw">▾</span> Charaktere</div>
+        <div class="node d1"><span class="dot" style="background:#c96f2e"></span> WitchOfPeter <span class="muted">(91)</span></div>
+        <div class="node d1"><span class="dot" style="background:#8f8fe8"></span> RangerZwei <span class="muted">(67)</span></div>
+        <div class="node"><span class="tw">▾</span> Stash</div>
+        <div class="node d1"><span class="tw">▾</span> 📁 Currency-Ordner</div>
+        <div class="node d2 sel"><span class="dot" style="background:#b3a06a"></span> Currency 1</div>
+        <div class="node d2"><span class="dot" style="background:#b3a06a"></span> Currency 2</div>
+        <div class="node d1"><span class="tw">▸</span> 📁 Gems</div>
+        <div class="node d1"><span class="dot" style="background:#7a4b8f"></span> Maps</div>
+        <div class="node d1"><span class="dot" style="background:#c96f2e"></span> Uniques</div>
+      </div>
+
+      <div class="right">
+        <div class="panel-hd">
+          <span>Items — <b>Currency 1</b></span>
+          <span>142 Items · geladen 14:02:11 <span class="mark">3</span></span>
+        </div>
+        <div style="overflow-x:auto">
+        <table class="items">
+          <thead><tr>
+            <th></th><th class="sorted">Name ▲</th><th>Typ</th>
+            <th class="num">Level</th><th class="num">Qual.</th>
+            <th class="num">Stack</th><th class="num">iLvl</th>
+          </tr></thead>
+          <tbody>
+            <tr class="rowsel">
+              <td><span class="ico" style="background:radial-gradient(circle at 35% 30%,#4ed3c8,#114f4a)"></span></td>
+              <td class="r-gem">Awakened Multistrike Support</td><td>Gem</td>
+              <td class="num">5</td><td class="num">+20%</td><td class="num">1</td><td class="num">–</td>
+            </tr>
+            <tr>
+              <td><span class="ico" style="background:radial-gradient(circle at 35% 30%,#f0e6c8,#8f7b3a)"></span></td>
+              <td class="r-curr">Divine Orb</td><td>Currency</td>
+              <td class="num">–</td><td class="num">–</td><td class="num">12</td><td class="num">–</td>
+            </tr>
+            <tr>
+              <td><span class="ico" style="background:radial-gradient(circle at 35% 30%,#d8c9a0,#6e5a2a)"></span></td>
+              <td class="r-curr">Chaos Orb</td><td>Currency</td>
+              <td class="num">–</td><td class="num">–</td><td class="num">843</td><td class="num">–</td>
+            </tr>
+            <tr>
+              <td><span class="ico" style="background:radial-gradient(circle at 35% 30%,#e08a4a,#6e3a12)"></span></td>
+              <td class="r-unique">Mageblood</td><td>Heavy Belt</td>
+              <td class="num">–</td><td class="num">–</td><td class="num">1</td><td class="num">86</td>
+            </tr>
+            <tr>
+              <td><span class="ico" style="background:radial-gradient(circle at 35% 30%,#e6e655,#7a7a20)"></span></td>
+              <td class="r-rare">Doom Cut, Stygian Vise</td><td>Belt</td>
+              <td class="num">–</td><td class="num">–</td><td class="num">1</td><td class="num">84</td>
+            </tr>
+            <tr>
+              <td><span class="ico" style="background:radial-gradient(circle at 35% 30%,#9a9af0,#3a3a8a)"></span></td>
+              <td class="r-magic">Sapphire Ring of Warding</td><td>Ring</td>
+              <td class="num">–</td><td class="num">–</td><td class="num">1</td><td class="num">78</td>
+            </tr>
+          </tbody>
+        </table>
+        </div>
+
+        <div class="detail">
+          <span class="bigicon"></span>
+          <div>
+            <div class="nm r-gem">Awakened Multistrike Support <span class="tag">corrupted</span> <span class="mark">4</span></div>
+            <div class="props">Support-Gem · <b>Level 5</b> · Quality <b>+20%</b> · Requires Level 72<br>
+            aus <code>properties[]</code> extrahiert — kein fester JSON-Key (siehe Doku §4.4)</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="dash">
+      <span class="policy">Policy: <b>stash-request-limit</b> <span class="mark">5</span></span>
+      <span class="meter"><span class="bar warn"><i style="width:53%"></i></span><small>8 / 15 · 15 s</small></span>
+      <span class="meter"><span class="bar"><i style="width:13%"></i></span><small>12 / 90 · 300 s</small></span>
+      <span class="led"></span><small style="color:var(--fg)">OK</small>
+      <span class="cd">Wartezeit: – s</span>
+    </div>
+    <div class="statusbar">
+      <span>Bereit</span><span class="sp"></span>
+      <span>Not affiliated with Grinding Gear Games <span class="mark">6</span></span>
+    </div>
+  </div></div></div>
+
+  <div class="legend">
+    <div class="lg"><span class="mark">1</span><div>
+      <b>Navigation (QTreeWidget)</b>
+      <p>Charaktere + Stash-Ordnerbaum (rekursive <code>children</code>). Tab-Farbe aus der API
+      als Farbpunkt. Klick löst einen <code>FetchStashItems</code>-Job im API-Worker aus;
+      bereits geladene Tabs kommen aus dem Speicher-Cache.</p>
+    </div></div>
+    <div class="lg"><span class="mark">2</span><div>
+      <b>Toolbar mit Liga-Wahl &amp; Filter</b>
+      <p>Login-Status, manuelles Aktualisieren, Liga-Dropdown. Das Suchfeld filtert die
+      Tabelle live und rein lokal — es kostet keine API-Requests.</p>
+    </div></div>
+    <div class="lg"><span class="mark">3</span><div>
+      <b>Item-Tabelle (QTableView + SortFilterProxy)</b>
+      <p>Spalten sortierbar (Klick auf Kopfzeile), Rarity als Textfarbe
+      (<code>frameType</code>), Icons asynchron aus dem Icon-Cache nachgeladen.</p>
+    </div></div>
+    <div class="lg"><span class="mark">4</span><div>
+      <b>Item-Detail</b>
+      <p>Großes Icon, Name in Rarity-Farbe, Gem-Level/Quality aus dem
+      <code>properties</code>-Array. Aktualisiert bei Zeilenauswahl.</p>
+    </div></div>
+    <div class="lg"><span class="mark">5</span><div>
+      <b>Rate-Limit-Dashboard</b>
+      <p>Ein Balken pro Regel der aktiven Policy, gespeist vom Signal
+      <code>rate_limit_changed</code> des RateLimitManagers (≙ LabVIEW User Event der FGV).
+      Grün &lt; 60 %, gelb &lt; 90 %, rot in der Wartephase — inkl. Countdown, damit
+      sichtbar ist, <em>warum</em> die App gerade pausiert.</p>
+    </div></div>
+    <div class="lg"><span class="mark">6</span><div>
+      <b>Statusbar</b>
+      <p>Aktueller Job, Login-Status und der permanente GGG-Disclaimer.</p>
+    </div></div>
+  </div>
+</div>
