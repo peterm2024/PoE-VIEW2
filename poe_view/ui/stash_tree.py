@@ -22,6 +22,12 @@ bleibt immer in der normalen, garantiert lesbaren Vordergrundfarbe.
 Rechtsklick auf einen Tab öffnet ein Kontextmenü mit "Rohdaten anzeigen"
 (``raw_data_requested``-Signal) — Aufhänger für den Mini-Viewer in
 ``ui/raw_data_viewer.py`` (Nutzer-Feedback).
+
+Map-Stash-Kinder werden nach ``metadata.map.section`` gruppiert (Tier 1–16,
+dann Unique Maps, dann Special Maps) — ein flacher Baum mit 100+ Fächern war
+"uferlos" (Nutzer-Feedback). Die Gruppenknoten sind reine Anzeige-Hilfen
+(kein _DATA_ROLE → nicht klick-/refreshbar); die Datenschicht
+(MainWindow._stash_trees, _leaf_stashes, Cache) bleibt flach.
 """
 
 from __future__ import annotations
@@ -60,6 +66,60 @@ def format_age(last_loaded_iso: str, *, now: datetime | None = None) -> str:
         return "?"
     days = ((now or datetime.now(timezone.utc)) - loaded_at).days
     return "heute" if days <= 0 else f"vor {days}d"
+
+
+def _map_info(stash: StashTab) -> dict:
+    return stash.metadata.get("map") or {}
+
+
+def group_map_children(children: list[StashTab]) -> list[tuple[str, list[StashTab]]] | None:
+    """Gruppiert Map-Stash-Kinder nach metadata.map.section.
+
+    Rückgabe: [(Gruppen-Label, Kinder), …] — Tiers numerisch aufsteigend,
+    danach "Unique Maps", danach "Special Maps". None, wenn die Kinder gar
+    keine Sektions-Information haben (z. B. UniqueStash-Fächer) — dann
+    bleibt die Anzeige flach.
+    """
+    if not any(_map_info(c).get("section") for c in children):
+        return None
+    groups: dict[str, list[StashTab]] = {}
+    for child in children:
+        groups.setdefault(str(_map_info(child).get("section") or "?"), []).append(child)
+
+    def sort_key(section: str) -> tuple[int, int]:
+        if section.startswith("tier"):
+            try:
+                return (0, int(section[4:]))
+            except ValueError:
+                return (0, 999)
+        return {"unique": (1, 0), "special": (2, 0)}.get(section, (3, 0))
+
+    def label(section: str) -> str:
+        if section.startswith("tier"):
+            return f"Tier {section[4:]}"
+        return {"unique": "Unique Maps", "special": "Special Maps"}.get(section, section)
+
+    result = []
+    for section in sorted(groups, key=sort_key):
+        members = sorted(groups[section],
+                         key=lambda c: (str(_map_info(c).get("name") or ""),
+                                        int(_map_info(c).get("index") or 0)))
+        result.append((label(section), members))
+    return result
+
+
+def grouped_leaf_label(child: StashTab) -> str:
+    """Kurz-Label eines Fachs UNTER seinem Gruppenknoten: "Fach 3 (12 Items)"
+    für Tier-Fächer (der Map-Name wäre dort nur die Gruppen-Wiederholung),
+    sonst der Map-Name ("Death and Taxes (1 Items)")."""
+    info = _map_info(child)
+    section = str(info.get("section") or "")
+    if section.startswith("tier"):
+        base = f"Fach {int(info.get('index') or 0) + 1}"
+    else:
+        base = str(info.get("name") or child.display_name)
+    count = child.metadata.get("items")
+    return f"{base} ({count} Items)" if count is not None else base
 
 
 class StashTree(QTreeWidget):
@@ -124,13 +184,10 @@ class StashTree(QTreeWidget):
         last_loaded = last_loaded or {}
         # Alte Kind-Knoten auch aus dem id→Knoten-Index entfernen (sonst
         # zeigen mark_loaded()-Aufrufe später auf tote Widget-Referenzen).
-        for i in range(parent_node.childCount()):
-            old_stash = parent_node.child(i).data(0, _DATA_ROLE)
-            if old_stash is not None:
-                self._stash_nodes.pop(old_stash.id, None)
+        # Rekursiv — mit Sektions-Gruppen liegen Fächer eine Ebene tiefer.
+        self._drop_index_entries_below(parent_node)
         parent_node.takeChildren()
-        for child in children:
-            parent_node.addChild(self._build_node(child))
+        self._attach_children(parent_node, children)
         for child in children:
             node = self._stash_nodes.get(child.id)
             if node is not None:
@@ -138,17 +195,40 @@ class StashTree(QTreeWidget):
         if expand:
             parent_node.setExpanded(True)
 
-    def _build_node(self, stash: StashTab) -> QTreeWidgetItem:
+    def _drop_index_entries_below(self, node: QTreeWidgetItem) -> None:
+        for i in range(node.childCount()):
+            child = node.child(i)
+            stash = child.data(0, _DATA_ROLE)
+            if stash is not None:
+                self._stash_nodes.pop(stash.id, None)
+            self._drop_index_entries_below(child)
+
+    def _attach_children(self, parent_node: QTreeWidgetItem,
+                         children: list[StashTab]) -> None:
+        """Kinder einhängen — Map-Fächer gruppiert nach Sektion (Nutzer-Feedback:
+        100+ flache Fächer waren "uferlos"), alles andere flach."""
+        grouped = group_map_children(children)
+        if grouped is None:
+            for child in children:
+                parent_node.addChild(self._build_node(child))
+            return
+        for group_label, members in grouped:
+            total = sum(m.metadata.get("items") or 0 for m in members)
+            group_node = QTreeWidgetItem([f"🗂 {group_label} ({total} Items)"])
+            parent_node.addChild(group_node)
+            for child in members:
+                group_node.addChild(self._build_node(child, label=grouped_leaf_label(child)))
+
+    def _build_node(self, stash: StashTab, label: str | None = None) -> QTreeWidgetItem:
         """Rekursiv: Ordner enthalten children (beliebig tief)."""
         prefix = "📁 " if stash.is_folder else ""
-        node = QTreeWidgetItem([f"{prefix}{stash.display_name}"])
+        node = QTreeWidgetItem([f"{prefix}{label or stash.display_name}"])
         if not stash.is_folder:
             node.setData(0, _DATA_ROLE, stash)
             self._stash_nodes[stash.id] = node
         if stash.colour:
             node.setIcon(_COL_NAME, _colour_swatch(stash.colour))
-        for child in stash.children:
-            node.addChild(self._build_node(child))
+        self._attach_children(node, stash.children)
         return node
 
     def _set_status(self, node: QTreeWidgetItem, stash_id: str,

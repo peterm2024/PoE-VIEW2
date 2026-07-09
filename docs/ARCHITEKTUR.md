@@ -488,6 +488,18 @@ Wechsel, "Aktualisieren") die bereits entdeckten Kinder wieder verwerfen —
 `MainWindow._merge_known_children()` überträgt sie deshalb in jede frisch
 geladene Liste, bevor sie den alten Baum ersetzt.
 
+**Sektions-Gruppierung im Baum (nur Anzeige):** Ein Map-Stash kann 100+
+Fächer haben — flach war das "uferlos" (Nutzer-Feedback). Der `StashTree`
+gruppiert Map-Fächer deshalb nach `metadata.map.section` unter synthetische
+Zwischenknoten: "Tier 1"–"Tier 16" (numerisch sortiert!), dann
+"Unique Maps", dann "Special Maps" — jeweils mit Summen-Item-Zahl im Label
+(`group_map_children()` / `grouped_leaf_label()`; Tier-Fächer heißen dort
+"Fach N (X Items)" nach `map.index`, Unique-/Special-Fächer nach `map.name`).
+Die Gruppenknoten tragen KEIN `_DATA_ROLE` — nicht klick-/refreshbar, reine
+Ordnungshilfe. Die Datenschicht (`_stash_trees`, `_leaf_stashes`, Cache,
+Auto-Refresh, Bulk) bleibt bewusst flach; UniqueStash-Fächer (keine
+Sektions-Info) bleiben auch in der Anzeige flach.
+
 ---
 
 ## 5. UI-Konzept (Oberflächenvorschlag)

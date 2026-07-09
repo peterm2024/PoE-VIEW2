@@ -155,6 +155,16 @@ def test_context_menu_does_nothing_for_folder_node(qapp, monkeypatch) -> None:
     tree._on_context_menu(pos)  # darf NICHT auf _exploding_menu treffen
 
 
+def _map_leaf(child_id: str, section: str, name: str, index: int = 0,
+              items: int = 1) -> StashTab:
+    """Kind-Fach in der ECHTEN Struktur (Nutzer-Rohdaten 2026-07-09)."""
+    return StashTab.model_validate({
+        "id": child_id, "name": "1", "parent": "m1", "type": "MapStash",
+        "metadata": {"items": items,
+                     "map": {"section": section, "name": name, "index": index}},
+    })
+
+
 def test_set_children_inserts_subtabs_without_rebuilding_tree(qapp) -> None:
     """Spezial-Tab (MapStash): entdeckte Kinder unter dem Knoten einhängen —
     Aufklapp-Zustand des restlichen Baums bleibt erhalten."""
@@ -165,19 +175,63 @@ def test_set_children_inserts_subtabs_without_rebuilding_tree(qapp) -> None:
     tree = StashTree()
     tree.set_stashes([StashTab.model_validate(d) for d in data])
 
-    child = StashTab.model_validate({"id": "c1", "name": "1", "parent": "m1",
-                                     "type": "MapStash",
-                                     "metadata": {"items": 8,
-                                                  "map": {"section": "tier6",
-                                                          "name": "Map (Tier 6)", "index": 0}}})
-    tree.set_children("m1", [child])
+    tree.set_children("m1", [_map_leaf("c1", "tier6", "Map (Tier 6)", items=8)])
 
     parent_node = tree._stash_nodes["m1"]
-    assert parent_node.childCount() == 1
-    assert parent_node.child(0).text(0) == "Map (Tier 6)"  # display_name, nicht das wertlose "1"
+    assert parent_node.childCount() == 1  # der Gruppenknoten "Tier 6"
+    group = parent_node.child(0)
+    assert group.text(0) == "🗂 Tier 6 (8 Items)"
+    assert group.child(0).text(0) == "Fach 1 (8 Items)"
     assert parent_node.isExpanded()
     assert tree._stash_nodes["c1"].text(1) == "⬇"  # Kind noch nicht geladen
     assert tree.topLevelItemCount() == 2  # Rest des Baums unangetastet
+
+
+def test_map_children_are_grouped_by_section_in_order(qapp) -> None:
+    """Nutzer-Feedback: 100+ flache Map-Fächer waren "uferlos" — Gruppierung
+    nach Tier (numerisch!), dann Unique Maps, dann Special Maps."""
+    data = [{"id": "m1", "name": "Maps", "type": "MapStash", "metadata": {}}]
+    tree = StashTree()
+    tree.set_stashes([StashTab.model_validate(d) for d in data])
+
+    children = [
+        _map_leaf("c_t16a", "tier16", "Map (Tier 16)", index=0, items=14),
+        _map_leaf("c_uniq", "unique", "Death and Taxes", items=2),
+        _map_leaf("c_t2", "tier2", "Map (Tier 2)", items=8),
+        _map_leaf("c_spec", "special", "Shaper Guardian Map", items=1),
+        _map_leaf("c_t16b", "tier16", "Map (Tier 16)", index=1, items=5),
+    ]
+    tree.set_children("m1", children)
+
+    parent_node = tree._stash_nodes["m1"]
+    labels = [parent_node.child(i).text(0) for i in range(parent_node.childCount())]
+    # tier2 vor tier16 (numerisch, nicht lexikographisch!), unique und special hinten
+    assert labels == ["🗂 Tier 2 (8 Items)", "🗂 Tier 16 (19 Items)",
+                      "🗂 Unique Maps (2 Items)", "🗂 Special Maps (1 Items)"]
+
+    tier16 = parent_node.child(1)
+    assert [tier16.child(i).text(0) for i in range(tier16.childCount())] == \
+        ["Fach 1 (14 Items)", "Fach 2 (5 Items)"]
+    unique = parent_node.child(2)
+    assert unique.child(0).text(0) == "Death and Taxes (2 Items)"
+    # Gruppenknoten sind reine Anzeige: kein Klick-Ziel, kein ⬇/⟳
+    assert parent_node.child(0).data(0, Qt.ItemDataRole.UserRole) is None
+    # Fächer bleiben normal klick-/refreshbar (im Index)
+    assert "c_t16b" in tree._stash_nodes
+
+
+def test_grouped_children_survive_full_rerender(qapp) -> None:
+    """set_stashes (Liga-Wechsel/Neustart) rendert persistierte Kinder ebenfalls
+    gruppiert — nicht nur der set_children-Pfad."""
+    map_stash = StashTab.model_validate({"id": "m1", "name": "Maps", "type": "MapStash",
+                                          "metadata": {}})
+    map_stash.children = [_map_leaf("c1", "tier6", "Map (Tier 6)", items=8)]
+    tree = StashTree()
+    tree.set_stashes([map_stash])
+
+    parent_node = tree._stash_nodes["m1"]
+    assert parent_node.child(0).text(0) == "🗂 Tier 6 (8 Items)"
+    assert "c1" in tree._stash_nodes
 
 
 def test_set_children_replaces_previous_children_and_index_entries(qapp) -> None:
