@@ -47,16 +47,19 @@ Stash-Tabs ausliest, filtert und übersichtlich darstellt.
 
 ### 2.1 Warum Threads statt asyncio?
 
-Gemini hatte `asyncio` empfohlen. Wir entscheiden uns **bewusst dagegen**, aus
-einem projektspezifischen Grund: **Portierbarkeit nach LabVIEW.**
+Gemini hatte `asyncio` empfohlen. Wir entscheiden uns **bewusst dagegen**
+*(Entscheidung bestätigt 2026-07-09; eine LabVIEW-Rückportierung ist
+inzwischen optional, das Argument gilt auch ohne sie)*:
 
-- LabVIEW arbeitet mit parallelen Schleifen (Producer/Consumer, QMH) und
-  blockierendem `Wait (ms)` — das entspricht exakt dem Modell
-  *"Worker-Thread + Queue + blockierendes Sleep"*.
-- `asyncio` (Coroutinen, `await`, Event-Loop) hat **kein** LabVIEW-Gegenstück;
-  eine spätere Portierung müsste die komplette Ablauflogik neu denken.
-- Die App macht wenige, sequenzielle API-Calls — asyncio brächte hier keinen
-  praktischen Vorteil.
+- **Einfachste robuste Qt-Integration:** Qt hat einen eigenen Event-Loop;
+  asyncio daneben zu betreiben erfordert eine Brücke (z. B. `qasync`) —
+  eine zusätzliche Abhängigkeit und Fehlerquelle ohne Nutzen für uns.
+- Die App macht wenige, **sequenzielle** API-Calls — Parallelität ist nicht
+  gewollt (Rate-Limit!), asyncio brächte hier keinen praktischen Vorteil.
+- Bonus LabVIEW: Das Modell *"Worker-Thread + Queue + blockierendes Sleep"*
+  entspricht exakt LabVIEWs QMH/Producer-Consumer mit `Wait (ms)`. Falls
+  doch je portiert wird, bleibt die Ablauflogik 1:1 übertragbar —
+  `asyncio`-Coroutinen hätten kein LabVIEW-Gegenstück.
 
 **Regel:** UI läuft im Main-Thread. Alle API-Calls laufen in einem einzigen
 API-Worker-Thread, der Aufträge aus einer Queue abarbeitet (sequenziell — das
@@ -369,7 +372,9 @@ Artifact-Link im Projektverlauf / `docs/ui-mockup.html`.)
 - Access-Token nur im Windows Credential Manager, nie auf Platte/im Repo.
 - Disclaimer in UI (Statusbar + Über-Dialog) und README:
   *"This product isn't affiliated with or endorsed by Grinding Gear Games in any way."*
-- Lizenz: noch festzulegen (Vorschlag: MIT).
+- Lizenz: MIT (siehe `LICENSE`).
+- Die Kontakt-E-Mail für den User-Agent kommt ausschließlich aus der lokalen
+  `.env` (`POE_CONTACT_EMAIL`) — sie steht nirgends im Repository.
 
 ## 8. Roadmap / Meilensteine
 
