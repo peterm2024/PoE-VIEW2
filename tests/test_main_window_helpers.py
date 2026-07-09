@@ -180,13 +180,45 @@ def _make_leaf(stash_id: str, name: str) -> StashTab:
                                      "metadata": {}})
 
 
-def test_pick_auto_refresh_candidate_ignores_recent_and_never_loaded(qapp) -> None:
+def test_pick_auto_refresh_candidate_ignores_only_recent_tabs(qapp) -> None:
+    """Frisch geladene (< 1 Tag) Tabs werden geschont — dafür reicht der manuelle Refresh."""
     win = MainWindow()
     win._current_league = "Standard"
-    win._leaf_stashes = [_make_leaf("fresh", "Fresh"), _make_leaf("never", "Never")]
+    win._leaf_stashes = [_make_leaf("fresh", "Fresh")]
     win._last_loaded["Standard"] = {"fresh": datetime.now(timezone.utc).isoformat()}
 
     assert win._pick_auto_refresh_candidate() is None
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_pick_auto_refresh_candidate_includes_never_loaded_tabs(qapp) -> None:
+    """Regression: Nutzer-Feedback — bei 391 Tabs bleibt der Zähler sonst für immer
+    auf 0 stehen, weil nie geladene Tabs ohne diese Regel gar keine Kandidaten sind."""
+    win = MainWindow()
+    win._current_league = "Standard"
+    win._leaf_stashes = [_make_leaf("never", "Never Loaded")]
+    win._last_loaded["Standard"] = {}
+
+    candidate = win._pick_auto_refresh_candidate()
+    assert candidate is not None and candidate.id == "never"
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_pick_auto_refresh_candidate_prefers_never_loaded_over_stale(qapp) -> None:
+    """Nie geladene Tabs gelten als 'unendlich alt' und gewinnen gegen jeden
+    bereits bekannten (auch sehr alten) stale Tab."""
+    win = MainWindow()
+    win._current_league = "Standard"
+    now = datetime.now(timezone.utc)
+    win._leaf_stashes = [_make_leaf("old", "Old Tab"), _make_leaf("never", "Never Loaded")]
+    win._last_loaded["Standard"] = {"old": (now - timedelta(days=100)).isoformat()}
+
+    candidate = win._pick_auto_refresh_candidate()
+    assert candidate is not None and candidate.id == "never"
 
     win.worker.stop()
     win.worker.wait(5000)

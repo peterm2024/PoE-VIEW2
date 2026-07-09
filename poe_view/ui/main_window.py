@@ -506,29 +506,37 @@ class MainWindow(QMainWindow):
         self._auto_refresh_label.setText(
             f"Auto-Refresh: {count} von {total} Stash-Tabs aktualisiert")
 
-    def _pick_auto_refresh_candidate(self) -> StashTab | None:
-        """Ältester bereits geladener Tab der aktuellen Liga, mind. 1 Tag alt.
+    # Noch nie geladene Tabs zählen als "unendlich alt" — sie kommen vor
+    # jedem tatsächlich datierten Tab dran (siehe _pick_auto_refresh_candidate).
+    _NEVER_LOADED = datetime.min.replace(tzinfo=timezone.utc)
 
+    def _pick_auto_refresh_candidate(self) -> StashTab | None:
+        """Ältester Tab der aktuellen Liga — inkl. noch nie geladener Tabs (⬇).
+
+        Noch nie geladene Tabs gelten als "unendlich alt" und werden IMMER
+        als Kandidat betrachtet (die 1-Tag-Schonfrist gilt nur für bereits
+        bekannte Daten — es gibt nichts zu schonen, wenn noch gar keine
+        Daten da sind). So füllt sich der Stash über die Zeit von selbst,
+        ohne dass 391 Tabs einzeln angeklickt werden müssen (Nutzer-Feedback).
         Tabs, deren Name "Remove-only" enthält, werden nachrangig behandelt
-        (Nutzer-Feedback) — nur falls es sonst keinen stale Kandidaten gibt,
-        kommen sie doch dran. Noch nie geladene Tabs werden NICHT automatisch
-        nachgeladen — dafür reicht ein manueller Klick.
+        — nur falls es sonst keinen anderen Kandidaten gibt, kommen sie doch dran.
         """
         league_loaded = self._last_loaded.get(self._current_league, {})
         now = datetime.now(timezone.utc)
-        stale: list[tuple[datetime, StashTab]] = []
+        candidates: list[tuple[datetime, StashTab]] = []
         for stash in self._leaf_stashes:
             iso = league_loaded.get(stash.id)
             if iso is None:
+                candidates.append((self._NEVER_LOADED, stash))
                 continue
             loaded_at = datetime.fromisoformat(iso)
             if now - loaded_at >= self.AUTO_REFRESH_MIN_AGE:
-                stale.append((loaded_at, stash))
-        if not stale:
+                candidates.append((loaded_at, stash))
+        if not candidates:
             return None
-        preferred = [pair for pair in stale if "remove-only" not in pair[1].name.lower()]
-        pool = preferred or stale
-        return min(pool, key=lambda pair: pair[0])[1]  # älteste zuerst
+        preferred = [pair for pair in candidates if "remove-only" not in pair[1].name.lower()]
+        pool = preferred or candidates
+        return min(pool, key=lambda pair: pair[0])[1]  # älteste (bzw. nie geladene) zuerst
 
     # ------------------------------------------------------------------ #
 

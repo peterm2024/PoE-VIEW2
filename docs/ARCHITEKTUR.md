@@ -376,17 +376,22 @@ aber nicht auf unbestimmte Zeit (Nutzer-Feedback).
 
 **Auswahl (`_pick_auto_refresh_candidate`):**
 
-1. Nur Tabs der **aktuell angezeigten Liga**, die bereits mindestens einmal
-   geladen wurden (`_last_loaded`) — noch nie geladene Tabs werden NICHT
-   automatisch nachgeladen, dafür reicht ein manueller Klick.
-2. Nur Tabs, deren letzter Ladezeitpunkt **mindestens `AUTO_REFRESH_MIN_AGE`
-   (1 Tag)** zurückliegt — jüngere Daten fasst der Hintergrund-Worker nicht
-   an ("man weiß ja, was man getan hat", Nutzer-Feedback).
-3. Tabs, deren Name `"Remove-only"` enthält, werden **nachrangig**
-   behandelt — sie kommen nur dran, wenn es sonst keinen veralteten
+1. Kandidaten sind alle Tabs der **aktuell angezeigten Liga**, die entweder
+   **noch nie geladen wurden** ODER deren letzter Ladezeitpunkt
+   **mindestens `AUTO_REFRESH_MIN_AGE` (1 Tag)** zurückliegt — jüngere,
+   bereits bekannte Daten fasst der Hintergrund-Worker nicht an ("man weiß
+   ja, was man getan hat", Nutzer-Feedback). Noch nie geladene Tabs gelten
+   als "unendlich alt" (`MainWindow._NEVER_LOADED`) und sind IMMER
+   Kandidaten — die 1-Tag-Schonfrist gilt nur für bereits bekannte Daten,
+   bei einem leeren Tab gibt es nichts zu schonen. So füllt sich der
+   gesamte Stash über die Zeit von selbst, ohne dass jeder Tab einzeln
+   angeklickt werden muss (z. B. bei 391 Tabs).
+2. Tabs, deren Name `"Remove-only"` enthält, werden **nachrangig**
+   behandelt — sie kommen nur dran, wenn es sonst keinen anderen
    Kandidaten gibt.
-4. Aus den verbleibenden Kandidaten gewinnt der mit dem **ältesten**
-   Ladezeitpunkt.
+3. Aus den verbleibenden Kandidaten gewinnt der mit dem **ältesten**
+   Ladezeitpunkt (noch nie geladene Tabs gewinnen dabei immer gegen jeden
+   bereits bekannten, auch sehr alten Tab).
 
 **Budget-Schutz:** Vor jedem Auto-Refresh-Versuch prüft
 `RateLimitManager.headroom_fraction()` (Minimum der "noch frei"-Anteile
