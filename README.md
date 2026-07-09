@@ -10,6 +10,9 @@ später nach LabVIEW (zurück-)portieren lassen — siehe
 [docs/ARCHITEKTUR.md](docs/ARCHITEKTUR.md), insbesondere die
 Mapping-Tabelle *Python ↔ LabVIEW*.
 
+Gelöste technische Hürden und Workarounds werden laufend in
+[FALLSTRICKE_UND_WORKAROUNDS.md](FALLSTRICKE_UND_WORKAROUNDS.md) festgehalten.
+
 ## Status
 
 🚧 In Entwicklung — aktuell: Architektur-/Konzeptphase (siehe Roadmap in der
