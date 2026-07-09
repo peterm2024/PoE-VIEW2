@@ -63,3 +63,18 @@ def test_unknown_fields_are_kept() -> None:
     """extra='allow': API-Erweiterungen dürfen nichts kaputt machen."""
     item = Item.model_validate({**GEM_JSON, "brandNewField": {"x": 1}})
     assert item.brandNewField == {"x": 1}
+
+
+def test_stash_display_name_prefers_name_then_map_metadata() -> None:
+    """MapStash-Kinder haben oft kein name-Feld — Anzeigename aus metadata.map."""
+    named = StashTab.model_validate({"id": "a", "name": "Currency 1", "type": "CurrencyStash",
+                                     "metadata": {"map": {"name": "sollte ignoriert werden"}}})
+    assert named.display_name == "Currency 1"
+
+    map_child = StashTab.model_validate({"id": "b", "parent": "m1", "type": "MapStash",
+                                         "metadata": {"map": {"name": "Beach Map", "tier": 16}}})
+    assert map_child.display_name == "Beach Map (T16)"
+    assert map_child.parent == "m1"
+
+    bare = StashTab.model_validate({"id": "c0ffee42", "type": "UniqueStash", "metadata": {}})
+    assert bare.display_name == "UniqueStash"

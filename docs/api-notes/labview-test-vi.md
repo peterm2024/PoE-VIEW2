@@ -54,7 +54,17 @@ Basis: `https://api.pathofexile.com`
 | `/account/leagues` | Liga-Liste (für das Liga-Dropdown) | `get_leagues()` |
 | `/character` | Charakter-Liste → name, class, league, level | `get_characters()` |
 | `/stash/<league>` | Stash-Tab-Liste einer Liga | `get_stashes(league)` |
-| `/stash/<league>/<stash_id>` | Items eines Tabs | `get_stash(league, stash_id)` |
+| `/stash/<league>/<stash_id>` | Items eines Tabs (Spezial-Tabs: children!) | `get_stash(league, stash_id)` |
+| `/stash/<league>/<stash_id>/<substash_id>` | Items eines Spezial-Tab-Kinds | `get_stash(league, substash_id, parent_id=stash_id)` |
+
+⚠️ **Spezial-Tabs (`MapStash`, `UniqueStash`)** antworten am Einzel-Tab-
+Endpunkt mit `children` statt `items` (ein Unter-Tab pro Map-Typ bzw.
+Unique-Kategorie; Map-Kinder oft ohne `name`, Anzeigename steckt in
+`metadata.map` → `{name, tier, …}`). Items gibt es nur über den
+Substash-Endpunkt mit BEIDEN IDs im Pfad. Diese Kinder erscheinen NICHT
+in der Liga-Stash-Liste — sie existieren erst nach dem Einzel-Abruf des
+Spezial-Tabs (Quelle: offizielle GGG-API-Doku; im LabVIEW-Test-VI noch
+nicht abgedeckt).
 
 ⚠️ **Liga-Namen enthalten Leerzeichen** (z. B. `SSF Ruthless`) — in Python die
 Pfadsegmente **URL-encoden** (`urllib.parse.quote`). Das LabVIEW-VI hängt den

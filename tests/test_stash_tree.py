@@ -155,6 +155,45 @@ def test_context_menu_does_nothing_for_folder_node(qapp, monkeypatch) -> None:
     tree._on_context_menu(pos)  # darf NICHT auf _exploding_menu treffen
 
 
+def test_set_children_inserts_subtabs_without_rebuilding_tree(qapp) -> None:
+    """Spezial-Tab (MapStash): entdeckte Kinder unter dem Knoten einhängen —
+    Aufklapp-Zustand des restlichen Baums bleibt erhalten."""
+    data = [
+        {"id": "m1", "name": "Maps", "type": "MapStash", "metadata": {}},
+        {"id": "other", "name": "Other", "type": "QuadStash", "metadata": {}},
+    ]
+    tree = StashTree()
+    tree.set_stashes([StashTab.model_validate(d) for d in data])
+
+    child = StashTab.model_validate({"id": "c1", "parent": "m1", "type": "MapStash",
+                                     "metadata": {"map": {"name": "Beach Map", "tier": 16}}})
+    tree.set_children("m1", [child])
+
+    parent_node = tree._stash_nodes["m1"]
+    assert parent_node.childCount() == 1
+    assert parent_node.child(0).text(0) == "Beach Map (T16)"  # display_name, kein leerer Name
+    assert parent_node.isExpanded()
+    assert tree._stash_nodes["c1"].text(1) == "⬇"  # Kind noch nicht geladen
+    assert tree.topLevelItemCount() == 2  # Rest des Baums unangetastet
+
+
+def test_set_children_replaces_previous_children_and_index_entries(qapp) -> None:
+    data = [{"id": "m1", "name": "Maps", "type": "MapStash", "metadata": {}}]
+    tree = StashTree()
+    tree.set_stashes([StashTab.model_validate(d) for d in data])
+
+    old_child = StashTab.model_validate({"id": "old", "parent": "m1", "name": "Old",
+                                         "type": "MapStash", "metadata": {}})
+    new_child = StashTab.model_validate({"id": "new", "parent": "m1", "name": "New",
+                                         "type": "MapStash", "metadata": {}})
+    tree.set_children("m1", [old_child])
+    tree.set_children("m1", [new_child])
+
+    assert "old" not in tree._stash_nodes  # kein toter Eintrag im Index
+    assert tree._stash_nodes["m1"].childCount() == 1
+    assert tree._stash_nodes["new"].text(0) == "New"
+
+
 def test_tab_colour_is_icon_not_text_colour(qapp) -> None:
     """Farbe als Icon-Swatch statt Textfarbe — dunkle API-Farben bleiben lesbar."""
     data = [{"id": "root1", "name": "Dark Tab", "type": "QuadStash",

@@ -454,6 +454,40 @@ Tab-Daten als eingerücktes JSON.
   den Pydantic-Roundtrip. Spart einen weiteren Persistenz-Layer, der nur
   für diesen Debug-Viewer existieren würde.
 
+### 4.10 Spezial-Tabs: MapStash & UniqueStash
+
+Spezial-Tabs verhalten sich am Einzel-Tab-Endpunkt grundlegend anders als
+normale Tabs: Die Antwort enthält **`children` statt `items`** — ein
+Unter-Tab pro Map-Typ (MapStash) bzw. pro Unique-Kategorie (UniqueStash).
+Die Items eines Unter-Tabs kommen ausschließlich vom
+**Substash-Endpunkt** `/stash/<liga>/<eltern_id>/<kind_id>`
+(`PoeApiClient.get_stash(league, stash_id, parent_id=...)`).
+
+**Entdeckungs-Fluss (selbstorganisierend):**
+
+1. In der Liga-Stash-LISTE sieht ein MapStash wie ein normaler Tab aus
+   (keine children) → er zählt als Leaf und ist klick-/auto-refreshbar.
+2. Sein erster Abruf liefert children → der Worker erkennt das
+   (`_emit_stash_result`: children und keine items) und emittiert
+   `stash_children_loaded` statt `stash_items_loaded`; jedes Kind bekommt
+   dabei `parent` gesetzt (die API füllt das Feld nicht immer).
+3. `MainWindow._on_stash_children` verankert die Kinder im Liga-Baum
+   (`_stash_trees`), hängt sie per `StashTree.set_children()` unter den
+   Knoten (OHNE Baum-Neuaufbau — Aufklapp-Zustand bleibt) und berechnet
+   `_leaf_stashes` neu: Der Spezial-Tab ist jetzt Container (wie ein
+   Ordner), seine **Kinder sind die ladbaren Einheiten** — mit eigenen
+   ⬇/⟳-Markern, Refresh-Buttons, Cache-Einträgen und Zeitstempeln, exakt
+   wie normale Tabs. Auto-Refresh (§4.8) und "Alle Tabs laden" arbeiten
+   dadurch automatisch auch die Unter-Tabs ab (via `stash.parent`).
+4. Klick auf ein Kind → `FetchStashItemsJob(..., parent_id=...)` →
+   Substash-Endpunkt → Items wie gewohnt.
+
+**Merge-Pflicht beim Listen-Refresh:** Die Liga-LISTE kennt die Kinder von
+Spezial-Tabs NICHT. Ohne Gegenmaßnahme würde jeder Listen-Refresh (Liga-
+Wechsel, "Aktualisieren") die bereits entdeckten Kinder wieder verwerfen —
+`MainWindow._merge_known_children()` überträgt sie deshalb in jede frisch
+geladene Liste, bevor sie den alten Baum ersetzt.
+
 ---
 
 ## 5. UI-Konzept (Oberflächenvorschlag)

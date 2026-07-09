@@ -238,6 +238,7 @@ class MainWindow(QMainWindow):
         w.characters_loaded.connect(self._on_characters)
         w.stash_list_loaded.connect(self._on_stash_list)
         w.stash_items_loaded.connect(self._on_stash_items)
+        w.stash_children_loaded.connect(self._on_stash_children)
         w.icon_loaded.connect(self._on_icon)
         w.rate_limit_changed.connect(self.dashboard.update_state)
         w.status.connect(self._on_status)
@@ -307,20 +308,71 @@ class MainWindow(QMainWindow):
         self._update_auto_refresh_label()
 
     def _on_stash_list(self, stashes: list[StashTab]) -> None:
+        # Die Liga-LISTE der API kennt die Kinder von Spezial-Tabs (MapStash,
+        # UniqueStash) NICHT — ohne Merge gingen bereits entdeckte Unter-Tabs
+        # bei jedem Listen-Refresh/Liga-Wechsel wieder verloren.
+        old = self._stash_trees.get(self._current_league)
+        if old:
+            self._merge_known_children(stashes, old)
         self._stash_trees[self._current_league] = stashes
         self._activate_stash_tree(stashes)
         self._persist_cache()
 
     @staticmethod
+    def _merge_known_children(new_stashes: list[StashTab],
+                              old_stashes: list[StashTab]) -> None:
+        """Überträgt in früheren Abrufen entdeckte Spezial-Tab-Kinder in die
+        frisch geladene Stash-Liste (in-place)."""
+        old_by_id: dict[str, StashTab] = {}
+
+        def index(stashes: list[StashTab]) -> None:
+            for stash in stashes:
+                old_by_id[stash.id] = stash
+                index(stash.children)
+
+        def graft(stashes: list[StashTab]) -> None:
+            for stash in stashes:
+                if stash.children:
+                    graft(stash.children)  # Ordner: Kinder kommen aus der Liste selbst
+                else:
+                    old = old_by_id.get(stash.id)
+                    if old is not None and old.children:
+                        stash.children = old.children
+
+        index(old_stashes)
+        graft(new_stashes)
+
+    @staticmethod
     def _flatten_stashes(stashes: list[StashTab]) -> list[StashTab]:
-        """Rekursiv alle Nicht-Ordner-Tabs einsammeln (Reihenfolge wie im Baum)."""
+        """Rekursiv alle Nicht-Container-Tabs einsammeln (Reihenfolge wie im Baum).
+
+        Container = Ordner ODER Spezial-Tabs mit bereits entdeckten Kindern
+        (MapStash/UniqueStash) — bei denen sind die KINDER die ladbaren
+        Einheiten. Ein Spezial-Tab VOR seiner Entdeckung hat keine children
+        und zählt als Leaf — sein erster Abruf liefert dann die Kinder.
+        """
         flat: list[StashTab] = []
         for stash in stashes:
-            if stash.is_folder:
+            if stash.is_folder or stash.children:
                 flat.extend(MainWindow._flatten_stashes(stash.children))
             else:
                 flat.append(stash)
         return flat
+
+    @staticmethod
+    def _find_stash(stashes: list[StashTab], stash_id: str) -> StashTab | None:
+        for stash in stashes:
+            if stash.id == stash_id:
+                return stash
+            found = MainWindow._find_stash(stash.children, stash_id)
+            if found is not None:
+                return found
+        return None
+
+    def _parent_id_of(self, stash_id: str) -> str | None:
+        """Substash-Eltern-ID (nur bei Kindern von Spezial-Tabs, sonst None)."""
+        stash = self._find_stash(self._stash_trees.get(self._current_league, []), stash_id)
+        return stash.parent if stash is not None else None
 
     def _on_stash_selected(self, stash_id: str, name: str) -> None:
         self._showing_aggregate = False
@@ -329,12 +381,14 @@ class MainWindow(QMainWindow):
             # Speicher-/Datei-Cache: kein erneuter API-Call (Doku §5)
             self._show_items(stash_id, league_items[stash_id], name)
             return
-        self.worker.submit(FetchStashItemsJob(self._current_league, stash_id, name))
+        self.worker.submit(FetchStashItemsJob(self._current_league, stash_id, name,
+                                              parent_id=self._parent_id_of(stash_id)))
 
     def _on_stash_refresh(self, stash_id: str, name: str) -> None:
         """Klick auf den Refresh-Button eines Tabs — bewusst AM Cache vorbei."""
         self._showing_aggregate = False
-        self.worker.submit(FetchStashItemsJob(self._current_league, stash_id, name))
+        self.worker.submit(FetchStashItemsJob(self._current_league, stash_id, name,
+                                              parent_id=self._parent_id_of(stash_id)))
 
     def _on_stash_items(self, league: str, stash_id: str, name: str,
                         items: list[Item], silent: bool) -> None:
@@ -354,6 +408,35 @@ class MainWindow(QMainWindow):
             self._update_auto_refresh_label()
         elif not self._showing_aggregate:
             self._show_items(stash_id, items, name)
+
+    def _on_stash_children(self, league: str, stash_id: str, name: str,
+                           children: list[StashTab], silent: bool) -> None:
+        """Ein Spezial-Tab (MapStash/UniqueStash) hat statt Items Unter-Tabs
+        geliefert — in Baumstruktur und Anzeige einhängen. Deren Items werden
+        wie bei normalen Tabs erst per Klick (oder Auto-Refresh) geladen."""
+        self._last_loaded.setdefault(league, {})[stash_id] = datetime.now(timezone.utc).isoformat()
+        tree = self._stash_trees.get(league)
+        if tree is not None:
+            tab = self._find_stash(tree, stash_id)
+            if tab is not None:
+                tab.children = children
+        if silent:
+            self._auto_refresh_counts[league] = self._auto_refresh_counts.get(league, 0) + 1
+        self._persist_cache()
+        if league != self._current_league:
+            return
+        league_loaded = self._last_loaded.get(league, {})
+        self.tree.set_children(stash_id, children, last_loaded=league_loaded,
+                               expand=not silent)
+        self.tree.mark_loaded(stash_id, league_loaded[stash_id])
+        if tree is not None:
+            self._leaf_stashes = self._flatten_stashes(tree)
+        self._update_auto_refresh_label()
+        if not silent:
+            self._status_msg.setText(
+                f"{name}: Spezial-Tab mit {len(children)} Unter-Tabs — "
+                "Items je Unter-Tab per Klick laden")
+            self._update_raw_viewer(stash_id, name)
 
     def _show_items(self, stash_id: str, items: list[Item], name: str) -> None:
         self._current_tab_name = name
@@ -509,12 +592,13 @@ class MainWindow(QMainWindow):
         """Setzt Tab-Metadaten (aus der Stash-Liste) und Items (aus dem Item-Cache)
         wieder zu einem vollständigen Objekt zusammen. Dank ``extra="allow"`` in
         den pydantic-Modellen (api/models.py) verlustfrei identisch zu dem, was
-        die API tatsächlich liefert — kein separater Rohtext-Cache nötig."""
-        tab = next((s for s in self._leaf_stashes if s.id == stash_id), None)
+        die API tatsächlich liefert — kein separater Rohtext-Cache nötig.
+        Bei Spezial-Tabs (MapStash, …) sind die children Teil der Rohdaten."""
+        tab = self._find_stash(self._stash_trees.get(self._current_league, []), stash_id)
         if tab is None:
             return None
         items = self._items.get(self._current_league, {}).get(stash_id, [])
-        payload = tab.model_dump(mode="json", exclude={"children"})
+        payload = tab.model_dump(mode="json")
         payload["items"] = [item.model_dump(mode="json") for item in items]
         return payload
 
@@ -531,7 +615,8 @@ class MainWindow(QMainWindow):
         candidate = self._pick_auto_refresh_candidate()
         if candidate is not None:
             self.worker.submit(FetchStashItemsJob(
-                self._current_league, candidate.id, candidate.name, silent=True))
+                self._current_league, candidate.id, candidate.display_name,
+                parent_id=candidate.parent, silent=True))
 
     def _update_auto_refresh_label(self) -> None:
         """Zähler rechts in der Statusleiste: „Auto-Refresh: X von Y Stash-Tabs aktualisiert“."""

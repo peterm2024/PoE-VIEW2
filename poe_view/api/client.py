@@ -91,7 +91,17 @@ class PoeApiClient:
         data = self._get(f"/stash/{quote(league)}")
         return [StashTab.model_validate(s) for s in data.get("stashes", [])]
 
-    def get_stash(self, league: str, stash_id: str) -> StashTab:
-        """Einzelner Tab inkl. Items. Antwort-Key ist 'stash' (Singular!)."""
-        data = self._get(f"/stash/{quote(league)}/{quote(stash_id)}")
+    def get_stash(self, league: str, stash_id: str, parent_id: str | None = None) -> StashTab:
+        """Einzelner Tab inkl. Items. Antwort-Key ist 'stash' (Singular!).
+
+        ``parent_id`` gesetzt → Substash-Endpunkt (Kind eines Spezial-Tabs wie
+        MapStash/UniqueStash): ``/stash/<league>/<parent_id>/<stash_id>``.
+        Spezial-Tabs selbst liefern statt items ihre children — der Aufrufer
+        (ApiWorker) unterscheidet die beiden Fälle.
+        """
+        if parent_id:
+            path = f"/stash/{quote(league)}/{quote(parent_id)}/{quote(stash_id)}"
+        else:
+            path = f"/stash/{quote(league)}/{quote(stash_id)}"
+        data = self._get(path)
         return StashTab.model_validate(data.get("stash", {}))

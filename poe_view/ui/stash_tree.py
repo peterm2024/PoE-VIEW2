@@ -112,10 +112,36 @@ class StashTree(QTreeWidget):
         if node is not None:
             self._set_status(node, stash_id, last_loaded_iso)
 
+    def set_children(self, parent_id: str, children: list[StashTab],
+                     last_loaded: dict[str, str] | None = None,
+                     expand: bool = True) -> None:
+        """Hängt die entdeckten Unter-Tabs eines Spezial-Tabs (MapStash, …) unter
+        dessen Knoten — OHNE den restlichen Baum neu aufzubauen (Aufklapp-Zustand
+        und Scroll-Position bleiben erhalten)."""
+        parent_node = self._stash_nodes.get(parent_id)
+        if parent_node is None:
+            return
+        last_loaded = last_loaded or {}
+        # Alte Kind-Knoten auch aus dem id→Knoten-Index entfernen (sonst
+        # zeigen mark_loaded()-Aufrufe später auf tote Widget-Referenzen).
+        for i in range(parent_node.childCount()):
+            old_stash = parent_node.child(i).data(0, _DATA_ROLE)
+            if old_stash is not None:
+                self._stash_nodes.pop(old_stash.id, None)
+        parent_node.takeChildren()
+        for child in children:
+            parent_node.addChild(self._build_node(child))
+        for child in children:
+            node = self._stash_nodes.get(child.id)
+            if node is not None:
+                self._set_status(node, child.id, last_loaded.get(child.id))
+        if expand:
+            parent_node.setExpanded(True)
+
     def _build_node(self, stash: StashTab) -> QTreeWidgetItem:
         """Rekursiv: Ordner enthalten children (beliebig tief)."""
         prefix = "📁 " if stash.is_folder else ""
-        node = QTreeWidgetItem([f"{prefix}{stash.name}"])
+        node = QTreeWidgetItem([f"{prefix}{stash.display_name}"])
         if not stash.is_folder:
             node.setData(0, _DATA_ROLE, stash)
             self._stash_nodes[stash.id] = node
@@ -132,7 +158,7 @@ class StashTree(QTreeWidget):
             node.setText(_COL_STATUS, _UNLOADED_MARK)
             node.setToolTip(_COL_STATUS, "Noch nicht geladen")
             return
-        name: str = node.data(0, _DATA_ROLE).name
+        name: str = node.data(0, _DATA_ROLE).display_name
         node.setText(_COL_STATUS, "")
         button = QToolButton()
         button.setText(f"⟳ {format_age(last_loaded_iso)}")
@@ -144,7 +170,7 @@ class StashTree(QTreeWidget):
     def _on_click(self, item: QTreeWidgetItem) -> None:
         stash: StashTab | None = item.data(0, _DATA_ROLE)
         if stash is not None:
-            self.stash_selected.emit(stash.id, stash.name)
+            self.stash_selected.emit(stash.id, stash.display_name)
 
     def _on_context_menu(self, pos) -> None:
         item = self.itemAt(pos)
@@ -155,5 +181,5 @@ class StashTree(QTreeWidget):
             return  # Ordner-Knoten haben keine eigenen Rohdaten
         menu = QMenu(self)
         action = menu.addAction("🔍 Rohdaten anzeigen")
-        action.triggered.connect(lambda: self.raw_data_requested.emit(stash.id, stash.name))
+        action.triggered.connect(lambda: self.raw_data_requested.emit(stash.id, stash.display_name))
         menu.exec(self.viewport().mapToGlobal(pos))

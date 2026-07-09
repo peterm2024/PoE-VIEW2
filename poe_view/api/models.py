@@ -83,15 +83,20 @@ class StashTab(BaseModel):
     """Stash-Tab; Ordner haben ``children`` (rekursiv) und metadata.folder=true.
 
     ``metadata.colour`` ist Hex OHNE '#'-Präfix (Beobachtung aus dem Test-VI).
+    Spezial-Tabs (MapStash, UniqueStash) liefern beim Einzel-Abruf ebenfalls
+    ``children`` (ein Unter-Tab pro Map-Typ bzw. Unique-Kategorie) statt
+    ``items``; deren Items kommen vom Substash-Endpunkt und die Kinder tragen
+    ``parent`` (ID des Spezial-Tabs) — nötig für den 3-Segment-URL-Pfad.
     """
 
     model_config = ConfigDict(extra="allow")
 
     id: str
     name: str = ""
-    type: str = ""                 # Folder, QuadStash, CurrencyStash, GemStash, …
+    type: str = ""                 # Folder, QuadStash, CurrencyStash, MapStash, …
     index: int | None = None
-    folder: str | None = None      # ID des Eltern-Ordners (nur bei Kindern)
+    parent: str | None = None      # ID des Eltern-SPEZIAL-Tabs (nur bei Substashes)
+    folder: str | None = None      # ID des Eltern-Ordners (nur bei Ordner-Kindern)
     metadata: dict = Field(default_factory=dict)
     children: list["StashTab"] = Field(default_factory=list)
     items: list[Item] = Field(default_factory=list)
@@ -104,6 +109,18 @@ class StashTab(BaseModel):
     @property
     def is_folder(self) -> bool:
         return bool(self.metadata.get("folder")) or self.type == "Folder"
+
+    @property
+    def display_name(self) -> str:
+        """Map-Stash-Kinder haben oft KEIN name-Feld — der Anzeigename steckt
+        dann in metadata.map ({name, tier, …})."""
+        if self.name:
+            return self.name
+        map_info = self.metadata.get("map") or {}
+        if map_info.get("name"):
+            tier = map_info.get("tier")
+            return f"{map_info['name']} (T{tier})" if tier else str(map_info["name"])
+        return self.type or self.id[:8]
 
 
 class Character(BaseModel):

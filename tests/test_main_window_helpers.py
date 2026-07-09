@@ -324,7 +324,7 @@ def test_build_raw_stash_payload_merges_tab_metadata_and_items(qapp) -> None:
     win._current_league = "Standard"
     stash = StashTab.model_validate({"id": "t1", "name": "Tab", "type": "CurrencyStash",
                                       "metadata": {"colour": "ff0000"}})
-    win._leaf_stashes = [stash]
+    win._stash_trees["Standard"] = [stash]
     item = Item.model_validate({"typeLine": "Chaos Orb", "frameType": 5, "stackSize": 3})
     win._items["Standard"] = {"t1": [item]}
 
@@ -334,7 +334,6 @@ def test_build_raw_stash_payload_merges_tab_metadata_and_items(qapp) -> None:
     assert payload["id"] == "t1"
     assert payload["metadata"]["colour"] == "ff0000"
     assert payload["items"][0]["typeLine"] == "Chaos Orb"
-    assert "children" not in payload
 
     win.worker.stop()
     win.worker.wait(5000)
@@ -343,7 +342,6 @@ def test_build_raw_stash_payload_merges_tab_metadata_and_items(qapp) -> None:
 def test_build_raw_stash_payload_returns_none_for_unknown_tab(qapp) -> None:
     win = MainWindow()
     win._current_league = "Standard"
-    win._leaf_stashes = []
 
     assert win._build_raw_stash_payload("nope") is None
 
@@ -358,7 +356,7 @@ def test_update_raw_viewer_only_refreshes_when_visible(qapp) -> None:
     win._current_league = "Standard"
     stash = StashTab.model_validate({"id": "t1", "name": "Tab", "type": "CurrencyStash",
                                       "metadata": {}})
-    win._leaf_stashes = [stash]
+    win._stash_trees["Standard"] = [stash]
     win._items["Standard"] = {"t1": []}
     win._raw_data_viewer = RawDataViewer(win)
 
@@ -380,7 +378,7 @@ def test_on_raw_data_requested_opens_viewer_and_shows_cached_data(qapp) -> None:
     win._current_league = "Standard"
     stash = StashTab.model_validate({"id": "t1", "name": "Tab", "type": "CurrencyStash",
                                       "metadata": {}})
-    win._leaf_stashes = [stash]
+    win._stash_trees["Standard"] = [stash]
     item = Item.model_validate({"typeLine": "Chaos Orb", "frameType": 5})
     win._items["Standard"] = {"t1": [item]}
 
@@ -399,7 +397,7 @@ def test_raw_viewer_follows_tab_switches(qapp) -> None:
     verschiedener Tabs von selbst, ohne dass erneut rechtsgeklickt werden muss."""
     win = MainWindow()
     win._current_league = "Standard"
-    win._leaf_stashes = [
+    win._stash_trees["Standard"] = [
         StashTab.model_validate({"id": "t1", "name": "Tab 1", "type": "CurrencyStash", "metadata": {}}),
         StashTab.model_validate({"id": "t2", "name": "Tab 2", "type": "CurrencyStash", "metadata": {}}),
     ]
@@ -414,6 +412,123 @@ def test_raw_viewer_follows_tab_switches(qapp) -> None:
     win._on_stash_selected("t2", "Tab 2")  # normaler Klick auf einen anderen Tab
     assert "Divine Orb" in win._raw_data_viewer._text.toPlainText()
     assert "Chaos Orb" not in win._raw_data_viewer._text.toPlainText()
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+# --- Spezial-Tabs: MapStash/UniqueStash (Nutzer-Feedback) ----------------- #
+
+def _map_child(child_id: str, parent_id: str, map_name: str) -> StashTab:
+    return StashTab.model_validate({
+        "id": child_id, "parent": parent_id, "type": "MapStash",
+        "metadata": {"map": {"name": map_name, "tier": 16}},
+    })
+
+
+def test_flatten_treats_special_tab_with_children_as_container() -> None:
+    map_stash = StashTab.model_validate({"id": "m1", "name": "Maps", "type": "MapStash",
+                                          "metadata": {}})
+    map_stash.children = [_map_child("c1", "m1", "Beach Map")]
+    flat = MainWindow._flatten_stashes([map_stash, _make_leaf("t1", "Tab")])
+    assert [s.id for s in flat] == ["c1", "t1"]  # Kind statt Spezial-Tab-Eltern
+
+
+def test_flatten_keeps_undiscovered_special_tab_as_leaf() -> None:
+    """Vor der Entdeckung hat der MapStash keine children — er muss Leaf bleiben,
+    damit sein erster Abruf (Klick/Auto-Refresh) die Kinder überhaupt entdeckt."""
+    map_stash = StashTab.model_validate({"id": "m1", "name": "Maps", "type": "MapStash",
+                                          "metadata": {}})
+    flat = MainWindow._flatten_stashes([map_stash])
+    assert [s.id for s in flat] == ["m1"]
+
+
+def test_on_stash_children_grafts_into_tree_and_updates_leaves(qapp) -> None:
+    win = MainWindow()
+    win._current_league = "Standard"
+    map_stash = StashTab.model_validate({"id": "m1", "name": "Maps", "type": "MapStash",
+                                          "metadata": {}})
+    win._stash_trees["Standard"] = [map_stash]
+    win._activate_stash_tree(win._stash_trees["Standard"])
+    assert [s.id for s in win._leaf_stashes] == ["m1"]
+
+    children = [_map_child("c1", "m1", "Beach Map"), _map_child("c2", "m1", "Dunes Map")]
+    win._on_stash_children("Standard", "m1", "Maps", children, silent=False)
+
+    # Struktur: Kinder im Liga-Baum verankert, Leaves umgestellt
+    assert win._stash_trees["Standard"][0].children == children
+    assert [s.id for s in win._leaf_stashes] == ["c1", "c2"]
+    # UI: Kind-Knoten hängen im Baum unter dem (aufgeklappten) Eltern-Knoten
+    assert "c1" in win.tree._stash_nodes and "c2" in win.tree._stash_nodes
+    assert win.tree._stash_nodes["m1"].isExpanded()
+    # Eltern-Tab gilt als geladen (Struktur bekannt), Kinder noch nicht
+    assert win._last_loaded["Standard"].get("m1") is not None
+    assert win.tree._stash_nodes["c1"].text(1) == "⬇"
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_merge_known_children_survives_stash_list_refresh(qapp) -> None:
+    """Die Liga-LISTE kennt Spezial-Tab-Kinder nicht — ohne Merge wären sie nach
+    jedem Listen-Refresh/Liga-Wechsel wieder weg."""
+    win = MainWindow()
+    win._current_league = "Standard"
+    old_map = StashTab.model_validate({"id": "m1", "name": "Maps", "type": "MapStash",
+                                        "metadata": {}})
+    old_map.children = [_map_child("c1", "m1", "Beach Map")]
+    win._stash_trees["Standard"] = [old_map]
+
+    # Frische Liste von der API: MapStash OHNE children (wie die API sie liefert)
+    fresh = [StashTab.model_validate({"id": "m1", "name": "Maps", "type": "MapStash",
+                                       "metadata": {}})]
+    win._on_stash_list(fresh)
+
+    assert win._stash_trees["Standard"][0].children[0].id == "c1"
+    assert [s.id for s in win._leaf_stashes] == ["c1"]
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_click_on_special_tab_child_submits_job_with_parent_id(qapp, monkeypatch) -> None:
+    win = MainWindow()
+    win._current_league = "Standard"
+    map_stash = StashTab.model_validate({"id": "m1", "name": "Maps", "type": "MapStash",
+                                          "metadata": {}})
+    map_stash.children = [_map_child("c1", "m1", "Beach Map")]
+    win._stash_trees["Standard"] = [map_stash]
+
+    submitted = []
+    monkeypatch.setattr(win.worker, "submit", lambda job: submitted.append(job))
+
+    win._on_stash_selected("c1", "Beach Map (T16)")
+
+    assert len(submitted) == 1
+    assert submitted[0].stash_id == "c1"
+    assert submitted[0].parent_id == "m1"
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_auto_refresh_passes_parent_id_for_special_tab_children(qapp, monkeypatch) -> None:
+    win = MainWindow()
+    win._current_league = "Standard"
+    child = _map_child("c1", "m1", "Beach Map")
+    win._leaf_stashes = [child]
+    win._last_loaded["Standard"] = {}
+
+    submitted = []
+    monkeypatch.setattr(win.worker, "submit", lambda job: submitted.append(job))
+    monkeypatch.setattr(win.worker.rate_limiter, "headroom_fraction", lambda: 1.0)
+
+    win._maybe_auto_refresh()
+
+    assert len(submitted) == 1
+    assert submitted[0].stash_id == "c1"
+    assert submitted[0].parent_id == "m1"
+    assert submitted[0].silent is True
 
     win.worker.stop()
     win.worker.wait(5000)
