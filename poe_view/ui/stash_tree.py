@@ -31,14 +31,29 @@ class StashTree(QTreeWidget):
         self.itemClicked.connect(self._on_click)
 
     def set_characters(self, characters: list[Character]) -> None:
+        """Charaktere gruppiert nach Liga anzeigen (/character liefert alle Ligen).
+
+        Ein Zwischenknoten pro Liga, analog zu den Stash-Ordnern. Innerhalb
+        einer Liga absteigend nach Level sortiert.
+        """
         self._char_root.takeChildren()
-        for char in characters:
+        league_nodes: dict[str, QTreeWidgetItem] = {}
+        by_league = sorted(characters, key=lambda c: (c.league or "", -c.level, c.name))
+        for char in by_league:
+            league_name = char.league or "Unbekannte Liga"
+            league_node = league_nodes.get(league_name)
+            if league_node is None:
+                league_node = QTreeWidgetItem([league_name])
+                league_nodes[league_name] = league_node
+                self._char_root.addChild(league_node)
             label = f"{char.name} ({char.class_} {char.level})"
             node = QTreeWidgetItem([label])
             node.setData(0, _KIND_ROLE, "character")
             node.setData(0, _DATA_ROLE, char)
-            self._char_root.addChild(node)
+            league_node.addChild(node)
         self._char_root.setExpanded(True)
+        for league_node in league_nodes.values():
+            league_node.setExpanded(True)
 
     def set_stashes(self, stashes: list[StashTab]) -> None:
         self._stash_root.takeChildren()
