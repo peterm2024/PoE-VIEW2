@@ -32,6 +32,7 @@ def test_save_and_load_roundtrip_preserves_nested_tree_and_items(tmp_path, monke
     data.characters = [char]
     data.stash_trees = {"Standard": [folder]}
     data.items_by_league = {"Standard": {"t1": [item]}}
+    data.last_loaded = {"Standard": {"t1": "2026-07-08T12:00:00+00:00"}}
     data_cache.save(data)
 
     restored = data_cache.load()
@@ -40,6 +41,19 @@ def test_save_and_load_roundtrip_preserves_nested_tree_and_items(tmp_path, monke
     assert restored.characters[0].name == "A"
     assert restored.stash_trees["Standard"][0].children[0].id == "t1"
     assert restored.items_by_league["Standard"]["t1"][0].typeLine == "Chaos Orb"
+    assert restored.last_loaded["Standard"]["t1"] == "2026-07-08T12:00:00+00:00"
+
+
+def test_load_defaults_last_loaded_to_empty_dict_for_old_cache_files(tmp_path, monkeypatch) -> None:
+    """Ältere Cache-Dateien (vor diesem Feature) haben kein 'last_loaded' — darf nicht crashen."""
+    path = tmp_path / "old-cache.json"
+    path.write_text(
+        '{"account_name": "", "characters": [], "stash_trees": {}, "items_by_league": {}}',
+        encoding="utf-8")
+    monkeypatch.setattr(data_cache, "_CACHE_FILE", path)
+    restored = data_cache.load()
+    assert restored is not None
+    assert restored.last_loaded == {}
 
 
 def test_save_ignores_write_errors(tmp_path, monkeypatch) -> None:

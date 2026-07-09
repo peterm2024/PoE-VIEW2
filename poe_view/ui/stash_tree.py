@@ -4,11 +4,14 @@ Kein umschließender "Stash"-Wurzelknoten mehr: Die Tabs sind direkt die
 Top-Level-Einträge des Baums (spart eine Ebene, Nutzer-Feedback). Die
 Charakterliste lebt separat in ``character_list.py``.
 
-Jeder Stash-Tab-Knoten hat zwei Zusatzspalten: eine Status-Spalte (⬇ = Items
-noch nicht geladen, leer = bereits im Speicher-Cache) und ein Refresh-Button,
-über den genau dieser Tab neu geladen werden kann (bewusst am Cache vorbei).
-Die Namensspalte ist per Maus verbreiterbar (``Interactive`` statt
-``Stretch`` — Stretch-Spalten lassen sich in Qt NICHT manuell resizen).
+Jeder Stash-Tab-Knoten hat GENAU EINE Zusatzspalte (Nutzer-Feedback: "wir
+benötigen im Stash-Tree nur entweder das Download-Symbol oder das
+Refresh-Symbol" — beide Zustände schließen sich gegenseitig aus): entweder
+"⬇" (Items noch nie geladen) als reiner Text, oder — sobald mindestens
+einmal geladen — ein Refresh-Button, dessen Beschriftung zugleich das Alter
+der zuletzt geladenen Daten zeigt ("⟳ heute", "⟳ vor 3d"). Die Namensspalte
+ist per Maus verbreiterbar (``Interactive`` statt ``Stretch`` — Stretch-
+Spalten lassen sich in Qt NICHT manuell resizen).
 
 LabVIEW-Äquivalent: Tree Control mit rekursivem Laden der children. Die
 Tab-Farbe (metadata.colour, hex ohne '#') wird NICHT als Textfarbe verwendet
@@ -19,6 +22,8 @@ bleibt immer in der normalen, garantiert lesbaren Vordergrundfarbe.
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import (QHeaderView, QToolButton, QTreeWidget,
@@ -27,7 +32,7 @@ from PySide6.QtWidgets import (QHeaderView, QToolButton, QTreeWidget,
 from poe_view.api.models import StashTab
 
 _DATA_ROLE = Qt.ItemDataRole.UserRole
-_COL_NAME, _COL_STATUS, _COL_REFRESH = 0, 1, 2
+_COL_NAME, _COL_STATUS = 0, 1
 _UNLOADED_MARK = "⬇"
 
 
@@ -43,14 +48,24 @@ def _colour_swatch(hex_colour: str, size: int = 12) -> QIcon:
     return QIcon(pixmap)
 
 
+def format_age(last_loaded_iso: str, *, now: datetime | None = None) -> str:
+    """"heute" / "vor 1d" / "vor 12d" — kurze Beschriftung für den Refresh-Button."""
+    try:
+        loaded_at = datetime.fromisoformat(last_loaded_iso)
+    except ValueError:
+        return "?"
+    days = ((now or datetime.now(timezone.utc)) - loaded_at).days
+    return "heute" if days <= 0 else f"vor {days}d"
+
+
 class StashTree(QTreeWidget):
     stash_selected = Signal(str, str)          # stash_id, name
     stash_refresh_requested = Signal(str, str)  # stash_id, name
 
     def __init__(self) -> None:
         super().__init__()
-        self.setColumnCount(3)
-        self.setHeaderLabels(["Name", "", ""])
+        self.setColumnCount(2)
+        self.setHeaderLabels(["Name", ""])
         self.setIconSize(QSize(12, 12))
         header = self.header()
         header.setStretchLastSection(False)
@@ -59,36 +74,36 @@ class StashTree(QTreeWidget):
         # nicht verbreitern"). Initialbreite grob großzügig gewählt.
         header.setSectionResizeMode(_COL_NAME, QHeaderView.ResizeMode.Interactive)
         header.setSectionResizeMode(_COL_STATUS, QHeaderView.ResizeMode.Fixed)
-        header.setSectionResizeMode(_COL_REFRESH, QHeaderView.ResizeMode.Fixed)
         self.setColumnWidth(_COL_NAME, 220)
-        self.setColumnWidth(_COL_STATUS, 24)
-        self.setColumnWidth(_COL_REFRESH, 30)
-        self.headerItem().setToolTip(_COL_STATUS, "⬇ = Tab noch nicht geladen")
-        self.headerItem().setToolTip(_COL_REFRESH, "Tab neu laden")
+        self.setColumnWidth(_COL_STATUS, 74)
+        self.headerItem().setToolTip(
+            _COL_STATUS, "⬇ = noch nicht geladen · ⟳ = neu laden (zeigt Alter der Daten)")
         self._stash_nodes: dict[str, QTreeWidgetItem] = {}  # stash_id → Knoten
         self.itemClicked.connect(self._on_click)
 
-    def set_stashes(self, stashes: list[StashTab], loaded_ids: frozenset[str] = frozenset()) -> None:
+    def set_stashes(self, stashes: list[StashTab],
+                    last_loaded: dict[str, str] | None = None) -> None:
         """Zeigt den Stash-Baum an — startet zugeklappt (auch Unterordner).
 
-        ``loaded_ids`` sind Stash-IDs, deren Items bereits im Speicher-Cache
-        liegen (MainWindow._items) — sie bekommen keinen ⬇-Marker.
+        ``last_loaded`` bildet stash_id → ISO-Zeitstempel des letzten
+        erfolgreichen Ladens ab (MainWindow._last_loaded). Fehlt der Eintrag,
+        gilt der Tab als noch nie geladen.
         """
         self.clear()
         self._stash_nodes.clear()
+        last_loaded = last_loaded or {}
         for stash in stashes:
             self.addTopLevelItem(self._build_node(stash))
-        # Refresh-Buttons erst NACH dem Einhängen setzen — setItemWidget
-        # wirkt nur auf Items, die bereits Teil des Baums sind.
+        # Status erst NACH dem Einhängen setzen — setItemWidget wirkt nur
+        # auf Items, die bereits Teil des Baums sind.
         for stash_id, node in self._stash_nodes.items():
-            self._set_status(node, loaded=stash_id in loaded_ids)
-            self._add_refresh_button(node, stash_id, node.data(0, _DATA_ROLE).name)
+            self._set_status(node, stash_id, last_loaded.get(stash_id))
 
-    def mark_loaded(self, stash_id: str) -> None:
-        """Blendet den ⬇-Marker aus, sobald ein Tab tatsächlich geladen wurde."""
+    def mark_loaded(self, stash_id: str, last_loaded_iso: str) -> None:
+        """Nach einem erfolgreichen Ladevorgang: ⬇ durch Refresh-Button+Alter ersetzen."""
         node = self._stash_nodes.get(stash_id)
         if node is not None:
-            self._set_status(node, loaded=True)
+            self._set_status(node, stash_id, last_loaded_iso)
 
     def _build_node(self, stash: StashTab) -> QTreeWidgetItem:
         """Rekursiv: Ordner enthalten children (beliebig tief)."""
@@ -103,18 +118,21 @@ class StashTree(QTreeWidget):
             node.addChild(self._build_node(child))
         return node
 
-    def _set_status(self, node: QTreeWidgetItem, loaded: bool) -> None:
-        node.setText(_COL_STATUS, "" if loaded else _UNLOADED_MARK)
-        node.setToolTip(_COL_STATUS, "Bereits geladen" if loaded else "Noch nicht geladen")
-
-    def _add_refresh_button(self, node: QTreeWidgetItem, stash_id: str, name: str) -> None:
+    def _set_status(self, node: QTreeWidgetItem, stash_id: str,
+                    last_loaded_iso: str | None) -> None:
+        if last_loaded_iso is None:
+            self.removeItemWidget(node, _COL_STATUS)
+            node.setText(_COL_STATUS, _UNLOADED_MARK)
+            node.setToolTip(_COL_STATUS, "Noch nicht geladen")
+            return
+        name: str = node.data(0, _DATA_ROLE).name
+        node.setText(_COL_STATUS, "")
         button = QToolButton()
-        button.setText("⟳")
+        button.setText(f"⟳ {format_age(last_loaded_iso)}")
         button.setAutoRaise(True)
-        button.setFixedSize(20, 20)
         button.setToolTip(f"'{name}' neu laden")
         button.clicked.connect(lambda: self.stash_refresh_requested.emit(stash_id, name))
-        self.setItemWidget(node, _COL_REFRESH, button)
+        self.setItemWidget(node, _COL_STATUS, button)
 
     def _on_click(self, item: QTreeWidgetItem) -> None:
         stash: StashTab | None = item.data(0, _DATA_ROLE)

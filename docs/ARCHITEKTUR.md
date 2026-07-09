@@ -291,8 +291,9 @@ Ein `QThread` mit Job-Queue — das Python-Pendant zum LabVIEW-QMH:
 - Der Worker arbeitet die Queue **sequenziell** ab (ein Request nach dem
   anderen → Rate-Limiter bleibt einfach und deterministisch).
 - Ergebnisse/Fehler per Signal: `characters_loaded`, `stash_list_loaded`,
-  `stash_items_loaded(stash_id, items)`, `icon_loaded(url, bytes)`,
-  `error(job, message)`, `rate_limit_changed(...)`.
+  `stash_items_loaded(league, stash_id, name, items, silent)` (die Liga
+  reist explizit im Signal mit, siehe FALLSTRICKE_UND_WORKAROUNDS.md #10),
+  `icon_loaded(url, bytes)`, `error(job, message)`, `rate_limit_changed(...)`.
 - Icon-Downloads bekommen **niedrige Priorität** (eigene Queue oder
   Prioritäts-Queue): Erst Daten, dann Bilder.
 
@@ -333,7 +334,10 @@ JSON ist 1:1 nach LabVIEW portierbar ("Flatten/Unflatten to JSON").
 - **Struktur:** `stash_trees: {Liga: [StashTab, …]}` (Baum OHNE Items — die
   Stash-LISTE der API liefert nie Items, die kommen ausschließlich vom
   Einzel-Tab-Endpunkt) getrennt von `items_by_league: {Liga: {stash_id:
-  [Item, …]}}`, plus `characters` (ligenübergreifend) und `account_name`.
+  [Item, …]}}`, plus `last_loaded: {Liga: {stash_id: ISO-Zeitstempel}}`
+  (wann ein Tab zuletzt erfolgreich geladen wurde — Basis für die
+  Alters-Anzeige im Baum und den Hintergrund-Auto-Refresher, siehe §4.8) und
+  `characters` (ligenübergreifend) sowie `account_name`.
 - **In-Memory-Pendant:** `MainWindow` hält dieselbe Form bereits zur
   Laufzeit (`self._stash_trees`, `self._items`) — der Datei-Cache ist
   einfach ein Snapshot davon. Ein Liga-Wechsel prüft zuerst, ob die Liga
@@ -351,6 +355,57 @@ JSON ist 1:1 nach LabVIEW portierbar ("Flatten/Unflatten to JSON").
   Refresh-Buttons je Tab gibt, ist ein globales Verwerfen aller Items
   unnötig — der globale Refresh aktualisiert nur noch Stash-Liste und
   Charaktere.
+
+#### 4.7.1 Ein Status-/Alters-Symbol statt zwei getrennter Spalten
+
+`StashTree` hat bewusst nur EINE Zusatzspalte statt vormals zwei (Nutzer-
+Feedback: "wir benötigen im Stash-Tree nur entweder das Download-Symbol
+oder das Refresh-Symbol") — die beiden Zustände schließen sich pro Tab
+gegenseitig aus: **entweder** "⬇" (noch nie geladen, reiner Text) **oder**,
+sobald mindestens einmal geladen, ein Refresh-Button, dessen Beschriftung
+zugleich das Alter der Daten trägt ("⟳ heute", "⟳ vor 3d",
+`stash_tree.format_age()`). Das spart eine Spalte UND macht auf einen Blick
+sichtbar, welche Tabs mal wieder dran wären.
+
+### 4.8 Hintergrund-Auto-Refresh (`MainWindow._maybe_auto_refresh`)
+
+Ein `QTimer` im Main-Thread (alle `AUTO_REFRESH_INTERVAL_MS` = 20 s) lädt
+im Hintergrund höchstens **einen** bereits bekannten, aber veralteten
+Stash-Tab neu — der Nutzer muss dafür nichts tun, alte Daten "verwesen"
+aber nicht auf unbestimmte Zeit (Nutzer-Feedback).
+
+**Auswahl (`_pick_auto_refresh_candidate`):**
+
+1. Nur Tabs der **aktuell angezeigten Liga**, die bereits mindestens einmal
+   geladen wurden (`_last_loaded`) — noch nie geladene Tabs werden NICHT
+   automatisch nachgeladen, dafür reicht ein manueller Klick.
+2. Nur Tabs, deren letzter Ladezeitpunkt **mindestens `AUTO_REFRESH_MIN_AGE`
+   (1 Tag)** zurückliegt — jüngere Daten fasst der Hintergrund-Worker nicht
+   an ("man weiß ja, was man getan hat", Nutzer-Feedback).
+3. Tabs, deren Name `"Remove-only"` enthält, werden **nachrangig**
+   behandelt — sie kommen nur dran, wenn es sonst keinen veralteten
+   Kandidaten gibt.
+4. Aus den verbleibenden Kandidaten gewinnt der mit dem **ältesten**
+   Ladezeitpunkt.
+
+**Budget-Schutz:** Vor jedem Auto-Refresh-Versuch prüft
+`RateLimitManager.headroom_fraction()` (Minimum der "noch frei"-Anteile
+über alle bekannten Policies/Regeln), ob mindestens
+`AUTO_REFRESH_MIN_HEADROOM` (50 %) des Rate-Limit-Fensters frei sind —
+sonst wird der Tick übersprungen. So bleibt dem Nutzer immer genug Budget
+für eigene, manuelle Refreshs übrig. Zusätzlich pausiert der Auto-Refresher
+komplett, während der Worker gerade mit etwas anderem beschäftigt ist
+(`_worker_busy`) oder ein Bulk-Load ("Alle Tabs laden") läuft.
+
+**Job läuft "silent":** `FetchStashItemsJob(..., silent=True)` unterdrückt
+sowohl den Status-Text (`ApiWorker._dispatch`) als auch das Umschalten der
+sichtbaren Item-Tabelle (`MainWindow._on_stash_items`) — der Nutzer merkt
+vom Hintergrund-Refresh nichts außer der aktualisierten Alters-Anzeige im
+Baum. Das Ergebnis-Signal `stash_items_loaded` trägt seit diesem Feature
+die Liga explizit mit (nicht mehr implizit über `self._current_league`
+zum Zeitpunkt des Eintreffens) — sonst könnte ein spät eintreffender
+Hintergrund-Job Daten einer inzwischen verlassenen Liga in die aktuell
+angezeigte Liga einsickern lassen.
 
 ---
 
@@ -372,13 +427,13 @@ gemeinsamen Baum, die textliche Beschreibung unten ist aktuell.)
 │ Charaktere            │ ITEMS — "Currency 1"          (142 Items)       │
 │  MeinChar (91)        ├──────┬────────────┬─────────┬──────┬──────┬─────┤
 │  Zweitchar (67)       │ Icon │ Name       │ Typ     │ Lvl  │ Qual │ Stk │
-│ Stash            ⬇ ⟳  ├──────┼────────────┼─────────┼──────┼──────┼─────┤
-│  ▪ Currency 1         │ [ø]  │ Divine Orb │ Currency│  –   │  –   │ 12  │
-│  ▪ Currency 2      ⬇ ⟳│ [◆]  │ Awakened…  │ Gem     │  5   │ 20%  │  1  │
+│ Stash                 ├──────┼────────────┼─────────┼──────┼──────┼─────┤
+│  ▪ Currency 1  ⟳heute │ [ø]  │ Divine Orb │ Currency│  –   │  –   │ 12  │
+│  ▪ Currency 2      ⬇  │ [◆]  │ Awakened…  │ Gem     │  5   │ 20%  │  1  │
 │  📁 Gems              │ [▣]  │ Chaos Orb  │ Currency│  –   │  –   │ 843 │
-│    ▪ Leveling      ⬇ ⟳│ …    │            │         │      │      │     │
+│    ▪ Leveling  ⟳vor 3d│ …    │            │         │      │      │     │
 │  📁 Maps              │      │ (Spalten sortierbar, Filter oben)        │
-│  ▪ Uniques         ⬇ ⟳├──────┴────────────┴─────────┴──────┴──────┴─────┤
+│  ▪ Uniques         ⬇  ├──────┴────────────┴─────────┴──────┴──────┴─────┤
 │                       │ ITEM-DETAIL                                     │
 │                       │ ┌────┐  Awakened Multistrike Support            │
 │                       │ │IMG │  Gem · Level 5 · Quality +20%            │
@@ -397,7 +452,7 @@ gemeinsamen Baum, die textliche Beschreibung unten ist aktuell.)
 | Bereich | Widget | Verhalten |
 |---|---|---|
 | Navigation: Charaktere | `CharacterList` (`QListWidget`) | Bewusst KEIN Tree — Charaktere haben keine Unterstruktur (Nutzer-Feedback: spart eine Ebene samt Auf-/Zuklapp-Klick). Flach, absteigend nach Level, liga-gefiltert (`MainWindow._apply_character_league_filter`, siehe §5.1). Höhe begrenzt (`setMaximumHeight`), damit der Stash-Baum den meisten Platz bekommt. |
-| Navigation: Stash | `StashTree` (`QTreeWidget`), 3 Spalten, **Header sichtbar** | Kein umschließender "Stash"-Wurzelknoten mehr — die Tabs SIND die Top-Level-Einträge (spart eine weitere Ebene). Ordner rekursiv (children). Namensspalte per `QHeaderView.ResizeMode.Interactive` (NICHT `Stretch` — Stretch-Spalten lassen sich in Qt nicht per Maus verbreitern, das war ein echter Bug) mit großzügiger Startbreite, per Header-Rand manuell nachziehbar. Tab-Farbe aus API als kleines Icon-Quadrat VOR dem Namen, bewusst NICHT als Textfarbe (manche API-Farben sind auf dunklem Grund sonst unlesbar). Klick auf Tab → `FetchStashItems`-Job, sofern nicht bereits im Cache. Spalte 2: **⬇**-Marker, solange der Tab noch nicht geladen ist (`StashTree.mark_loaded`). Spalte 3: **⟳-Button** je Tab, lädt genau diesen Tab bewusst AM Cache vorbei neu (`stash_refresh_requested`-Signal). |
+| Navigation: Stash | `StashTree` (`QTreeWidget`), 2 Spalten, **Header sichtbar** | Kein umschließender "Stash"-Wurzelknoten mehr — die Tabs SIND die Top-Level-Einträge (spart eine weitere Ebene). Ordner rekursiv (children). Namensspalte per `QHeaderView.ResizeMode.Interactive` (NICHT `Stretch` — Stretch-Spalten lassen sich in Qt nicht per Maus verbreitern, das war ein echter Bug) mit großzügiger Startbreite, per Header-Rand manuell nachziehbar. Tab-Farbe aus API als kleines Icon-Quadrat VOR dem Namen, bewusst NICHT als Textfarbe (manche API-Farben sind auf dunklem Grund sonst unlesbar). Klick auf Tab → `FetchStashItems`-Job, sofern nicht bereits im Cache. Spalte 2 zeigt GENAU EINEN der beiden sich gegenseitig ausschließenden Zustände (§4.7.1): **⬇**-Text, solange nie geladen, oder ein **⟳-Button mit Alters-Beschriftung** ("⟳ vor 3d") sobald mindestens einmal geladen — Klick lädt genau diesen Tab bewusst AM Cache vorbei neu (`stash_refresh_requested`-Signal). |
 | Item-Tabelle rechts oben | `QTableView` + `QSortFilterProxyModel` | Spalten: Icon, Tab, Name, Typ, Level, Quality, Stack, iLvl. Klick auf Spaltenkopf sortiert; Suchfeld filtert live über Name+Typ+Tab (kein API-Call — gefiltert wird lokal). |
 | Item-Detail rechts unten | eigenes Widget | Großes Icon, Name in Rarity-Farbe (frameType), Properties, Mods. Aktualisiert bei Zeilenauswahl. |
 | Rate-Limit-Dashboard | `QProgressBar` pro Regel + Status-LED + Countdown | Wird ausschließlich über das Signal `rate_limit_changed` gefüttert. Farbe: grün < 60 %, gelb < 90 %, rot ab 90 %/Wartephase. Countdown zeigt verbleibende Wartezeit. *Intention: Der User soll immer sehen, WARUM die App gerade wartet.* |

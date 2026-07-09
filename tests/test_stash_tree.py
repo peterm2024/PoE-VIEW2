@@ -3,10 +3,12 @@
 Die Charakterliste lebt separat, siehe test_character_list.py.
 """
 
+from datetime import datetime, timedelta, timezone
+
 from PySide6.QtCore import Qt
 
 from poe_view.api.models import StashTab
-from poe_view.ui.stash_tree import StashTree
+from poe_view.ui.stash_tree import StashTree, format_age
 
 
 def test_set_stashes_builds_recursive_tree_without_wrapper_root(qapp) -> None:
@@ -24,46 +26,64 @@ def test_set_stashes_builds_recursive_tree_without_wrapper_root(qapp) -> None:
     assert folder_node.child(0).text(0) == "Sub"
 
 
-def test_set_stashes_marks_unloaded_tabs_and_adds_refresh_button(qapp) -> None:
+def test_set_stashes_marks_unloaded_tabs_with_download_marker_only(qapp) -> None:
+    """Unloaded Tab: nur der ⬇-Text, KEIN Refresh-Button (Nutzer-Feedback: nur eine Spalte)."""
     data = [{"id": "root1", "name": "#", "type": "QuadStash", "metadata": {}}]
     stashes = [StashTab.model_validate(d) for d in data]
     tree = StashTree()
-    tree.set_stashes(stashes, loaded_ids=frozenset())
+    tree.set_stashes(stashes)
     node = tree._stash_nodes["root1"]
     assert node.text(1) == "⬇"
-    assert tree.itemWidget(node, 2) is not None  # Refresh-Button vorhanden
+    assert tree.itemWidget(node, 1) is None
 
 
-def test_set_stashes_respects_loaded_ids(qapp) -> None:
+def test_set_stashes_shows_refresh_button_with_age_for_loaded_tabs(qapp) -> None:
     data = [{"id": "root1", "name": "#", "type": "QuadStash", "metadata": {}}]
     stashes = [StashTab.model_validate(d) for d in data]
     tree = StashTree()
-    tree.set_stashes(stashes, loaded_ids=frozenset({"root1"}))
-    assert tree._stash_nodes["root1"].text(1) == ""
+    three_days_ago = (datetime.now(timezone.utc) - timedelta(days=3)).isoformat()
+    tree.set_stashes(stashes, last_loaded={"root1": three_days_ago})
+    node = tree._stash_nodes["root1"]
+    assert node.text(1) == ""
+    button = tree.itemWidget(node, 1)
+    assert button is not None
+    assert button.text() == "⟳ vor 3d"
 
 
-def test_mark_loaded_clears_unloaded_marker(qapp) -> None:
+def test_mark_loaded_replaces_download_marker_with_refresh_button(qapp) -> None:
     data = [{"id": "root1", "name": "#", "type": "QuadStash", "metadata": {}}]
     stashes = [StashTab.model_validate(d) for d in data]
     tree = StashTree()
     tree.set_stashes(stashes)
     assert tree._stash_nodes["root1"].text(1) == "⬇"
-    tree.mark_loaded("root1")
-    assert tree._stash_nodes["root1"].text(1) == ""
+
+    tree.mark_loaded("root1", datetime.now(timezone.utc).isoformat())
+
+    node = tree._stash_nodes["root1"]
+    assert node.text(1) == ""
+    assert tree.itemWidget(node, 1).text() == "⟳ heute"
 
 
 def test_refresh_button_click_emits_signal(qapp) -> None:
     data = [{"id": "root1", "name": "Currency 1", "type": "QuadStash", "metadata": {}}]
     stashes = [StashTab.model_validate(d) for d in data]
     tree = StashTree()
-    tree.set_stashes(stashes)
+    tree.set_stashes(stashes, last_loaded={"root1": datetime.now(timezone.utc).isoformat()})
     node = tree._stash_nodes["root1"]
-    button = tree.itemWidget(node, 2)
+    button = tree.itemWidget(node, 1)
 
     received = []
     tree.stash_refresh_requested.connect(lambda sid, name: received.append((sid, name)))
     button.click()
     assert received == [("root1", "Currency 1")]
+
+
+def test_format_age() -> None:
+    now = datetime(2026, 7, 9, tzinfo=timezone.utc)
+    assert format_age(now.isoformat(), now=now) == "heute"
+    assert format_age((now - timedelta(hours=5)).isoformat(), now=now) == "heute"
+    assert format_age((now - timedelta(days=1)).isoformat(), now=now) == "vor 1d"
+    assert format_age((now - timedelta(days=12)).isoformat(), now=now) == "vor 12d"
 
 
 def test_header_is_visible(qapp) -> None:

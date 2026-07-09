@@ -57,3 +57,40 @@ def test_run_emits_busy_changed_around_each_job(qapp, monkeypatch) -> None:
     worker.run()
 
     assert busy_events == [True, False]
+
+
+def test_stash_items_dispatch_passes_league_and_silent_through_signal(qapp, monkeypatch) -> None:
+    """Regression: der Handler in MainWindow braucht die Liga aus dem Signal, nicht
+    aus self._current_league — sonst verfälscht ein später Hintergrund-Job die
+    Daten der inzwischen aktiven Liga."""
+    worker = ApiWorker()
+    fake_stash = StashTab.model_validate({
+        "id": "t1", "name": "Currency 1", "type": "CurrencyStash", "metadata": {}, "items": [],
+    })
+    monkeypatch.setattr(worker.client, "get_stash", lambda league, sid: fake_stash)
+
+    received = []
+    worker.stash_items_loaded.connect(
+        lambda league, sid, name, items, silent: received.append((league, sid, name, silent)))
+
+    worker._dispatch(FetchStashItemsJob("Standard", "t1", "Currency 1", silent=True))
+
+    assert received == [("Standard", "t1", "Currency 1", True)]
+    worker.client.close()
+
+
+def test_silent_stash_items_dispatch_emits_no_status(qapp, monkeypatch) -> None:
+    """Hintergrund-Auto-Refresh darf den Status-Text nicht mit Ladehinweisen stören."""
+    worker = ApiWorker()
+    fake_stash = StashTab.model_validate({
+        "id": "t1", "name": "Currency 1", "type": "CurrencyStash", "metadata": {}, "items": [],
+    })
+    monkeypatch.setattr(worker.client, "get_stash", lambda league, sid: fake_stash)
+
+    emitted: list[str] = []
+    worker.status.connect(emitted.append)
+
+    worker._dispatch(FetchStashItemsJob("Standard", "t1", "Currency 1", silent=True))
+
+    assert emitted == []
+    worker.client.close()

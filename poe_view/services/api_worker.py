@@ -67,6 +67,7 @@ class FetchStashItemsJob:
     league: str
     stash_id: str
     stash_name: str
+    silent: bool = False  # True = Hintergrund-Auto-Refresh, kein Status-/Anzeige-Update
 
 
 @dataclass
@@ -102,7 +103,7 @@ class ApiWorker(QThread):
     leagues_loaded = Signal(object)            # list[str]
     characters_loaded = Signal(object)         # list[Character]
     stash_list_loaded = Signal(object)         # list[StashTab]
-    stash_items_loaded = Signal(str, str, object)  # stash_id, name, list[Item]
+    stash_items_loaded = Signal(str, str, str, object, bool)  # league, stash_id, name, list[Item], silent
     icon_loaded = Signal(str, object)          # url, bytes
     rate_limit_changed = Signal(str, object, float)  # policy, rules, wait_s
     job_error = Signal(str)                    # Fehlertext für die Statusbar
@@ -174,10 +175,11 @@ class ApiWorker(QThread):
                 self.status.emit(f"Lade Stash-Liste ({league}) …")
                 self.stash_list_loaded.emit(self.client.get_stashes(league))
                 self.status.emit("Bereit")
-            case FetchStashItemsJob(league=league, stash_id=sid, stash_name=name):
-                self.status.emit(f"Lade Items: {name} …")
+            case FetchStashItemsJob(league=league, stash_id=sid, stash_name=name, silent=silent):
+                if not silent:
+                    self.status.emit(f"Lade Items: {name} …")
                 stash = self.client.get_stash(league, sid)
-                self.stash_items_loaded.emit(sid, name, stash.items)
+                self.stash_items_loaded.emit(league, sid, name, stash.items, silent)
             case FetchIconJob(url=url):
                 self._fetch_icon(url)
             case FetchAllItemsJob(league=league, stashes=stashes):
@@ -229,7 +231,7 @@ class ApiWorker(QThread):
                 break
             try:
                 fetched = self.client.get_stash(league, stash.id)
-                self.stash_items_loaded.emit(stash.id, stash.name, fetched.items)
+                self.stash_items_loaded.emit(league, stash.id, stash.name, fetched.items, False)
                 success += 1
             except Exception:
                 log.exception("Bulk-Laden: Tab %s fehlgeschlagen", stash.name)

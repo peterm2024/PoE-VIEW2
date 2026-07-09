@@ -9,8 +9,9 @@ LabVIEW-Äquivalent: das Main-VI mit Event-Struktur (User Events + UI-Events).
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timedelta, timezone
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QAction, QPixmap
 from PySide6.QtWidgets import (QComboBox, QFileDialog, QLabel, QLineEdit,
                                QMainWindow, QMessageBox, QProgressBar,
@@ -37,6 +38,13 @@ log = logging.getLogger(__name__)
 
 
 class MainWindow(QMainWindow):
+    # Hintergrund-Auto-Refresh (Nutzer-Feedback): nie jünger als 1 Tag anfassen
+    # (dafür reicht der manuelle Refresh völlig), und dem Nutzer immer mind.
+    # die Hälfte des Rate-Limit-Budgets für manuelle Klicks übrig lassen.
+    AUTO_REFRESH_INTERVAL_MS = 20_000
+    AUTO_REFRESH_MIN_AGE = timedelta(days=1)
+    AUTO_REFRESH_MIN_HEADROOM = 0.5
+
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("PoE-VIEW2")
@@ -45,12 +53,14 @@ class MainWindow(QMainWindow):
         self._account_name: str = ""
         self._stash_trees: dict[str, list[StashTab]] = {}      # Liga → Baumstruktur
         self._items: dict[str, dict[str, list[Item]]] = {}     # Liga → {stash_id: Items}
+        self._last_loaded: dict[str, dict[str, str]] = {}      # Liga → {stash_id: ISO-Zeitstempel}
         self._leaf_stashes: list[StashTab] = []                # abgeflacht, NUR aktuelle Liga
         self._all_characters: list[Character] = []             # ligenübergreifend, ungefiltert
         self._current_league: str = ""
         self._current_tab_name: str = ""
         self._bulk_dialog: QProgressDialog | None = None
         self._showing_aggregate = False
+        self._worker_busy = False
         self._restore_cached_data()
 
         self.worker = ApiWorker()
@@ -58,6 +68,11 @@ class MainWindow(QMainWindow):
         self._connect_worker()
         self.worker.start()
         self.worker.submit(BootstrapJob())
+
+        self._auto_refresh_timer = QTimer(self)
+        self._auto_refresh_timer.setInterval(self.AUTO_REFRESH_INTERVAL_MS)
+        self._auto_refresh_timer.timeout.connect(self._maybe_auto_refresh)
+        self._auto_refresh_timer.start()
 
         if not config.is_configured():
             self._status_msg.setText(
@@ -78,6 +93,7 @@ class MainWindow(QMainWindow):
         self._all_characters = cached.characters
         self._stash_trees = cached.stash_trees
         self._items = cached.items_by_league
+        self._last_loaded = cached.last_loaded
         log.info("Daten-Cache geladen: %d Charaktere, %d Liga(en)",
                  len(cached.characters), len(cached.stash_trees))
 
@@ -87,6 +103,7 @@ class MainWindow(QMainWindow):
         data.characters = self._all_characters
         data.stash_trees = self._stash_trees
         data.items_by_league = self._items
+        data.last_loaded = self._last_loaded
         data_cache.save(data)
 
     # ------------------------------------------------------------------ #
@@ -276,8 +293,8 @@ class MainWindow(QMainWindow):
 
     def _activate_stash_tree(self, stashes: list[StashTab]) -> None:
         """Baum rendern + abgeflachte Liste aktualisieren — für Live- UND Cache-Daten."""
-        loaded_ids = frozenset(self._items.get(self._current_league, {}).keys())
-        self.tree.set_stashes(stashes, loaded_ids=loaded_ids)
+        last_loaded = self._last_loaded.get(self._current_league, {})
+        self.tree.set_stashes(stashes, last_loaded=last_loaded)
         self._leaf_stashes = self._flatten_stashes(stashes)
 
     def _on_stash_list(self, stashes: list[StashTab]) -> None:
@@ -310,11 +327,19 @@ class MainWindow(QMainWindow):
         self._showing_aggregate = False
         self.worker.submit(FetchStashItemsJob(self._current_league, stash_id, name))
 
-    def _on_stash_items(self, stash_id: str, name: str, items: list[Item]) -> None:
-        self._items.setdefault(self._current_league, {})[stash_id] = items
-        self.tree.mark_loaded(stash_id)
+    def _on_stash_items(self, league: str, stash_id: str, name: str,
+                        items: list[Item], silent: bool) -> None:
+        """``league`` kommt aus dem Signal (nicht ``self._current_league``!) —
+        sonst würde ein spät eintreffender Hintergrund-Job die Daten der
+        MOMENTAN aktiven Liga verfälschen, falls der Nutzer zwischenzeitlich
+        die Liga gewechselt hat."""
+        self._last_loaded.setdefault(league, {})[stash_id] = datetime.now(timezone.utc).isoformat()
+        self._items.setdefault(league, {})[stash_id] = items
         self._persist_cache()
-        if not self._showing_aggregate:
+        if league != self._current_league:
+            return
+        self.tree.mark_loaded(stash_id, self._last_loaded[league][stash_id])
+        if not silent and not self._showing_aggregate:
             self._show_items(items, name)
 
     def _show_items(self, items: list[Item], name: str) -> None:
@@ -433,6 +458,7 @@ class MainWindow(QMainWindow):
 
     def _on_busy_changed(self, busy: bool) -> None:
         self._busy_indicator.setVisible(busy)
+        self._worker_busy = busy
 
     def _on_error(self, message: str) -> None:
         self._status_msg.setText(f"Fehler: {message}")
@@ -444,6 +470,45 @@ class MainWindow(QMainWindow):
         if self._current_league:
             self.worker.submit(FetchStashListJob(self._current_league))
         self.worker.submit(FetchCharactersJob())
+
+    # --- Hintergrund-Auto-Refresh (Nutzer-Feedback) ---------------------- #
+
+    def _maybe_auto_refresh(self) -> None:
+        """Läuft alle paar Sekunden per QTimer; lädt höchstens EINEN Tab neu,
+        und nur, wenn genug Rate-Limit-Budget für manuelle Klicks übrig
+        bleibt (Doku §4.8)."""
+        if not self._current_league or self._worker_busy or self._bulk_dialog is not None:
+            return
+        if self.worker.rate_limiter.headroom_fraction() < self.AUTO_REFRESH_MIN_HEADROOM:
+            return
+        candidate = self._pick_auto_refresh_candidate()
+        if candidate is not None:
+            self.worker.submit(FetchStashItemsJob(
+                self._current_league, candidate.id, candidate.name, silent=True))
+
+    def _pick_auto_refresh_candidate(self) -> StashTab | None:
+        """Ältester bereits geladener Tab der aktuellen Liga, mind. 1 Tag alt.
+
+        Tabs, deren Name "Remove-only" enthält, werden nachrangig behandelt
+        (Nutzer-Feedback) — nur falls es sonst keinen stale Kandidaten gibt,
+        kommen sie doch dran. Noch nie geladene Tabs werden NICHT automatisch
+        nachgeladen — dafür reicht ein manueller Klick.
+        """
+        league_loaded = self._last_loaded.get(self._current_league, {})
+        now = datetime.now(timezone.utc)
+        stale: list[tuple[datetime, StashTab]] = []
+        for stash in self._leaf_stashes:
+            iso = league_loaded.get(stash.id)
+            if iso is None:
+                continue
+            loaded_at = datetime.fromisoformat(iso)
+            if now - loaded_at >= self.AUTO_REFRESH_MIN_AGE:
+                stale.append((loaded_at, stash))
+        if not stale:
+            return None
+        preferred = [pair for pair in stale if "remove-only" not in pair[1].name.lower()]
+        pool = preferred or stale
+        return min(pool, key=lambda pair: pair[0])[1]  # älteste zuerst
 
     # ------------------------------------------------------------------ #
 

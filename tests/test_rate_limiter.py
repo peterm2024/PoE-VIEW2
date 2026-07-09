@@ -115,3 +115,24 @@ def test_callback_reports_snapshot() -> None:
 def test_unknown_policy_never_blocks() -> None:
     mgr = make_manager(FakeClock())
     assert mgr.check_and_wait("nie-gesehen") == 0.0
+
+
+def test_headroom_fraction_is_1_when_no_policy_known() -> None:
+    mgr = make_manager(FakeClock())
+    assert mgr.headroom_fraction() == 1.0
+
+
+def test_headroom_fraction_reflects_worst_rule() -> None:
+    mgr = make_manager(FakeClock())
+    headers = dict(HEADERS)
+    headers["X-Rate-Limit-Account-State"] = "3:15:0,81:300:0"  # 20% frei im 300s-Fenster
+    mgr.update_from_headers(headers)
+    assert mgr.headroom_fraction() == pytest.approx(0.1, abs=0.01)
+
+
+def test_headroom_fraction_is_0_when_locked() -> None:
+    mgr = make_manager(FakeClock())
+    headers = dict(HEADERS)
+    headers["X-Rate-Limit-Account-State"] = "15:15:42,7:300:0"  # aktive Sperre
+    mgr.update_from_headers(headers)
+    assert mgr.headroom_fraction() == 0.0

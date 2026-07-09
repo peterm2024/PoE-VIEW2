@@ -33,6 +33,7 @@ class CachedData:
         self.characters: list[Character] = []
         self.stash_trees: dict[str, list[StashTab]] = {}         # Liga → Baumstruktur
         self.items_by_league: dict[str, dict[str, list[Item]]] = {}  # Liga → {stash_id: Items}
+        self.last_loaded: dict[str, dict[str, str]] = {}         # Liga → {stash_id: ISO-Zeitstempel}
 
 
 def save(data: CachedData) -> None:
@@ -49,6 +50,7 @@ def save(data: CachedData) -> None:
                      for sid, items in stashes.items()}
             for league, stashes in data.items_by_league.items()
         },
+        "last_loaded": data.last_loaded,
     }
     try:
         config.ensure_dirs()
@@ -75,6 +77,7 @@ def load() -> CachedData | None:
                      for sid, items in stashes.items()}
             for league, stashes in payload["items_by_league"].items()
         }
+        data.last_loaded = payload.get("last_loaded", {})
         return data
     except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError):
         log.exception("Daten-Cache: Lesen fehlgeschlagen — ignoriere Cache-Datei")

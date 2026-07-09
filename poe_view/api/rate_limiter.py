@@ -185,6 +185,23 @@ class RateLimitManager:
 
     # ------------------------------------------------------------------ #
 
+    def headroom_fraction(self) -> float:
+        """Wie viel Luft ist über ALLE bekannten Policies hinweg noch frei (1.0 = alles frei)?
+
+        Konservativ: das Minimum über alle Regeln, nicht nur die zuletzt
+        benutzte Policy — genutzt vom Hintergrund-Auto-Refresher, damit der
+        genug manuelles Budget für den Nutzer übrig lässt (Nutzer-Feedback).
+        """
+        with self._lock:
+            fractions = []
+            for state in self._policies.values():
+                for rule in state.rules.values():
+                    if rule.active_lock_s > 0:
+                        return 0.0
+                    if rule.max_hits > 0:
+                        fractions.append((rule.max_hits - rule.current) / rule.max_hits)
+            return min(fractions) if fractions else 1.0
+
     def register_penalty(self, retry_after_s: float, policy_name: str | None = None) -> None:
         """HTTP 429 trotz Vorsicht: Sperre aus Retry-After übernehmen."""
         name = policy_name or self._last_policy

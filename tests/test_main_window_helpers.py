@@ -3,6 +3,8 @@
 CSV-Dateiname-Vorschlag (Filtertext bzw. Tab-/Aggregat-Name).
 """
 
+from datetime import datetime, timedelta, timezone
+
 from poe_view.api.models import Character, Item, StashTab
 from poe_view.ui.main_window import MainWindow
 
@@ -110,11 +112,13 @@ def test_activate_stash_tree_renders_from_cache_without_network(qapp) -> None:
     stash = StashTab.model_validate({"id": "t1", "name": "Tab", "type": "CurrencyStash",
                                       "metadata": {}})
     win._items["Standard"] = {"t1": [Item.model_validate({"typeLine": "Chaos Orb", "frameType": 5})]}
+    win._last_loaded["Standard"] = {"t1": "2026-07-08T12:00:00+00:00"}
 
     win._activate_stash_tree([stash])
 
     assert set(win.tree._stash_nodes.keys()) == {"t1"}
-    assert win.tree._stash_nodes["t1"].text(1) == ""  # bereits als geladen markiert
+    assert win.tree._stash_nodes["t1"].text(1) == ""  # bereits als geladen markiert (Refresh-Button)
+    assert win.tree.itemWidget(win.tree._stash_nodes["t1"], 1) is not None
     assert [s.id for s in win._leaf_stashes] == ["t1"]
 
     win.worker.stop()
@@ -137,6 +141,117 @@ def test_restore_cached_data_populates_state_at_startup(qapp, monkeypatch, tmp_p
     win = MainWindow()
     assert win._all_characters == [char]
     assert "Standard" in win._stash_trees
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_on_stash_items_ignores_result_for_stale_league(qapp) -> None:
+    """Regression: ein Hintergrund-Job für Liga X darf nicht in die Anzeige der
+    inzwischen aktiven Liga Y einsickern — nur in den Cache."""
+    win = MainWindow()
+    win._current_league = "Standard"
+
+    win._on_stash_items("Hardcore", "t1", "Tab", [], silent=False)
+
+    assert win._items["Hardcore"]["t1"] == []  # landet trotzdem im Cache …
+    assert "t1" not in win.tree._stash_nodes  # … aber NICHT in der aktiven Baum-Anzeige
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_on_stash_items_silent_updates_cache_but_not_table(qapp) -> None:
+    win = MainWindow()
+    win._current_league = "Standard"
+    item = Item.model_validate({"typeLine": "Chaos Orb", "frameType": 5})
+
+    win._on_stash_items("Standard", "t1", "Tab", [item], silent=True)
+
+    assert win._items["Standard"]["t1"] == [item]
+    assert win.table_model.rowCount() == 0  # Anzeige unangetastet (Nutzer-Feedback)
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def _make_leaf(stash_id: str, name: str) -> StashTab:
+    return StashTab.model_validate({"id": stash_id, "name": name, "type": "CurrencyStash",
+                                     "metadata": {}})
+
+
+def test_pick_auto_refresh_candidate_ignores_recent_and_never_loaded(qapp) -> None:
+    win = MainWindow()
+    win._current_league = "Standard"
+    win._leaf_stashes = [_make_leaf("fresh", "Fresh"), _make_leaf("never", "Never")]
+    win._last_loaded["Standard"] = {"fresh": datetime.now(timezone.utc).isoformat()}
+
+    assert win._pick_auto_refresh_candidate() is None
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_pick_auto_refresh_candidate_prefers_oldest_stale_tab(qapp) -> None:
+    win = MainWindow()
+    win._current_league = "Standard"
+    now = datetime.now(timezone.utc)
+    win._leaf_stashes = [_make_leaf("t1", "Tab 1"), _make_leaf("t2", "Tab 2")]
+    win._last_loaded["Standard"] = {
+        "t1": (now - timedelta(days=2)).isoformat(),
+        "t2": (now - timedelta(days=5)).isoformat(),
+    }
+
+    candidate = win._pick_auto_refresh_candidate()
+    assert candidate is not None and candidate.id == "t2"  # älteste Daten zuerst
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_pick_auto_refresh_candidate_deprioritises_remove_only_tabs(qapp) -> None:
+    """Nutzer-Feedback: Tabs mit 'Remove-only' im Namen nur nehmen, wenn es
+    keine andere stale Alternative gibt."""
+    win = MainWindow()
+    win._current_league = "Standard"
+    now = datetime.now(timezone.utc)
+    win._leaf_stashes = [_make_leaf("ro", "Guild Tab (Remove-only)"), _make_leaf("t2", "Tab 2")]
+    win._last_loaded["Standard"] = {
+        "ro": (now - timedelta(days=10)).isoformat(),  # älter, aber Remove-only
+        "t2": (now - timedelta(days=2)).isoformat(),
+    }
+
+    candidate = win._pick_auto_refresh_candidate()
+    assert candidate is not None and candidate.id == "t2"
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_maybe_auto_refresh_skips_when_worker_busy_or_low_headroom(qapp, monkeypatch) -> None:
+    win = MainWindow()
+    win._current_league = "Standard"
+    now = datetime.now(timezone.utc)
+    win._leaf_stashes = [_make_leaf("t1", "Tab 1")]
+    win._last_loaded["Standard"] = {"t1": (now - timedelta(days=5)).isoformat()}
+
+    submitted = []
+    monkeypatch.setattr(win.worker, "submit", lambda job: submitted.append(job))
+
+    win._worker_busy = True
+    win._maybe_auto_refresh()
+    assert submitted == []
+
+    win._worker_busy = False
+    monkeypatch.setattr(win.worker.rate_limiter, "headroom_fraction", lambda: 0.1)
+    win._maybe_auto_refresh()
+    assert submitted == []
+
+    monkeypatch.setattr(win.worker.rate_limiter, "headroom_fraction", lambda: 1.0)
+    win._maybe_auto_refresh()
+    assert len(submitted) == 1
+    assert submitted[0].stash_id == "t1"
+    assert submitted[0].silent is True
 
     win.worker.stop()
     win.worker.wait(5000)
