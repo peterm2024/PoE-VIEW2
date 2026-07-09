@@ -11,11 +11,21 @@ deutscher Locale die Datei ohne manuellen Text-Import korrekt öffnet.
 from __future__ import annotations
 
 import csv
+import re
 
 from poe_view.api.models import Item, gem_level, gem_quality
 
 FIELDNAMES = ["Tab", "Name", "Rarity", "TypeLine", "BaseType", "Level",
              "Quality", "StackSize", "ItemLevel", "Corrupted"]
+
+_INVALID_FILENAME_CHARS = re.compile(r'[\\/:*?"<>|]')
+
+
+def sanitize_filename(text: str, fallback: str = "items") -> str:
+    """Macht einen String zu einem gültigen Windows-Dateinamens-Bestandteil."""
+    cleaned = _INVALID_FILENAME_CHARS.sub("_", text).strip()
+    cleaned = re.sub(r"\s+", "-", cleaned)
+    return cleaned[:60] or fallback
 
 
 def export_items(path: str, rows: list[tuple[str, Item]]) -> int:

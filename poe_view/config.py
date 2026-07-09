@@ -11,11 +11,15 @@ LabVIEW-Äquivalent: Konfigurations-Cluster, beim Start aus externer Datei geles
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 
 from dotenv import load_dotenv
 
 from poe_view import __version__
+
+if sys.platform == "win32":
+    import winreg
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(PROJECT_ROOT / ".env")
@@ -58,3 +62,26 @@ def is_configured() -> bool:
 def ensure_dirs() -> None:
     for d in (APP_DATA_DIR, ICON_CACHE_DIR, LOG_DIR):
         d.mkdir(parents=True, exist_ok=True)
+
+
+_DOWNLOADS_FOLDER_GUID = "{374DE290-123F-4565-9164-39C4925E467B}"
+
+
+def downloads_dir() -> Path:
+    """Windows-'Downloads'-Ordner als Vorschlag für den CSV-Export.
+
+    Liest den echten Speicherort aus der Registry, statt fest ``~/Downloads``
+    anzunehmen — der User kann den Ordner unter Eigenschaften > Speicherort
+    verschoben haben (z. B. auf ein anderes Laufwerk).
+    """
+    if sys.platform == "win32":
+        try:
+            with winreg.OpenKey(
+                winreg.HKEY_CURRENT_USER,
+                r"SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders",
+            ) as key:
+                raw, _ = winreg.QueryValueEx(key, _DOWNLOADS_FOLDER_GUID)
+            return Path(os.path.expandvars(raw))
+        except OSError:
+            pass
+    return Path.home() / "Downloads"

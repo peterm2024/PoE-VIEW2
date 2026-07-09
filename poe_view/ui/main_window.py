@@ -25,7 +25,7 @@ from poe_view.services.api_worker import (ApiWorker, BootstrapJob,
                                           FetchLeaguesJob, FetchStashItemsJob,
                                           FetchStashListJob, LoginJob,
                                           LogoutJob)
-from poe_view.services.csv_export import export_items
+from poe_view.services.csv_export import export_items, sanitize_filename
 from poe_view.ui.item_detail import ItemDetail
 from poe_view.ui.item_table import ItemFilterProxy, ItemTableModel
 from poe_view.ui.rate_limit_dashboard import RateLimitDashboard
@@ -42,7 +42,9 @@ class MainWindow(QMainWindow):
 
         self._items_cache: dict[str, list[Item]] = {}  # stash_id → Items
         self._leaf_stashes: list[StashTab] = []  # abgeflacht, ohne Ordner
+        self._all_characters: list[Character] = []  # ligenübergreifend, ungefiltert
         self._current_league: str = ""
+        self._current_tab_name: str = ""
         self._bulk_dialog: QProgressDialog | None = None
         self._showing_aggregate = False
 
@@ -187,9 +189,21 @@ class MainWindow(QMainWindow):
         self._items_cache.clear()
         self._leaf_stashes = []
         self.worker.submit(FetchStashListJob(league))
+        self._apply_character_league_filter()
 
     def _on_characters(self, characters: list[Character]) -> None:
-        self.tree.set_characters(characters)
+        """/character liefert ligenübergreifend; gefiltert wird lokal übers Dropdown.
+
+        Kein eigener Liga-Level im Baum (spart eine Ebene) — das Liga-Dropdown
+        steuert Charaktere UND Stash-Tabs gemeinsam, ein Wechsel zwischen
+        Ligen ist bei Items/Stash ohnehin nicht möglich.
+        """
+        self._all_characters = characters
+        self._apply_character_league_filter()
+
+    def _apply_character_league_filter(self) -> None:
+        filtered = [c for c in self._all_characters if c.league == self._current_league]
+        self.tree.set_characters(filtered)
 
     def _on_stash_list(self, stashes: list[StashTab]) -> None:
         self.tree.set_stashes(stashes)
@@ -220,6 +234,7 @@ class MainWindow(QMainWindow):
             self._show_items(items, name)
 
     def _show_items(self, items: list[Item], name: str) -> None:
+        self._current_tab_name = name
         self.table_model.set_items(items, [name] * len(items))
         self._status_msg.setText(f"{name}: {len(items)} Items")
 
@@ -260,6 +275,7 @@ class MainWindow(QMainWindow):
     def _show_aggregate(self) -> None:
         """Items aller bereits geladenen Tabs zusammen anzeigen (lokal filter-/exportierbar)."""
         self._showing_aggregate = True
+        self._current_tab_name = f"alle-tabs-{self._current_league}"
         items: list[Item] = []
         sources: list[str] = []
         for stash in self._leaf_stashes:
@@ -278,12 +294,20 @@ class MainWindow(QMainWindow):
         if not rows:
             QMessageBox.information(self, "CSV-Export", "Keine Items zum Exportieren geladen.")
             return
+        default_path = str(config.downloads_dir() / self._default_export_filename())
         path, _ = QFileDialog.getSaveFileName(
-            self, "Items als CSV exportieren", "poe-view2-items.csv", "CSV-Dateien (*.csv)")
+            self, "Items als CSV exportieren", default_path, "CSV-Dateien (*.csv)")
         if not path:
             return
         count = export_items(path, rows)
         self._status_msg.setText(f"{count} Items nach {path} exportiert.")
+
+    def _default_export_filename(self) -> str:
+        """Dateiname-Vorschlag: aktiver Filtertext, sonst der Tab-/Aggregat-Name."""
+        filter_text = self._filter_edit.text().strip()
+        base = sanitize_filename(filter_text) if filter_text \
+            else sanitize_filename(self._current_tab_name)
+        return f"poe-view2-{base}.csv"
 
     def _visible_rows(self) -> list[tuple[str, Item]]:
         """(Tab-Name, Item)-Paare für die AKTUELL sichtbaren (gefilterten) Zeilen."""

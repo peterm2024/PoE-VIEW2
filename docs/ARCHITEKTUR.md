@@ -342,7 +342,7 @@ Artifact-Link im Projektverlauf / `docs/ui-mockup.html`.)
 
 | Bereich | Widget | Verhalten |
 |---|---|---|
-| Navigation links | `QTreeWidget` | Zwei Wurzelknoten: *Charaktere* und *Stash*. Stash-Ordner rekursiv (children). Tab-Farbe aus API als Farbpunkt/Hintergrund. Klick auf Tab/Char → `FetchStashItems`/`FetchCharacter`-Job. Bereits geladene Tabs kommen aus dem Speicher-Cache (kein erneuter API-Call, außer via "Aktualisieren"). |
+| Navigation links | `QTreeWidget` | Zwei Wurzelknoten: *Charaktere* und *Stash*, beide **flach** (kein Liga-Level). Stash-Ordner rekursiv (children). Tab-Farbe aus API als Farbpunkt/Hintergrund. Klick auf Tab/Char → `FetchStashItems`/`FetchCharacter`-Job. Bereits geladene Tabs kommen aus dem Speicher-Cache (kein erneuter API-Call, außer via "Aktualisieren"). |
 | Item-Tabelle rechts oben | `QTableView` + `QSortFilterProxyModel` | Spalten: Icon, Name, Typ, Level, Quality, Stack, iLvl. Klick auf Spaltenkopf sortiert; Suchfeld filtert live über Name+Typ (kein API-Call — gefiltert wird lokal). |
 | Item-Detail rechts unten | eigenes Widget | Großes Icon, Name in Rarity-Farbe (frameType), Properties, Mods. Aktualisiert bei Zeilenauswahl. |
 | Rate-Limit-Dashboard | `QProgressBar` pro Regel + Status-LED + Countdown | Wird ausschließlich über das Signal `rate_limit_changed` gefüttert. Farbe: grün < 60 %, gelb < 90 %, rot ab 90 %/Wartephase. Countdown zeigt verbleibende Wartezeit. *Intention: Der User soll immer sehen, WARUM die App gerade wartet.* |
@@ -360,6 +360,19 @@ der Bezug beim Filtern/Sortieren über den gesamten Stash nicht verloren geht.
 Der Toolbar-Button "💾 CSV exportieren" schreibt die aktuell sichtbaren
 (gefilterten) Zeilen — egal ob Einzeltab oder Aggregat — über
 `services/csv_export.py` als Semikolon-CSV mit UTF-8-BOM (Excel/de-DE-kompatibel).
+Der Speicherdialog startet im echten Windows-Downloads-Ordner
+(`config.downloads_dir()`, per Registry ermittelt — respektiert eine vom User
+verschobene Downloads-Location) und schlägt einen Dateinamen vor: aktiver
+Item-Filtertext, sonst der Name des Tabs bzw. "alle-tabs-\<liga\>" im
+Aggregat (`MainWindow._default_export_filename`).
+
+**Liga-Dropdown als einzige Quelle der Wahrheit:** Charaktere kommen von
+`/character` ligenübergreifend, werden aber NICHT mehr im Baum nach Liga
+gruppiert — stattdessen filtert `MainWindow._apply_character_league_filter`
+lokal auf `char.league == aktuelle Liga`, gesteuert vom selben Dropdown, das
+auch die Stash-Tabs bestimmt. Ein Wechsel zwischen Ligen ist bei Items/Stash
+ohnehin nicht möglich; die Vereinheitlichung spart eine Baum-Ebene und macht
+Charaktere/Stash konsistent liga-scoped (Nutzer-Feedback 2026-07-09).
 
 **Rarity-Farben** (frameType → Textfarbe im Detail/Namen):
 0 normal (weiß), 1 magic (blau), 2 rare (gelb), 3 unique (orange), 4 gem (türkis), 5 currency (gold).
