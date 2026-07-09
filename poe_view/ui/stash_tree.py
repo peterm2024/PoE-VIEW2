@@ -4,16 +4,19 @@ Jeder Stash-Tab-Knoten hat zwei Zusatzspalten: eine Status-Spalte (⬇ = Items
 noch nicht geladen, leer = bereits im Speicher-Cache) und ein Refresh-Button,
 über den genau dieser Tab neu geladen werden kann (bewusst am Cache vorbei).
 
-LabVIEW-Äquivalent: Tree Control mit rekursivem Laden der children;
-die Tab-Farbe (metadata.colour, hex ohne '#') wird als Vordergrundfarbe gesetzt
-(≙ Hex→U32-Wandlung im Original).
+LabVIEW-Äquivalent: Tree Control mit rekursivem Laden der children. Die
+Tab-Farbe (metadata.colour, hex ohne '#') wird NICHT als Textfarbe verwendet
+(einige API-Farben sind dunkel genug, um auf dunklem Grund unlesbar zu
+werden) — stattdessen als kleines Farbquadrat vor dem Namen (Icon), Text
+bleibt immer in der normalen, garantiert lesbaren Vordergrundfarbe.
 """
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QBrush, QColor
-from PySide6.QtWidgets import QToolButton, QTreeWidget, QTreeWidgetItem
+from PySide6.QtCore import QSize, Qt, Signal
+from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap
+from PySide6.QtWidgets import (QHeaderView, QToolButton, QTreeWidget,
+                               QTreeWidgetItem)
 
 from poe_view.api.models import Character, StashTab
 
@@ -24,6 +27,18 @@ _COL_NAME, _COL_STATUS, _COL_REFRESH = 0, 1, 2
 _UNLOADED_MARK = "⬇"
 
 
+def _colour_swatch(hex_colour: str, size: int = 12) -> QIcon:
+    """Kleines farbiges Quadrat als Icon — sicherer als Text in dieser Farbe."""
+    pixmap = QPixmap(size, size)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pixmap)
+    painter.setBrush(QColor(hex_colour))
+    painter.setPen(Qt.GlobalColor.transparent)
+    painter.drawRoundedRect(0, 0, size, size, 2, 2)
+    painter.end()
+    return QIcon(pixmap)
+
+
 class StashTree(QTreeWidget):
     stash_selected = Signal(str, str)          # stash_id, name
     stash_refresh_requested = Signal(str, str)  # stash_id, name
@@ -32,10 +47,17 @@ class StashTree(QTreeWidget):
     def __init__(self) -> None:
         super().__init__()
         self.setColumnCount(3)
-        self.setHeaderHidden(True)
-        self.header().setStretchLastSection(False)
-        self.setColumnWidth(_COL_STATUS, 20)
-        self.setColumnWidth(_COL_REFRESH, 26)
+        self.setHeaderLabels(["Name", "", ""])
+        self.setIconSize(QSize(12, 12))
+        header = self.header()
+        header.setStretchLastSection(False)
+        header.setSectionResizeMode(_COL_NAME, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(_COL_STATUS, QHeaderView.ResizeMode.Fixed)
+        header.setSectionResizeMode(_COL_REFRESH, QHeaderView.ResizeMode.Fixed)
+        self.setColumnWidth(_COL_STATUS, 24)
+        self.setColumnWidth(_COL_REFRESH, 30)
+        self.headerItem().setToolTip(_COL_STATUS, "⬇ = Tab noch nicht geladen")
+        self.headerItem().setToolTip(_COL_REFRESH, "Tab neu laden")
         self._char_root = QTreeWidgetItem(["Charaktere"])
         self._stash_root = QTreeWidgetItem(["Stash"])
         self.addTopLevelItem(self._char_root)
@@ -84,7 +106,7 @@ class StashTree(QTreeWidget):
             node.setData(0, _DATA_ROLE, stash)
             self._stash_nodes[stash.id] = node
         if stash.colour:
-            node.setForeground(0, QBrush(QColor(stash.colour)))
+            node.setIcon(_COL_NAME, _colour_swatch(stash.colour))
         for child in stash.children:
             node.addChild(self._build_node(child))
         return node

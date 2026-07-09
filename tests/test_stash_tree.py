@@ -3,6 +3,8 @@
 und den rekursiven Stash-Baum.
 """
 
+from PySide6.QtCore import Qt
+
 from poe_view.api.models import Character, StashTab
 from poe_view.ui.stash_tree import StashTree
 
@@ -88,3 +90,23 @@ def test_refresh_button_click_emits_signal(qapp) -> None:
     tree.stash_refresh_requested.connect(lambda sid, name: received.append((sid, name)))
     button.click()
     assert received == [("root1", "Currency 1")]
+
+
+def test_header_is_visible(qapp) -> None:
+    """Kopfzeile sichtbar — sonst keine manuelle Spaltenbreite (Nutzer-Feedback)."""
+    tree = StashTree()
+    assert not tree.isHeaderHidden()
+    assert tree.headerItem().text(0) == "Name"
+
+
+def test_tab_colour_is_icon_not_text_colour(qapp) -> None:
+    """Farbe als Icon-Swatch statt Textfarbe — dunkle API-Farben bleiben lesbar."""
+    data = [{"id": "root1", "name": "Dark Tab", "type": "QuadStash",
+             "metadata": {"colour": "000000"}}]
+    stashes = [StashTab.model_validate(d) for d in data]
+    tree = StashTree()
+    tree.set_stashes(stashes)
+    node = tree._stash_nodes["root1"]
+    # NoBrush == nie per setForeground() überschrieben, Text bleibt Theme-Farbe
+    assert node.foreground(0).style() == Qt.BrushStyle.NoBrush
+    assert not node.icon(0).isNull()
