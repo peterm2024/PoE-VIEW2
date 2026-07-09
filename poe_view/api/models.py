@@ -112,15 +112,25 @@ class StashTab(BaseModel):
 
     @property
     def display_name(self) -> str:
-        """Map-Stash-Kinder haben oft KEIN name-Feld — der Anzeigename steckt
-        dann in metadata.map ({name, tier, …})."""
-        if self.name:
-            return self.name
-        map_info = self.metadata.get("map") or {}
-        if map_info.get("name"):
-            tier = map_info.get("tier")
-            return f"{map_info['name']} (T{tier})" if tier else str(map_info["name"])
-        return self.type or self.id[:8]
+        """Anzeigename aus den real beobachteten Spezial-Tab-Strukturen (echte
+        Rohdaten 2026-07-09, siehe docs/api-notes/labview-test-vi.md):
+
+        - Map-Kinder: metadata.map.name ("Map (Tier 6)" — der Tier steckt IM
+          Namen, es gibt KEIN separates tier-Feld). Das name-Feld der Kinder
+          ist daneben wertlos ("1"), AUSSER es ist ein GGG-Suffix mit
+          führendem Leerzeichen (" (Remove-only)") — das hängen wir an.
+        - Unique-Kinder: völlig namenlos (nur metadata.items = Anzahl) →
+          Typ + Item-Anzahl, damit die Einträge unterscheidbar bleiben.
+        """
+        map_name = (self.metadata.get("map") or {}).get("name")
+        if map_name:
+            is_suffix = self.name != self.name.lstrip()  # " (Remove-only)" u. ä.
+            return f"{map_name}{self.name}" if is_suffix else str(map_name)
+        if self.name.strip():
+            return self.name.strip()
+        count = self.metadata.get("items")
+        label = self.type or self.id[:8]
+        return f"{label} ({count} Items)" if count is not None else label
 
 
 class Character(BaseModel):

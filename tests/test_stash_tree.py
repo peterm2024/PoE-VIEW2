@@ -165,13 +165,16 @@ def test_set_children_inserts_subtabs_without_rebuilding_tree(qapp) -> None:
     tree = StashTree()
     tree.set_stashes([StashTab.model_validate(d) for d in data])
 
-    child = StashTab.model_validate({"id": "c1", "parent": "m1", "type": "MapStash",
-                                     "metadata": {"map": {"name": "Beach Map", "tier": 16}}})
+    child = StashTab.model_validate({"id": "c1", "name": "1", "parent": "m1",
+                                     "type": "MapStash",
+                                     "metadata": {"items": 8,
+                                                  "map": {"section": "tier6",
+                                                          "name": "Map (Tier 6)", "index": 0}}})
     tree.set_children("m1", [child])
 
     parent_node = tree._stash_nodes["m1"]
     assert parent_node.childCount() == 1
-    assert parent_node.child(0).text(0) == "Beach Map (T16)"  # display_name, kein leerer Name
+    assert parent_node.child(0).text(0) == "Map (Tier 6)"  # display_name, nicht das wertlose "1"
     assert parent_node.isExpanded()
     assert tree._stash_nodes["c1"].text(1) == "⬇"  # Kind noch nicht geladen
     assert tree.topLevelItemCount() == 2  # Rest des Baums unangetastet

@@ -369,6 +369,9 @@ class MainWindow(QMainWindow):
                 return found
         return None
 
+    # Tab-Typen, die am Einzel-Endpunkt children statt items liefern (§4.10)
+    SPECIAL_TAB_TYPES = frozenset({"MapStash", "UniqueStash"})
+
     def _parent_id_of(self, stash_id: str) -> str | None:
         """Substash-Eltern-ID (nur bei Kindern von Spezial-Tabs, sonst None)."""
         stash = self._find_stash(self._stash_trees.get(self._current_league, []), stash_id)
@@ -376,6 +379,22 @@ class MainWindow(QMainWindow):
 
     def _on_stash_selected(self, stash_id: str, name: str) -> None:
         self._showing_aggregate = False
+        stash = self._find_stash(self._stash_trees.get(self._current_league, []), stash_id)
+        if stash is not None and stash.type in self.SPECIAL_TAB_TYPES and stash.parent is None:
+            if stash.children:
+                # Struktur bereits bekannt — Items hängen an den Kind-Knoten.
+                self._status_msg.setText(
+                    f"{name}: Spezial-Tab mit {len(stash.children)} Unter-Tabs — "
+                    "Items je Unter-Tab per Klick laden")
+                self._update_raw_viewer(stash_id, name)
+                return
+            # Spezial-Tab ohne bekannte Kinder: IMMER fetchen, den Item-Cache
+            # bewusst ignorieren — ein alter "0 Items"-Eintrag (von vor dem
+            # Spezial-Tab-Feature) wäre sonst ein permanenter Cache-Treffer,
+            # und die Kinder-Entdeckung fände nie statt (Nutzer-Befund:
+            # "musste erst manuell aktualisieren").
+            self.worker.submit(FetchStashItemsJob(self._current_league, stash_id, name))
+            return
         league_items = self._items.get(self._current_league, {})
         if stash_id in league_items:
             # Speicher-/Datei-Cache: kein erneuter API-Call (Doku §5)
@@ -415,6 +434,10 @@ class MainWindow(QMainWindow):
         geliefert — in Baumstruktur und Anzeige einhängen. Deren Items werden
         wie bei normalen Tabs erst per Klick (oder Auto-Refresh) geladen."""
         self._last_loaded.setdefault(league, {})[stash_id] = datetime.now(timezone.utc).isoformat()
+        # Ein evtl. vorhandener alter Item-Eintrag des Eltern-Tabs ist Müll
+        # (Spezial-Tabs haben nie eigene Items) — raus damit, sonst wäre der
+        # nächste Klick wieder ein irreführender "0 Items"-Cache-Treffer.
+        self._items.get(league, {}).pop(stash_id, None)
         tree = self._stash_trees.get(league)
         if tree is not None:
             tab = self._find_stash(tree, stash_id)
@@ -455,7 +478,10 @@ class MainWindow(QMainWindow):
                 "Keine Stash-Tabs geladen — bitte zuerst eine Liga wählen.")
             return
         league_items = self._items.get(self._current_league, {})
-        to_fetch = [s for s in self._leaf_stashes if s.id not in league_items]
+        # Spezial-Tabs ohne entdeckte Kinder immer mitnehmen: ein evtl.
+        # vorhandener Item-Cache-Eintrag ist bei ihnen bedeutungslos (§4.10).
+        to_fetch = [s for s in self._leaf_stashes
+                    if s.id not in league_items or s.type in self.SPECIAL_TAB_TYPES]
         if not to_fetch:
             self._show_aggregate()  # schon alles im Cache
             return

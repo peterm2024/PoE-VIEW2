@@ -58,13 +58,42 @@ Basis: `https://api.pathofexile.com`
 | `/stash/<league>/<stash_id>/<substash_id>` | Items eines Spezial-Tab-Kinds | `get_stash(league, substash_id, parent_id=stash_id)` |
 
 ⚠️ **Spezial-Tabs (`MapStash`, `UniqueStash`)** antworten am Einzel-Tab-
-Endpunkt mit `children` statt `items` (ein Unter-Tab pro Map-Typ bzw.
-Unique-Kategorie; Map-Kinder oft ohne `name`, Anzeigename steckt in
-`metadata.map` → `{name, tier, …}`). Items gibt es nur über den
-Substash-Endpunkt mit BEIDEN IDs im Pfad. Diese Kinder erscheinen NICHT
-in der Liga-Stash-Liste — sie existieren erst nach dem Einzel-Abruf des
-Spezial-Tabs (Quelle: offizielle GGG-API-Doku; im LabVIEW-Test-VI noch
-nicht abgedeckt).
+Endpunkt mit `children` statt `items` (ein Unter-Tab pro Map-Sektion bzw.
+Unique-Fach). Items gibt es nur über den Substash-Endpunkt mit BEIDEN IDs
+im Pfad. Diese Kinder erscheinen NICHT in der Liga-Stash-Liste — sie
+existieren erst nach dem Einzel-Abruf des Spezial-Tabs.
+
+**Echte Kind-Strukturen (Nutzer-Rohdaten, 2026-07-09)** — weichen von der
+offiziellen Doku ab, das hier ist die Ground Truth:
+
+```jsonc
+// MapStash-Kind (aktive Liga): name="1" ist WERTLOS, der echte Name steckt
+// in metadata.map.name — und der Tier steckt IM Namen (kein tier-Feld!).
+{ "id": "4917132724", "name": "1", "type": "MapStash", "index": null,
+  "parent": "911e88f182", "folder": null,
+  "metadata": { "items": 8,
+                "map": { "section": "tier6", "name": "Map (Tier 6)", "index": 0 } },
+  "children": [], "items": [] }
+
+// MapStash-Kind (Remove-only-Liga): name ist NUR das Suffix " (Remove-only)"
+// (mit führendem Leerzeichen!) — an map.name anhängen.
+// map.section-Werte: "tier1"…"tier16", "unique" (Unique-Maps wie
+// "Death and Taxes"), "special" ("Shaper Guardian Map", "Valdo Map", …).
+{ "name": " (Remove-only)",
+  "metadata": { "items": 2,
+                "map": { "section": "unique", "name": "Death and Taxes", "index": 0 } } }
+
+// UniqueStash-Kind: KOMPLETT namenlos — kein name, kein metadata.map,
+// nur die Item-Anzahl. Anzeige: Typ + Anzahl ("UniqueStash (5 Items)").
+{ "id": "deecbe452b", "name": "", "type": "UniqueStash", "index": null,
+  "parent": "5859dab84a", "folder": null,
+  "metadata": { "items": 5 }, "children": [], "items": [] }
+```
+
+Weitere Beobachtungen: `metadata.items` = Item-Anzahl je Kind (praktisch
+für die Anzeige, erspart aber keinen Substash-Abruf); der MapStash-Eltern-
+Tab trägt `metadata.map.series` (z. B. 26 = Stash-Serie der Liga);
+`parent` ist bei den Kindern zuverlässig gefüllt.
 
 ⚠️ **Liga-Namen enthalten Leerzeichen** (z. B. `SSF Ruthless`) — in Python die
 Pfadsegmente **URL-encoden** (`urllib.parse.quote`). Das LabVIEW-VI hängt den

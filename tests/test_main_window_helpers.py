@@ -512,6 +512,88 @@ def test_click_on_special_tab_child_submits_job_with_parent_id(qapp, monkeypatch
     win.worker.wait(5000)
 
 
+def test_special_tab_click_bypasses_stale_zero_item_cache(qapp, monkeypatch) -> None:
+    """Nutzer-Befund: MapStash 'funktionierte nicht', bis manuell aktualisiert
+    wurde. Ursache: ein alter '0 Items'-Cache-Eintrag (von vor dem Spezial-Tab-
+    Feature) war ein permanenter Cache-Treffer — die Kinder-Entdeckung fand nie
+    statt. Spezial-Tabs ohne bekannte Kinder müssen den Item-Cache ignorieren."""
+    win = MainWindow()
+    win._current_league = "Standard"
+    map_stash = StashTab.model_validate({"id": "m1", "name": "M", "type": "MapStash",
+                                          "metadata": {}})
+    win._stash_trees["Standard"] = [map_stash]
+    win._items["Standard"] = {"m1": []}  # der Alt-Eintrag, der alles blockierte
+
+    submitted = []
+    monkeypatch.setattr(win.worker, "submit", lambda job: submitted.append(job))
+
+    win._on_stash_selected("m1", "M")
+
+    assert len(submitted) == 1 and submitted[0].stash_id == "m1"
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_special_tab_click_with_known_children_shows_status_without_fetch(qapp, monkeypatch) -> None:
+    win = MainWindow()
+    win._current_league = "Standard"
+    map_stash = StashTab.model_validate({"id": "m1", "name": "M", "type": "MapStash",
+                                          "metadata": {}})
+    map_stash.children = [_map_child("c1", "m1", "Map (Tier 6)")]
+    win._stash_trees["Standard"] = [map_stash]
+
+    submitted = []
+    monkeypatch.setattr(win.worker, "submit", lambda job: submitted.append(job))
+
+    win._on_stash_selected("m1", "M")
+
+    assert submitted == []
+    assert "1 Unter-Tabs" in win._status_msg.text()
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_on_stash_children_purges_stale_parent_item_entry(qapp) -> None:
+    win = MainWindow()
+    win._current_league = "Standard"
+    map_stash = StashTab.model_validate({"id": "m1", "name": "M", "type": "MapStash",
+                                          "metadata": {}})
+    win._stash_trees["Standard"] = [map_stash]
+    win._items["Standard"] = {"m1": []}  # Alt-Eintrag
+
+    win._on_stash_children("Standard", "m1", "M", [_map_child("c1", "m1", "Map (Tier 6)")],
+                           silent=False)
+
+    assert "m1" not in win._items["Standard"]
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_load_all_includes_special_tabs_despite_cache_entry(qapp, monkeypatch) -> None:
+    win = MainWindow()
+    win._current_league = "Standard"
+    map_stash = StashTab.model_validate({"id": "m1", "name": "M", "type": "MapStash",
+                                          "metadata": {}})
+    win._stash_trees["Standard"] = [map_stash]
+    win._leaf_stashes = [map_stash, _make_leaf("t1", "Tab")]
+    win._items["Standard"] = {"m1": [], "t1": []}  # beide "im Cache"
+
+    submitted = []
+    monkeypatch.setattr(win.worker, "submit", lambda job: submitted.append(job))
+
+    win._load_all_items()
+
+    # Normaler Tab t1 bleibt Cache-Treffer, der Spezial-Tab m1 wird trotzdem geholt
+    assert len(submitted) == 1
+    assert [s.id for s in submitted[0].stashes] == ["m1"]
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
 def test_auto_refresh_passes_parent_id_for_special_tab_children(qapp, monkeypatch) -> None:
     win = MainWindow()
     win._current_league = "Standard"

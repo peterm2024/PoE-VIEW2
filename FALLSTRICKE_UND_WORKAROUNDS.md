@@ -94,6 +94,22 @@ Dieses Dokument dokumentiert die technischen Hürden, die während der Entwicklu
 
 ---
 
+## 13. Spezial-Tabs wirkten kaputt: alter "0 Items"-Cache-Eintrag blockierte die Kinder-Entdeckung dauerhaft
+
+**Problem:** Nach dem Ausrollen der Spezial-Tab-Unterstützung (MapStash/UniqueStash → Unter-Tabs): "Der Map-Stash funktioniert noch nicht, der Unique-Stash funktioniert bei einigen." Der Nutzer fand selbst heraus, dass ein manueller Klick auf den ⟳-Button des Tabs das Problem behob ("musste erst aktualisieren").
+**Ursache:** Dieselbe Klasse Fehler wie #12 — ein neues Feature stolpert über Bestandsdaten aus der Zeit davor. Spezial-Tabs, die VOR dem Feature schon einmal angeklickt worden waren, hatten einen Item-Cache-Eintrag mit 0 Items (damals wurden `children` schlicht ignoriert und die leere `items`-Liste gecacht). Ein Klick auf so einen Tab war damit ein permanenter Cache-Treffer (`_on_stash_selected` zeigt "0 Items" und fetcht nie) — der Abruf, der die Kinder überhaupt erst entdecken würde, fand auf normalem Weg NIE statt. Nur der Refresh-Button (bewusst am Cache vorbei) durchbrach den Kreis, deshalb "half aktualisieren".
+**Lösung:** Dreifach. (1) Klick auf einen Spezial-Tab (`type` in `MainWindow.SPECIAL_TAB_TYPES`) ohne bekannte Kinder ignoriert den Item-Cache grundsätzlich und fetcht immer — es gibt bei diesen Tabs nichts, was ein Item-Cache-Treffer legitim beantworten könnte. Sind die Kinder bereits bekannt, zeigt der Klick nur den Hinweis "N Unter-Tabs" (kein Request). (2) `_on_stash_children` löscht einen evtl. vorhandenen alten Item-Eintrag des Eltern-Tabs aus dem Cache. (3) "Alle Tabs laden" nimmt unentdeckte Spezial-Tabs trotz Cache-Eintrag mit. **Regel:** Verhaltensänderungen, die die BEDEUTUNG bereits gecachter Daten ändern ("leere Item-Liste" hieß früher "Tab ist leer", heute "falsch abgefragt"), brauchen wie Schema-Änderungen (#12) eine Migrations-/Bypass-Strategie für Bestandsdaten — Tests mit jungfräulichem Zustand decken das systematisch nicht ab.
+
+---
+
+## 14. Die echten Spezial-Tab-Strukturen weichen von der API-Doku ab (name-Feld ist Müll oder Suffix)
+
+**Problem:** Die erste Implementierung der Unter-Tab-Anzeigenamen basierte auf der offiziellen GGG-Doku (angenommen: Map-Kinder ohne `name`, dafür `metadata.map.{name, tier}`). Echte Rohdaten (via Rohdaten-Viewer #9 vom Nutzer geliefert!) zeigten dreifach anderes Verhalten: (a) Map-Kinder HABEN ein `name`-Feld, aber es ist wertlos ("1") ODER nur ein Suffix mit führendem Leerzeichen (" (Remove-only)"); (b) ein separates `tier`-Feld gibt es nicht — der Tier steckt bereits in `map.name` ("Map (Tier 6)"); (c) Unique-Kinder sind KOMPLETT namenlos (kein `name`, kein `metadata.map`, nur `metadata.items` = Anzahl).
+**Ursache:** Doku und Realität der GGG-API driften auseinander; ohne echte Antwortdaten war das nicht zu sehen. Genau dafür war der Rohdaten-Viewer gebaut worden — der erste echte Einsatz hat sofort drei Abweichungen aufgedeckt.
+**Lösung:** `StashTab.display_name` an die Realität angepasst: `map.name` gewinnt; das `name`-Feld wird nur angehängt, wenn es ein echtes Suffix ist (erkennbar am führenden Leerzeichen, z. B. " (Remove-only)"); namenlose Unique-Kinder zeigen Typ + Item-Anzahl ("UniqueStash (5 Items)"). Die echten Strukturen sind als Ground Truth in docs/api-notes/labview-test-vi.md festgehalten. **Regel:** API-Verhalten, das nur aus Doku (statt aus beobachteten Antworten) implementiert wurde, als solches markieren und beim ersten echten Datenkontakt gegenprüfen — der Rohdaten-Viewer ist dafür das Werkzeug der Wahl.
+
+---
+
 ## 12. Neues Persistenz-Feld ohne Migration — Bestandsdaten blieben dauerhaft im "nie passiert"-Zustand
 
 **Problem:** Direkt nach dem Deployment der Alters-Anzeige/des Auto-Refreshs (#10/#11) meldete der Nutzer: Im Stash-Tree erscheint IMMER nur der ⬇-Pfeil ("nie geladen"), auch bei Tabs, deren Items sichtbar aus dem Cache angezeigt werden. Zusätzlich tat der Auto-Refresher auf der echten Maschine schlicht nichts — obwohl alle 65 Tests grün waren und ein End-to-End-Smoke-Test das Feature bestätigt hatte.

@@ -65,16 +65,43 @@ def test_unknown_fields_are_kept() -> None:
     assert item.brandNewField == {"x": 1}
 
 
-def test_stash_display_name_prefers_name_then_map_metadata() -> None:
-    """MapStash-Kinder haben oft kein name-Feld — Anzeigename aus metadata.map."""
+def test_stash_display_name_from_real_special_tab_structures() -> None:
+    """Strukturen aus ECHTEN Rohdaten (Nutzer, 2026-07-09) — nicht aus der Doku.
+
+    Map-Kinder: map.name enthält den Tier bereits ("Map (Tier 6)"), das
+    name-Feld ist entweder wertlos ("1") oder ein GGG-Suffix mit führendem
+    Leerzeichen (" (Remove-only)"). Unique-Kinder: gar kein Name, nur
+    metadata.items (Anzahl).
+    """
+    # Normaler Tab: name gewinnt, metadata.map wäre irreführend
     named = StashTab.model_validate({"id": "a", "name": "Currency 1", "type": "CurrencyStash",
-                                     "metadata": {"map": {"name": "sollte ignoriert werden"}}})
+                                     "metadata": {}})
     assert named.display_name == "Currency 1"
 
-    map_child = StashTab.model_validate({"id": "b", "parent": "m1", "type": "MapStash",
-                                         "metadata": {"map": {"name": "Beach Map", "tier": 16}}})
-    assert map_child.display_name == "Beach Map (T16)"
+    # Map-Kind der aktiven Liga: name="1" ist wertlos → nur map.name
+    map_child = StashTab.model_validate({"id": "b", "name": "1", "parent": "m1",
+                                         "type": "MapStash",
+                                         "metadata": {"items": 8,
+                                                      "map": {"section": "tier6",
+                                                              "name": "Map (Tier 6)",
+                                                              "index": 0}}})
+    assert map_child.display_name == "Map (Tier 6)"
     assert map_child.parent == "m1"
+
+    # Map-Kind einer Remove-only-Liga: name=" (Remove-only)" ist Suffix → anhängen
+    ro_child = StashTab.model_validate({"id": "c", "name": " (Remove-only)", "parent": "m1",
+                                        "type": "MapStash",
+                                        "metadata": {"items": 2,
+                                                     "map": {"section": "unique",
+                                                             "name": "Death and Taxes",
+                                                             "index": 0}}})
+    assert ro_child.display_name == "Death and Taxes (Remove-only)"
+
+    # Unique-Kind: völlig namenlos → Typ + Item-Anzahl (unterscheidbar)
+    uniq_child = StashTab.model_validate({"id": "d", "name": "", "parent": "u1",
+                                          "type": "UniqueStash",
+                                          "metadata": {"items": 5}})
+    assert uniq_child.display_name == "UniqueStash (5 Items)"
 
     bare = StashTab.model_validate({"id": "c0ffee42", "type": "UniqueStash", "metadata": {}})
     assert bare.display_name == "UniqueStash"
