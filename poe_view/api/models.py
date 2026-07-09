@@ -79,6 +79,59 @@ def gem_quality(item: Item) -> str | None:
     return get_property_value(item, "Quality")
 
 
+# Waffen tragen ihre Item-Klasse als ERSTE Property (ohne Werte) — das ist
+# der einzige Ort, an dem die API die Klasse direkt nennt.
+_WEAPON_CLASSES = frozenset({
+    "Bow", "Claw", "Dagger", "Rune Dagger", "One Handed Axe", "One Handed Mace",
+    "One Handed Sword", "Thrusting One Handed Sword", "Sceptre", "Staff",
+    "Warstaff", "Two Handed Axe", "Two Handed Mace", "Two Handed Sword",
+    "Wand", "Fishing Rod",
+})
+
+# baseType-ENDUNG → Kategorie (endswith, NICHT substring: "Ringmail Coat"
+# ist ein Body Armour, kein Ring!). Reihenfolge = Priorität.
+_BASETYPE_CATEGORIES = (
+    ("Flask", "Flask"), ("Jewel", "Jewel"), ("Quiver", "Quiver"), ("Ring", "Ring"),
+    ("Talisman", "Amulet"), ("Amulet", "Amulet"),
+    ("Sash", "Belt"), ("Vise", "Belt"), ("Belt", "Belt"),
+    ("Greaves", "Boots"), ("Slippers", "Boots"), ("Boots", "Boots"), ("Shoes", "Boots"),
+    ("Gauntlets", "Gloves"), ("Mitts", "Gloves"), ("Gloves", "Gloves"),
+    ("Bascinet", "Helmet"), ("Burgonet", "Helmet"), ("Cage", "Helmet"),
+    ("Casque", "Helmet"), ("Circlet", "Helmet"), ("Coif", "Helmet"),
+    ("Crown", "Helmet"), ("Hood", "Helmet"), ("Helmet", "Helmet"),
+    ("Mask", "Helmet"), ("Pelt", "Helmet"), ("Sallet", "Helmet"), ("Tricorne", "Helmet"),
+    ("Buckler", "Shield"), ("Bundle", "Shield"), ("Shield", "Shield"),
+)
+
+
+def item_category(item: Item) -> str | None:
+    """Item-Klasse/-Kategorie ("Two Handed Axe", "Ring", "Flask", …) — die API
+    nennt sie nur bei Waffen direkt (erste Property), sonst Heuristik über
+    die baseType-Endung, zuletzt Rüstungs-Properties → "Body Armour"."""
+    if (item.properties and not item.properties[0].values
+            and item.properties[0].name in _WEAPON_CLASSES):
+        return item.properties[0].name
+    base = item.baseType or item.typeLine
+    for suffix, category in _BASETYPE_CATEGORIES:
+        if base.endswith(suffix):
+            return category
+    if any(p.name in ("Armour", "Energy Shield", "Evasion Rating")
+           for p in item.properties):
+        return "Body Armour"
+    return None
+
+
+def dominant_category(items: list[Item]) -> str | None:
+    """Häufigste Kategorie einer Item-Liste — benennt Unique-Stash-Fächer,
+    die von der API völlig namenlos geliefert werden (Nutzer-Feedback)."""
+    counts: dict[str, int] = {}
+    for item in items:
+        category = item_category(item)
+        if category:
+            counts[category] = counts.get(category, 0) + 1
+    return max(counts, key=counts.get) if counts else None
+
+
 class StashTab(BaseModel):
     """Stash-Tab; Ordner haben ``children`` (rekursiv) und metadata.folder=true.
 
@@ -129,7 +182,10 @@ class StashTab(BaseModel):
         if self.name.strip():
             return self.name.strip()
         count = self.metadata.get("items")
-        label = self.type or self.id[:8]
+        # Von UNS gestempelte Kategorie (dominant_category nach dem ersten
+        # Item-Load, Präfix "poeview_" = synthetisch) — namenlose Unique-
+        # Stash-Fächer heißen damit "Ring (5 Items)" statt "UniqueStash".
+        label = self.metadata.get("poeview_category") or self.type or self.id[:8]
         return f"{label} ({count} Items)" if count is not None else label
 
 

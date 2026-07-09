@@ -594,6 +594,74 @@ def test_load_all_includes_special_tabs_despite_cache_entry(qapp, monkeypatch) -
     win.worker.wait(5000)
 
 
+def _unique_child(child_id: str, parent_id: str = "u1") -> StashTab:
+    """Namenloses Unique-Fach in der ECHTEN Struktur (nur metadata.items)."""
+    return StashTab.model_validate({"id": child_id, "name": "", "parent": parent_id,
+                                    "type": "UniqueStash", "metadata": {"items": 2}})
+
+
+def test_unique_child_gets_category_name_after_item_load(qapp) -> None:
+    """Nutzer-Feedback: "über die Kategorie gehen, z. B. Two Handed Axe, Ring, Flask"."""
+    win = MainWindow()
+    win._current_league = "Standard"
+    unique = StashTab.model_validate({"id": "u1", "name": "Uniq", "type": "UniqueStash",
+                                       "metadata": {}})
+    unique.children = [_unique_child("c1")]
+    win._stash_trees["Standard"] = [unique]
+    win._activate_stash_tree(win._stash_trees["Standard"])
+    assert win.tree._stash_nodes["c1"].text(0) == "UniqueStash (2 Items)"
+
+    rings = [Item.model_validate({"typeLine": "Amethyst Ring", "baseType": "Amethyst Ring",
+                                  "frameType": 3})]
+    win._on_stash_items("Standard", "c1", "UniqueStash (2 Items)", rings, silent=True)
+
+    tab = win._stash_trees["Standard"][0].children[0]
+    assert tab.metadata["poeview_category"] == "Ring"
+    assert win.tree._stash_nodes["c1"].text(0) == "Ring (2 Items)"  # Label live aktualisiert
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_category_stamp_skips_named_tabs_and_map_children(qapp) -> None:
+    win = MainWindow()
+    win._current_league = "Standard"
+    named = _make_leaf("t1", "Currency 1")
+    map_stash = StashTab.model_validate({"id": "m1", "name": "Maps", "type": "MapStash",
+                                          "metadata": {}})
+    map_stash.children = [_map_child("c_map", "m1", "Map (Tier 6)")]
+    win._stash_trees["Standard"] = [named, map_stash]
+
+    ring = Item.model_validate({"typeLine": "Amethyst Ring", "baseType": "Amethyst Ring",
+                                "frameType": 3})
+    assert win._stamp_category("Standard", "t1", [ring]) is None      # hat echten Namen
+    assert win._stamp_category("Standard", "c_map", [ring]) is None   # Map-Fach
+    assert "poeview_category" not in named.metadata
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_raw_payload_hides_synthetic_poeview_keys(qapp) -> None:
+    """Der Rohdaten-Viewer verspricht API-Realität — unsere gestempelten
+    poeview_*-Schlüssel dürfen dort nicht auftauchen."""
+    win = MainWindow()
+    win._current_league = "Standard"
+    tab = StashTab.model_validate({"id": "c1", "name": "", "parent": "u1",
+                                   "type": "UniqueStash",
+                                   "metadata": {"items": 2, "poeview_category": "Ring"}})
+    win._stash_trees["Standard"] = [tab]
+
+    payload = win._build_raw_stash_payload("c1")
+
+    assert payload is not None
+    assert "poeview_category" not in payload["metadata"]
+    assert payload["metadata"]["items"] == 2  # echte API-Felder bleiben
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
 def test_auto_refresh_passes_parent_id_for_special_tab_children(qapp, monkeypatch) -> None:
     win = MainWindow()
     win._current_league = "Standard"

@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (QComboBox, QFileDialog, QLabel, QLineEdit,
                                QTableView, QToolBar, QVBoxLayout, QWidget)
 
 from poe_view import config
-from poe_view.api.models import Character, Item, StashTab
+from poe_view.api.models import Character, Item, StashTab, dominant_category
 from poe_view.services import data_cache
 from poe_view.services.api_worker import (ApiWorker, BootstrapJob,
                                           FetchAllItemsJob,
@@ -419,10 +419,13 @@ class MainWindow(QMainWindow):
         self._items.setdefault(league, {})[stash_id] = items
         if silent:
             self._auto_refresh_counts[league] = self._auto_refresh_counts.get(league, 0) + 1
+        relabelled = self._stamp_category(league, stash_id, items)
         self._persist_cache()
         if league != self._current_league:
             return
         self.tree.mark_loaded(stash_id, self._last_loaded[league][stash_id])
+        if relabelled is not None:
+            self.tree.update_label(stash_id, relabelled)
         if silent:
             self._update_auto_refresh_label()
         elif not self._showing_aggregate:
@@ -460,6 +463,24 @@ class MainWindow(QMainWindow):
                 f"{name}: Spezial-Tab mit {len(children)} Unter-Tabs — "
                 "Items je Unter-Tab per Klick laden")
             self._update_raw_viewer(stash_id, name)
+
+    def _stamp_category(self, league: str, stash_id: str, items: list[Item]) -> str | None:
+        """Namenlose Unique-Stash-Fächer nach dem ersten Item-Load taufen
+        (Nutzer-Feedback: "über die Kategorie gehen, z. B. Two Handed Axe,
+        Ring, Flask"). Die Kategorie wandert als synthetischer Schlüssel
+        ``poeview_category`` in die Tab-Metadaten — landet damit im
+        Datei-Cache und überlebt den Neustart. Rückgabe: neuer Anzeigename,
+        falls sich einer ergeben hat, sonst None."""
+        tab = self._find_stash(self._stash_trees.get(league, []), stash_id)
+        if tab is None or tab.parent is None:
+            return None  # nur Kinder von Spezial-Tabs sind namenlos
+        if tab.name.strip() or tab.metadata.get("map"):
+            return None  # hat bereits einen brauchbaren Namen (Map-Fächer etc.)
+        category = dominant_category(items)
+        if not category or tab.metadata.get("poeview_category") == category:
+            return None
+        tab.metadata["poeview_category"] = category
+        return tab.display_name
 
     def _show_items(self, stash_id: str, items: list[Item], name: str) -> None:
         self._current_tab_name = name
@@ -626,7 +647,18 @@ class MainWindow(QMainWindow):
         items = self._items.get(self._current_league, {}).get(stash_id, [])
         payload = tab.model_dump(mode="json")
         payload["items"] = [item.model_dump(mode="json") for item in items]
-        return payload
+        return self._strip_synthetic_keys(payload)
+
+    @staticmethod
+    def _strip_synthetic_keys(obj):
+        """Von uns gestempelte "poeview_*"-Schlüssel aus den Rohdaten entfernen —
+        der Viewer verspricht, zu zeigen, was die API WIRKLICH liefert."""
+        if isinstance(obj, dict):
+            return {k: MainWindow._strip_synthetic_keys(v)
+                    for k, v in obj.items() if not k.startswith("poeview_")}
+        if isinstance(obj, list):
+            return [MainWindow._strip_synthetic_keys(x) for x in obj]
+        return obj
 
     # --- Hintergrund-Auto-Refresh (Nutzer-Feedback) ---------------------- #
 

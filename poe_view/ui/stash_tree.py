@@ -172,6 +172,13 @@ class StashTree(QTreeWidget):
         if node is not None:
             self._set_status(node, stash_id, last_loaded_iso)
 
+    def update_label(self, stash_id: str, label: str) -> None:
+        """Namensspalte eines Knotens nachträglich ändern — z. B. wenn ein
+        namenloses Unique-Fach nach dem Item-Load seine Kategorie bekommt."""
+        node = self._stash_nodes.get(stash_id)
+        if node is not None:
+            node.setText(_COL_NAME, label)
+
     def set_children(self, parent_id: str, children: list[StashTab],
                      last_loaded: dict[str, str] | None = None,
                      expand: bool = True) -> None:

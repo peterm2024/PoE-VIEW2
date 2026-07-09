@@ -500,6 +500,22 @@ Ordnungshilfe. Die Datenschicht (`_stash_trees`, `_leaf_stashes`, Cache,
 Auto-Refresh, Bulk) bleibt bewusst flach; UniqueStash-Fächer (keine
 Sektions-Info) bleiben auch in der Anzeige flach.
 
+**Unique-Fächer werden nach dem ersten Item-Load "getauft":** Die API
+liefert UniqueStash-Fächer völlig namenlos (nur `metadata.items` = Anzahl).
+Sobald die Items eines Fachs erstmals geladen sind, bestimmt
+`models.dominant_category()` per Mehrheitsentscheid die Item-Kategorie
+("Two Handed Axe", "Ring", "Flask", …) und `MainWindow._stamp_category()`
+schreibt sie als synthetischen Schlüssel `poeview_category` in die
+Tab-Metadaten — damit landet sie im Datei-Cache und überlebt Neustarts;
+der Baum-Knoten wird sofort umbenannt ("Ring (5 Items)"). Der
+Auto-Refresher (§4.8) füllt die Namen so über die Zeit von selbst auf.
+Kategoriequelle (`models.item_category()`): Waffen nennen ihre Klasse als
+erste Property (einziger Ort, wo die API sie direkt ausspricht), der Rest
+läuft über die baseType-ENDUNG (endswith, nicht Substring — "Full
+Ringmail" ist kein Ring!), Rüstungs-Properties als letzter Fallback →
+"Body Armour". Der Rohdaten-Viewer (§4.9) filtert alle `poeview_*`-
+Schlüssel heraus — er verspricht, die echte API-Antwort zu zeigen.
+
 ---
 
 ## 5. UI-Konzept (Oberflächenvorschlag)

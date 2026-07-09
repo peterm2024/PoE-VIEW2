@@ -4,8 +4,9 @@ Die JSON-Strukturen entsprechen den Beobachtungen aus dem LabVIEW-Test-VI
 (docs/api-notes/labview-test-vi.md).
 """
 
-from poe_view.api.models import (Character, Item, StashTab, gem_level,
-                                 gem_quality, get_property_value)
+from poe_view.api.models import (Character, Item, StashTab, dominant_category,
+                                 gem_level, gem_quality, get_property_value,
+                                 item_category)
 
 GEM_JSON = {
     "id": "abc123",
@@ -105,3 +106,56 @@ def test_stash_display_name_from_real_special_tab_structures() -> None:
 
     bare = StashTab.model_validate({"id": "c0ffee42", "type": "UniqueStash", "metadata": {}})
     assert bare.display_name == "UniqueStash"
+
+
+def test_stash_display_name_uses_stamped_category() -> None:
+    """Nach dem ersten Item-Load stempelt MainWindow die dominante Kategorie
+    als poeview_category — der Anzeigename nutzt sie statt des Typs."""
+    tab = StashTab.model_validate({"id": "d", "name": "", "parent": "u1",
+                                   "type": "UniqueStash",
+                                   "metadata": {"items": 5, "poeview_category": "Ring"}})
+    assert tab.display_name == "Ring (5 Items)"
+
+
+def _item(base_type: str, properties: list | None = None) -> Item:
+    return Item.model_validate({"typeLine": base_type, "baseType": base_type,
+                                "frameType": 3, "properties": properties or []})
+
+
+def test_item_category_weapon_from_first_property() -> None:
+    """Waffen: Die API nennt die Item-Klasse als erste Property (ohne Werte)."""
+    axe = _item("Vaal Axe", properties=[
+        {"name": "Two Handed Axe", "values": []},
+        {"name": "Quality", "values": [["+20%", 1]]},
+    ])
+    assert item_category(axe) == "Two Handed Axe"
+
+
+def test_item_category_from_basetype_suffix() -> None:
+    assert item_category(_item("Amethyst Ring")) == "Ring"
+    assert item_category(_item("Divine Life Flask")) == "Flask"
+    assert item_category(_item("Stygian Vise")) == "Belt"
+    assert item_category(_item("Rustic Sash")) == "Belt"
+    assert item_category(_item("Titan Greaves")) == "Boots"
+    assert item_category(_item("Hubris Circlet")) == "Helmet"
+    assert item_category(_item("Pinnacle Tower Shield")) == "Shield"
+    assert item_category(_item("Large Cluster Jewel")) == "Jewel"
+
+
+def test_item_category_ringmail_is_body_armour_not_ring() -> None:
+    """endswith statt Substring: "Full Ringmail" enthält "Ring", IST aber keiner."""
+    ringmail = _item("Full Ringmail", properties=[
+        {"name": "Armour", "values": [["104", 0]]},
+    ])
+    assert item_category(ringmail) == "Body Armour"
+
+
+def test_item_category_unknown_returns_none() -> None:
+    assert item_category(_item("Mirror of Kalandra")) is None
+
+
+def test_dominant_category_majority_vote() -> None:
+    items = [_item("Amethyst Ring"), _item("Two-Stone Ring"), _item("Divine Life Flask")]
+    assert dominant_category(items) == "Ring"
+    assert dominant_category([]) is None
+    assert dominant_category([_item("Mirror of Kalandra")]) is None
