@@ -1,0 +1,28 @@
+# Secrets & lokale Konfiguration — niemals committen!
+.env
+config.json
+*.token
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+
+# Tests & Tools
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# IDE
+.vscode/
+.idea/
+
+# App-Daten (Caches, Logs — liegen normalerweise in %LOCALAPPDATA%)
+icon-cache/
+logs/
