@@ -34,7 +34,8 @@ class StashTree(QTreeWidget):
         """Charaktere gruppiert nach Liga anzeigen (/character liefert alle Ligen).
 
         Ein Zwischenknoten pro Liga, analog zu den Stash-Ordnern. Innerhalb
-        einer Liga absteigend nach Level sortiert.
+        einer Liga absteigend nach Level sortiert. Alles startet zugeklappt —
+        der User klappt gezielt das auf, was er sehen will.
         """
         self._char_root.takeChildren()
         league_nodes: dict[str, QTreeWidgetItem] = {}
@@ -51,15 +52,12 @@ class StashTree(QTreeWidget):
             node.setData(0, _KIND_ROLE, "character")
             node.setData(0, _DATA_ROLE, char)
             league_node.addChild(node)
-        self._char_root.setExpanded(True)
-        for league_node in league_nodes.values():
-            league_node.setExpanded(True)
 
     def set_stashes(self, stashes: list[StashTab]) -> None:
+        """Zeigt den Stash-Baum an — startet zugeklappt (auch Unterordner)."""
         self._stash_root.takeChildren()
         for stash in stashes:
             self._stash_root.addChild(self._build_node(stash))
-        self._stash_root.setExpanded(True)
 
     def _build_node(self, stash: StashTab) -> QTreeWidgetItem:
         """Rekursiv: Ordner enthalten children (beliebig tief)."""

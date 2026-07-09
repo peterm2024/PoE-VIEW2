@@ -35,3 +35,11 @@ Dieses Dokument dokumentiert die technischen Hürden, die während der Entwicklu
 
 **Problem:** Ein Skript, das `MainWindow` instanziiert und ohne sichtbares Fenster wieder beendet (z. B. für CI oder einen schnellen Start-Check), scheitert auf einem System ohne aktive Desktop-Session bzw. würde sonst ein echtes Fenster aufploppen lassen.
 **Lösung:** Umgebungsvariable `QT_QPA_PLATFORM=offscreen` vor dem Start setzen (PowerShell: `$env:QT_QPA_PLATFORM = "offscreen"`). Qt rendert dann ohne echtes Display; `QApplication`, Worker-Start/-Stop und Signal-Verdrahtung lassen sich so ohne Klick-Interaktion prüfen. Zusätzlich `PYTHONPATH` auf das Projektverzeichnis setzen, wenn das Test-Skript außerhalb des Projekts liegt (z. B. im Scratchpad-Ordner) — sonst schlägt `import poe_view` mit `ModuleNotFoundError` fehl.
+
+---
+
+## 5. `MainWindow.close()` vor `app.exec()` kann mit ungeprüftem `False` von `QThread.wait()` zu hartem Prozessabsturz führen
+
+**Problem:** Ein Offscreen-Testskript rief `win.close()` auf, bevor die Qt-Event-Loop (`app.exec()`) überhaupt gestartet war, und beendete das Skript danach direkt. Der Python-Prozess endete mit Exit-Code 9 statt 0 — ohne sichtbaren Traceback.
+**Ursache:** `closeEvent` ruft `self.worker.stop()` und `self.worker.wait(3000)` auf, ignoriert aber den Rückgabewert. Läuft der `ApiWorker`-Thread zu diesem Zeitpunkt noch (z. B. weil `BootstrapJob` — Zugriff auf den Windows Credential Manager via `keyring` — noch nicht durch war), liefert `wait()` `False`, der Thread lebt beim Prozessende weiter, und Qt beendet den Prozess hart, sobald es einen noch laufenden `QThread` beim Interpreter-Shutdown bemerkt.
+**Lösung:** Zwei Ebenen. (1) In Test-/Diagnose-Skripten den Worker explizit stoppen UND den Rückgabewert von `wait()` prüfen (`assert win.worker.wait(5000)`), statt sich auf `close()` allein zu verlassen. (2) `MainWindow.closeEvent` (`poe_view/ui/main_window.py`) prüft den Rückgabewert jetzt selbst: liefert `wait(3000)` `False`, wird geloggt und `terminate()` als Fallback aufgerufen, statt den Thread stillschweigend weiterlaufen zu lassen.

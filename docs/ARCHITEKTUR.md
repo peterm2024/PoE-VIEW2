@@ -348,6 +348,19 @@ Artifact-Link im Projektverlauf / `docs/ui-mockup.html`.)
 | Rate-Limit-Dashboard | `QProgressBar` pro Regel + Status-LED + Countdown | Wird ausschließlich über das Signal `rate_limit_changed` gefüttert. Farbe: grün < 60 %, gelb < 90 %, rot ab 90 %/Wartephase. Countdown zeigt verbleibende Wartezeit. *Intention: Der User soll immer sehen, WARUM die App gerade wartet.* |
 | Statusbar | `QStatusBar` | Login-Status, laufender Job, permanenter GGG-Disclaimer. |
 
+**"Alle Tabs laden" (Bulk) und CSV-Export:** Über den Toolbar-Button "⇊ Alle
+Tabs laden" holt der `ApiWorker` (`FetchAllItemsJob`) die Items sämtlicher
+Nicht-Ordner-Tabs der aktuellen Liga sequenziell — jeder Tab durchläuft
+denselben Rate-Limit-Check wie eine Einzelabfrage, ein `QProgressDialog`
+zeigt Fortschritt (`bulk_progress`-Signal) und erlaubt Abbrechen nach dem
+aktuellen Tab (`ApiWorker.cancel_bulk()`). Nach Abschluss zeigt die
+Item-Tabelle alle geladenen Tabs zusammen (`MainWindow._show_aggregate`) —
+dafür trägt jede Zeile in der neuen **Tab-Spalte** ihren Herkunfts-Tab, damit
+der Bezug beim Filtern/Sortieren über den gesamten Stash nicht verloren geht.
+Der Toolbar-Button "💾 CSV exportieren" schreibt die aktuell sichtbaren
+(gefilterten) Zeilen — egal ob Einzeltab oder Aggregat — über
+`services/csv_export.py` als Semikolon-CSV mit UTF-8-BOM (Excel/de-DE-kompatibel).
+
 **Rarity-Farben** (frameType → Textfarbe im Detail/Namen):
 0 normal (weiß), 1 magic (blau), 2 rare (gelb), 3 unique (orange), 4 gem (türkis), 5 currency (gold).
 

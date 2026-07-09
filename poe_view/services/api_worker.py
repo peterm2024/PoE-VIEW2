@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 import queue
+import threading
 from dataclasses import dataclass
 
 import httpx
@@ -21,6 +22,7 @@ from PySide6.QtCore import QThread, Signal
 from poe_view import config
 from poe_view.api import oauth
 from poe_view.api.client import AuthError, PoeApiClient
+from poe_view.api.models import StashTab
 from poe_view.api.rate_limiter import RateLimitManager
 from poe_view.services import icon_cache, token_store
 
@@ -73,6 +75,19 @@ class FetchIconJob:
 
 
 @dataclass
+class FetchAllItemsJob:
+    """Alle Items EINER Liga über alle (Nicht-Ordner-)Tabs hinweg laden.
+
+    Läuft absichtlich sequenziell im Worker-Thread: jeder Tab durchläuft
+    denselben Rate-Limit-Check wie eine Einzelabfrage, dauert also ggf.
+    lange — deshalb die Fortschritts-Signale statt eines einzigen Ergebnisses.
+    """
+
+    league: str
+    stashes: list[StashTab]  # bereits rekursiv abgeflachte Nicht-Ordner-Tabs
+
+
+@dataclass
 class _StopJob:
     pass
 
@@ -92,10 +107,13 @@ class ApiWorker(QThread):
     rate_limit_changed = Signal(str, object, float)  # policy, rules, wait_s
     job_error = Signal(str)                    # Fehlertext für die Statusbar
     status = Signal(str)                       # laufende Tätigkeit
+    bulk_progress = Signal(int, int, str)      # done, total, aktueller Tab-Name
+    bulk_finished = Signal(int, int)           # success_count, total
 
     def __init__(self) -> None:
         super().__init__()
         self._jobs: queue.Queue = queue.Queue()
+        self._cancel_bulk = threading.Event()
         # Callback der Qt-freien API-Schicht → Qt-Signal (Schichtengrenze).
         self.rate_limiter = RateLimitManager(status_callback=self._on_rate_limit)
         self.client = PoeApiClient(self.rate_limiter)
@@ -106,6 +124,10 @@ class ApiWorker(QThread):
 
     def stop(self) -> None:
         self._jobs.put(_StopJob())
+
+    def cancel_bulk(self) -> None:
+        """Bricht ein laufendes FetchAllItemsJob nach dem aktuellen Tab ab."""
+        self._cancel_bulk.set()
 
     # ------------------------------------------------------------------ #
 
@@ -148,6 +170,8 @@ class ApiWorker(QThread):
                 self.stash_items_loaded.emit(sid, name, stash.items)
             case FetchIconJob(url=url):
                 self._fetch_icon(url)
+            case FetchAllItemsJob(league=league, stashes=stashes):
+                self._fetch_all_items(league, stashes)
         self.status.emit("Bereit")
 
     # ------------------------------------------------------------------ #
@@ -183,6 +207,24 @@ class ApiWorker(QThread):
             data = resp.content
             icon_cache.save(url, data)
         self.icon_loaded.emit(url, data)
+
+    def _fetch_all_items(self, league: str, stashes: list[StashTab]) -> None:
+        """Holt Items Tab für Tab; ein fehlschlagender Tab bricht die anderen nicht ab."""
+        self._cancel_bulk.clear()
+        total = len(stashes)
+        success = 0
+        for done, stash in enumerate(stashes, start=1):
+            if self._cancel_bulk.is_set():
+                log.info("Bulk-Laden abgebrochen nach %d/%d Tabs", done - 1, total)
+                break
+            try:
+                fetched = self.client.get_stash(league, stash.id)
+                self.stash_items_loaded.emit(stash.id, stash.name, fetched.items)
+                success += 1
+            except Exception:
+                log.exception("Bulk-Laden: Tab %s fehlgeschlagen", stash.name)
+            self.bulk_progress.emit(done, total, stash.name)
+        self.bulk_finished.emit(success, total)
 
     def _on_rate_limit(self, policy: str, rules: list[dict], wait_s: float) -> None:
         """Läuft im Worker-Thread; Signal-Emission ist threadsicher (queued)."""

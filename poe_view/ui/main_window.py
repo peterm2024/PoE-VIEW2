@@ -12,17 +12,20 @@ import logging
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction, QPixmap
-from PySide6.QtWidgets import (QComboBox, QLabel, QLineEdit, QMainWindow,
-                               QMessageBox, QSizePolicy, QSplitter,
-                               QTableView, QToolBar, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QComboBox, QFileDialog, QLabel, QLineEdit,
+                               QMainWindow, QMessageBox, QProgressDialog,
+                               QSizePolicy, QSplitter, QTableView, QToolBar,
+                               QVBoxLayout, QWidget)
 
 from poe_view import config
 from poe_view.api.models import Character, Item, StashTab
 from poe_view.services.api_worker import (ApiWorker, BootstrapJob,
+                                          FetchAllItemsJob,
                                           FetchCharactersJob, FetchIconJob,
                                           FetchLeaguesJob, FetchStashItemsJob,
                                           FetchStashListJob, LoginJob,
                                           LogoutJob)
+from poe_view.services.csv_export import export_items
 from poe_view.ui.item_detail import ItemDetail
 from poe_view.ui.item_table import ItemFilterProxy, ItemTableModel
 from poe_view.ui.rate_limit_dashboard import RateLimitDashboard
@@ -38,7 +41,10 @@ class MainWindow(QMainWindow):
         self.resize(1100, 700)
 
         self._items_cache: dict[str, list[Item]] = {}  # stash_id → Items
+        self._leaf_stashes: list[StashTab] = []  # abgeflacht, ohne Ordner
         self._current_league: str = ""
+        self._bulk_dialog: QProgressDialog | None = None
+        self._showing_aggregate = False
 
         self.worker = ApiWorker()
         self._build_ui()
@@ -64,6 +70,18 @@ class MainWindow(QMainWindow):
         self._refresh_action = QAction("⟳ Aktualisieren", self)
         self._refresh_action.triggered.connect(self._refresh)
         toolbar.addAction(self._refresh_action)
+
+        self._load_all_action = QAction("⇊ Alle Tabs laden", self)
+        self._load_all_action.setToolTip(
+            "Items aller Stash-Tabs der aktuellen Liga nacheinander laden "
+            "(kann je nach Tab-Anzahl und Rate-Limit länger dauern)")
+        self._load_all_action.triggered.connect(self._load_all_items)
+        toolbar.addAction(self._load_all_action)
+
+        self._export_action = QAction("💾 CSV exportieren", self)
+        self._export_action.setToolTip("Aktuell angezeigte (gefilterte) Items als CSV speichern")
+        self._export_action.triggered.connect(self._export_csv)
+        toolbar.addAction(self._export_action)
 
         toolbar.addSeparator()
         toolbar.addWidget(QLabel(" Liga: "))
@@ -98,6 +116,7 @@ class MainWindow(QMainWindow):
         self.table.setSelectionBehavior(QTableView.SelectionBehavior.SelectRows)
         self.table.verticalHeader().hide()
         self.table.setColumnWidth(0, 36)
+        self.table.setColumnWidth(1, 110)
         self.table.selectionModel().currentRowChanged.connect(self._on_row_selected)
 
         self.detail = ItemDetail()
@@ -137,6 +156,8 @@ class MainWindow(QMainWindow):
         w.rate_limit_changed.connect(self.dashboard.update_state)
         w.status.connect(self._status_msg.setText)
         w.job_error.connect(self._on_error)
+        w.bulk_progress.connect(self._on_bulk_progress)
+        w.bulk_finished.connect(self._on_bulk_finished)
 
     # --- Worker-Slots (Main-Thread) ------------------------------------ #
 
@@ -164,6 +185,7 @@ class MainWindow(QMainWindow):
             return
         self._current_league = league
         self._items_cache.clear()
+        self._leaf_stashes = []
         self.worker.submit(FetchStashListJob(league))
 
     def _on_characters(self, characters: list[Character]) -> None:
@@ -171,8 +193,21 @@ class MainWindow(QMainWindow):
 
     def _on_stash_list(self, stashes: list[StashTab]) -> None:
         self.tree.set_stashes(stashes)
+        self._leaf_stashes = self._flatten_stashes(stashes)
+
+    @staticmethod
+    def _flatten_stashes(stashes: list[StashTab]) -> list[StashTab]:
+        """Rekursiv alle Nicht-Ordner-Tabs einsammeln (Reihenfolge wie im Baum)."""
+        flat: list[StashTab] = []
+        for stash in stashes:
+            if stash.is_folder:
+                flat.extend(MainWindow._flatten_stashes(stash.children))
+            else:
+                flat.append(stash)
+        return flat
 
     def _on_stash_selected(self, stash_id: str, name: str) -> None:
+        self._showing_aggregate = False
         if stash_id in self._items_cache:
             # Speicher-Cache: kein erneuter API-Call (Intention, siehe Doku §5)
             self._show_items(self._items_cache[stash_id], name)
@@ -181,11 +216,84 @@ class MainWindow(QMainWindow):
 
     def _on_stash_items(self, stash_id: str, name: str, items: list[Item]) -> None:
         self._items_cache[stash_id] = items
-        self._show_items(items, name)
+        if not self._showing_aggregate:
+            self._show_items(items, name)
 
     def _show_items(self, items: list[Item], name: str) -> None:
-        self.table_model.set_items(items)
+        self.table_model.set_items(items, [name] * len(items))
         self._status_msg.setText(f"{name}: {len(items)} Items")
+
+    # --- Alle Tabs laden (Bulk) ----------------------------------------- #
+
+    def _load_all_items(self) -> None:
+        if self._bulk_dialog is not None:
+            return  # läuft schon
+        if not self._leaf_stashes:
+            QMessageBox.information(
+                self, "Alle Tabs laden",
+                "Keine Stash-Tabs geladen — bitte zuerst eine Liga wählen.")
+            return
+        to_fetch = [s for s in self._leaf_stashes if s.id not in self._items_cache]
+        if not to_fetch:
+            self._show_aggregate()  # schon alles im Cache
+            return
+
+        self._bulk_dialog = QProgressDialog(
+            "Lade Stash-Tabs …", "Abbrechen", 0, len(to_fetch), self)
+        self._bulk_dialog.setWindowModality(Qt.WindowModality.WindowModal)
+        self._bulk_dialog.setMinimumDuration(0)
+        self._bulk_dialog.canceled.connect(self.worker.cancel_bulk)
+        self.worker.submit(FetchAllItemsJob(self._current_league, to_fetch))
+
+    def _on_bulk_progress(self, done: int, total: int, name: str) -> None:
+        if self._bulk_dialog is not None:
+            self._bulk_dialog.setLabelText(f"Lade Stash-Tab {done}/{total}: {name}")
+            self._bulk_dialog.setValue(done)
+
+    def _on_bulk_finished(self, success: int, total: int) -> None:
+        if self._bulk_dialog is not None:
+            self._bulk_dialog.close()
+            self._bulk_dialog = None
+        self._status_msg.setText(f"Alle Tabs geladen: {success}/{total} erfolgreich.")
+        self._show_aggregate()
+
+    def _show_aggregate(self) -> None:
+        """Items aller bereits geladenen Tabs zusammen anzeigen (lokal filter-/exportierbar)."""
+        self._showing_aggregate = True
+        items: list[Item] = []
+        sources: list[str] = []
+        for stash in self._leaf_stashes:
+            cached = self._items_cache.get(stash.id)
+            if cached is None:
+                continue
+            items.extend(cached)
+            sources.extend([stash.name] * len(cached))
+        self.table_model.set_items(items, sources)
+        self._status_msg.setText(f"Alle Tabs: {len(items)} Items gesamt")
+
+    # --- CSV-Export ------------------------------------------------------ #
+
+    def _export_csv(self) -> None:
+        rows = self._visible_rows()
+        if not rows:
+            QMessageBox.information(self, "CSV-Export", "Keine Items zum Exportieren geladen.")
+            return
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Items als CSV exportieren", "poe-view2-items.csv", "CSV-Dateien (*.csv)")
+        if not path:
+            return
+        count = export_items(path, rows)
+        self._status_msg.setText(f"{count} Items nach {path} exportiert.")
+
+    def _visible_rows(self) -> list[tuple[str, Item]]:
+        """(Tab-Name, Item)-Paare für die AKTUELL sichtbaren (gefilterten) Zeilen."""
+        rows: list[tuple[str, Item]] = []
+        for row in range(self.proxy.rowCount()):
+            source_idx = self.proxy.mapToSource(self.proxy.index(row, 0))
+            item = self.table_model.item_at(source_idx.row())
+            if item is not None:
+                rows.append((self.table_model.source_at(source_idx.row()), item))
+        return rows
 
     def _on_character_selected(self, char: Character) -> None:
         self._status_msg.setText(
@@ -217,7 +325,10 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:  # noqa: N802
         self.worker.stop()
-        self.worker.wait(3000)
+        if not self.worker.wait(3000):
+            log.warning("ApiWorker reagierte nicht innerhalb von 3s auf stop() — erzwinge Beendigung.")
+            self.worker.terminate()
+            self.worker.wait(1000)
         event.accept()
 
 
