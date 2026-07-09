@@ -228,6 +228,34 @@ def test_pick_auto_refresh_candidate_deprioritises_remove_only_tabs(qapp) -> Non
     win.worker.wait(5000)
 
 
+def test_auto_refresh_counter_label_counts_silent_loads(qapp) -> None:
+    """Nutzer-Feedback: sichtbarer Nachweis „X von Y Stash-Tabs aktualisiert“."""
+    win = MainWindow()
+    win._current_league = "Standard"
+    win._leaf_stashes = [_make_leaf("t1", "Tab 1"), _make_leaf("t2", "Tab 2")]
+    win._update_auto_refresh_label()
+    assert win._auto_refresh_label.text() == "Auto-Refresh: 0 von 2 Stash-Tabs aktualisiert"
+
+    win._on_stash_items("Standard", "t1", "Tab 1", [], silent=True)
+    assert win._auto_refresh_label.text() == "Auto-Refresh: 1 von 2 Stash-Tabs aktualisiert"
+
+    # Manuelle (nicht-silente) Ladevorgänge zählen NICHT als Auto-Refresh.
+    win._on_stash_items("Standard", "t2", "Tab 2", [], silent=False)
+    assert win._auto_refresh_label.text() == "Auto-Refresh: 1 von 2 Stash-Tabs aktualisiert"
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_auto_refresh_label_is_empty_without_league(qapp) -> None:
+    win = MainWindow()
+    win._update_auto_refresh_label()
+    assert win._auto_refresh_label.text() == ""
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
 def test_maybe_auto_refresh_skips_when_worker_busy_or_low_headroom(qapp, monkeypatch) -> None:
     win = MainWindow()
     win._current_league = "Standard"

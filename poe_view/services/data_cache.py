@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import datetime, timezone
 
 from poe_view import config
 from poe_view.api.models import Character, Item, StashTab
@@ -78,7 +79,24 @@ def load() -> CachedData | None:
             for league, stashes in payload["items_by_league"].items()
         }
         data.last_loaded = payload.get("last_loaded", {})
+        _backfill_last_loaded(data)
         return data
     except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError):
         log.exception("Daten-Cache: Lesen fehlgeschlagen — ignoriere Cache-Datei")
         return None
+
+
+def _backfill_last_loaded(data: CachedData) -> None:
+    """Migration für Cache-Dateien von VOR dem last_loaded-Feature (FALLSTRICKE #12).
+
+    Tabs, deren Items im Cache liegen, aber keinen Zeitstempel haben, bekommen
+    die mtime der Cache-Datei — die Daten sind höchstens so alt wie deren
+    letzter Schreibvorgang. Ohne Backfill blieben solche Tabs für immer als
+    "nie geladen" (⬇) markiert und für den Auto-Refresh unsichtbar.
+    """
+    mtime_iso = datetime.fromtimestamp(_CACHE_FILE.stat().st_mtime,
+                                       tz=timezone.utc).isoformat()
+    for league, stashes in data.items_by_league.items():
+        league_loaded = data.last_loaded.setdefault(league, {})
+        for stash_id in stashes:
+            league_loaded.setdefault(stash_id, mtime_iso)

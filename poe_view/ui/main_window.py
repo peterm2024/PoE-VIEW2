@@ -61,6 +61,7 @@ class MainWindow(QMainWindow):
         self._bulk_dialog: QProgressDialog | None = None
         self._showing_aggregate = False
         self._worker_busy = False
+        self._auto_refresh_counts: dict[str, int] = {}  # Liga → auto-aktualisierte Tabs (Session)
         self._restore_cached_data()
 
         self.worker = ApiWorker()
@@ -220,6 +221,10 @@ class MainWindow(QMainWindow):
         self._busy_indicator.setTextVisible(False)
         self._busy_indicator.hide()
         self.statusBar().addWidget(self._busy_indicator)
+        # Sichtbarer Nachweis, dass der Hintergrund-Auto-Refresh arbeitet
+        # (Nutzer-Feedback: "Bist du dir sicher, dass das funktioniert?").
+        self._auto_refresh_label = QLabel("")
+        self.statusBar().addPermanentWidget(self._auto_refresh_label)
         self.statusBar().addPermanentWidget(QLabel(config.DISCLAIMER))
 
     def _connect_worker(self) -> None:
@@ -296,6 +301,7 @@ class MainWindow(QMainWindow):
         last_loaded = self._last_loaded.get(self._current_league, {})
         self.tree.set_stashes(stashes, last_loaded=last_loaded)
         self._leaf_stashes = self._flatten_stashes(stashes)
+        self._update_auto_refresh_label()
 
     def _on_stash_list(self, stashes: list[StashTab]) -> None:
         self._stash_trees[self._current_league] = stashes
@@ -335,11 +341,15 @@ class MainWindow(QMainWindow):
         die Liga gewechselt hat."""
         self._last_loaded.setdefault(league, {})[stash_id] = datetime.now(timezone.utc).isoformat()
         self._items.setdefault(league, {})[stash_id] = items
+        if silent:
+            self._auto_refresh_counts[league] = self._auto_refresh_counts.get(league, 0) + 1
         self._persist_cache()
         if league != self._current_league:
             return
         self.tree.mark_loaded(stash_id, self._last_loaded[league][stash_id])
-        if not silent and not self._showing_aggregate:
+        if silent:
+            self._update_auto_refresh_label()
+        elif not self._showing_aggregate:
             self._show_items(items, name)
 
     def _show_items(self, items: list[Item], name: str) -> None:
@@ -485,6 +495,16 @@ class MainWindow(QMainWindow):
         if candidate is not None:
             self.worker.submit(FetchStashItemsJob(
                 self._current_league, candidate.id, candidate.name, silent=True))
+
+    def _update_auto_refresh_label(self) -> None:
+        """Zähler rechts in der Statusleiste: „Auto-Refresh: X von Y Stash-Tabs aktualisiert“."""
+        total = len(self._leaf_stashes)
+        if not total:
+            self._auto_refresh_label.setText("")
+            return
+        count = self._auto_refresh_counts.get(self._current_league, 0)
+        self._auto_refresh_label.setText(
+            f"Auto-Refresh: {count} von {total} Stash-Tabs aktualisiert")
 
     def _pick_auto_refresh_candidate(self) -> StashTab | None:
         """Ältester bereits geladener Tab der aktuellen Liga, mind. 1 Tag alt.

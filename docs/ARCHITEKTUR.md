@@ -407,6 +407,22 @@ zum Zeitpunkt des Eintreffens) — sonst könnte ein spät eintreffender
 Hintergrund-Job Daten einer inzwischen verlassenen Liga in die aktuell
 angezeigte Liga einsickern lassen.
 
+**Sichtbarer Nachweis:** Ein permanentes Label rechts in der Statusleiste
+("Auto-Refresh: X von Y Stash-Tabs aktualisiert",
+`MainWindow._update_auto_refresh_label`) zählt die in dieser Session
+still aktualisierten Tabs der aktuellen Liga gegen die Gesamtzahl der
+Tabs — der Nutzer kann so jederzeit prüfen, dass der Hintergrund-Refresher
+tatsächlich arbeitet (Nutzer-Feedback).
+
+**Migration von Bestandsdaten:** Cache-Dateien von vor dem
+`last_loaded`-Feature enthalten keine Zeitstempel — ohne Gegenmaßnahme
+blieben alle bereits geladenen Tabs für immer als "nie geladen" (⬇)
+markiert und für den Auto-Refresher unsichtbar (Cache-Treffer lösen keinen
+Fetch aus und würden daher nie einen Zeitstempel nachtragen).
+`data_cache._backfill_last_loaded()` vergibt beim Laden die mtime der
+Cache-Datei als konservativen Ersatz-Zeitstempel (siehe
+FALLSTRICKE_UND_WORKAROUNDS.md #12).
+
 ---
 
 ## 5. UI-Konzept (Oberflächenvorschlag)

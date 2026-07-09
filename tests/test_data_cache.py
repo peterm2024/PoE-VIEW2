@@ -56,6 +56,41 @@ def test_load_defaults_last_loaded_to_empty_dict_for_old_cache_files(tmp_path, m
     assert restored.last_loaded == {}
 
 
+def test_load_backfills_last_loaded_from_file_mtime_for_old_caches(tmp_path, monkeypatch) -> None:
+    """Migration FALLSTRICKE #12: Tabs mit gecachten Items, aber ohne Zeitstempel
+    (Cache-Datei von vor dem Feature) bekommen die mtime der Datei — sonst
+    blieben sie für immer als ⬇ markiert und für den Auto-Refresh unsichtbar."""
+    from datetime import datetime, timezone
+
+    path = tmp_path / "old-cache.json"
+    path.write_text(
+        '{"account_name": "", "characters": [], "stash_trees": {},'
+        ' "items_by_league": {"Standard": {"t1": [], "t2": []}}}',
+        encoding="utf-8")
+    monkeypatch.setattr(data_cache, "_CACHE_FILE", path)
+
+    restored = data_cache.load()
+
+    assert restored is not None
+    expected = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc).isoformat()
+    assert restored.last_loaded == {"Standard": {"t1": expected, "t2": expected}}
+
+
+def test_load_backfill_keeps_existing_timestamps(tmp_path, monkeypatch) -> None:
+    path = tmp_path / "cache.json"
+    path.write_text(
+        '{"account_name": "", "characters": [], "stash_trees": {},'
+        ' "items_by_league": {"Standard": {"t1": []}},'
+        ' "last_loaded": {"Standard": {"t1": "2026-07-01T00:00:00+00:00"}}}',
+        encoding="utf-8")
+    monkeypatch.setattr(data_cache, "_CACHE_FILE", path)
+
+    restored = data_cache.load()
+
+    assert restored is not None
+    assert restored.last_loaded["Standard"]["t1"] == "2026-07-01T00:00:00+00:00"
+
+
 def test_save_ignores_write_errors(tmp_path, monkeypatch) -> None:
     """Schreibfehler (z. B. Verzeichnis nicht erstellbar) dürfen nie crashen."""
     monkeypatch.setattr(data_cache, "_CACHE_FILE", tmp_path / "no" / "such" / "dir" / "cache.json")
