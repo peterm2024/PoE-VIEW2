@@ -357,16 +357,25 @@ JSON ist 1:1 nach LabVIEW portierbar ("Flatten/Unflatten to JSON").
   unnötig — der globale Refresh aktualisiert nur noch Stash-Liste und
   Charaktere.
 
-#### 4.7.1 Ein Status-/Alters-Symbol statt zwei getrennter Spalten
+#### 4.7.1 Status-/Alters-Symbol UND Item-Anzahl je eine eigene Spalte
 
-`StashTree` hat bewusst nur EINE Zusatzspalte statt vormals zwei (Nutzer-
-Feedback: "wir benötigen im Stash-Tree nur entweder das Download-Symbol
-oder das Refresh-Symbol") — die beiden Zustände schließen sich pro Tab
-gegenseitig aus: **entweder** "⬇" (noch nie geladen, reiner Text) **oder**,
-sobald mindestens einmal geladen, ein Refresh-Button, dessen Beschriftung
-zugleich das Alter der Daten trägt ("⟳ heute", "⟳ vor 3d",
-`stash_tree.format_age()`). Das spart eine Spalte UND macht auf einen Blick
-sichtbar, welche Tabs mal wieder dran wären.
+`StashTree` hat drei Spalten: Name, **# (Item-Anzahl)** und Status.
+
+Die Status-Spalte zeigt bewusst nur EINEN von zwei sich gegenseitig
+ausschließenden Zuständen (Nutzer-Feedback: "wir benötigen im Stash-Tree
+nur entweder das Download-Symbol oder das Refresh-Symbol"): **entweder**
+"⬇" (noch nie geladen, reiner Text) **oder**, sobald mindestens einmal
+geladen, ein Refresh-Button, dessen Beschriftung zugleich das Alter der
+Daten trägt ("⟳ heute", "⟳ vor 3d", `stash_tree.format_age()`).
+
+Die **#-Spalte** trägt die Item-Anzahl — ursprünglich stand die Zahl als
+"(N Items)"-Text im Namen, das wurde als unübersichtlich empfunden
+(Nutzer-Feedback). Quelle: entweder die tatsächlich geladene Anzahl
+(`len(items)`, überschreibt alles andere) oder — bei noch nicht geladenen
+Map-/Unique-Kindern — der API-Hinweis `metadata.items`, den GGG dort schon
+vor dem eigentlichen Laden mitschickt. Gruppen- UND Ordner-Knoten zeigen
+die Summe ihrer (bekannten) Kind-Anzahlen (`StashTree._refresh_ancestor_
+totals`, rekursiv nach oben durchgereicht, sobald eine Zahl sich ändert).
 
 ### 4.8 Hintergrund-Auto-Refresh (`MainWindow._maybe_auto_refresh`)
 
@@ -492,13 +501,14 @@ geladene Liste, bevor sie den alten Baum ersetzt.
 Fächer haben — flach war das "uferlos" (Nutzer-Feedback). Der `StashTree`
 gruppiert Map-Fächer deshalb nach `metadata.map.section` unter synthetische
 Zwischenknoten: "Tier 1"–"Tier 16" (numerisch sortiert!), dann
-"Unique Maps", dann "Special Maps" — jeweils mit Summen-Item-Zahl im Label
-(`group_map_children()` / `grouped_leaf_label()`; Tier-Fächer heißen dort
-"Fach N (X Items)" nach `map.index`, Unique-/Special-Fächer nach `map.name`).
-Die Gruppenknoten tragen KEIN `_DATA_ROLE` — nicht klick-/refreshbar, reine
-Ordnungshilfe. Die Datenschicht (`_stash_trees`, `_leaf_stashes`, Cache,
-Auto-Refresh, Bulk) bleibt bewusst flach; UniqueStash-Fächer (keine
-Sektions-Info) bleiben auch in der Anzeige flach.
+"Unique Maps", dann "Special Maps" — jeweils mit Summen-Item-Zahl in der
+**#-Spalte** (§4.7.1), nicht mehr im Namen (`group_map_children()` /
+`grouped_leaf_label()`; Tier-Fächer heißen dort "Fach N" nach `map.index`,
+Unique-/Special-Fächer nach `map.name`). Die Gruppenknoten tragen KEIN
+`_DATA_ROLE` — nicht klick-/refreshbar, reine Ordnungshilfe. Die
+Datenschicht (`_stash_trees`, `_leaf_stashes`, Cache, Auto-Refresh, Bulk)
+bleibt bewusst flach; UniqueStash-Fächer (keine Sektions-Info) bleiben
+auch in der Anzeige flach.
 
 **Unique-Fächer werden nach dem ersten Item-Load "getauft":** Die API
 liefert UniqueStash-Fächer völlig namenlos (nur `metadata.items` = Anzahl).
@@ -507,8 +517,9 @@ Sobald die Items eines Fachs erstmals geladen sind, bestimmt
 ("Two Handed Axe", "Ring", "Flask", …) und `MainWindow._stamp_category()`
 schreibt sie als synthetischen Schlüssel `poeview_category` in die
 Tab-Metadaten — damit landet sie im Datei-Cache und überlebt Neustarts;
-der Baum-Knoten wird sofort umbenannt ("Ring (5 Items)"). Der
-Auto-Refresher (§4.8) füllt die Namen so über die Zeit von selbst auf.
+der Baum-Knoten wird sofort umbenannt ("UniqueStash" → "Ring", Anzahl
+steht separat in der #-Spalte). Der Auto-Refresher (§4.8) füllt die Namen
+so über die Zeit von selbst auf.
 Kategoriequelle (`models.item_category()`): Waffen nennen ihre Klasse als
 erste Property (einziger Ort, wo die API sie direkt ausspricht), der Rest
 läuft über die baseType-ENDUNG (endswith, nicht Substring — "Full
@@ -536,13 +547,13 @@ gemeinsamen Baum, die textliche Beschreibung unten ist aktuell.)
 │ Charaktere            │ ITEMS — "Currency 1"          (142 Items)       │
 │  MeinChar (91)        ├──────┬────────────┬─────────┬──────┬──────┬─────┤
 │  Zweitchar (67)       │ Icon │ Name       │ Typ     │ Lvl  │ Qual │ Stk │
-│ Stash                 ├──────┼────────────┼─────────┼──────┼──────┼─────┤
-│  ▪ Currency 1  ⟳heute │ [ø]  │ Divine Orb │ Currency│  –   │  –   │ 12  │
+│ Stash          #  ⟳/⬇ ├──────┼────────────┼─────────┼──────┼──────┼─────┤
+│  ▪ Currency 1  45 ⟳heu│ [ø]  │ Divine Orb │ Currency│  –   │  –   │ 12  │
 │  ▪ Currency 2      ⬇  │ [◆]  │ Awakened…  │ Gem     │  5   │ 20%  │  1  │
 │  📁 Gems              │ [▣]  │ Chaos Orb  │ Currency│  –   │  –   │ 843 │
-│    ▪ Leveling  ⟳vor 3d│ …    │            │         │      │      │     │
+│    ▪ Leveling  12 ⟳3d │ …    │            │         │      │      │     │
 │  📁 Maps              │      │ (Spalten sortierbar, Filter oben)        │
-│  ▪ Uniques         ⬇  ├──────┴────────────┴─────────┴──────┴──────┴─────┤
+│   🗂 Tier 6    58   ⬇ ├──────┴────────────┴─────────┴──────┴──────┴─────┤
 │                       │ ITEM-DETAIL                                     │
 │                       │ ┌────┐  Awakened Multistrike Support            │
 │                       │ │IMG │  Gem · Level 5 · Quality +20%            │
@@ -561,7 +572,7 @@ gemeinsamen Baum, die textliche Beschreibung unten ist aktuell.)
 | Bereich | Widget | Verhalten |
 |---|---|---|
 | Navigation: Charaktere | `CharacterList` (`QListWidget`) | Bewusst KEIN Tree — Charaktere haben keine Unterstruktur (Nutzer-Feedback: spart eine Ebene samt Auf-/Zuklapp-Klick). Flach, absteigend nach Level, liga-gefiltert (`MainWindow._apply_character_league_filter`, siehe §5.1). Höhe begrenzt (`setMaximumHeight`), damit der Stash-Baum den meisten Platz bekommt. |
-| Navigation: Stash | `StashTree` (`QTreeWidget`), 2 Spalten, **Header sichtbar** | Kein umschließender "Stash"-Wurzelknoten mehr — die Tabs SIND die Top-Level-Einträge (spart eine weitere Ebene). Ordner rekursiv (children). Namensspalte per `QHeaderView.ResizeMode.Interactive` (NICHT `Stretch` — Stretch-Spalten lassen sich in Qt nicht per Maus verbreitern, das war ein echter Bug) mit großzügiger Startbreite, per Header-Rand manuell nachziehbar. Tab-Farbe aus API als kleines Icon-Quadrat VOR dem Namen, bewusst NICHT als Textfarbe (manche API-Farben sind auf dunklem Grund sonst unlesbar). Klick auf Tab → `FetchStashItems`-Job, sofern nicht bereits im Cache. Spalte 2 zeigt GENAU EINEN der beiden sich gegenseitig ausschließenden Zustände (§4.7.1): **⬇**-Text, solange nie geladen, oder ein **⟳-Button mit Alters-Beschriftung** ("⟳ vor 3d") sobald mindestens einmal geladen — Klick lädt genau diesen Tab bewusst AM Cache vorbei neu (`stash_refresh_requested`-Signal). Rechtsklick öffnet ein Kontextmenü mit "🔍 Rohdaten anzeigen" (`raw_data_requested`-Signal, §4.9) — öffnet/aktualisiert den nicht-modalen Rohdaten-Mini-Viewer. |
+| Navigation: Stash | `StashTree` (`QTreeWidget`), 3 Spalten, **Header sichtbar** | Kein umschließender "Stash"-Wurzelknoten mehr — die Tabs SIND die Top-Level-Einträge (spart eine weitere Ebene). Ordner rekursiv (children), Map-Fächer zusätzlich nach Sektion gruppiert (§4.10). Namensspalte per `QHeaderView.ResizeMode.Interactive` (NICHT `Stretch` — Stretch-Spalten lassen sich in Qt nicht per Maus verbreitern, das war ein echter Bug) mit großzügiger Startbreite, per Header-Rand manuell nachziehbar. Tab-Farbe aus API als kleines Icon-Quadrat VOR dem Namen, bewusst NICHT als Textfarbe (manche API-Farben sind auf dunklem Grund sonst unlesbar). Klick auf Tab → `FetchStashItems`-Job, sofern nicht bereits im Cache. Spalte 2 (**#**) zeigt die Item-Anzahl (Nutzer-Feedback: eigene Spalte statt "(N Items)"-Text im Namen; Details §4.7.1). Spalte 3 zeigt GENAU EINEN der beiden sich gegenseitig ausschließenden Zustände (§4.7.1): **⬇**-Text, solange nie geladen, oder ein **⟳-Button mit Alters-Beschriftung** ("⟳ vor 3d") sobald mindestens einmal geladen — Klick lädt genau diesen Tab bewusst AM Cache vorbei neu (`stash_refresh_requested`-Signal). Rechtsklick öffnet ein Kontextmenü mit "🔍 Rohdaten anzeigen" (`raw_data_requested`-Signal, §4.9) — öffnet/aktualisiert den nicht-modalen Rohdaten-Mini-Viewer. |
 | Item-Tabelle rechts oben | `QTableView` + `QSortFilterProxyModel` | Spalten: Icon, Tab, Name, Typ, Level, Quality, Stack, iLvl. Klick auf Spaltenkopf sortiert; Suchfeld filtert live über Name+Typ+Tab (kein API-Call — gefiltert wird lokal). |
 | Item-Detail rechts unten | eigenes Widget | Großes Icon, Name in Rarity-Farbe (frameType), Properties, Mods. Aktualisiert bei Zeilenauswahl. |
 | Rate-Limit-Dashboard | `QProgressBar` pro Regel + Status-LED + Countdown | Wird ausschließlich über das Signal `rate_limit_changed` gefüttert. Farbe: grün < 60 %, gelb < 90 %, rot ab 90 %/Wartephase. Countdown zeigt verbleibende Wartezeit. *Intention: Der User soll immer sehen, WARUM die App gerade wartet.* |

@@ -303,9 +303,16 @@ class MainWindow(QMainWindow):
     def _activate_stash_tree(self, stashes: list[StashTab]) -> None:
         """Baum rendern + abgeflachte Liste aktualisieren — für Live- UND Cache-Daten."""
         last_loaded = self._last_loaded.get(self._current_league, {})
-        self.tree.set_stashes(stashes, last_loaded=last_loaded)
+        item_counts = self._item_counts_for_current_league()
+        self.tree.set_stashes(stashes, last_loaded=last_loaded, item_counts=item_counts)
         self._leaf_stashes = self._flatten_stashes(stashes)
         self._update_auto_refresh_label()
+
+    def _item_counts_for_current_league(self) -> dict[str, int]:
+        """stash_id → tatsächlich geladene Item-Anzahl — überschreibt im Baum
+        den bloßen API-Hinweis (metadata.items bei Map-/Unique-Kindern)."""
+        return {sid: len(items)
+                for sid, items in self._items.get(self._current_league, {}).items()}
 
     def _on_stash_list(self, stashes: list[StashTab]) -> None:
         # Die Liga-LISTE der API kennt die Kinder von Spezial-Tabs (MapStash,
@@ -423,7 +430,7 @@ class MainWindow(QMainWindow):
         self._persist_cache()
         if league != self._current_league:
             return
-        self.tree.mark_loaded(stash_id, self._last_loaded[league][stash_id])
+        self.tree.mark_loaded(stash_id, self._last_loaded[league][stash_id], count=len(items))
         if relabelled is not None:
             self.tree.update_label(stash_id, relabelled)
         if silent:
@@ -452,9 +459,14 @@ class MainWindow(QMainWindow):
         if league != self._current_league:
             return
         league_loaded = self._last_loaded.get(league, {})
+        item_counts = self._item_counts_for_current_league()
         self.tree.set_children(stash_id, children, last_loaded=league_loaded,
-                               expand=not silent)
-        self.tree.mark_loaded(stash_id, league_loaded[stash_id])
+                               item_counts=item_counts, expand=not silent)
+        # Gesamtsumme über die Kinder (bekannte API-Hinweise + evtl. schon
+        # geladene) auch am Eltern-Knoten zeigen.
+        counts = [item_counts.get(c.id, c.metadata.get("items")) for c in children]
+        total = sum(c or 0 for c in counts) if any(c is not None for c in counts) else None
+        self.tree.mark_loaded(stash_id, league_loaded[stash_id], count=total)
         if tree is not None:
             self._leaf_stashes = self._flatten_stashes(tree)
         self._update_auto_refresh_label()

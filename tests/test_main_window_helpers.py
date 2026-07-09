@@ -117,8 +117,9 @@ def test_activate_stash_tree_renders_from_cache_without_network(qapp) -> None:
     win._activate_stash_tree([stash])
 
     assert set(win.tree._stash_nodes.keys()) == {"t1"}
-    assert win.tree._stash_nodes["t1"].text(1) == ""  # bereits als geladen markiert (Refresh-Button)
-    assert win.tree.itemWidget(win.tree._stash_nodes["t1"], 1) is not None
+    assert win.tree._stash_nodes["t1"].text(2) == ""  # bereits als geladen markiert (Refresh-Button)
+    assert win.tree.itemWidget(win.tree._stash_nodes["t1"], 2) is not None
+    assert win.tree._stash_nodes["t1"].text(1) == "1"  # Item-Anzahl-Spalte
     assert [s.id for s in win._leaf_stashes] == ["t1"]
 
     win.worker.stop()
@@ -419,10 +420,12 @@ def test_raw_viewer_follows_tab_switches(qapp) -> None:
 
 # --- Spezial-Tabs: MapStash/UniqueStash (Nutzer-Feedback) ----------------- #
 
-def _map_child(child_id: str, parent_id: str, map_name: str) -> StashTab:
+def _map_child(child_id: str, parent_id: str, map_name: str, items: int | None = None) -> StashTab:
+    metadata: dict = {"map": {"name": map_name, "tier": 16}}
+    if items is not None:
+        metadata["items"] = items
     return StashTab.model_validate({
-        "id": child_id, "parent": parent_id, "type": "MapStash",
-        "metadata": {"map": {"name": map_name, "tier": 16}},
+        "id": child_id, "parent": parent_id, "type": "MapStash", "metadata": metadata,
     })
 
 
@@ -463,7 +466,27 @@ def test_on_stash_children_grafts_into_tree_and_updates_leaves(qapp) -> None:
     assert win.tree._stash_nodes["m1"].isExpanded()
     # Eltern-Tab gilt als geladen (Struktur bekannt), Kinder noch nicht
     assert win._last_loaded["Standard"].get("m1") is not None
-    assert win.tree._stash_nodes["c1"].text(1) == "⬇"
+    assert win.tree._stash_nodes["c1"].text(2) == "⬇"
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_on_stash_children_shows_aggregate_count_on_parent_node(qapp) -> None:
+    """Nutzer-Feedback: Item-Anzahl in eigener Spalte — der Spezial-Tab-Eltern-
+    knoten selbst zeigt die Summe der (bekannten) Kind-Anzahlen."""
+    win = MainWindow()
+    win._current_league = "Standard"
+    map_stash = StashTab.model_validate({"id": "m1", "name": "Maps", "type": "MapStash",
+                                          "metadata": {}})
+    win._stash_trees["Standard"] = [map_stash]
+    win._activate_stash_tree(win._stash_trees["Standard"])
+
+    children = [_map_child("c1", "m1", "Beach Map", items=8),
+                _map_child("c2", "m1", "Dunes Map", items=5)]
+    win._on_stash_children("Standard", "m1", "Maps", children, silent=False)
+
+    assert win.tree._stash_nodes["m1"].text(1) == "13"
 
     win.worker.stop()
     win.worker.wait(5000)
@@ -609,15 +632,17 @@ def test_unique_child_gets_category_name_after_item_load(qapp) -> None:
     unique.children = [_unique_child("c1")]
     win._stash_trees["Standard"] = [unique]
     win._activate_stash_tree(win._stash_trees["Standard"])
-    assert win.tree._stash_nodes["c1"].text(0) == "UniqueStash (2 Items)"
+    assert win.tree._stash_nodes["c1"].text(0) == "UniqueStash"
+    assert win.tree._stash_nodes["c1"].text(1) == "2"  # metadata.items als Vorab-Hinweis
 
     rings = [Item.model_validate({"typeLine": "Amethyst Ring", "baseType": "Amethyst Ring",
                                   "frameType": 3})]
-    win._on_stash_items("Standard", "c1", "UniqueStash (2 Items)", rings, silent=True)
+    win._on_stash_items("Standard", "c1", "UniqueStash", rings, silent=True)
 
     tab = win._stash_trees["Standard"][0].children[0]
     assert tab.metadata["poeview_category"] == "Ring"
-    assert win.tree._stash_nodes["c1"].text(0) == "Ring (2 Items)"  # Label live aktualisiert
+    assert win.tree._stash_nodes["c1"].text(0) == "Ring"  # Label live aktualisiert
+    assert win.tree._stash_nodes["c1"].text(1) == "1"  # echte Anzahl (1 Item geladen)
 
     win.worker.stop()
     win.worker.wait(5000)

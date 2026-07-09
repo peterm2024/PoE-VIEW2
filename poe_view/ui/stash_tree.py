@@ -4,14 +4,15 @@ Kein umschließender "Stash"-Wurzelknoten mehr: Die Tabs sind direkt die
 Top-Level-Einträge des Baums (spart eine Ebene, Nutzer-Feedback). Die
 Charakterliste lebt separat in ``character_list.py``.
 
-Jeder Stash-Tab-Knoten hat GENAU EINE Zusatzspalte (Nutzer-Feedback: "wir
-benötigen im Stash-Tree nur entweder das Download-Symbol oder das
-Refresh-Symbol" — beide Zustände schließen sich gegenseitig aus): entweder
-"⬇" (Items noch nie geladen) als reiner Text, oder — sobald mindestens
-einmal geladen — ein Refresh-Button, dessen Beschriftung zugleich das Alter
-der zuletzt geladenen Daten zeigt ("⟳ heute", "⟳ vor 3d"). Die Namensspalte
-ist per Maus verbreiterbar (``Interactive`` statt ``Stretch`` — Stretch-
-Spalten lassen sich in Qt NICHT manuell resizen).
+Drei Spalten: Name, Item-Anzahl ("#", Nutzer-Feedback — vorher stand die
+Zahl als "(N Items)"-Text im Namen, das wurde als unübersichtlich
+empfunden), und GENAU EINE Status-Spalte, die sich gegenseitig
+ausschließende Zustände zeigt: "⬇" (Items noch nie geladen) als reiner
+Text, oder — sobald mindestens einmal geladen — ein Refresh-Button, dessen
+Beschriftung zugleich das Alter der zuletzt geladenen Daten zeigt
+("⟳ heute", "⟳ vor 3d"). Die Namensspalte ist per Maus verbreiterbar
+(``Interactive`` statt ``Stretch`` — Stretch-Spalten lassen sich in Qt
+NICHT manuell resizen).
 
 LabVIEW-Äquivalent: Tree Control mit rekursivem Laden der children. Die
 Tab-Farbe (metadata.colour, hex ohne '#') wird NICHT als Textfarbe verwendet
@@ -27,7 +28,8 @@ Map-Stash-Kinder werden nach ``metadata.map.section`` gruppiert (Tier 1–16,
 dann Unique Maps, dann Special Maps) — ein flacher Baum mit 100+ Fächern war
 "uferlos" (Nutzer-Feedback). Die Gruppenknoten sind reine Anzeige-Hilfen
 (kein _DATA_ROLE → nicht klick-/refreshbar); die Datenschicht
-(MainWindow._stash_trees, _leaf_stashes, Cache) bleibt flach.
+(MainWindow._stash_trees, _leaf_stashes, Cache) bleibt flach. Ihre
+Item-Anzahl ist die Summe der (bekannten) Kind-Anzahlen.
 """
 
 from __future__ import annotations
@@ -42,7 +44,7 @@ from PySide6.QtWidgets import (QHeaderView, QMenu, QToolButton, QTreeWidget,
 from poe_view.api.models import StashTab
 
 _DATA_ROLE = Qt.ItemDataRole.UserRole
-_COL_NAME, _COL_STATUS = 0, 1
+_COL_NAME, _COL_COUNT, _COL_STATUS = 0, 1, 2
 _UNLOADED_MARK = "⬇"
 
 
@@ -109,17 +111,14 @@ def group_map_children(children: list[StashTab]) -> list[tuple[str, list[StashTa
 
 
 def grouped_leaf_label(child: StashTab) -> str:
-    """Kurz-Label eines Fachs UNTER seinem Gruppenknoten: "Fach 3 (12 Items)"
-    für Tier-Fächer (der Map-Name wäre dort nur die Gruppen-Wiederholung),
-    sonst der Map-Name ("Death and Taxes (1 Items)")."""
+    """Kurz-Label eines Fachs UNTER seinem Gruppenknoten: "Fach 3" für
+    Tier-Fächer (der Map-Name wäre dort nur die Gruppen-Wiederholung),
+    sonst der Map-Name ("Death and Taxes")."""
     info = _map_info(child)
     section = str(info.get("section") or "")
     if section.startswith("tier"):
-        base = f"Fach {int(info.get('index') or 0) + 1}"
-    else:
-        base = str(info.get("name") or child.display_name)
-    count = child.metadata.get("items")
-    return f"{base} ({count} Items)" if count is not None else base
+        return f"Fach {int(info.get('index') or 0) + 1}"
+    return str(info.get("name") or child.display_name)
 
 
 class StashTree(QTreeWidget):
@@ -129,8 +128,8 @@ class StashTree(QTreeWidget):
 
     def __init__(self) -> None:
         super().__init__()
-        self.setColumnCount(2)
-        self.setHeaderLabels(["Name", ""])
+        self.setColumnCount(3)
+        self.setHeaderLabels(["Name", "#", ""])
         self.setIconSize(QSize(12, 12))
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.customContextMenuRequested.connect(self._on_context_menu)
@@ -140,37 +139,48 @@ class StashTree(QTreeWidget):
         # Maus verbreiterbar (das war der Bug hinter "Spalten lassen sich
         # nicht verbreitern"). Initialbreite grob großzügig gewählt.
         header.setSectionResizeMode(_COL_NAME, QHeaderView.ResizeMode.Interactive)
+        header.setSectionResizeMode(_COL_COUNT, QHeaderView.ResizeMode.Fixed)
         header.setSectionResizeMode(_COL_STATUS, QHeaderView.ResizeMode.Fixed)
         self.setColumnWidth(_COL_NAME, 220)
+        self.setColumnWidth(_COL_COUNT, 42)
         self.setColumnWidth(_COL_STATUS, 74)
+        self.headerItem().setTextAlignment(_COL_COUNT, Qt.AlignmentFlag.AlignRight)
+        self.headerItem().setToolTip(_COL_COUNT, "Anzahl Items (bekannt nach dem ersten Laden)")
         self.headerItem().setToolTip(
             _COL_STATUS, "⬇ = noch nicht geladen · ⟳ = neu laden (zeigt Alter der Daten)")
         self._stash_nodes: dict[str, QTreeWidgetItem] = {}  # stash_id → Knoten
         self.itemClicked.connect(self._on_click)
 
-    def set_stashes(self, stashes: list[StashTab],
-                    last_loaded: dict[str, str] | None = None) -> None:
+    def set_stashes(self, stashes: list[StashTab], last_loaded: dict[str, str] | None = None,
+                    item_counts: dict[str, int] | None = None) -> None:
         """Zeigt den Stash-Baum an — startet zugeklappt (auch Unterordner).
 
         ``last_loaded`` bildet stash_id → ISO-Zeitstempel des letzten
         erfolgreichen Ladens ab (MainWindow._last_loaded). Fehlt der Eintrag,
-        gilt der Tab als noch nie geladen.
+        gilt der Tab als noch nie geladen. ``item_counts`` überschreibt den
+        API-Hinweis (metadata.items) mit der tatsächlich geladenen Anzahl.
         """
         self.clear()
         self._stash_nodes.clear()
         last_loaded = last_loaded or {}
+        overrides = item_counts or {}
         for stash in stashes:
-            self.addTopLevelItem(self._build_node(stash))
+            self.addTopLevelItem(self._build_node(stash, overrides))
         # Status erst NACH dem Einhängen setzen — setItemWidget wirkt nur
         # auf Items, die bereits Teil des Baums sind.
         for stash_id, node in self._stash_nodes.items():
             self._set_status(node, stash_id, last_loaded.get(stash_id))
 
-    def mark_loaded(self, stash_id: str, last_loaded_iso: str) -> None:
-        """Nach einem erfolgreichen Ladevorgang: ⬇ durch Refresh-Button+Alter ersetzen."""
+    def mark_loaded(self, stash_id: str, last_loaded_iso: str, count: int | None = None) -> None:
+        """Nach einem erfolgreichen Ladevorgang: ⬇ durch Refresh-Button+Alter ersetzen
+        und — falls bekannt — die Item-Anzahl-Spalte (inkl. Eltern-Gruppensumme) aktualisieren."""
         node = self._stash_nodes.get(stash_id)
-        if node is not None:
-            self._set_status(node, stash_id, last_loaded_iso)
+        if node is None:
+            return
+        self._set_status(node, stash_id, last_loaded_iso)
+        if count is not None:
+            node.setText(_COL_COUNT, str(count))
+            self._refresh_ancestor_totals(node)
 
     def update_label(self, stash_id: str, label: str) -> None:
         """Namensspalte eines Knotens nachträglich ändern — z. B. wenn ein
@@ -181,6 +191,7 @@ class StashTree(QTreeWidget):
 
     def set_children(self, parent_id: str, children: list[StashTab],
                      last_loaded: dict[str, str] | None = None,
+                     item_counts: dict[str, int] | None = None,
                      expand: bool = True) -> None:
         """Hängt die entdeckten Unter-Tabs eines Spezial-Tabs (MapStash, …) unter
         dessen Knoten — OHNE den restlichen Baum neu aufzubauen (Aufklapp-Zustand
@@ -189,12 +200,13 @@ class StashTree(QTreeWidget):
         if parent_node is None:
             return
         last_loaded = last_loaded or {}
+        overrides = item_counts or {}
         # Alte Kind-Knoten auch aus dem id→Knoten-Index entfernen (sonst
         # zeigen mark_loaded()-Aufrufe später auf tote Widget-Referenzen).
         # Rekursiv — mit Sektions-Gruppen liegen Fächer eine Ebene tiefer.
         self._drop_index_entries_below(parent_node)
         parent_node.takeChildren()
-        self._attach_children(parent_node, children)
+        self._attach_children(parent_node, children, overrides)
         for child in children:
             node = self._stash_nodes.get(child.id)
             if node is not None:
@@ -210,32 +222,60 @@ class StashTree(QTreeWidget):
                 self._stash_nodes.pop(stash.id, None)
             self._drop_index_entries_below(child)
 
-    def _attach_children(self, parent_node: QTreeWidgetItem,
-                         children: list[StashTab]) -> None:
+    def _leaf_count(self, stash: StashTab, overrides: dict[str, int]) -> int | None:
+        """Bekannte Item-Anzahl: tatsächlich geladen (overrides) schlägt den
+        bloßen API-Hinweis (metadata.items bei Map-/Unique-Kindern)."""
+        if stash.id in overrides:
+            return overrides[stash.id]
+        return stash.metadata.get("items")
+
+    def _refresh_ancestor_totals(self, node: QTreeWidgetItem) -> None:
+        """Summe der Kind-Anzahlen nach oben durchreichen (Gruppen- UND
+        Ordner-Knoten) — z. B. "Tier 6" zeigt die Summe seiner Fächer."""
+        parent = node.parent()
+        while parent is not None:
+            total, any_known = 0, False
+            for i in range(parent.childCount()):
+                text = parent.child(i).text(_COL_COUNT)
+                if text.isdigit():
+                    total += int(text)
+                    any_known = True
+            if any_known:
+                parent.setText(_COL_COUNT, str(total))
+            parent = parent.parent()
+
+    def _attach_children(self, parent_node: QTreeWidgetItem, children: list[StashTab],
+                         overrides: dict[str, int]) -> None:
         """Kinder einhängen — Map-Fächer gruppiert nach Sektion (Nutzer-Feedback:
         100+ flache Fächer waren "uferlos"), alles andere flach."""
         grouped = group_map_children(children)
         if grouped is None:
             for child in children:
-                parent_node.addChild(self._build_node(child))
+                parent_node.addChild(self._build_node(child, overrides))
             return
         for group_label, members in grouped:
-            total = sum(m.metadata.get("items") or 0 for m in members)
-            group_node = QTreeWidgetItem([f"🗂 {group_label} ({total} Items)"])
+            group_node = QTreeWidgetItem([f"🗂 {group_label}"])
+            counts = [self._leaf_count(m, overrides) for m in members]
+            if any(c is not None for c in counts):
+                group_node.setText(_COL_COUNT, str(sum(c or 0 for c in counts)))
             parent_node.addChild(group_node)
             for child in members:
-                group_node.addChild(self._build_node(child, label=grouped_leaf_label(child)))
+                group_node.addChild(self._build_node(child, overrides, label=grouped_leaf_label(child)))
 
-    def _build_node(self, stash: StashTab, label: str | None = None) -> QTreeWidgetItem:
+    def _build_node(self, stash: StashTab, overrides: dict[str, int],
+                    label: str | None = None) -> QTreeWidgetItem:
         """Rekursiv: Ordner enthalten children (beliebig tief)."""
         prefix = "📁 " if stash.is_folder else ""
         node = QTreeWidgetItem([f"{prefix}{label or stash.display_name}"])
         if not stash.is_folder:
             node.setData(0, _DATA_ROLE, stash)
             self._stash_nodes[stash.id] = node
+            count = self._leaf_count(stash, overrides)
+            if count is not None:
+                node.setText(_COL_COUNT, str(count))
         if stash.colour:
             node.setIcon(_COL_NAME, _colour_swatch(stash.colour))
-        self._attach_children(node, stash.children)
+        self._attach_children(node, stash.children, overrides)
         return node
 
     def _set_status(self, node: QTreeWidgetItem, stash_id: str,

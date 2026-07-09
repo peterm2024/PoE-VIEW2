@@ -98,11 +98,12 @@ def test_stash_display_name_from_real_special_tab_structures() -> None:
                                                              "index": 0}}})
     assert ro_child.display_name == "Death and Taxes (Remove-only)"
 
-    # Unique-Kind: völlig namenlos → Typ + Item-Anzahl (unterscheidbar)
+    # Unique-Kind: völlig namenlos → Typ (Item-Anzahl steht in der eigenen
+    # Baum-Spalte, nicht mehr im Namen, Nutzer-Feedback)
     uniq_child = StashTab.model_validate({"id": "d", "name": "", "parent": "u1",
                                           "type": "UniqueStash",
                                           "metadata": {"items": 5}})
-    assert uniq_child.display_name == "UniqueStash (5 Items)"
+    assert uniq_child.display_name == "UniqueStash"
 
     bare = StashTab.model_validate({"id": "c0ffee42", "type": "UniqueStash", "metadata": {}})
     assert bare.display_name == "UniqueStash"
@@ -114,7 +115,7 @@ def test_stash_display_name_uses_stamped_category() -> None:
     tab = StashTab.model_validate({"id": "d", "name": "", "parent": "u1",
                                    "type": "UniqueStash",
                                    "metadata": {"items": 5, "poeview_category": "Ring"}})
-    assert tab.display_name == "Ring (5 Items)"
+    assert tab.display_name == "Ring"
 
 
 def _item(base_type: str, properties: list | None = None) -> Item:

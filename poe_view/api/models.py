@@ -181,12 +181,12 @@ class StashTab(BaseModel):
             return f"{map_name}{self.name}" if is_suffix else str(map_name)
         if self.name.strip():
             return self.name.strip()
-        count = self.metadata.get("items")
         # Von UNS gestempelte Kategorie (dominant_category nach dem ersten
         # Item-Load, Präfix "poeview_" = synthetisch) — namenlose Unique-
-        # Stash-Fächer heißen damit "Ring (5 Items)" statt "UniqueStash".
-        label = self.metadata.get("poeview_category") or self.type or self.id[:8]
-        return f"{label} ({count} Items)" if count is not None else label
+        # Stash-Fächer heißen damit "Ring" statt "UniqueStash". Die
+        # Item-Anzahl steht in der eigenen Baum-Spalte (Nutzer-Feedback),
+        # nicht mehr im Namen.
+        return self.metadata.get("poeview_category") or self.type or self.id[:8]
 
 
 class Character(BaseModel):

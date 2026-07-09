@@ -12,6 +12,9 @@ from poe_view.api.models import StashTab
 from poe_view.ui import stash_tree as stash_tree_module
 from poe_view.ui.stash_tree import StashTree, format_age
 
+# Spaltenindizes wie in stash_tree.py: Name, # (Item-Anzahl), Status
+_COL_NAME, _COL_COUNT, _COL_STATUS = 0, 1, 2
+
 
 def test_set_stashes_builds_recursive_tree_without_wrapper_root(qapp) -> None:
     data = [
@@ -25,7 +28,7 @@ def test_set_stashes_builds_recursive_tree_without_wrapper_root(qapp) -> None:
     assert tree.topLevelItemCount() == 2  # Tabs SIND die Top-Level-Items, kein Wrapper
     folder_node = tree.topLevelItem(1)
     assert folder_node.childCount() == 1
-    assert folder_node.child(0).text(0) == "Sub"
+    assert folder_node.child(0).text(_COL_NAME) == "Sub"
 
 
 def test_set_stashes_marks_unloaded_tabs_with_download_marker_only(qapp) -> None:
@@ -35,8 +38,8 @@ def test_set_stashes_marks_unloaded_tabs_with_download_marker_only(qapp) -> None
     tree = StashTree()
     tree.set_stashes(stashes)
     node = tree._stash_nodes["root1"]
-    assert node.text(1) == "⬇"
-    assert tree.itemWidget(node, 1) is None
+    assert node.text(_COL_STATUS) == "⬇"
+    assert tree.itemWidget(node, _COL_STATUS) is None
 
 
 def test_set_stashes_shows_refresh_button_with_age_for_loaded_tabs(qapp) -> None:
@@ -46,8 +49,8 @@ def test_set_stashes_shows_refresh_button_with_age_for_loaded_tabs(qapp) -> None
     three_days_ago = (datetime.now(timezone.utc) - timedelta(days=3)).isoformat()
     tree.set_stashes(stashes, last_loaded={"root1": three_days_ago})
     node = tree._stash_nodes["root1"]
-    assert node.text(1) == ""
-    button = tree.itemWidget(node, 1)
+    assert node.text(_COL_STATUS) == ""
+    button = tree.itemWidget(node, _COL_STATUS)
     assert button is not None
     assert button.text() == "⟳ vor 3d"
 
@@ -57,13 +60,27 @@ def test_mark_loaded_replaces_download_marker_with_refresh_button(qapp) -> None:
     stashes = [StashTab.model_validate(d) for d in data]
     tree = StashTree()
     tree.set_stashes(stashes)
-    assert tree._stash_nodes["root1"].text(1) == "⬇"
+    assert tree._stash_nodes["root1"].text(_COL_STATUS) == "⬇"
 
     tree.mark_loaded("root1", datetime.now(timezone.utc).isoformat())
 
     node = tree._stash_nodes["root1"]
-    assert node.text(1) == ""
-    assert tree.itemWidget(node, 1).text() == "⟳ heute"
+    assert node.text(_COL_STATUS) == ""
+    assert tree.itemWidget(node, _COL_STATUS).text() == "⟳ heute"
+
+
+def test_mark_loaded_updates_item_count_column(qapp) -> None:
+    """Nutzer-Feedback: Item-Anzahl in eigene Spalte statt "(N Items)" im Namen."""
+    data = [{"id": "root1", "name": "Currency 1", "type": "QuadStash", "metadata": {}}]
+    stashes = [StashTab.model_validate(d) for d in data]
+    tree = StashTree()
+    tree.set_stashes(stashes)
+    assert tree._stash_nodes["root1"].text(_COL_COUNT) == ""  # unbekannt vor dem Laden
+
+    tree.mark_loaded("root1", datetime.now(timezone.utc).isoformat(), count=45)
+
+    assert tree._stash_nodes["root1"].text(_COL_COUNT) == "45"
+    assert tree._stash_nodes["root1"].text(_COL_NAME) == "Currency 1"  # kein Suffix im Namen
 
 
 def test_refresh_button_click_emits_signal(qapp) -> None:
@@ -72,7 +89,7 @@ def test_refresh_button_click_emits_signal(qapp) -> None:
     tree = StashTree()
     tree.set_stashes(stashes, last_loaded={"root1": datetime.now(timezone.utc).isoformat()})
     node = tree._stash_nodes["root1"]
-    button = tree.itemWidget(node, 1)
+    button = tree.itemWidget(node, _COL_STATUS)
 
     received = []
     tree.stash_refresh_requested.connect(lambda sid, name: received.append((sid, name)))
@@ -92,14 +109,15 @@ def test_header_is_visible(qapp) -> None:
     """Kopfzeile sichtbar — sonst keine manuelle Spaltenbreite (Nutzer-Feedback)."""
     tree = StashTree()
     assert not tree.isHeaderHidden()
-    assert tree.headerItem().text(0) == "Name"
+    assert tree.headerItem().text(_COL_NAME) == "Name"
+    assert tree.headerItem().text(_COL_COUNT) == "#"
 
 
 def test_name_column_is_interactive_not_stretch(qapp) -> None:
     """Stretch-Spalten lassen sich in Qt nicht per Maus verbreitern (Nutzer-Feedback)."""
     from PySide6.QtWidgets import QHeaderView
     tree = StashTree()
-    assert tree.header().sectionResizeMode(0) == QHeaderView.ResizeMode.Interactive
+    assert tree.header().sectionResizeMode(_COL_NAME) == QHeaderView.ResizeMode.Interactive
 
 
 class _FakeMenu:
@@ -180,10 +198,12 @@ def test_set_children_inserts_subtabs_without_rebuilding_tree(qapp) -> None:
     parent_node = tree._stash_nodes["m1"]
     assert parent_node.childCount() == 1  # der Gruppenknoten "Tier 6"
     group = parent_node.child(0)
-    assert group.text(0) == "🗂 Tier 6 (8 Items)"
-    assert group.child(0).text(0) == "Fach 1 (8 Items)"
+    assert group.text(_COL_NAME) == "🗂 Tier 6"
+    assert group.text(_COL_COUNT) == "8"
+    assert group.child(0).text(_COL_NAME) == "Fach 1"
+    assert group.child(0).text(_COL_COUNT) == "8"
     assert parent_node.isExpanded()
-    assert tree._stash_nodes["c1"].text(1) == "⬇"  # Kind noch nicht geladen
+    assert tree._stash_nodes["c1"].text(_COL_STATUS) == "⬇"  # Kind noch nicht geladen
     assert tree.topLevelItemCount() == 2  # Rest des Baums unangetastet
 
 
@@ -204,16 +224,20 @@ def test_map_children_are_grouped_by_section_in_order(qapp) -> None:
     tree.set_children("m1", children)
 
     parent_node = tree._stash_nodes["m1"]
-    labels = [parent_node.child(i).text(0) for i in range(parent_node.childCount())]
+    labels = [parent_node.child(i).text(_COL_NAME) for i in range(parent_node.childCount())]
+    counts = [parent_node.child(i).text(_COL_COUNT) for i in range(parent_node.childCount())]
     # tier2 vor tier16 (numerisch, nicht lexikographisch!), unique und special hinten
-    assert labels == ["🗂 Tier 2 (8 Items)", "🗂 Tier 16 (19 Items)",
-                      "🗂 Unique Maps (2 Items)", "🗂 Special Maps (1 Items)"]
+    assert labels == ["🗂 Tier 2", "🗂 Tier 16", "🗂 Unique Maps", "🗂 Special Maps"]
+    assert counts == ["8", "19", "2", "1"]
 
     tier16 = parent_node.child(1)
-    assert [tier16.child(i).text(0) for i in range(tier16.childCount())] == \
-        ["Fach 1 (14 Items)", "Fach 2 (5 Items)"]
+    assert [tier16.child(i).text(_COL_NAME) for i in range(tier16.childCount())] == \
+        ["Fach 1", "Fach 2"]
+    assert [tier16.child(i).text(_COL_COUNT) for i in range(tier16.childCount())] == \
+        ["14", "5"]
     unique = parent_node.child(2)
-    assert unique.child(0).text(0) == "Death and Taxes (2 Items)"
+    assert unique.child(0).text(_COL_NAME) == "Death and Taxes"
+    assert unique.child(0).text(_COL_COUNT) == "2"
     # Gruppenknoten sind reine Anzeige: kein Klick-Ziel, kein ⬇/⟳
     assert parent_node.child(0).data(0, Qt.ItemDataRole.UserRole) is None
     # Fächer bleiben normal klick-/refreshbar (im Index)
@@ -230,8 +254,28 @@ def test_grouped_children_survive_full_rerender(qapp) -> None:
     tree.set_stashes([map_stash])
 
     parent_node = tree._stash_nodes["m1"]
-    assert parent_node.child(0).text(0) == "🗂 Tier 6 (8 Items)"
+    assert parent_node.child(0).text(_COL_NAME) == "🗂 Tier 6"
+    assert parent_node.child(0).text(_COL_COUNT) == "8"
     assert "c1" in tree._stash_nodes
+
+
+def test_mark_loaded_propagates_count_to_ancestor_group(qapp) -> None:
+    """Lädt man ein Fach neu und die echte Item-Anzahl weicht vom API-Hinweis
+    ab, muss die Gruppensumme ("Tier 6") mitziehen."""
+    data = [{"id": "m1", "name": "Maps", "type": "MapStash", "metadata": {}}]
+    tree = StashTree()
+    tree.set_stashes([StashTab.model_validate(d) for d in data])
+    tree.set_children("m1", [
+        _map_leaf("c1", "tier6", "Map (Tier 6)", index=0, items=8),
+        _map_leaf("c2", "tier6", "Map (Tier 6)", index=1, items=3),
+    ])
+    group = tree._stash_nodes["c1"].parent()
+    assert group.text(_COL_COUNT) == "11"
+
+    tree.mark_loaded("c1", datetime.now(timezone.utc).isoformat(), count=20)  # echte Zahl weicht ab
+
+    assert tree._stash_nodes["c1"].text(_COL_COUNT) == "20"
+    assert group.text(_COL_COUNT) == "23"  # 20 + 3, nicht mehr 8 + 3
 
 
 def test_set_children_replaces_previous_children_and_index_entries(qapp) -> None:
@@ -248,7 +292,7 @@ def test_set_children_replaces_previous_children_and_index_entries(qapp) -> None
 
     assert "old" not in tree._stash_nodes  # kein toter Eintrag im Index
     assert tree._stash_nodes["m1"].childCount() == 1
-    assert tree._stash_nodes["new"].text(0) == "New"
+    assert tree._stash_nodes["new"].text(_COL_NAME) == "New"
 
 
 def test_tab_colour_is_icon_not_text_colour(qapp) -> None:
@@ -260,5 +304,5 @@ def test_tab_colour_is_icon_not_text_colour(qapp) -> None:
     tree.set_stashes(stashes)
     node = tree._stash_nodes["root1"]
     # NoBrush == nie per setForeground() überschrieben, Text bleibt Theme-Farbe
-    assert node.foreground(0).style() == Qt.BrushStyle.NoBrush
-    assert not node.icon(0).isNull()
+    assert node.foreground(_COL_NAME).style() == Qt.BrushStyle.NoBrush
+    assert not node.icon(_COL_NAME).isNull()
