@@ -11,10 +11,10 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timedelta, timezone
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import QSettings, Qt, QTimer
 from PySide6.QtGui import QAction, QPixmap
 from PySide6.QtWidgets import (QComboBox, QFileDialog, QLabel, QLineEdit,
-                               QMainWindow, QMessageBox, QProgressBar,
+                               QMainWindow, QMenu, QMessageBox, QProgressBar,
                                QProgressDialog, QSizePolicy, QSplitter,
                                QTableView, QToolBar, QVBoxLayout, QWidget)
 
@@ -30,7 +30,8 @@ from poe_view.services.api_worker import (ApiWorker, BootstrapJob,
 from poe_view.services.csv_export import export_items, sanitize_filename
 from poe_view.ui.character_list import CharacterList
 from poe_view.ui.item_detail import ItemDetail
-from poe_view.ui.item_table import ItemFilterProxy, ItemTableModel
+from poe_view.ui.item_table import (COLUMNS, MODS_COL, TAB_COL,
+                                    ItemFilterProxy, ItemTableModel)
 from poe_view.ui.rate_limit_dashboard import RateLimitDashboard
 from poe_view.ui.raw_data_viewer import RawDataViewer
 from poe_view.ui.stash_tree import StashTree
@@ -191,7 +192,14 @@ class MainWindow(QMainWindow):
         self.table.verticalHeader().hide()
         self.table.setColumnWidth(0, 36)
         self.table.setColumnWidth(1, 110)
+        self.table.setColumnWidth(MODS_COL, 320)
         self.table.selectionModel().currentRowChanged.connect(self._on_row_selected)
+        # Spalten per Rechtsklick auf den Header an-/abwählbar (Nutzer-Feedback);
+        # die Wahl überlebt den Neustart (ui-settings.ini im APP_DATA_DIR).
+        table_header = self.table.horizontalHeader()
+        table_header.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        table_header.customContextMenuRequested.connect(self._on_table_header_menu)
+        self._apply_hidden_columns(self._load_hidden_columns())
 
         self.detail = ItemDetail()
         right = QWidget()
@@ -229,6 +237,49 @@ class MainWindow(QMainWindow):
         self._auto_refresh_label = QLabel("")
         self.statusBar().addPermanentWidget(self._auto_refresh_label)
         self.statusBar().addPermanentWidget(QLabel(config.DISCLAIMER))
+
+    # --- Spalten-Sichtbarkeit der Item-Tabelle (Nutzer-Feedback) --------- #
+
+    # "Typ" ist standardmäßig aus: die Rarity steckt bereits in der
+    # Namensfarbe. Die Tab-Spalte wird automatisch verwaltet (aus bei
+    # Einzelfach, an bei Aggregat) und ist deshalb NICHT im Menü.
+    DEFAULT_HIDDEN_COLUMNS = frozenset({"Typ"})
+
+    def _settings(self) -> QSettings:
+        """INI-Datei statt Registry — konsistent zum Datei-Cache-Ansatz und
+        1:1 nach LabVIEW portierbar (Config-File)."""
+        return QSettings(str(config.APP_DATA_DIR / "ui-settings.ini"),
+                         QSettings.Format.IniFormat)
+
+    def _load_hidden_columns(self) -> set[str]:
+        stored = self._settings().value("item_table/hidden_columns")
+        if stored is None:
+            return set(self.DEFAULT_HIDDEN_COLUMNS)
+        return {name for name in str(stored).split(";") if name}
+
+    def _apply_hidden_columns(self, hidden: set[str]) -> None:
+        for i, name in enumerate(COLUMNS):
+            if i == TAB_COL:
+                continue  # automatisch verwaltet (Einzelfach vs. Aggregat)
+            self.table.setColumnHidden(i, name in hidden)
+
+    def _toggle_column(self, name: str) -> None:
+        hidden = self._load_hidden_columns()
+        hidden.symmetric_difference_update({name})
+        self._apply_hidden_columns(hidden)
+        self._settings().setValue("item_table/hidden_columns", ";".join(sorted(hidden)))
+
+    def _on_table_header_menu(self, pos) -> None:
+        menu = QMenu(self.table)
+        hidden = self._load_hidden_columns()
+        for i, name in enumerate(COLUMNS):
+            if i == TAB_COL:
+                continue
+            action = menu.addAction(name)
+            action.setCheckable(True)
+            action.setChecked(name not in hidden)
+            action.triggered.connect(lambda _=False, n=name: self._toggle_column(n))
+        menu.exec(self.table.horizontalHeader().mapToGlobal(pos))
 
     def _connect_worker(self) -> None:
         w = self.worker
@@ -389,11 +440,10 @@ class MainWindow(QMainWindow):
         stash = self._find_stash(self._stash_trees.get(self._current_league, []), stash_id)
         if stash is not None and stash.type in self.SPECIAL_TAB_TYPES and stash.parent is None:
             if stash.children:
-                # Struktur bereits bekannt — Items hängen an den Kind-Knoten.
-                self._status_msg.setText(
-                    f"{name}: Spezial-Tab mit {len(stash.children)} Unter-Tabs — "
-                    "Items je Unter-Tab per Klick laden")
-                self._update_raw_viewer(stash_id, name)
+                # Struktur bekannt: alle bereits geladenen Unter-Fächer
+                # aggregiert anzeigen — mit Fach-Namen ("Map (Tier 1)") in
+                # der Tab-Spalte (Nutzer-Feedback).
+                self._show_special_parent_aggregate(stash, name)
                 return
             # Spezial-Tab ohne bekannte Kinder: IMMER fetchen, den Item-Cache
             # bewusst ignorieren — ein alter "0 Items"-Eintrag (von vor dem
@@ -496,9 +546,34 @@ class MainWindow(QMainWindow):
 
     def _show_items(self, stash_id: str, items: list[Item], name: str) -> None:
         self._current_tab_name = name
+        self.table.setColumnHidden(TAB_COL, True)  # redundant bei Einzelfach
         self.table_model.set_items(items, [name] * len(items))
         self._status_msg.setText(f"{name}: {len(items)} Items")
         self._update_raw_viewer(stash_id, name)
+
+    def _show_special_parent_aggregate(self, stash: StashTab, name: str) -> None:
+        """Klick auf einen Spezial-Tab-Elternknoten (Map/Unique): Items ALLER
+        bereits geladenen Unter-Fächer zusammen anzeigen; die Tab-Spalte trägt
+        den Fach-Namen ("Map (Tier 1)", Nutzer-Feedback)."""
+        self._showing_aggregate = True
+        self._current_tab_name = name
+        league_items = self._items.get(self._current_league, {})
+        items: list[Item] = []
+        sources: list[str] = []
+        loaded = 0
+        for child in stash.children:
+            cached = league_items.get(child.id)
+            if cached is None:
+                continue
+            loaded += 1
+            items.extend(cached)
+            sources.extend([child.display_name] * len(cached))
+        self.table.setColumnHidden(TAB_COL, False)  # hier trägt sie die Info
+        self.table_model.set_items(items, sources)
+        self._status_msg.setText(
+            f"{name}: {len(items)} Items aus {loaded} von {len(stash.children)} "
+            "geladenen Unter-Fächern")
+        self._update_raw_viewer(stash.id, name)
 
     # --- Alle Tabs laden (Bulk) ----------------------------------------- #
 
@@ -550,7 +625,8 @@ class MainWindow(QMainWindow):
             if cached is None:
                 continue
             items.extend(cached)
-            sources.extend([stash.name] * len(cached))
+            sources.extend([stash.display_name] * len(cached))
+        self.table.setColumnHidden(TAB_COL, False)  # Aggregat: Herkunft zeigen
         self.table_model.set_items(items, sources)
         self._status_msg.setText(f"Alle Tabs: {len(items)} Items gesamt")
 

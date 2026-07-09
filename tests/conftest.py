@@ -15,7 +15,11 @@ def qapp():
 
 @pytest.fixture(autouse=True)
 def _isolated_local_state(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
-    """Isoliert MainWindow() von echtem OAuth-Token (FALLSTRICKE #6) und echter data-cache.json."""
+    """Isoliert MainWindow() von echtem lokalem State: OAuth-Token (FALLSTRICKE #6),
+    data-cache.json und ui-settings.ini (Spalten-Sichtbarkeit)."""
     monkeypatch.setattr("poe_view.services.token_store.load_token", lambda: None)
     monkeypatch.setattr("poe_view.services.data_cache._CACHE_FILE",
                         tmp_path / "unused-data-cache.json")
+    # _settings() baut den Pfad bei jedem Aufruf aus config.APP_DATA_DIR —
+    # deshalb reicht das Patchen des Modul-Globals hier aus.
+    monkeypatch.setattr("poe_view.config.APP_DATA_DIR", tmp_path / "appdata")

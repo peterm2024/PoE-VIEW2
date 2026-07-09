@@ -558,7 +558,9 @@ def test_special_tab_click_bypasses_stale_zero_item_cache(qapp, monkeypatch) -> 
     win.worker.wait(5000)
 
 
-def test_special_tab_click_with_known_children_shows_status_without_fetch(qapp, monkeypatch) -> None:
+def test_special_tab_click_with_known_children_aggregates_without_fetch(qapp, monkeypatch) -> None:
+    """Struktur bekannt → kein API-Call; die Anzeige aggregiert die (hier: null)
+    geladenen Unter-Fächer (Details: test_special_parent_click_aggregates_…)."""
     win = MainWindow()
     win._current_league = "Standard"
     map_stash = StashTab.model_validate({"id": "m1", "name": "M", "type": "MapStash",
@@ -572,7 +574,7 @@ def test_special_tab_click_with_known_children_shows_status_without_fetch(qapp, 
     win._on_stash_selected("m1", "M")
 
     assert submitted == []
-    assert "1 Unter-Tabs" in win._status_msg.text()
+    assert "0 von 1" in win._status_msg.text()
 
     win.worker.stop()
     win.worker.wait(5000)
@@ -612,6 +614,89 @@ def test_load_all_includes_special_tabs_despite_cache_entry(qapp, monkeypatch) -
     # Normaler Tab t1 bleibt Cache-Treffer, der Spezial-Tab m1 wird trotzdem geholt
     assert len(submitted) == 1
     assert [s.id for s in submitted[0].stashes] == ["m1"]
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+# --- Item-Spalten: Sichtbarkeit + kontextabhängige Tab-Spalte ------------- #
+
+def test_typ_column_hidden_by_default_mods_visible(qapp) -> None:
+    """Nutzer-Feedback: Typ default aus (Rarity steckt in der Namensfarbe),
+    Mods-Spalte (Map-Modifikatoren) sichtbar."""
+    from poe_view.ui.item_table import COLUMNS
+    win = MainWindow()
+    assert win.table.isColumnHidden(COLUMNS.index("Typ"))
+    assert not win.table.isColumnHidden(COLUMNS.index("Mods"))
+    assert not win.table.isColumnHidden(COLUMNS.index("Name"))
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_column_toggle_persists_across_restart(qapp) -> None:
+    from poe_view.ui.item_table import COLUMNS
+    win = MainWindow()
+    win._toggle_column("Typ")   # einblenden
+    win._toggle_column("Mods")  # ausblenden
+    assert not win.table.isColumnHidden(COLUMNS.index("Typ"))
+    assert win.table.isColumnHidden(COLUMNS.index("Mods"))
+    win.worker.stop()
+    win.worker.wait(5000)
+
+    win2 = MainWindow()  # "Neustart": liest ui-settings.ini (im Test: tmp_path)
+    assert not win2.table.isColumnHidden(COLUMNS.index("Typ"))
+    assert win2.table.isColumnHidden(COLUMNS.index("Mods"))
+
+    win2.worker.stop()
+    win2.worker.wait(5000)
+
+
+def test_tab_column_auto_hidden_for_single_tab_shown_for_aggregate(qapp) -> None:
+    """Nutzer-Feedback: Im Einzelfach ist die Herkunft redundant, im Aggregat
+    ("Map"-Elternknoten, "Alle Tabs") ist sie die entscheidende Info."""
+    from poe_view.ui.item_table import TAB_COL
+    win = MainWindow()
+    win._current_league = "Standard"
+
+    win._show_items("t1", [], "Currency 1")
+    assert win.table.isColumnHidden(TAB_COL)
+
+    win._leaf_stashes = []
+    win._show_aggregate()
+    assert not win.table.isColumnHidden(TAB_COL)
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_special_parent_click_aggregates_loaded_children(qapp) -> None:
+    """Klick auf den "Map"-Elternknoten zeigt die Items aller GELADENEN
+    Unter-Fächer, Tab-Spalte trägt den Fach-Namen ("Map (Tier 6)")."""
+    from poe_view.ui.item_table import TAB_COL
+    win = MainWindow()
+    win._current_league = "Standard"
+    map_stash = StashTab.model_validate({"id": "m1", "name": "M", "type": "MapStash",
+                                          "metadata": {}})
+    c1 = StashTab.model_validate({"id": "c1", "name": "1", "parent": "m1", "type": "MapStash",
+                                  "metadata": {"map": {"section": "tier6",
+                                                       "name": "Map (Tier 6)", "index": 0}}})
+    c2 = StashTab.model_validate({"id": "c2", "name": "1", "parent": "m1", "type": "MapStash",
+                                  "metadata": {"map": {"section": "tier9",
+                                                       "name": "Map (Tier 9)", "index": 0}}})
+    map_stash.children = [c1, c2]
+    win._stash_trees["Standard"] = [map_stash]
+    # nur c1 ist geladen, c2 nicht
+    win._items["Standard"] = {"c1": [Item.model_validate({"typeLine": "Beach Map",
+                                                          "frameType": 0})]}
+
+    win._on_stash_selected("m1", "M")
+
+    assert win.table_model.rowCount() == 1
+    assert win.table_model.source_at(0) == "Map (Tier 6)"
+    assert not win.table.isColumnHidden(TAB_COL)
+    assert win._showing_aggregate  # einzelne Kind-Loads kapern die Ansicht nicht
+    assert "1 Items aus 1 von 2" in win._status_msg.text()
 
     win.worker.stop()
     win.worker.wait(5000)

@@ -8,9 +8,15 @@ Icons werden asynchron nachgeladen: das Model meldet fehlende URLs über den
 fertigen Pixmaps via ``set_icon`` zurück.
 
 Die Tab-Spalte trägt den Namen des Herkunfts-Tabs pro Item. Bei Auswahl
-eines einzelnen Tabs ist sie für alle Zeilen identisch; sie wird erst beim
-"Alle Tabs laden" (aggregierte Ansicht, siehe main_window._show_aggregate)
-wirklich nützlich, um Items wieder ihrem Tab zuordnen zu können.
+eines einzelnen Tabs ist sie redundant und wird vom MainWindow automatisch
+ausgeblendet; in Aggregat-Ansichten ("Alle Tabs laden", Klick auf einen
+Spezial-Tab-Elternknoten) wird sie automatisch eingeblendet — dort ordnet
+sie Items ihrem Fach zu ("Map (Tier 1)", Nutzer-Feedback).
+
+Die Mods-Spalte zeigt die explicitMods (v. a. Map-Modifikatoren,
+Nutzer-Feedback); der Live-Filter durchsucht sie mit. Alle übrigen Spalten
+sind per Rechtsklick auf den Header an-/abwählbar (MainWindow), "Typ" ist
+standardmäßig aus — die Rarity steckt bereits in der Namensfarbe.
 """
 
 from __future__ import annotations
@@ -24,11 +30,12 @@ from PySide6.QtGui import QBrush, QColor, QPixmap
 from poe_view.api.models import Item, gem_level, gem_quality
 from poe_view.ui.theme import RARITY_COLORS
 
-COLUMNS = ("", "Tab", "Name", "Typ", "Level", "Qual.", "Stack", "iLvl")
-_ICON_COL = 0
-_TAB_COL = 1
+COLUMNS = ("Icon", "Tab", "Name", "Typ", "Level", "Qual.", "Stack", "iLvl", "Mods")
+ICON_COL = 0
+TAB_COL = 1
 _NAME_COL = 2
 _NUMERIC_FROM_COL = 4  # Level, Qual., Stack, iLvl
+MODS_COL = 8           # Mods (v. a. Maps) — linksbündig, nicht numerisch
 
 
 class ItemTableModel(QAbstractTableModel):
@@ -62,7 +69,8 @@ class ItemTableModel(QAbstractTableModel):
         return (item.display_name, item.rarity, gem_level(item) or "–",
                 gem_quality(item) or "–",
                 str(item.stackSize) if item.stackSize else "–",
-                str(item.ilvl) if item.ilvl else "–")
+                str(item.ilvl) if item.ilvl else "–",
+                " · ".join(item.explicitMods))  # v. a. Map-Modifikatoren
 
     def item_at(self, row: int) -> Item | None:
         return self._items[row] if 0 <= row < len(self._items) else None
@@ -74,7 +82,7 @@ class ItemTableModel(QAbstractTableModel):
         self._pixmaps[url] = pixmap
         for row, item in enumerate(self._items):
             if item.icon == url:
-                idx = self.index(row, _ICON_COL)
+                idx = self.index(row, ICON_COL)
                 self.dataChanged.emit(idx, idx, [Qt.ItemDataRole.DecorationRole])
 
     def pixmap_for(self, item: Item) -> QPixmap | None:
@@ -90,18 +98,21 @@ class ItemTableModel(QAbstractTableModel):
 
     def headerData(self, section, orientation, role):  # noqa: N802
         if role == Qt.ItemDataRole.DisplayRole and orientation == Qt.Orientation.Horizontal:
-            return COLUMNS[section]
+            return "" if section == ICON_COL else COLUMNS[section]
         return None
 
     def data(self, index: QModelIndex, role):
         item = self._items[index.row()]
         col = index.column()
         if role == Qt.ItemDataRole.DisplayRole:
-            if col == _TAB_COL:
+            if col == TAB_COL:
                 return self._sources[index.row()] or "–"
-            if col > _TAB_COL:
+            if col > TAB_COL:
                 return self._rows[index.row()][col - 2]
-        if role == Qt.ItemDataRole.DecorationRole and col == _ICON_COL:
+        if role == Qt.ItemDataRole.ToolTipRole and col == MODS_COL:
+            # Mods können lang werden — Tooltip zeigt sie zeilenweise komplett.
+            return "\n".join(item.explicitMods) or None
+        if role == Qt.ItemDataRole.DecorationRole and col == ICON_COL:
             pm = self._pixmaps.get(item.icon)
             if pm:
                 return pm.scaled(24, 24, Qt.AspectRatioMode.KeepAspectRatio,
@@ -110,7 +121,7 @@ class ItemTableModel(QAbstractTableModel):
             colour = RARITY_COLORS.get(item.frameType)
             if colour:
                 return QBrush(QColor(colour))
-        if role == Qt.ItemDataRole.TextAlignmentRole and col >= _NUMERIC_FROM_COL:
+        if role == Qt.ItemDataRole.TextAlignmentRole and _NUMERIC_FROM_COL <= col < MODS_COL:
             return int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         return None
 
@@ -131,5 +142,6 @@ class ItemFilterProxy(QSortFilterProxyModel):
         if item is None:
             return True
         haystack = (f"{item.display_name} {item.typeLine} {item.baseType} "
-                   f"{item.rarity} {model.source_at(row)}")
+                   f"{item.rarity} {model.source_at(row)} "
+                   f"{' '.join(item.explicitMods)}")  # Maps nach Mods filtern
         return pattern.lower() in haystack.lower()

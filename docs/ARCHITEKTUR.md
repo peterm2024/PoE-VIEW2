@@ -490,6 +490,13 @@ Die Items eines Unter-Tabs kommen ausschließlich vom
    dadurch automatisch auch die Unter-Tabs ab (via `stash.parent`).
 4. Klick auf ein Kind → `FetchStashItemsJob(..., parent_id=...)` →
    Substash-Endpunkt → Items wie gewohnt.
+5. Klick auf den ELTERN-Knoten (Struktur bekannt) →
+   `MainWindow._show_special_parent_aggregate()`: zeigt die Items ALLER
+   bereits geladenen Unter-Fächer zusammen, mit dem Fach-Namen
+   ("Map (Tier 1)") in der automatisch eingeblendeten Tab-Spalte
+   (Nutzer-Feedback); Statuszeile nennt "X Items aus N von M geladenen
+   Unter-Fächern". Kein API-Call — was fehlt, holt der Auto-Refresher
+   oder ein Klick aufs jeweilige Fach.
 
 **Merge-Pflicht beim Listen-Refresh:** Die Liga-LISTE kennt die Kinder von
 Spezial-Tabs NICHT. Ohne Gegenmaßnahme würde jeder Listen-Refresh (Liga-
@@ -573,7 +580,7 @@ gemeinsamen Baum, die textliche Beschreibung unten ist aktuell.)
 |---|---|---|
 | Navigation: Charaktere | `CharacterList` (`QListWidget`) | Bewusst KEIN Tree — Charaktere haben keine Unterstruktur (Nutzer-Feedback: spart eine Ebene samt Auf-/Zuklapp-Klick). Flach, absteigend nach Level, liga-gefiltert (`MainWindow._apply_character_league_filter`, siehe §5.1). Höhe begrenzt (`setMaximumHeight`), damit der Stash-Baum den meisten Platz bekommt. |
 | Navigation: Stash | `StashTree` (`QTreeWidget`), 3 Spalten, **Header sichtbar** | Kein umschließender "Stash"-Wurzelknoten mehr — die Tabs SIND die Top-Level-Einträge (spart eine weitere Ebene). Ordner rekursiv (children), Map-Fächer zusätzlich nach Sektion gruppiert (§4.10). Namensspalte per `QHeaderView.ResizeMode.Interactive` (NICHT `Stretch` — Stretch-Spalten lassen sich in Qt nicht per Maus verbreitern, das war ein echter Bug) mit großzügiger Startbreite, per Header-Rand manuell nachziehbar. Tab-Farbe aus API als kleines Icon-Quadrat VOR dem Namen, bewusst NICHT als Textfarbe (manche API-Farben sind auf dunklem Grund sonst unlesbar). Klick auf Tab → `FetchStashItems`-Job, sofern nicht bereits im Cache. Spalte 2 (**#**) zeigt die Item-Anzahl (Nutzer-Feedback: eigene Spalte statt "(N Items)"-Text im Namen; Details §4.7.1). Spalte 3 zeigt GENAU EINEN der beiden sich gegenseitig ausschließenden Zustände (§4.7.1): **⬇**-Text, solange nie geladen, oder ein **⟳-Button mit Alters-Beschriftung** ("⟳ vor 3d") sobald mindestens einmal geladen — Klick lädt genau diesen Tab bewusst AM Cache vorbei neu (`stash_refresh_requested`-Signal). Rechtsklick öffnet ein Kontextmenü mit "🔍 Rohdaten anzeigen" (`raw_data_requested`-Signal, §4.9) — öffnet/aktualisiert den nicht-modalen Rohdaten-Mini-Viewer. |
-| Item-Tabelle rechts oben | `QTableView` + `QSortFilterProxyModel` | Spalten: Icon, Tab, Name, Typ, Level, Quality, Stack, iLvl. Klick auf Spaltenkopf sortiert; Suchfeld filtert live über Name+Typ+Tab (kein API-Call — gefiltert wird lokal). |
+| Item-Tabelle rechts oben | `QTableView` + `QSortFilterProxyModel` | Spalten: Icon, Tab, Name, Typ, Level, Quality, Stack, iLvl, **Mods** (explicitMods, v. a. Map-Modifikatoren; Tooltip zeilenweise). Klick auf Spaltenkopf sortiert; Suchfeld filtert live über Name+Typ+Tab+Mods (kein API-Call — gefiltert wird lokal). **Spalten per Rechtsklick auf den Header an-/abwählbar** (Nutzer-Feedback), Wahl persistiert in `%LOCALAPPDATA%/PoE-VIEW2/ui-settings.ini` (INI statt Registry — Datei-Ansatz, LabVIEW-portierbar); "Typ" ist default AUS (Rarity steckt bereits in der Namensfarbe). Die **Tab-Spalte wird automatisch verwaltet** und ist nicht im Menü: AUS bei Einzelfach-Auswahl (redundant), AN in Aggregat-Ansichten ("Alle Tabs", Klick auf Spezial-Tab-Elternknoten) — dort trägt sie die Fach-Herkunft ("Map (Tier 1)"). |
 | Item-Detail rechts unten | eigenes Widget | Großes Icon, Name in Rarity-Farbe (frameType), Properties, Mods. Aktualisiert bei Zeilenauswahl. |
 | Rate-Limit-Dashboard | `QProgressBar` pro Regel + Status-LED + Countdown | Wird ausschließlich über das Signal `rate_limit_changed` gefüttert. Farbe: grün < 60 %, gelb < 90 %, rot ab 90 %/Wartephase. Countdown zeigt verbleibende Wartezeit. *Intention: Der User soll immer sehen, WARUM die App gerade wartet.* |
 | Statusbar | `QStatusBar` + `QProgressBar` (busy) | Login-Status, laufender Job, permanenter GGG-Disclaimer. Die `QProgressBar` läuft mit `setRange(0, 0)` im "busy"-Modus (Qt animiert das eingebaut, kein eigener Timer nötig). Sichtbarkeit hängt am eigenen `busy_changed`-Signal des Workers (`True` rund um jeden Job), NICHT am `status`-Text — siehe §4.5.1 zur Begründung. |
