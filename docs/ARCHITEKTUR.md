@@ -133,10 +133,13 @@ PoE-VIEW2/
 │   ├── services/
 │   │   ├── api_worker.py       # QThread + Job-Queue (≙ QMH-Loop)
 │   │   ├── icon_cache.py       # Icon-Download + Datei-Cache
+│   │   ├── data_cache.py       # Charaktere/Stash/Items überleben einen Neustart
+│   │   ├── csv_export.py       # Item-Export als CSV
 │   │   └── token_store.py      # keyring-Wrapper
 │   └── ui/
 │       ├── main_window.py
-│       ├── stash_tree.py
+│       ├── character_list.py   # flache Charakterliste (kein Tree)
+│       ├── stash_tree.py       # Stash-Baum (Tabs = Top-Level-Items, kein Wrapper)
 │       ├── item_table.py       # TableModel + SortFilterProxy
 │       ├── item_detail.py
 │       └── rate_limit_dashboard.py
@@ -293,6 +296,26 @@ Ein `QThread` mit Job-Queue — das Python-Pendant zum LabVIEW-QMH:
 - Icon-Downloads bekommen **niedrige Priorität** (eigene Queue oder
   Prioritäts-Queue): Erst Daten, dann Bilder.
 
+#### 4.5.1 Status-Text vs. Busy-Zustand — zwei getrennte Signale
+
+`status(str)` (Verlaufstext, z. B. "Lade Items: Currency 1 …") und
+`busy_changed(bool)` (steuert nur den Spinner) sind bewusst getrennt.
+
+*Ursprünglicher Bug:* `_dispatch()` emittierte früher am Ende JEDES Jobs
+unbedingt `status.emit("Bereit")`. Da Qt Cross-Thread-Signale FIFO in der
+Reihenfolge des Absendens auf dem Main-Thread verarbeitet, kam dieses
+"Bereit" nach `stash_items_loaded` immer als Letztes an und überschrieb die
+gerade erst gesetzte, spezifischere Meldung ("Currency 1: 45 Items") sofort
+wieder — sichtbar war es nur, wenn der Tab aus dem Netz kam (bei einem
+Cache-Treffer gab es kein nachfolgendes "Bereit", das den Text stiehlt).
+
+*Lösung:* `run()` emittiert `busy_changed(True/False)` rund um JEDEN Job
+(`try/finally`), unabhängig vom Inhalt. `status.emit("Bereit")` gibt es nur
+noch in den Cases, deren Ergebnis-Signal in der UI KEINEN eigenen
+Abschlusstext setzt (Ligen, Charaktere, Stash-Liste). Cases mit eigenem
+Abschlusstext (`FetchStashItemsJob`, `FetchAllItemsJob`) emittieren bewusst
+kein "Bereit".
+
 ### 4.6 Icon-Cache (`services/icon_cache.py`)
 
 - Cache-Ordner: `%LOCALAPPDATA%/PoE-VIEW2/icon-cache/`
@@ -300,12 +323,43 @@ Ein `QThread` mit Job-Queue — das Python-Pendant zum LabVIEW-QMH:
 - Ablauf: Cache-Hit → sofort `QPixmap`; Miss → `FetchIcon`-Job → Signal → Anzeige.
 - Icon-CDN-Downloads laufen ebenfalls über den Rate-Limiter (eigene, milde Policy).
 
+### 4.7 Persistenter Daten-Cache (`services/data_cache.py`)
+
+Charaktere, Stash-Struktur und bereits geladene Items überleben einen
+Neustart — eine JSON-Datei (`%LOCALAPPDATA%/PoE-VIEW2/data-cache.json`)
+statt einer Datenbank: Der Datenumfang rechtfertigt keine Datenbank, und
+JSON ist 1:1 nach LabVIEW portierbar ("Flatten/Unflatten to JSON").
+
+- **Struktur:** `stash_trees: {Liga: [StashTab, …]}` (Baum OHNE Items — die
+  Stash-LISTE der API liefert nie Items, die kommen ausschließlich vom
+  Einzel-Tab-Endpunkt) getrennt von `items_by_league: {Liga: {stash_id:
+  [Item, …]}}`, plus `characters` (ligenübergreifend) und `account_name`.
+- **In-Memory-Pendant:** `MainWindow` hält dieselbe Form bereits zur
+  Laufzeit (`self._stash_trees`, `self._items`) — der Datei-Cache ist
+  einfach ein Snapshot davon. Ein Liga-Wechsel prüft zuerst, ob die Liga
+  schon bekannt ist (aus dieser Session ODER vom letzten Programmstart
+  wiederhergestellt) und zeigt sie dann **sofort** an, während im
+  Hintergrund trotzdem ein `FetchStashListJob` zur Bestätigung/Aktualisierung
+  läuft (`_activate_stash_tree`) — der Aufrufer kann Live- und Cache-Daten
+  nicht unterscheiden, dieselbe Rendering-Logik bedient beide.
+- **Schreiben:** bei jeder relevanten Änderung (`_on_stash_list`,
+  `_on_stash_items`, `_on_characters`) wird der volle Snapshot synchron neu
+  geschrieben — bewusst keine Debounce-/Thread-Komplexität für diesen
+  Datenumfang (siehe FALLSTRICKE_UND_WORKAROUNDS.md #9 falls das je zum
+  Performance-Problem wird).
+- **"Aktualisieren" räumt den Item-Cache NICHT mehr leer:** Seit es
+  Refresh-Buttons je Tab gibt, ist ein globales Verwerfen aller Items
+  unnötig — der globale Refresh aktualisiert nur noch Stash-Liste und
+  Charaktere.
+
 ---
 
 ## 5. UI-Konzept (Oberflächenvorschlag)
 
-Ein Hauptfenster, drei Bereiche + Dashboard. (Interaktives HTML-Mockup: siehe
-Artifact-Link im Projektverlauf / `docs/ui-mockup.html`.)
+Ein Hauptfenster: Navigation links (Charaktere + Stash getrennt), Items
+rechts, Dashboard unten. (Interaktives HTML-Mockup: siehe Artifact-Link im
+Projektverlauf / `docs/ui-mockup.html` — zeigt noch den ursprünglichen
+gemeinsamen Baum, die textliche Beschreibung unten ist aktuell.)
 
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
@@ -315,20 +369,20 @@ Artifact-Link im Projektverlauf / `docs/ui-mockup.html`.)
 ├────────────────────────────────────────────────────────────────────────┤
 │ [🔑 Login] [⟳ Aktualisieren]  Liga: [Settlers ▾]   🔍 [Item-Filter…  ] │
 ├──────────────────────┬─────────────────────────────────────────────────┤
-│ NAVIGATION           │ ITEMS — "Currency 1"          (142 Items)       │
-│                      ├──────┬────────────┬─────────┬──────┬──────┬─────┤
-│ 👤 Charaktere        │ Icon │ Name       │ Typ     │ Lvl  │ Qual │ Stk │
-│  ├ MeinChar (91)     ├──────┼────────────┼─────────┼──────┼──────┼─────┤
-│  └ Zweitchar (67)    │ [ø]  │ Divine Orb │ Currency│  –   │  –   │ 12  │
-│                      │ [◆]  │ Awakened…  │ Gem     │  5   │ 20%  │  1  │
-│ 🗄 Stash (Ordner-Baum)│ [▣]  │ Chaos Orb  │ Currency│  –   │  –   │ 843 │
-│  ├ 📁 Currency        │ …    │            │         │      │      │     │
-│  │  ├ Currency 1  ◀──│      │ (Spalten sortierbar, Filter oben)        │
-│  │  └ Currency 2     ├──────┴────────────┴─────────┴──────┴──────┴─────┤
-│  ├ 📁 Gems            │ ITEM-DETAIL                                     │
-│  │  └ Leveling       │ ┌────┐  Awakened Multistrike Support            │
-│  ├ Maps              │ │IMG │  Gem · Level 5 · Quality +20%            │
-│  └ Uniques           │ └────┘  Requires Level 72 · corrupted           │
+│ Charaktere            │ ITEMS — "Currency 1"          (142 Items)       │
+│  MeinChar (91)        ├──────┬────────────┬─────────┬──────┬──────┬─────┤
+│  Zweitchar (67)       │ Icon │ Name       │ Typ     │ Lvl  │ Qual │ Stk │
+│ Stash            ⬇ ⟳  ├──────┼────────────┼─────────┼──────┼──────┼─────┤
+│  ▪ Currency 1         │ [ø]  │ Divine Orb │ Currency│  –   │  –   │ 12  │
+│  ▪ Currency 2      ⬇ ⟳│ [◆]  │ Awakened…  │ Gem     │  5   │ 20%  │  1  │
+│  📁 Gems              │ [▣]  │ Chaos Orb  │ Currency│  –   │  –   │ 843 │
+│    ▪ Leveling      ⬇ ⟳│ …    │            │         │      │      │     │
+│  📁 Maps              │      │ (Spalten sortierbar, Filter oben)        │
+│  ▪ Uniques         ⬇ ⟳├──────┴────────────┴─────────┴──────┴──────┴─────┤
+│                       │ ITEM-DETAIL                                     │
+│                       │ ┌────┐  Awakened Multistrike Support            │
+│                       │ │IMG │  Gem · Level 5 · Quality +20%            │
+│                       │ └────┘  Requires Level 72 · corrupted           │
 ├──────────────────────┴─────────────────────────────────────────────────┤
 │ RATE-LIMIT   Policy: stash-request-limit                                │
 │ [████████░░░░░░░] 8/15 (15 s)   [██░░░░░░░░░░░░░] 12/90 (300 s)  ● OK  │
@@ -342,11 +396,12 @@ Artifact-Link im Projektverlauf / `docs/ui-mockup.html`.)
 
 | Bereich | Widget | Verhalten |
 |---|---|---|
-| Navigation links | `QTreeWidget`, 3 Spalten, **Header sichtbar** | Zwei Wurzelknoten: *Charaktere* und *Stash*, beide **flach** (kein Liga-Level). Stash-Ordner rekursiv (children). Namensspalte per `QHeaderView.ResizeMode.Stretch` — nimmt den restlichen Platz ein und lässt sich per Header-Rand manuell nachziehen (behebt abgeschnittene Namen wie "KRN…"). Tab-Farbe aus API als kleines Icon-Quadrat VOR dem Namen, bewusst NICHT als Textfarbe (manche API-Farben sind auf dunklem Grund sonst unlesbar). Klick auf Tab/Char → `FetchStashItems`/`FetchCharacter`-Job. Bereits geladene Tabs kommen aus dem Speicher-Cache (kein erneuter API-Call, außer via "Aktualisieren"). Spalte 2: **⬇**-Marker, solange der Tab noch nicht geladen ist (`StashTree.mark_loaded`). Spalte 3: **⟳-Button** je Tab, lädt genau diesen Tab bewusst AM Cache vorbei neu (`stash_refresh_requested`-Signal). |
+| Navigation: Charaktere | `CharacterList` (`QListWidget`) | Bewusst KEIN Tree — Charaktere haben keine Unterstruktur (Nutzer-Feedback: spart eine Ebene samt Auf-/Zuklapp-Klick). Flach, absteigend nach Level, liga-gefiltert (`MainWindow._apply_character_league_filter`, siehe §5.1). Höhe begrenzt (`setMaximumHeight`), damit der Stash-Baum den meisten Platz bekommt. |
+| Navigation: Stash | `StashTree` (`QTreeWidget`), 3 Spalten, **Header sichtbar** | Kein umschließender "Stash"-Wurzelknoten mehr — die Tabs SIND die Top-Level-Einträge (spart eine weitere Ebene). Ordner rekursiv (children). Namensspalte per `QHeaderView.ResizeMode.Interactive` (NICHT `Stretch` — Stretch-Spalten lassen sich in Qt nicht per Maus verbreitern, das war ein echter Bug) mit großzügiger Startbreite, per Header-Rand manuell nachziehbar. Tab-Farbe aus API als kleines Icon-Quadrat VOR dem Namen, bewusst NICHT als Textfarbe (manche API-Farben sind auf dunklem Grund sonst unlesbar). Klick auf Tab → `FetchStashItems`-Job, sofern nicht bereits im Cache. Spalte 2: **⬇**-Marker, solange der Tab noch nicht geladen ist (`StashTree.mark_loaded`). Spalte 3: **⟳-Button** je Tab, lädt genau diesen Tab bewusst AM Cache vorbei neu (`stash_refresh_requested`-Signal). |
 | Item-Tabelle rechts oben | `QTableView` + `QSortFilterProxyModel` | Spalten: Icon, Tab, Name, Typ, Level, Quality, Stack, iLvl. Klick auf Spaltenkopf sortiert; Suchfeld filtert live über Name+Typ+Tab (kein API-Call — gefiltert wird lokal). |
 | Item-Detail rechts unten | eigenes Widget | Großes Icon, Name in Rarity-Farbe (frameType), Properties, Mods. Aktualisiert bei Zeilenauswahl. |
 | Rate-Limit-Dashboard | `QProgressBar` pro Regel + Status-LED + Countdown | Wird ausschließlich über das Signal `rate_limit_changed` gefüttert. Farbe: grün < 60 %, gelb < 90 %, rot ab 90 %/Wartephase. Countdown zeigt verbleibende Wartezeit. *Intention: Der User soll immer sehen, WARUM die App gerade wartet.* |
-| Statusbar | `QStatusBar` + `QProgressBar` (busy) | Login-Status, laufender Job, permanenter GGG-Disclaimer. Die `QProgressBar` läuft mit `setRange(0, 0)` im "busy"-Modus (Qt animiert das eingebaut, kein eigener Timer nötig) und ist sichtbar, solange das `status`-Signal des Workers etwas anderes als `"Bereit"` meldet (`MainWindow._on_status`) — deckt damit jeden laufenden Job inkl. Rate-Limit-Wartezeit ab. |
+| Statusbar | `QStatusBar` + `QProgressBar` (busy) | Login-Status, laufender Job, permanenter GGG-Disclaimer. Die `QProgressBar` läuft mit `setRange(0, 0)` im "busy"-Modus (Qt animiert das eingebaut, kein eigener Timer nötig). Sichtbarkeit hängt am eigenen `busy_changed`-Signal des Workers (`True` rund um jeden Job), NICHT am `status`-Text — siehe §4.5.1 zur Begründung. |
 
 **"Alle Tabs laden" (Bulk) und CSV-Export:** Über den Toolbar-Button "⇊ Alle
 Tabs laden" holt der `ApiWorker` (`FetchAllItemsJob`) die Items sämtlicher

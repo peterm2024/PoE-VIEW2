@@ -14,6 +14,8 @@ def qapp():
 
 
 @pytest.fixture(autouse=True)
-def _no_real_login(monkeypatch: pytest.MonkeyPatch) -> None:
-    """MainWindow() löst sonst via BootstrapJob einen echten API-Call aus, falls ein gültiges Token im Credential Manager liegt (siehe FALLSTRICKE #6)."""
+def _isolated_local_state(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    """Isoliert MainWindow() von echtem OAuth-Token (FALLSTRICKE #6) und echter data-cache.json."""
     monkeypatch.setattr("poe_view.services.token_store.load_token", lambda: None)
+    monkeypatch.setattr("poe_view.services.data_cache._CACHE_FILE",
+                        tmp_path / "unused-data-cache.json")

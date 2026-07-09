@@ -26,3 +26,4 @@ htmlcov/
 # App-Daten (Caches, Logs — liegen normalerweise in %LOCALAPPDATA%)
 icon-cache/
 logs/
+data-cache.json

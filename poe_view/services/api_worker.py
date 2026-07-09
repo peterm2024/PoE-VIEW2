@@ -106,7 +106,8 @@ class ApiWorker(QThread):
     icon_loaded = Signal(str, object)          # url, bytes
     rate_limit_changed = Signal(str, object, float)  # policy, rules, wait_s
     job_error = Signal(str)                    # Fehlertext für die Statusbar
-    status = Signal(str)                       # laufende Tätigkeit
+    status = Signal(str)                       # Verlaufstext ("Lade …"), NICHT der Busy-Zustand
+    busy_changed = Signal(bool)                # True, solange irgendein Job läuft (für den UI-Spinner)
     bulk_progress = Signal(int, int, str)      # done, total, aktueller Tab-Name
     bulk_finished = Signal(int, int)           # success_count, total
 
@@ -136,6 +137,7 @@ class ApiWorker(QThread):
             job = self._jobs.get()
             if isinstance(job, _StopJob):
                 break
+            self.busy_changed.emit(True)
             try:
                 self._dispatch(job)
             except AuthError as exc:
@@ -144,9 +146,14 @@ class ApiWorker(QThread):
             except Exception as exc:  # noqa: BLE001 — Worker darf nie sterben
                 log.exception("Job %s fehlgeschlagen", type(job).__name__)
                 self.job_error.emit(f"{type(job).__name__}: {exc}")
+            finally:
+                self.busy_changed.emit(False)
         self.client.close()
 
     def _dispatch(self, job) -> None:
+        """Cases mit eigenem Abschlusstext (z. B. stash_items_loaded) emittieren
+        bewusst KEIN "Bereit" — Signale sind FIFO, es käme als Letztes an und
+        würde die spezifischere Meldung sofort überschreiben."""
         match job:
             case BootstrapJob():
                 self._bootstrap()
@@ -158,12 +165,15 @@ class ApiWorker(QThread):
             case FetchLeaguesJob():
                 self.status.emit("Lade Ligen …")
                 self.leagues_loaded.emit(self.client.get_leagues())
+                self.status.emit("Bereit")
             case FetchCharactersJob():
                 self.status.emit("Lade Charaktere …")
                 self.characters_loaded.emit(self.client.get_characters())
+                self.status.emit("Bereit")
             case FetchStashListJob(league=league):
                 self.status.emit(f"Lade Stash-Liste ({league}) …")
                 self.stash_list_loaded.emit(self.client.get_stashes(league))
+                self.status.emit("Bereit")
             case FetchStashItemsJob(league=league, stash_id=sid, stash_name=name):
                 self.status.emit(f"Lade Items: {name} …")
                 stash = self.client.get_stash(league, sid)
@@ -173,7 +183,6 @@ class ApiWorker(QThread):
             case FetchAllItemsJob(league=league, stashes=stashes):
                 self.status.emit(f"Lade alle Tabs ({league}) …")
                 self._fetch_all_items(league, stashes)
-        self.status.emit("Bereit")
 
     # ------------------------------------------------------------------ #
 

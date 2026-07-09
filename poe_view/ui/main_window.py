@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (QComboBox, QFileDialog, QLabel, QLineEdit,
 
 from poe_view import config
 from poe_view.api.models import Character, Item, StashTab
+from poe_view.services import data_cache
 from poe_view.services.api_worker import (ApiWorker, BootstrapJob,
                                           FetchAllItemsJob,
                                           FetchCharactersJob, FetchIconJob,
@@ -26,6 +27,7 @@ from poe_view.services.api_worker import (ApiWorker, BootstrapJob,
                                           FetchStashListJob, LoginJob,
                                           LogoutJob)
 from poe_view.services.csv_export import export_items, sanitize_filename
+from poe_view.ui.character_list import CharacterList
 from poe_view.ui.item_detail import ItemDetail
 from poe_view.ui.item_table import ItemFilterProxy, ItemTableModel
 from poe_view.ui.rate_limit_dashboard import RateLimitDashboard
@@ -40,13 +42,16 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("PoE-VIEW2")
         self.resize(1100, 700)
 
-        self._items_cache: dict[str, list[Item]] = {}  # stash_id → Items
-        self._leaf_stashes: list[StashTab] = []  # abgeflacht, ohne Ordner
-        self._all_characters: list[Character] = []  # ligenübergreifend, ungefiltert
+        self._account_name: str = ""
+        self._stash_trees: dict[str, list[StashTab]] = {}      # Liga → Baumstruktur
+        self._items: dict[str, dict[str, list[Item]]] = {}     # Liga → {stash_id: Items}
+        self._leaf_stashes: list[StashTab] = []                # abgeflacht, NUR aktuelle Liga
+        self._all_characters: list[Character] = []             # ligenübergreifend, ungefiltert
         self._current_league: str = ""
         self._current_tab_name: str = ""
         self._bulk_dialog: QProgressDialog | None = None
         self._showing_aggregate = False
+        self._restore_cached_data()
 
         self.worker = ApiWorker()
         self._build_ui()
@@ -57,6 +62,32 @@ class MainWindow(QMainWindow):
         if not config.is_configured():
             self._status_msg.setText(
                 "⚠ POE_CONTACT_EMAIL fehlt in der .env — bitte .env.example kopieren und ausfüllen.")
+
+    # ------------------------------------------------------------------ #
+
+    def _restore_cached_data(self) -> None:
+        """Lädt den letzten Daten-Cache (überlebt einen Neustart) — rein in-memory.
+
+        Das Rendern übernimmt der normale Ablauf, sobald eine Liga aktiv
+        wird (_on_league_changed → _activate_stash_tree), genau wie bei
+        frisch von der API geladenen Daten.
+        """
+        cached = data_cache.load()
+        if cached is None:
+            return
+        self._all_characters = cached.characters
+        self._stash_trees = cached.stash_trees
+        self._items = cached.items_by_league
+        log.info("Daten-Cache geladen: %d Charaktere, %d Liga(en)",
+                 len(cached.characters), len(cached.stash_trees))
+
+    def _persist_cache(self) -> None:
+        data = data_cache.CachedData()
+        data.account_name = self._account_name
+        data.characters = self._all_characters
+        data.stash_trees = self._stash_trees
+        data.items_by_league = self._items
+        data_cache.save(data)
 
     # ------------------------------------------------------------------ #
 
@@ -100,11 +131,30 @@ class MainWindow(QMainWindow):
         self._filter_edit.setFixedWidth(260)
         toolbar.addWidget(self._filter_edit)
 
-        # Linke Seite: Baum
+        # Linke Seite: Charakterliste (flach) oben, Stash-Baum unten — je mit
+        # eigener Überschrift statt eines gemeinsamen Wrapper-Baums (spart
+        # eine Ebene, Nutzer-Feedback).
+        left_panel = QWidget()
+        left_layout = QVBoxLayout(left_panel)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setSpacing(2)
+
+        char_label = QLabel("Charaktere")
+        char_label.setStyleSheet("font-weight: 600; padding: 2px 4px;")
+        self.character_list = CharacterList()
+        self.character_list.character_selected.connect(self._on_character_selected)
+        self.character_list.setMaximumHeight(220)
+
+        stash_label = QLabel("Stash")
+        stash_label.setStyleSheet("font-weight: 600; padding: 2px 4px;")
         self.tree = StashTree()
         self.tree.stash_selected.connect(self._on_stash_selected)
         self.tree.stash_refresh_requested.connect(self._on_stash_refresh)
-        self.tree.character_selected.connect(self._on_character_selected)
+
+        left_layout.addWidget(char_label)
+        left_layout.addWidget(self.character_list)
+        left_layout.addWidget(stash_label)
+        left_layout.addWidget(self.tree, stretch=1)
 
         # Rechte Seite: Tabelle + Detail
         self.table_model = ItemTableModel(
@@ -130,7 +180,7 @@ class MainWindow(QMainWindow):
         right_layout.addWidget(self.detail)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
-        splitter.addWidget(self.tree)
+        splitter.addWidget(left_panel)
         splitter.addWidget(right)
         splitter.setStretchFactor(1, 1)
         splitter.setSizes([260, 840])
@@ -166,6 +216,7 @@ class MainWindow(QMainWindow):
         w.icon_loaded.connect(self._on_icon)
         w.rate_limit_changed.connect(self.dashboard.update_state)
         w.status.connect(self._on_status)
+        w.busy_changed.connect(self._on_busy_changed)
         w.job_error.connect(self._on_error)
         w.bulk_progress.connect(self._on_bulk_progress)
         w.bulk_finished.connect(self._on_bulk_finished)
@@ -173,6 +224,7 @@ class MainWindow(QMainWindow):
     # --- Worker-Slots (Main-Thread) ------------------------------------ #
 
     def _on_logged_in(self, account_name: str) -> None:
+        self._account_name = account_name
         self._login_action.setText(f"⚷ {account_name}")
         self._login_action.setEnabled(False)
         self.worker.submit(FetchLeaguesJob())
@@ -195,28 +247,43 @@ class MainWindow(QMainWindow):
         if not league or league == self._current_league:
             return
         self._current_league = league
-        self._items_cache.clear()
-        self._leaf_stashes = []
-        self.worker.submit(FetchStashListJob(league))
+        self._showing_aggregate = False
         self._apply_character_league_filter()
+        cached_tree = self._stash_trees.get(league)
+        if cached_tree is not None:
+            # Sofort anzeigen (aus dieser Session oder vom letzten Programmstart) …
+            self._activate_stash_tree(cached_tree)
+        else:
+            self.tree.set_stashes([])
+            self._leaf_stashes = []
+        # … und trotzdem im Hintergrund bestätigen/aktualisieren (wie bisher).
+        self.worker.submit(FetchStashListJob(league))
 
     def _on_characters(self, characters: list[Character]) -> None:
         """/character liefert ligenübergreifend; gefiltert wird lokal übers Dropdown.
 
-        Kein eigener Liga-Level im Baum (spart eine Ebene) — das Liga-Dropdown
-        steuert Charaktere UND Stash-Tabs gemeinsam, ein Wechsel zwischen
-        Ligen ist bei Items/Stash ohnehin nicht möglich.
+        Kein eigener Liga-Level in der Liste (spart eine Ebene) — das
+        Liga-Dropdown steuert Charaktere UND Stash-Tabs gemeinsam, ein
+        Wechsel zwischen Ligen ist bei Items/Stash ohnehin nicht möglich.
         """
         self._all_characters = characters
         self._apply_character_league_filter()
+        self._persist_cache()
 
     def _apply_character_league_filter(self) -> None:
         filtered = [c for c in self._all_characters if c.league == self._current_league]
-        self.tree.set_characters(filtered)
+        self.character_list.set_characters(filtered)
+
+    def _activate_stash_tree(self, stashes: list[StashTab]) -> None:
+        """Baum rendern + abgeflachte Liste aktualisieren — für Live- UND Cache-Daten."""
+        loaded_ids = frozenset(self._items.get(self._current_league, {}).keys())
+        self.tree.set_stashes(stashes, loaded_ids=loaded_ids)
+        self._leaf_stashes = self._flatten_stashes(stashes)
 
     def _on_stash_list(self, stashes: list[StashTab]) -> None:
-        self.tree.set_stashes(stashes, loaded_ids=frozenset(self._items_cache.keys()))
-        self._leaf_stashes = self._flatten_stashes(stashes)
+        self._stash_trees[self._current_league] = stashes
+        self._activate_stash_tree(stashes)
+        self._persist_cache()
 
     @staticmethod
     def _flatten_stashes(stashes: list[StashTab]) -> list[StashTab]:
@@ -231,9 +298,10 @@ class MainWindow(QMainWindow):
 
     def _on_stash_selected(self, stash_id: str, name: str) -> None:
         self._showing_aggregate = False
-        if stash_id in self._items_cache:
-            # Speicher-Cache: kein erneuter API-Call (Intention, siehe Doku §5)
-            self._show_items(self._items_cache[stash_id], name)
+        league_items = self._items.get(self._current_league, {})
+        if stash_id in league_items:
+            # Speicher-/Datei-Cache: kein erneuter API-Call (Doku §5)
+            self._show_items(league_items[stash_id], name)
             return
         self.worker.submit(FetchStashItemsJob(self._current_league, stash_id, name))
 
@@ -243,8 +311,9 @@ class MainWindow(QMainWindow):
         self.worker.submit(FetchStashItemsJob(self._current_league, stash_id, name))
 
     def _on_stash_items(self, stash_id: str, name: str, items: list[Item]) -> None:
-        self._items_cache[stash_id] = items
+        self._items.setdefault(self._current_league, {})[stash_id] = items
         self.tree.mark_loaded(stash_id)
+        self._persist_cache()
         if not self._showing_aggregate:
             self._show_items(items, name)
 
@@ -263,7 +332,8 @@ class MainWindow(QMainWindow):
                 self, "Alle Tabs laden",
                 "Keine Stash-Tabs geladen — bitte zuerst eine Liga wählen.")
             return
-        to_fetch = [s for s in self._leaf_stashes if s.id not in self._items_cache]
+        league_items = self._items.get(self._current_league, {})
+        to_fetch = [s for s in self._leaf_stashes if s.id not in league_items]
         if not to_fetch:
             self._show_aggregate()  # schon alles im Cache
             return
@@ -291,10 +361,11 @@ class MainWindow(QMainWindow):
         """Items aller bereits geladenen Tabs zusammen anzeigen (lokal filter-/exportierbar)."""
         self._showing_aggregate = True
         self._current_tab_name = "Alle Tabs"
+        league_items = self._items.get(self._current_league, {})
         items: list[Item] = []
         sources: list[str] = []
         for stash in self._leaf_stashes:
-            cached = self._items_cache.get(stash.id)
+            cached = league_items.get(stash.id)
             if cached is None:
                 continue
             items.extend(cached)
@@ -356,16 +427,20 @@ class MainWindow(QMainWindow):
             self.detail.show_item(item, self.table_model.pixmap_for(item))
 
     def _on_status(self, text: str) -> None:
+        """Reiner Verlaufstext — Busy-Zustand kommt separat über busy_changed
+        (siehe FALLSTRICKE_UND_WORKAROUNDS.md #8)."""
         self._status_msg.setText(text)
-        self._busy_indicator.setVisible(text != "Bereit")
+
+    def _on_busy_changed(self, busy: bool) -> None:
+        self._busy_indicator.setVisible(busy)
 
     def _on_error(self, message: str) -> None:
         self._status_msg.setText(f"Fehler: {message}")
-        self._busy_indicator.hide()
         log.error("%s", message)
 
     def _refresh(self) -> None:
-        self._items_cache.clear()
+        """Stash-Liste + Charaktere neu laden; Item-Daten bleiben unangetastet
+        (dafür gibt es die gezielten Refresh-Buttons je Tab im Baum)."""
         if self._current_league:
             self.worker.submit(FetchStashListJob(self._current_league))
         self.worker.submit(FetchCharactersJob())
