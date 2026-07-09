@@ -154,18 +154,23 @@ PoE-VIEW2/
 
 ### 4.1 OAuth2 mit PKCE (`api/oauth.py`)
 
-Ablauf (identisch zur LabVIEW-Implementierung):
+Ablauf (identisch zur LabVIEW-Implementierung; erprobte Parameter siehe
+[api-notes/labview-test-vi.md](api-notes/labview-test-vi.md)):
 
-1. `code_verifier` (Zufallsstring) und `code_challenge` (SHA-256, base64url) erzeugen.
-2. Lokalen HTTP-Server auf `http://localhost:<port>` starten (Standardbibliothek
-   `http.server`, ein einziger Request).
+1. `code_verifier` (Zufallsstring), `code_challenge` (SHA-256, base64url) und
+   `state` (64-Bit-Zufall, `%016x`) erzeugen.
+2. Lokalen HTTP-Server auf `http://localhost:64338` starten (Standardbibliothek
+   `http.server`, ein einziger Request) — Port 64338 ist als Redirect-URI der
+   Client-Registrierung fest hinterlegt.
 3. Browser mit der GGG-Authorize-URL öffnen (`webbrowser.open`).
-4. Callback abfangen → `code` extrahieren → Server beenden.
+4. Callback abfangen → `state` prüfen (CSRF-Schutz, ≙ "State OK?" im Test-VI)
+   → `code` extrahieren → Erfolgsseite ausliefern → Server beenden.
 5. `code` + `code_verifier` gegen Access-Token tauschen (gültig ~10 h).
 6. Token im Windows Credential Manager speichern (`keyring`); beim App-Start
    prüfen, ob ein gültiges Token existiert → Login-Schritt überspringen.
 
-*Scopes (initial):* `account:profile account:characters account:stashes`
+*Client-ID:* `poeview` (registrierte public App, kein Secret — PKCE genügt)
+*Scopes:* `account:profile account:stashes account:characters account:leagues`
 
 ### 4.2 API-Client (`api/client.py`)
 
@@ -192,8 +197,10 @@ def _get(self, path: str, policy_hint: str) -> httpx.Response:
     return resp
 ```
 
-- Endpunkte (v1): `get_profile()`, `get_characters()`, `get_character(name)`,
-  `get_stashes(league)`, `get_stash(league, stash_id)`.
+- Endpunkte (v1): `get_profile()`, `get_leagues()`, `get_characters()`,
+  `get_character(name)`, `get_stashes(league)`, `get_stash(league, stash_id)`.
+- Liga-Namen können Leerzeichen enthalten (`SSF Ruthless`) → Pfadsegmente
+  immer per `urllib.parse.quote` encoden.
 
 ### 4.3 Rate-Limit-Manager (`api/rate_limiter.py`) — das Kernsystem
 
