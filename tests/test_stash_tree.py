@@ -6,8 +6,10 @@ Die Charakterliste lebt separat, siehe test_character_list.py.
 from datetime import datetime, timedelta, timezone
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QAction
 
 from poe_view.api.models import StashTab
+from poe_view.ui import stash_tree as stash_tree_module
 from poe_view.ui.stash_tree import StashTree, format_age
 
 
@@ -98,6 +100,59 @@ def test_name_column_is_interactive_not_stretch(qapp) -> None:
     from PySide6.QtWidgets import QHeaderView
     tree = StashTree()
     assert tree.header().sectionResizeMode(0) == QHeaderView.ResizeMode.Interactive
+
+
+class _FakeMenu:
+    """Ersatz für QMenu in Tests: QMenu.exec() öffnet einen modalen Event-Loop,
+    der in einer Offscreen-Testumgebung ewig auf einen (nie kommenden) Klick
+    wartet. Statt (unzuverlässig) QMenu.exec zu monkeypatchen, ersetzen wir
+    den kompletten Namen ``QMenu`` im Modul unter Test — echte QAction-Objekte
+    darunter, damit .triggered/.trigger() sich exakt wie im echten Code verhalten."""
+
+    def __init__(self, *args, **kwargs) -> None:
+        self._actions: list[QAction] = []
+
+    def addAction(self, text: str) -> QAction:
+        action = QAction(text)
+        self._actions.append(action)
+        return action
+
+    def exec(self, *args, **kwargs) -> None:
+        for action in self._actions:
+            action.trigger()
+
+
+def test_context_menu_emits_raw_data_requested_for_leaf(qapp, monkeypatch) -> None:
+    data = [{"id": "root1", "name": "Currency 1", "type": "QuadStash", "metadata": {}}]
+    stashes = [StashTab.model_validate(d) for d in data]
+    tree = StashTree()
+    tree.set_stashes(stashes)
+    node = tree._stash_nodes["root1"]
+    pos = tree.visualItemRect(node).center()
+
+    monkeypatch.setattr(stash_tree_module, "QMenu", _FakeMenu)
+    received = []
+    tree.raw_data_requested.connect(lambda sid, name: received.append((sid, name)))
+
+    tree._on_context_menu(pos)
+
+    assert received == [("root1", "Currency 1")]
+
+
+def test_context_menu_does_nothing_for_folder_node(qapp, monkeypatch) -> None:
+    """Ordner haben keine eigenen Rohdaten — kein Menü, kein Signal."""
+    data = [{"id": "folder1", "name": "Folder", "type": "Folder", "metadata": {"folder": True},
+             "children": []}]
+    stashes = [StashTab.model_validate(d) for d in data]
+    tree = StashTree()
+    tree.set_stashes(stashes)
+    pos = tree.visualItemRect(tree.topLevelItem(0)).center()
+
+    def _exploding_menu(*args, **kwargs):
+        raise AssertionError("QMenu darf für Ordner-Knoten nie erzeugt werden")
+    monkeypatch.setattr(stash_tree_module, "QMenu", _exploding_menu)
+
+    tree._on_context_menu(pos)  # darf NICHT auf _exploding_menu treffen
 
 
 def test_tab_colour_is_icon_not_text_colour(qapp) -> None:

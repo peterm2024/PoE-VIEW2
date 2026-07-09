@@ -142,6 +142,7 @@ PoE-VIEW2/
 │       ├── stash_tree.py       # Stash-Baum (Tabs = Top-Level-Items, kein Wrapper)
 │       ├── item_table.py       # TableModel + SortFilterProxy
 │       ├── item_detail.py
+│       ├── raw_data_viewer.py  # Rohdaten-Mini-Viewer (Rechtsklick im Baum)
 │       └── rate_limit_dashboard.py
 ├── tests/
 │   ├── fixtures/               # gespeicherte API-JSON-Antworten
@@ -428,6 +429,31 @@ Fetch aus und würden daher nie einen Zeitstempel nachtragen).
 Cache-Datei als konservativen Ersatz-Zeitstempel (siehe
 FALLSTRICKE_UND_WORKAROUNDS.md #12).
 
+### 4.9 Rohdaten-Mini-Viewer (`ui/raw_data_viewer.py`)
+
+Debug-/Inspektions-Werkzeug (Nutzer-Wunsch): Rechtsklick auf einen Stash-Tab
+im Baum → Kontextmenü "🔍 Rohdaten anzeigen" → ein eigenständiges,
+NICHT-modales Fenster (`RawDataViewer`, `Qt.WindowType.Window`) zeigt die
+Tab-Daten als eingerücktes JSON.
+
+- **Läuft parallel:** Da das Fenster nicht-modal ist, bleibt das
+  Hauptfenster voll bedienbar — der Viewer blockiert nichts.
+- **Folgt der Auswahl:** Einmal geöffnet, aktualisiert sich der Viewer bei
+  JEDEM weiteren Tab-Wechsel automatisch (`MainWindow._update_raw_viewer`,
+  aufgerufen aus `_show_items`) — ohne erneuten Rechtsklick. Das gilt
+  sowohl für Klicks auf andere Tabs als auch für einen Refresh des gerade
+  angezeigten Tabs. Nur `silent`-Hintergrund-Refreshs (§4.8) lösen bewusst
+  KEIN Viewer-Update aus (dieselbe "silent lässt die Anzeige in Ruhe"-Regel
+  wie bei Status-Text und Item-Tabelle).
+- **Keine echten Rohdaten nötig:** Statt die HTTP-Response-Bytes gesondert
+  zwischenzuspeichern, setzt `MainWindow._build_raw_stash_payload` die
+  Tab-Metadaten (aus der bereits geladenen Stash-Liste) und die Items (aus
+  dem Item-Cache) wieder zu einem Objekt zusammen. Das ist dank
+  `extra="allow"` in allen pydantic-Modellen (`api/models.py`) verlustfrei
+  — jedes Feld, das die API sendet (auch unbekannte/zukünftige), übersteht
+  den Pydantic-Roundtrip. Spart einen weiteren Persistenz-Layer, der nur
+  für diesen Debug-Viewer existieren würde.
+
 ---
 
 ## 5. UI-Konzept (Oberflächenvorschlag)
@@ -473,7 +499,7 @@ gemeinsamen Baum, die textliche Beschreibung unten ist aktuell.)
 | Bereich | Widget | Verhalten |
 |---|---|---|
 | Navigation: Charaktere | `CharacterList` (`QListWidget`) | Bewusst KEIN Tree — Charaktere haben keine Unterstruktur (Nutzer-Feedback: spart eine Ebene samt Auf-/Zuklapp-Klick). Flach, absteigend nach Level, liga-gefiltert (`MainWindow._apply_character_league_filter`, siehe §5.1). Höhe begrenzt (`setMaximumHeight`), damit der Stash-Baum den meisten Platz bekommt. |
-| Navigation: Stash | `StashTree` (`QTreeWidget`), 2 Spalten, **Header sichtbar** | Kein umschließender "Stash"-Wurzelknoten mehr — die Tabs SIND die Top-Level-Einträge (spart eine weitere Ebene). Ordner rekursiv (children). Namensspalte per `QHeaderView.ResizeMode.Interactive` (NICHT `Stretch` — Stretch-Spalten lassen sich in Qt nicht per Maus verbreitern, das war ein echter Bug) mit großzügiger Startbreite, per Header-Rand manuell nachziehbar. Tab-Farbe aus API als kleines Icon-Quadrat VOR dem Namen, bewusst NICHT als Textfarbe (manche API-Farben sind auf dunklem Grund sonst unlesbar). Klick auf Tab → `FetchStashItems`-Job, sofern nicht bereits im Cache. Spalte 2 zeigt GENAU EINEN der beiden sich gegenseitig ausschließenden Zustände (§4.7.1): **⬇**-Text, solange nie geladen, oder ein **⟳-Button mit Alters-Beschriftung** ("⟳ vor 3d") sobald mindestens einmal geladen — Klick lädt genau diesen Tab bewusst AM Cache vorbei neu (`stash_refresh_requested`-Signal). |
+| Navigation: Stash | `StashTree` (`QTreeWidget`), 2 Spalten, **Header sichtbar** | Kein umschließender "Stash"-Wurzelknoten mehr — die Tabs SIND die Top-Level-Einträge (spart eine weitere Ebene). Ordner rekursiv (children). Namensspalte per `QHeaderView.ResizeMode.Interactive` (NICHT `Stretch` — Stretch-Spalten lassen sich in Qt nicht per Maus verbreitern, das war ein echter Bug) mit großzügiger Startbreite, per Header-Rand manuell nachziehbar. Tab-Farbe aus API als kleines Icon-Quadrat VOR dem Namen, bewusst NICHT als Textfarbe (manche API-Farben sind auf dunklem Grund sonst unlesbar). Klick auf Tab → `FetchStashItems`-Job, sofern nicht bereits im Cache. Spalte 2 zeigt GENAU EINEN der beiden sich gegenseitig ausschließenden Zustände (§4.7.1): **⬇**-Text, solange nie geladen, oder ein **⟳-Button mit Alters-Beschriftung** ("⟳ vor 3d") sobald mindestens einmal geladen — Klick lädt genau diesen Tab bewusst AM Cache vorbei neu (`stash_refresh_requested`-Signal). Rechtsklick öffnet ein Kontextmenü mit "🔍 Rohdaten anzeigen" (`raw_data_requested`-Signal, §4.9) — öffnet/aktualisiert den nicht-modalen Rohdaten-Mini-Viewer. |
 | Item-Tabelle rechts oben | `QTableView` + `QSortFilterProxyModel` | Spalten: Icon, Tab, Name, Typ, Level, Quality, Stack, iLvl. Klick auf Spaltenkopf sortiert; Suchfeld filtert live über Name+Typ+Tab (kein API-Call — gefiltert wird lokal). |
 | Item-Detail rechts unten | eigenes Widget | Großes Icon, Name in Rarity-Farbe (frameType), Properties, Mods. Aktualisiert bei Zeilenauswahl. |
 | Rate-Limit-Dashboard | `QProgressBar` pro Regel + Status-LED + Countdown | Wird ausschließlich über das Signal `rate_limit_changed` gefüttert. Farbe: grün < 60 %, gelb < 90 %, rot ab 90 %/Wartephase. Countdown zeigt verbleibende Wartezeit. *Intention: Der User soll immer sehen, WARUM die App gerade wartet.* |

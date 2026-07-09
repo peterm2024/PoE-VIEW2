@@ -32,6 +32,7 @@ from poe_view.ui.character_list import CharacterList
 from poe_view.ui.item_detail import ItemDetail
 from poe_view.ui.item_table import ItemFilterProxy, ItemTableModel
 from poe_view.ui.rate_limit_dashboard import RateLimitDashboard
+from poe_view.ui.raw_data_viewer import RawDataViewer
 from poe_view.ui.stash_tree import StashTree
 
 log = logging.getLogger(__name__)
@@ -62,6 +63,7 @@ class MainWindow(QMainWindow):
         self._showing_aggregate = False
         self._worker_busy = False
         self._auto_refresh_counts: dict[str, int] = {}  # Liga → auto-aktualisierte Tabs (Session)
+        self._raw_data_viewer: RawDataViewer | None = None
         self._restore_cached_data()
 
         self.worker = ApiWorker()
@@ -168,6 +170,7 @@ class MainWindow(QMainWindow):
         self.tree = StashTree()
         self.tree.stash_selected.connect(self._on_stash_selected)
         self.tree.stash_refresh_requested.connect(self._on_stash_refresh)
+        self.tree.raw_data_requested.connect(self._on_raw_data_requested)
 
         left_layout.addWidget(char_label)
         left_layout.addWidget(self.character_list)
@@ -324,7 +327,7 @@ class MainWindow(QMainWindow):
         league_items = self._items.get(self._current_league, {})
         if stash_id in league_items:
             # Speicher-/Datei-Cache: kein erneuter API-Call (Doku §5)
-            self._show_items(league_items[stash_id], name)
+            self._show_items(stash_id, league_items[stash_id], name)
             return
         self.worker.submit(FetchStashItemsJob(self._current_league, stash_id, name))
 
@@ -350,12 +353,13 @@ class MainWindow(QMainWindow):
         if silent:
             self._update_auto_refresh_label()
         elif not self._showing_aggregate:
-            self._show_items(items, name)
+            self._show_items(stash_id, items, name)
 
-    def _show_items(self, items: list[Item], name: str) -> None:
+    def _show_items(self, stash_id: str, items: list[Item], name: str) -> None:
         self._current_tab_name = name
         self.table_model.set_items(items, [name] * len(items))
         self._status_msg.setText(f"{name}: {len(items)} Items")
+        self._update_raw_viewer(stash_id, name)
 
     # --- Alle Tabs laden (Bulk) ----------------------------------------- #
 
@@ -481,6 +485,39 @@ class MainWindow(QMainWindow):
             self.worker.submit(FetchStashListJob(self._current_league))
         self.worker.submit(FetchCharactersJob())
 
+    # --- Rohdaten-Mini-Viewer (Rechtsklick im Baum, Nutzer-Feedback) ----- #
+
+    def _on_raw_data_requested(self, stash_id: str, name: str) -> None:
+        if self._raw_data_viewer is None:
+            self._raw_data_viewer = RawDataViewer(self)
+        self._raw_data_viewer.show()
+        self._raw_data_viewer.raise_()
+        self._raw_data_viewer.activateWindow()
+        # Lädt bei Bedarf nach (wie ein normaler Linksklick) — _show_items
+        # aktualisiert den jetzt sichtbaren Viewer im selben Zug.
+        self._on_stash_selected(stash_id, name)
+
+    def _update_raw_viewer(self, stash_id: str, name: str) -> None:
+        """Hält den (falls geöffneten) Mini-Viewer beim Tab-Wechsel synchron."""
+        if self._raw_data_viewer is None or not self._raw_data_viewer.isVisible():
+            return
+        payload = self._build_raw_stash_payload(stash_id)
+        if payload is not None:
+            self._raw_data_viewer.show_payload(stash_id, name, payload)
+
+    def _build_raw_stash_payload(self, stash_id: str) -> dict | None:
+        """Setzt Tab-Metadaten (aus der Stash-Liste) und Items (aus dem Item-Cache)
+        wieder zu einem vollständigen Objekt zusammen. Dank ``extra="allow"`` in
+        den pydantic-Modellen (api/models.py) verlustfrei identisch zu dem, was
+        die API tatsächlich liefert — kein separater Rohtext-Cache nötig."""
+        tab = next((s for s in self._leaf_stashes if s.id == stash_id), None)
+        if tab is None:
+            return None
+        items = self._items.get(self._current_league, {}).get(stash_id, [])
+        payload = tab.model_dump(mode="json", exclude={"children"})
+        payload["items"] = [item.model_dump(mode="json") for item in items]
+        return payload
+
     # --- Hintergrund-Auto-Refresh (Nutzer-Feedback) ---------------------- #
 
     def _maybe_auto_refresh(self) -> None:
@@ -541,6 +578,8 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------ #
 
     def closeEvent(self, event) -> None:  # noqa: N802
+        if self._raw_data_viewer is not None:
+            self._raw_data_viewer.close()
         self.worker.stop()
         if not self.worker.wait(3000):
             log.warning("ApiWorker reagierte nicht innerhalb von 3s auf stop() — erzwinge Beendigung.")

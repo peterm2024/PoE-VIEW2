@@ -315,3 +315,105 @@ def test_maybe_auto_refresh_skips_when_worker_busy_or_low_headroom(qapp, monkeyp
 
     win.worker.stop()
     win.worker.wait(5000)
+
+
+# --- Rohdaten-Mini-Viewer (Nutzer-Feedback) ------------------------------ #
+
+def test_build_raw_stash_payload_merges_tab_metadata_and_items(qapp) -> None:
+    win = MainWindow()
+    win._current_league = "Standard"
+    stash = StashTab.model_validate({"id": "t1", "name": "Tab", "type": "CurrencyStash",
+                                      "metadata": {"colour": "ff0000"}})
+    win._leaf_stashes = [stash]
+    item = Item.model_validate({"typeLine": "Chaos Orb", "frameType": 5, "stackSize": 3})
+    win._items["Standard"] = {"t1": [item]}
+
+    payload = win._build_raw_stash_payload("t1")
+
+    assert payload is not None
+    assert payload["id"] == "t1"
+    assert payload["metadata"]["colour"] == "ff0000"
+    assert payload["items"][0]["typeLine"] == "Chaos Orb"
+    assert "children" not in payload
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_build_raw_stash_payload_returns_none_for_unknown_tab(qapp) -> None:
+    win = MainWindow()
+    win._current_league = "Standard"
+    win._leaf_stashes = []
+
+    assert win._build_raw_stash_payload("nope") is None
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_update_raw_viewer_only_refreshes_when_visible(qapp) -> None:
+    from poe_view.ui.raw_data_viewer import RawDataViewer
+
+    win = MainWindow()
+    win._current_league = "Standard"
+    stash = StashTab.model_validate({"id": "t1", "name": "Tab", "type": "CurrencyStash",
+                                      "metadata": {}})
+    win._leaf_stashes = [stash]
+    win._items["Standard"] = {"t1": []}
+    win._raw_data_viewer = RawDataViewer(win)
+
+    win._update_raw_viewer("t1", "Tab")
+    assert win._raw_data_viewer._text.toPlainText() == ""  # nicht sichtbar -> kein Update
+
+    win._raw_data_viewer.show()
+    win._update_raw_viewer("t1", "Tab")
+    assert '"id": "t1"' in win._raw_data_viewer._text.toPlainText()
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_on_raw_data_requested_opens_viewer_and_shows_cached_data(qapp) -> None:
+    """Rechtsklick 'Rohdaten anzeigen' öffnet den Viewer UND lädt (bei Cache-Treffer
+    sofort) die Daten hinein — wie ein normaler Linksklick auf den Tab."""
+    win = MainWindow()
+    win._current_league = "Standard"
+    stash = StashTab.model_validate({"id": "t1", "name": "Tab", "type": "CurrencyStash",
+                                      "metadata": {}})
+    win._leaf_stashes = [stash]
+    item = Item.model_validate({"typeLine": "Chaos Orb", "frameType": 5})
+    win._items["Standard"] = {"t1": [item]}
+
+    win._on_raw_data_requested("t1", "Tab")
+
+    assert win._raw_data_viewer is not None
+    assert win._raw_data_viewer.isVisible()
+    assert "Chaos Orb" in win._raw_data_viewer._text.toPlainText()
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_raw_viewer_follows_tab_switches(qapp) -> None:
+    """Kern des Nutzer-Wunsches: der Viewer aktualisiert sich beim Durchklicken
+    verschiedener Tabs von selbst, ohne dass erneut rechtsgeklickt werden muss."""
+    win = MainWindow()
+    win._current_league = "Standard"
+    win._leaf_stashes = [
+        StashTab.model_validate({"id": "t1", "name": "Tab 1", "type": "CurrencyStash", "metadata": {}}),
+        StashTab.model_validate({"id": "t2", "name": "Tab 2", "type": "CurrencyStash", "metadata": {}}),
+    ]
+    win._items["Standard"] = {
+        "t1": [Item.model_validate({"typeLine": "Chaos Orb", "frameType": 5})],
+        "t2": [Item.model_validate({"typeLine": "Divine Orb", "frameType": 5})],
+    }
+
+    win._on_raw_data_requested("t1", "Tab 1")
+    assert "Chaos Orb" in win._raw_data_viewer._text.toPlainText()
+
+    win._on_stash_selected("t2", "Tab 2")  # normaler Klick auf einen anderen Tab
+    assert "Divine Orb" in win._raw_data_viewer._text.toPlainText()
+    assert "Chaos Orb" not in win._raw_data_viewer._text.toPlainText()
+
+    win.worker.stop()
+    win.worker.wait(5000)

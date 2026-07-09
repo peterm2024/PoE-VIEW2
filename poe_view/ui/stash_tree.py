@@ -18,6 +18,10 @@ Tab-Farbe (metadata.colour, hex ohne '#') wird NICHT als Textfarbe verwendet
 (einige API-Farben sind dunkel genug, um auf dunklem Grund unlesbar zu
 werden) — stattdessen als kleines Farbquadrat vor dem Namen (Icon), Text
 bleibt immer in der normalen, garantiert lesbaren Vordergrundfarbe.
+
+Rechtsklick auf einen Tab öffnet ein Kontextmenü mit "Rohdaten anzeigen"
+(``raw_data_requested``-Signal) — Aufhänger für den Mini-Viewer in
+``ui/raw_data_viewer.py`` (Nutzer-Feedback).
 """
 
 from __future__ import annotations
@@ -26,7 +30,7 @@ from datetime import datetime, timezone
 
 from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap
-from PySide6.QtWidgets import (QHeaderView, QToolButton, QTreeWidget,
+from PySide6.QtWidgets import (QHeaderView, QMenu, QToolButton, QTreeWidget,
                                QTreeWidgetItem)
 
 from poe_view.api.models import StashTab
@@ -61,12 +65,15 @@ def format_age(last_loaded_iso: str, *, now: datetime | None = None) -> str:
 class StashTree(QTreeWidget):
     stash_selected = Signal(str, str)          # stash_id, name
     stash_refresh_requested = Signal(str, str)  # stash_id, name
+    raw_data_requested = Signal(str, str)       # stash_id, name
 
     def __init__(self) -> None:
         super().__init__()
         self.setColumnCount(2)
         self.setHeaderLabels(["Name", ""])
         self.setIconSize(QSize(12, 12))
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.customContextMenuRequested.connect(self._on_context_menu)
         header = self.header()
         header.setStretchLastSection(False)
         # Interactive statt Stretch: Stretch-Spalten sind in Qt NICHT per
@@ -138,3 +145,15 @@ class StashTree(QTreeWidget):
         stash: StashTab | None = item.data(0, _DATA_ROLE)
         if stash is not None:
             self.stash_selected.emit(stash.id, stash.name)
+
+    def _on_context_menu(self, pos) -> None:
+        item = self.itemAt(pos)
+        if item is None:
+            return
+        stash: StashTab | None = item.data(0, _DATA_ROLE)
+        if stash is None:
+            return  # Ordner-Knoten haben keine eigenen Rohdaten
+        menu = QMenu(self)
+        action = menu.addAction("🔍 Rohdaten anzeigen")
+        action.triggered.connect(lambda: self.raw_data_requested.emit(stash.id, stash.name))
+        menu.exec(self.viewport().mapToGlobal(pos))
