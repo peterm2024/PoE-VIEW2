@@ -534,6 +534,51 @@ Ringmail" ist kein Ring!), Rüstungs-Properties als letzter Fallback →
 "Body Armour". Der Rohdaten-Viewer (§4.9) filtert alle `poeview_*`-
 Schlüssel heraus — er verspricht, die echte API-Antwort zu zeigen.
 
+### 4.11 Anforderungs-Spalten, Spalten-Filter, liga-weite Suche
+
+**Anf.Lvl / Str / Dex / Int kommen direkt von GGG — kein PoEDB nötig.**
+Die Stash-API liefert bei ausrüstbaren Items ein `requirements`-Array
+(gleiche Struktur wie `properties`); Cache-Analyse 2026-07-10: 17.449 von
+28.138 gecachten Items tragen es. Dank `extra="allow"` lag es längst
+verlustfrei im Datei-Cache — es musste nur angezeigt werden. Fallstricke
+bei den Namen (`models.req_level()` / `req_attribute()`):
+
+- Attribute erscheinen mal kurz ("Str"), mal lang ("Strength") — beide
+  Varianten real beobachtet, werden normalisiert.
+- Heist-Ausrüstung trägt `"Level {0} in {1}"` ("Level 2 in Any Job") —
+  das ist ein **Job**-Level; `req_level()` vergleicht deshalb exakt auf
+  `"Level"` statt per startswith.
+
+**Numerische Sortierung (`NUMERIC_SORT_ROLE`):** Der Proxy sortiert über
+eine UserRole, die für Zahlenspalten echte Floats liefert (erste Zahl im
+Anzeigetext, "+20%" → 20.0; "–" → -inf, landet also ganz unten) und für
+Textspalten den kleingeschriebenen Text. Vorher verglich Qt die
+Anzeige-Strings: "113" < "56".
+
+**Spalten-Filter (Excel-artig, Nutzer-Feedback "20% Quality, iLvl <45"):**
+Header-Rechtsklick zeigt oben ein Eingabefeld für die angeklickte Spalte
+(`QWidgetAction`), Enter übernimmt. Ausdrücke: `>=20`, `<45`, `=Text`,
+`!=…`, sonst Teilstring; numerisch wird verglichen, sobald Operand UND
+Zelle eine Zahl hergeben. Aktive Filter markieren den Header mit 🔍
+(`ItemFilterProxy.headerData`-Override), sind UND-verknüpft untereinander
+und mit dem globalen Suchfeld, und die Statuszeile nennt Treffer/Gesamt.
+Bewusst NICHT persistiert (wie in Excel: Filter sind Arbeitszustand).
+
+**Liga-weite Suche (Nutzer-Feedback "fächerübergreifend"):** Tippen ins
+Suchfeld schaltet die Tabelle auf ALLE gecachten Items der aktuellen Liga
+um (Tab-Spalte = Herkunfts-Fach), Leeren des Felds kehrt zur vorher
+gewählten Ansicht zurück (`_current_stash_id` als Rückkehrziel; Baum-Klick
+während der Suche beendet sie ebenfalls). Liga-Wechsel zieht eine aktive
+Suche auf die neue Liga um. Eingrenzen auf ein Fach: Baum-Klick oder
+Spalten-Filter auf der Tab-Spalte.
+
+**Lazy-Icon-Loading:** Aggregat-Ansichten (Suche, "Alle Tabs",
+Spezial-Eltern) rufen `set_items(…, request_icons=False)` auf — Icons
+werden erst angefordert, wenn Qt die Zeile tatsächlich malt
+(`data()`/DecorationRole). Eifriges Anfordern würde bei ~15.000 Items
+ebenso viele Icon-Jobs in die sequenzielle Worker-Queue schieben und
+manuelle Klicks minutenlang hinter CDN-Fetches einreihen.
+
 ---
 
 ## 5. UI-Konzept (Oberflächenvorschlag)
@@ -580,7 +625,7 @@ gemeinsamen Baum, die textliche Beschreibung unten ist aktuell.)
 |---|---|---|
 | Navigation: Charaktere | `CharacterList` (`QListWidget`) | Bewusst KEIN Tree — Charaktere haben keine Unterstruktur (Nutzer-Feedback: spart eine Ebene samt Auf-/Zuklapp-Klick). Flach, absteigend nach Level, liga-gefiltert (`MainWindow._apply_character_league_filter`, siehe §5.1). Höhe begrenzt (`setMaximumHeight`), damit der Stash-Baum den meisten Platz bekommt. |
 | Navigation: Stash | `StashTree` (`QTreeWidget`), 3 Spalten, **Header sichtbar** | Kein umschließender "Stash"-Wurzelknoten mehr — die Tabs SIND die Top-Level-Einträge (spart eine weitere Ebene). Ordner rekursiv (children), Map-Fächer zusätzlich nach Sektion gruppiert (§4.10). Namensspalte per `QHeaderView.ResizeMode.Interactive` (NICHT `Stretch` — Stretch-Spalten lassen sich in Qt nicht per Maus verbreitern, das war ein echter Bug) mit großzügiger Startbreite, per Header-Rand manuell nachziehbar. Tab-Farbe aus API als kleines Icon-Quadrat VOR dem Namen, bewusst NICHT als Textfarbe (manche API-Farben sind auf dunklem Grund sonst unlesbar). Klick auf Tab → `FetchStashItems`-Job, sofern nicht bereits im Cache. Spalte 2 (**#**) zeigt die Item-Anzahl (Nutzer-Feedback: eigene Spalte statt "(N Items)"-Text im Namen; Details §4.7.1). Spalte 3 zeigt GENAU EINEN der beiden sich gegenseitig ausschließenden Zustände (§4.7.1): **⬇**-Text, solange nie geladen, oder ein **⟳-Button mit Alters-Beschriftung** ("⟳ vor 3d") sobald mindestens einmal geladen — Klick lädt genau diesen Tab bewusst AM Cache vorbei neu (`stash_refresh_requested`-Signal). Rechtsklick öffnet ein Kontextmenü mit "🔍 Rohdaten anzeigen" (`raw_data_requested`-Signal, §4.9) — öffnet/aktualisiert den nicht-modalen Rohdaten-Mini-Viewer. |
-| Item-Tabelle rechts oben | `QTableView` + `QSortFilterProxyModel` | Spalten: Icon, Tab, Name, Typ, Level, Quality, Stack, iLvl, **Mods** (explicitMods, v. a. Map-Modifikatoren; Tooltip zeilenweise). Klick auf Spaltenkopf sortiert; Suchfeld filtert live über Name+Typ+Tab+Mods (kein API-Call — gefiltert wird lokal). **Spalten per Rechtsklick auf den Header an-/abwählbar** (Nutzer-Feedback), Wahl persistiert in `%LOCALAPPDATA%/PoE-VIEW2/ui-settings.ini` (INI statt Registry — Datei-Ansatz, LabVIEW-portierbar); "Typ" ist default AUS (Rarity steckt bereits in der Namensfarbe). Die **Tab-Spalte wird automatisch verwaltet** und ist nicht im Menü: AUS bei Einzelfach-Auswahl (redundant), AN in Aggregat-Ansichten ("Alle Tabs", Klick auf Spezial-Tab-Elternknoten) — dort trägt sie die Fach-Herkunft ("Map (Tier 1)"). |
+| Item-Tabelle rechts oben | `QTableView` + `QSortFilterProxyModel` | Spalten: Icon, Tab, Name, Typ, Level, Quality, Stack, iLvl, **Anf.Lvl, Str, Dex, Int** (benötigter Level/Attribute aus dem `requirements`-Array der API, §4.11), **Mods** (explicitMods, v. a. Map-Modifikatoren; Tooltip zeilenweise). Klick auf Spaltenkopf sortiert — **numerisch** über `NUMERIC_SORT_ROLE` (echte Zahlen statt "113" < "56"-Stringvergleich, "–" ganz unten). Das Suchfeld sucht **fächerübergreifend über die ganze Liga** (§4.11); zusätzlich je Spalte ein **Excel-artiger Filter-Ausdruck** (`>=20`, `<45`, `=Text`, Teilstring) über das Header-Rechtsklick-Menü, aktive Filter tragen 🔍 im Header. **Spalten per Rechtsklick auf den Header an-/abwählbar** (Nutzer-Feedback), Wahl persistiert in `%LOCALAPPDATA%/PoE-VIEW2/ui-settings.ini` (INI statt Registry — Datei-Ansatz, LabVIEW-portierbar); "Typ" ist default AUS (Rarity steckt bereits in der Namensfarbe). Die **Tab-Spalte wird automatisch verwaltet** und ist nicht im Menü: AUS bei Einzelfach-Auswahl (redundant), AN in Aggregat-Ansichten ("Alle Tabs", Spezial-Tab-Elternknoten, liga-weite Suche) — dort trägt sie die Fach-Herkunft ("Map (Tier 1)"). |
 | Item-Detail rechts unten | eigenes Widget | Großes Icon, Name in Rarity-Farbe (frameType), Properties, Mods. Aktualisiert bei Zeilenauswahl. |
 | Rate-Limit-Dashboard | `QProgressBar` pro Regel + Status-LED + Countdown | Wird ausschließlich über das Signal `rate_limit_changed` gefüttert. Farbe: grün < 60 %, gelb < 90 %, rot ab 90 %/Wartephase. Countdown zeigt verbleibende Wartezeit. *Intention: Der User soll immer sehen, WARUM die App gerade wartet.* |
 | Statusbar | `QStatusBar` + `QProgressBar` (busy) | Login-Status, laufender Job, permanenter GGG-Disclaimer. Die `QProgressBar` läuft mit `setRange(0, 0)` im "busy"-Modus (Qt animiert das eingebaut, kein eigener Timer nötig). Sichtbarkeit hängt am eigenen `busy_changed`-Signal des Workers (`True` rund um jeden Job), NICHT am `status`-Text — siehe §4.5.1 zur Begründung. |

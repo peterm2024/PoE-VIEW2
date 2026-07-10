@@ -792,3 +792,106 @@ def test_auto_refresh_passes_parent_id_for_special_tab_children(qapp, monkeypatc
 
     win.worker.stop()
     win.worker.wait(5000)
+
+# --- Fächerübergreifende Suche + Spalten-Filter (Nutzer-Feedback) ---------- #
+
+def test_typing_in_search_switches_to_league_wide_view(qapp, monkeypatch) -> None:
+    """Tippen sucht über ALLE geladenen Fächer der Liga; Leeren des Felds
+    führt zurück zum vorher gewählten Fach — alles ohne API-Call."""
+    from PySide6.QtCore import Qt
+    from poe_view.ui.item_table import TAB_COL
+    win = MainWindow()
+    win._current_league = "Standard"
+    t1, t2 = _make_leaf("t1", "Currency 1"), _make_leaf("t2", "Essence")
+    win._stash_trees["Standard"] = [t1, t2]
+    win._leaf_stashes = [t1, t2]
+    win._items["Standard"] = {
+        "t1": [Item.model_validate({"typeLine": "Chaos Orb"})],
+        "t2": [Item.model_validate({"typeLine": "Deafening Essence of Greed"})],
+    }
+    submitted = []
+    monkeypatch.setattr(win.worker, "submit", lambda job: submitted.append(job))
+    win._show_items("t1", win._items["Standard"]["t1"], "Currency 1")
+    assert win.table_model.rowCount() == 1
+
+    win._filter_edit.setText("essence")          # tippen → liga-weite Ansicht
+    assert win.table_model.rowCount() == 2       # Model hält ALLE Items der Liga
+    assert win.proxy.rowCount() == 1             # Filter zeigt nur den Treffer
+    assert win.proxy.data(win.proxy.index(0, 2),
+                          Qt.ItemDataRole.DisplayRole) == "Deafening Essence of Greed"
+    assert not win.table.isColumnHidden(TAB_COL)  # Herkunfts-Fach ist Teil der Antwort
+
+    win._filter_edit.setText("")                 # leeren → zurück zum Fach
+    assert win.table_model.rowCount() == 1
+    assert win.table_model.source_at(0) == "Currency 1"
+    assert win.table.isColumnHidden(TAB_COL)
+    assert submitted == []                       # alles aus dem Cache
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_tree_click_during_search_shows_single_tab(qapp, monkeypatch) -> None:
+    """Baum-Klick während aktiver Suche beendet die liga-weite Ansicht."""
+    win = MainWindow()
+    win._current_league = "Standard"
+    t1 = _make_leaf("t1", "Currency 1")
+    win._stash_trees["Standard"] = [t1]
+    win._leaf_stashes = [t1]
+    win._items["Standard"] = {"t1": [Item.model_validate({"typeLine": "Chaos Orb"})]}
+    monkeypatch.setattr(win.worker, "submit", lambda job: None)
+
+    win._filter_edit.setText("chaos")
+    assert win._search_all_active
+
+    win._on_stash_selected("t1", "Currency 1")
+    assert not win._search_all_active
+    assert win.table.isColumnHidden(1)  # TAB_COL: Einzelfach-Ansicht
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def _weapon(name: str, req_level: str) -> Item:
+    return Item.model_validate({"typeLine": name, "requirements": [
+        {"name": "Level", "values": [[req_level, 0]]}]})
+
+
+def test_apply_column_filter_updates_status_and_header(qapp) -> None:
+    """Excel-artiger Spalten-Filter ("iLvl <45", "20% Quality"): Statuszeile
+    nennt Treffer, Header trägt 🔍, Entfernen räumt beides wieder auf."""
+    from PySide6.QtCore import Qt
+    from poe_view.ui.item_table import COLUMNS
+    win = MainWindow()
+    win.table_model.set_items([_weapon("A", "56"), _weapon("B", "70")])
+    req_col = COLUMNS.index("Anf.Lvl")
+
+    win._apply_column_filter(req_col, "<60")
+    assert win.proxy.rowCount() == 1
+    assert "1 von 2" in win._status_msg.text()
+    assert "Anf.Lvl <60" in win._status_msg.text()
+    assert win.proxy.headerData(req_col, Qt.Orientation.Horizontal,
+                                Qt.ItemDataRole.DisplayRole) == "Anf.Lvl 🔍"
+
+    win._apply_column_filter(req_col, "")
+    assert win.proxy.rowCount() == 2
+    assert "entfernt" in win._status_msg.text()
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_clear_column_filters_resets_all(qapp) -> None:
+    from poe_view.ui.item_table import COLUMNS
+    win = MainWindow()
+    win.table_model.set_items([_weapon("A", "56"), _weapon("B", "70")])
+    win._apply_column_filter(COLUMNS.index("Anf.Lvl"), ">=60")
+    win._apply_column_filter(COLUMNS.index("Name"), "A")
+    assert win.proxy.rowCount() == 0
+
+    win._clear_column_filters()
+    assert win.proxy.rowCount() == 2
+    assert win.proxy.filtered_columns() == set()
+
+    win.worker.stop()
+    win.worker.wait(5000)

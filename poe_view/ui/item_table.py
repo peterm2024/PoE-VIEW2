@@ -5,37 +5,58 @@ QAbstractTableModel + QSortFilterProxyModel (Sortieren/Filtern kostenlos).
 
 Icons werden asynchron nachgeladen: das Model meldet fehlende URLs über den
 ``icon_requester``-Callback (MainWindow → FetchIconJob) und bekommt die
-fertigen Pixmaps via ``set_icon`` zurück.
+fertigen Pixmaps via ``set_icon`` zurück. In Aggregat-Ansichten (liga-weite
+Suche, "Alle Tabs laden") passiert das LAZY erst beim Painten der Zeile —
+eifriges Anfordern würde die Worker-Queue mit zigtausend Icon-Jobs fluten.
 
 Die Tab-Spalte trägt den Namen des Herkunfts-Tabs pro Item. Bei Auswahl
 eines einzelnen Tabs ist sie redundant und wird vom MainWindow automatisch
 ausgeblendet; in Aggregat-Ansichten ("Alle Tabs laden", Klick auf einen
-Spezial-Tab-Elternknoten) wird sie automatisch eingeblendet — dort ordnet
-sie Items ihrem Fach zu ("Map (Tier 1)", Nutzer-Feedback).
+Spezial-Tab-Elternknoten, liga-weite Suche) wird sie automatisch
+eingeblendet — dort ordnet sie Items ihrem Fach zu ("Map (Tier 1)").
 
-Die Mods-Spalte zeigt die explicitMods (v. a. Map-Modifikatoren,
-Nutzer-Feedback); der Live-Filter durchsucht sie mit. Alle übrigen Spalten
-sind per Rechtsklick auf den Header an-/abwählbar (MainWindow), "Typ" ist
-standardmäßig aus — die Rarity steckt bereits in der Namensfarbe.
+Anf.Lvl/Str/Dex/Int kommen aus dem requirements-Array der GGG-API — die
+Daten waren dank ``extra="allow"`` längst im Cache, wurden nur nie gezeigt
+(Nutzer-Feedback; PoEDB o. Ä. ist damit unnötig).
+
+Die Mods-Spalte zeigt die explicitMods (v. a. Map-Modifikatoren);
+der Live-Filter durchsucht sie mit. Zusätzlich kann jede Spalte einen
+eigenen Filter-Ausdruck tragen (">=20", "<45", "=Text", Teilstring) —
+gesetzt über das Header-Rechtsklick-Menü, markiert mit 🔍 im Header.
 """
 
 from __future__ import annotations
 
+import re
 from typing import Callable
 
 from PySide6.QtCore import (QAbstractTableModel, QModelIndex,
                             QSortFilterProxyModel, Qt)
 from PySide6.QtGui import QBrush, QColor, QPixmap
 
-from poe_view.api.models import Item, gem_level, gem_quality
+from poe_view.api.models import (Item, gem_level, gem_quality, req_attribute,
+                                 req_level)
 from poe_view.ui.theme import RARITY_COLORS
 
-COLUMNS = ("Icon", "Tab", "Name", "Typ", "Level", "Qual.", "Stack", "iLvl", "Mods")
+COLUMNS = ("Icon", "Tab", "Name", "Typ", "Level", "Qual.", "Stack", "iLvl",
+           "Anf.Lvl", "Str", "Dex", "Int", "Mods")
 ICON_COL = 0
 TAB_COL = 1
 _NAME_COL = 2
-_NUMERIC_FROM_COL = 4  # Level, Qual., Stack, iLvl
-MODS_COL = 8           # Mods (v. a. Maps) — linksbündig, nicht numerisch
+_NUMERIC_FROM_COL = 4  # Level, Qual., Stack, iLvl, Anf.Lvl, Str, Dex, Int
+MODS_COL = 12          # Mods (v. a. Maps) — linksbündig, nicht numerisch
+
+# Sortierung/Vergleich über echte Zahlen statt Anzeigetext — sonst sortiert
+# "113" vor "56" (Stringvergleich). Der Proxy nutzt diese Rolle als sortRole.
+NUMERIC_SORT_ROLE = Qt.ItemDataRole.UserRole
+
+_NUM_RE = re.compile(r"-?\d+(?:[.,]\d+)?")
+
+
+def _first_number(text: str) -> float | None:
+    """Erste Zahl im Anzeigetext ("+20%" → 20.0, "–" → None)."""
+    m = _NUM_RE.search(text)
+    return float(m.group().replace(",", ".")) if m else None
 
 
 class ItemTableModel(QAbstractTableModel):
@@ -50,19 +71,28 @@ class ItemTableModel(QAbstractTableModel):
 
     # --- Daten setzen -------------------------------------------------- #
 
-    def set_items(self, items: list[Item], sources: list[str] | None = None) -> None:
-        """``sources[i]`` ist der Tab-Name von ``items[i]``. Ohne Angabe leer."""
+    def set_items(self, items: list[Item], sources: list[str] | None = None,
+                  request_icons: bool = True) -> None:
+        """``sources[i]`` ist der Tab-Name von ``items[i]``. Ohne Angabe leer.
+
+        ``request_icons=False`` für große Aggregate (liga-weite Suche,
+        "Alle Tabs laden"): Icons werden dann lazy in ``data()`` angefordert,
+        sobald Qt die Zeile tatsächlich malt — nur Sichtbares kostet Jobs.
+        """
         self.beginResetModel()
         self._items = items
         self._sources = sources if sources is not None else [""] * len(items)
         self._rows = [self._precompute(item) for item in items]
         self.endResetModel()
-        if self._icon_requester:
+        if request_icons and self._icon_requester:
             for item in items:
-                if item.icon and item.icon not in self._pixmaps \
-                        and item.icon not in self._requested:
-                    self._requested.add(item.icon)
-                    self._icon_requester(item.icon)
+                self._request_icon(item)
+
+    def _request_icon(self, item: Item) -> None:
+        if self._icon_requester and item.icon \
+                and item.icon not in self._pixmaps and item.icon not in self._requested:
+            self._requested.add(item.icon)
+            self._icon_requester(item.icon)
 
     @staticmethod
     def _precompute(item: Item) -> tuple:
@@ -70,6 +100,10 @@ class ItemTableModel(QAbstractTableModel):
                 gem_quality(item) or "–",
                 str(item.stackSize) if item.stackSize else "–",
                 str(item.ilvl) if item.ilvl else "–",
+                req_level(item) or "–",
+                req_attribute(item, "Str") or "–",
+                req_attribute(item, "Dex") or "–",
+                req_attribute(item, "Int") or "–",
                 " · ".join(item.explicitMods))  # v. a. Map-Modifikatoren
 
     def item_at(self, row: int) -> Item | None:
@@ -101,14 +135,27 @@ class ItemTableModel(QAbstractTableModel):
             return "" if section == ICON_COL else COLUMNS[section]
         return None
 
+    def display_text(self, row: int, col: int) -> str:
+        """Anzeigetext einer Zelle — auch Basis der Spalten-Filter im Proxy."""
+        if col == TAB_COL:
+            return self._sources[row] or "–"
+        if col > TAB_COL:
+            return self._rows[row][col - 2]
+        return ""
+
     def data(self, index: QModelIndex, role):
         item = self._items[index.row()]
         col = index.column()
-        if role == Qt.ItemDataRole.DisplayRole:
-            if col == TAB_COL:
-                return self._sources[index.row()] or "–"
-            if col > TAB_COL:
-                return self._rows[index.row()][col - 2]
+        if role == Qt.ItemDataRole.DisplayRole and col >= TAB_COL:
+            return self.display_text(index.row(), col)
+        if role == NUMERIC_SORT_ROLE:
+            # Numerische Spalten als Zahl sortieren ("–" ganz nach unten),
+            # alle anderen weiterhin als (kleingeschriebener) Text.
+            text = self.display_text(index.row(), col)
+            if _NUMERIC_FROM_COL <= col < MODS_COL:
+                number = _first_number(text)
+                return number if number is not None else float("-inf")
+            return text.lower()
         if role == Qt.ItemDataRole.ToolTipRole and col == MODS_COL:
             # Mods können lang werden — Tooltip zeigt sie zeilenweise komplett.
             return "\n".join(item.explicitMods) or None
@@ -117,6 +164,7 @@ class ItemTableModel(QAbstractTableModel):
             if pm:
                 return pm.scaled(24, 24, Qt.AspectRatioMode.KeepAspectRatio,
                                  Qt.TransformationMode.SmoothTransformation)
+            self._request_icon(item)  # lazy: erst wenn die Zeile sichtbar wird
         if role == Qt.ItemDataRole.ForegroundRole and col == _NAME_COL:
             colour = RARITY_COLORS.get(item.frameType)
             if colour:
@@ -126,20 +174,92 @@ class ItemTableModel(QAbstractTableModel):
         return None
 
 
+# Vergleichsoperator am Anfang eines Spalten-Filter-Ausdrucks
+_OP_RE = re.compile(r"^\s*(<=|>=|!=|<>|<|>|=)\s*(.+)$")
+
+
+def _expression_matches(expr: str, cell_text: str) -> bool:
+    """Excel-artige Mini-Ausdrücke: ">=20", "<45", "=Beach Map", sonst
+    Teilstring. Numerisch wird verglichen, sobald Operand UND Zelle eine
+    Zahl hergeben ("+20%" zählt als 20) — sonst Textvergleich; Zellen ohne
+    Zahl ("–") fallen bei <,>,<=,>= bewusst raus (wie in Excel)."""
+    m = _OP_RE.match(expr)
+    if not m:
+        return expr.lower() in cell_text.lower()
+    op, operand = m.group(1), m.group(2).strip()
+    operand_num = _first_number(operand)
+    cell_num = _first_number(cell_text)
+    if op in ("=", "!=", "<>"):
+        if operand_num is not None and cell_num is not None:
+            equal = cell_num == operand_num
+        else:
+            equal = cell_text.strip().lower() == operand.lower()
+        return equal if op == "=" else not equal
+    if operand_num is None or cell_num is None:
+        return False
+    return {"<": cell_num < operand_num, "<=": cell_num <= operand_num,
+            ">": cell_num > operand_num, ">=": cell_num >= operand_num}[op]
+
+
 class ItemFilterProxy(QSortFilterProxyModel):
-    """Filtert lokal über Name + Typ + Tab — kostet bewusst keine API-Calls."""
+    """Filtert lokal über Name + Typ + Tab + Mods — kostet bewusst keine
+    API-Calls. Zusätzlich je Spalte ein optionaler Filter-Ausdruck
+    (Header-Rechtsklick), UND-verknüpft mit dem globalen Suchfeld."""
 
     def __init__(self) -> None:
         super().__init__()
         self.setFilterCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+        self.setSortRole(NUMERIC_SORT_ROLE)
+        self._column_filters: dict[int, str] = {}
+
+    # --- Spalten-Filter -------------------------------------------------- #
+
+    def set_column_filter(self, col: int, expr: str) -> None:
+        expr = (expr or "").strip()
+        # begin/endFilterChange statt invalidateFilter — Letzteres ist seit
+        # Qt 6.10 deprecated (Warnung in jedem Testlauf).
+        self.beginFilterChange()
+        if expr:
+            self._column_filters[col] = expr
+        else:
+            self._column_filters.pop(col, None)
+        self.endFilterChange()
+        self.headerDataChanged.emit(Qt.Orientation.Horizontal, col, col)
+
+    def column_filter(self, col: int) -> str:
+        return self._column_filters.get(col, "")
+
+    def filtered_columns(self) -> set[int]:
+        return set(self._column_filters)
+
+    def clear_column_filters(self) -> None:
+        cols = list(self._column_filters)
+        self.beginFilterChange()
+        self._column_filters.clear()
+        self.endFilterChange()
+        for col in cols:
+            self.headerDataChanged.emit(Qt.Orientation.Horizontal, col, col)
+
+    def headerData(self, section, orientation, role=Qt.ItemDataRole.DisplayRole):  # noqa: N802
+        value = super().headerData(section, orientation, role)
+        if (role == Qt.ItemDataRole.DisplayRole
+                and orientation == Qt.Orientation.Horizontal
+                and section in self._column_filters and value):
+            return f"{value} 🔍"  # aktiver Spalten-Filter sichtbar im Header
+        return value
+
+    # --- Zeilen-Filter ---------------------------------------------------- #
 
     def filterAcceptsRow(self, row: int, parent: QModelIndex) -> bool:  # noqa: N802
-        pattern = self.filterRegularExpression().pattern()
-        if not pattern:
-            return True
         model: ItemTableModel = self.sourceModel()
         item = model.item_at(row)
         if item is None:
+            return True
+        for col, expr in self._column_filters.items():
+            if not _expression_matches(expr, model.display_text(row, col)):
+                return False
+        pattern = self.filterRegularExpression().pattern()
+        if not pattern:
             return True
         haystack = (f"{item.display_name} {item.typeLine} {item.baseType} "
                    f"{item.rarity} {model.source_at(row)} "

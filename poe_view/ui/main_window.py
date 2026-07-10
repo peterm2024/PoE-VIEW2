@@ -16,7 +16,8 @@ from PySide6.QtGui import QAction, QPixmap
 from PySide6.QtWidgets import (QComboBox, QFileDialog, QLabel, QLineEdit,
                                QMainWindow, QMenu, QMessageBox, QProgressBar,
                                QProgressDialog, QSizePolicy, QSplitter,
-                               QTableView, QToolBar, QVBoxLayout, QWidget)
+                               QTableView, QToolBar, QVBoxLayout, QWidget,
+                               QWidgetAction)
 
 from poe_view import config
 from poe_view.api.models import Character, Item, StashTab, dominant_category
@@ -30,7 +31,7 @@ from poe_view.services.api_worker import (ApiWorker, BootstrapJob,
 from poe_view.services.csv_export import export_items, sanitize_filename
 from poe_view.ui.character_list import CharacterList
 from poe_view.ui.item_detail import ItemDetail
-from poe_view.ui.item_table import (COLUMNS, MODS_COL, TAB_COL,
+from poe_view.ui.item_table import (COLUMNS, ICON_COL, MODS_COL, TAB_COL,
                                     ItemFilterProxy, ItemTableModel)
 from poe_view.ui.rate_limit_dashboard import RateLimitDashboard
 from poe_view.ui.raw_data_viewer import RawDataViewer
@@ -62,6 +63,8 @@ class MainWindow(QMainWindow):
         self._current_tab_name: str = ""
         self._bulk_dialog: QProgressDialog | None = None
         self._showing_aggregate = False
+        self._search_all_active = False        # Suchfeld → liga-weite Ansicht aktiv
+        self._current_stash_id: str | None = None  # zuletzt gewähltes Fach (Rückkehrziel)
         self._worker_busy = False
         self._auto_refresh_counts: dict[str, int] = {}  # Liga → auto-aktualisierte Tabs (Session)
         self._raw_data_viewer: RawDataViewer | None = None
@@ -148,7 +151,7 @@ class MainWindow(QMainWindow):
         spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         toolbar.addWidget(spacer)
         self._filter_edit = QLineEdit()
-        self._filter_edit.setPlaceholderText("🔍 Item-Filter (lokal, ohne API-Call)")
+        self._filter_edit.setPlaceholderText("🔍 Suche über alle Fächer der Liga (lokal)")
         self._filter_edit.setFixedWidth(260)
         toolbar.addWidget(self._filter_edit)
 
@@ -183,7 +186,7 @@ class MainWindow(QMainWindow):
             icon_requester=lambda url: self.worker.submit(FetchIconJob(url)))
         self.proxy = ItemFilterProxy()
         self.proxy.setSourceModel(self.table_model)
-        self._filter_edit.textChanged.connect(self.proxy.setFilterFixedString)
+        self._filter_edit.textChanged.connect(self._on_filter_text_changed)
 
         self.table = QTableView()
         self.table.setModel(self.proxy)
@@ -192,6 +195,8 @@ class MainWindow(QMainWindow):
         self.table.verticalHeader().hide()
         self.table.setColumnWidth(0, 36)
         self.table.setColumnWidth(1, 110)
+        for name in ("Anf.Lvl", "Str", "Dex", "Int"):  # schmale Zahlenspalten
+            self.table.setColumnWidth(COLUMNS.index(name), 58)
         self.table.setColumnWidth(MODS_COL, 320)
         self.table.selectionModel().currentRowChanged.connect(self._on_row_selected)
         # Spalten per Rechtsklick auf den Header an-/abwählbar (Nutzer-Feedback);
@@ -270,7 +275,27 @@ class MainWindow(QMainWindow):
         self._settings().setValue("item_table/hidden_columns", ";".join(sorted(hidden)))
 
     def _on_table_header_menu(self, pos) -> None:
+        header = self.table.horizontalHeader()
+        clicked_col = header.logicalIndexAt(pos)
         menu = QMenu(self.table)
+        # Excel-artiger Spalten-Filter für die angeklickte Spalte
+        # (Nutzer-Feedback: "z. B. 20% Quality oder iLvl <45"). Übernahme
+        # mit Enter; aktive Filter tragen 🔍 im Spalten-Header.
+        if clicked_col > ICON_COL:
+            title = menu.addAction(f"Filter „{COLUMNS[clicked_col]}“ (Enter übernimmt):")
+            title.setEnabled(False)
+            edit = QLineEdit(self.proxy.column_filter(clicked_col))
+            edit.setPlaceholderText("z. B. >=20, <45, =Text, Teilstring")
+            edit.returnPressed.connect(
+                lambda c=clicked_col, e=edit, m=menu: (
+                    self._apply_column_filter(c, e.text()), m.close()))
+            field = QWidgetAction(menu)
+            field.setDefaultWidget(edit)
+            menu.addAction(field)
+            if self.proxy.filtered_columns():
+                clear_action = menu.addAction("✕ Alle Spalten-Filter löschen")
+                clear_action.triggered.connect(self._clear_column_filters)
+            menu.addSeparator()
         hidden = self._load_hidden_columns()
         for i, name in enumerate(COLUMNS):
             if i == TAB_COL:
@@ -279,7 +304,21 @@ class MainWindow(QMainWindow):
             action.setCheckable(True)
             action.setChecked(name not in hidden)
             action.triggered.connect(lambda _=False, n=name: self._toggle_column(n))
-        menu.exec(self.table.horizontalHeader().mapToGlobal(pos))
+        menu.exec(header.mapToGlobal(pos))
+
+    def _apply_column_filter(self, col: int, expr: str) -> None:
+        self.proxy.set_column_filter(col, expr)
+        shown, total = self.proxy.rowCount(), self.table_model.rowCount()
+        active = ", ".join(f"{COLUMNS[c]} {self.proxy.column_filter(c)}"
+                           for c in sorted(self.proxy.filtered_columns()))
+        self._status_msg.setText(
+            f"Spalten-Filter [{active}]: {shown} von {total} Items sichtbar"
+            if active else f"Spalten-Filter entfernt — {total} Items")
+
+    def _clear_column_filters(self) -> None:
+        self.proxy.clear_column_filters()
+        self._status_msg.setText(
+            f"Alle Spalten-Filter gelöscht — {self.table_model.rowCount()} Items")
 
     def _connect_worker(self) -> None:
         w = self.worker
@@ -325,6 +364,7 @@ class MainWindow(QMainWindow):
             return
         self._current_league = league
         self._showing_aggregate = False
+        self._current_stash_id = None  # Fach-IDs gelten nur innerhalb einer Liga
         self._apply_character_league_filter()
         cached_tree = self._stash_trees.get(league)
         if cached_tree is not None:
@@ -333,6 +373,8 @@ class MainWindow(QMainWindow):
         else:
             self.tree.set_stashes([])
             self._leaf_stashes = []
+        if self._search_all_active:
+            self._enter_search_all()  # laufende Suche auf die neue Liga umziehen
         # … und trotzdem im Hintergrund bestätigen/aktualisieren (wie bisher).
         self.worker.submit(FetchStashListJob(league))
 
@@ -374,6 +416,8 @@ class MainWindow(QMainWindow):
             self._merge_known_children(stashes, old)
         self._stash_trees[self._current_league] = stashes
         self._activate_stash_tree(stashes)
+        if self._search_all_active:
+            self._enter_search_all()  # Suchansicht auf die frische Liste umstellen
         self._persist_cache()
 
     @staticmethod
@@ -437,6 +481,7 @@ class MainWindow(QMainWindow):
 
     def _on_stash_selected(self, stash_id: str, name: str) -> None:
         self._showing_aggregate = False
+        self._search_all_active = False  # Baum-Klick beendet die liga-weite Suchansicht
         stash = self._find_stash(self._stash_trees.get(self._current_league, []), stash_id)
         if stash is not None and stash.type in self.SPECIAL_TAB_TYPES and stash.parent is None:
             if stash.children:
@@ -546,6 +591,7 @@ class MainWindow(QMainWindow):
 
     def _show_items(self, stash_id: str, items: list[Item], name: str) -> None:
         self._current_tab_name = name
+        self._current_stash_id = stash_id  # Rückkehrziel nach liga-weiter Suche
         self.table.setColumnHidden(TAB_COL, True)  # redundant bei Einzelfach
         self.table_model.set_items(items, [name] * len(items))
         self._status_msg.setText(f"{name}: {len(items)} Items")
@@ -557,6 +603,7 @@ class MainWindow(QMainWindow):
         den Fach-Namen ("Map (Tier 1)", Nutzer-Feedback)."""
         self._showing_aggregate = True
         self._current_tab_name = name
+        self._current_stash_id = stash.id  # Rückkehrziel nach liga-weiter Suche
         league_items = self._items.get(self._current_league, {})
         items: list[Item] = []
         sources: list[str] = []
@@ -569,7 +616,7 @@ class MainWindow(QMainWindow):
             items.extend(cached)
             sources.extend([child.display_name] * len(cached))
         self.table.setColumnHidden(TAB_COL, False)  # hier trägt sie die Info
-        self.table_model.set_items(items, sources)
+        self.table_model.set_items(items, sources, request_icons=False)  # lazy
         self._status_msg.setText(
             f"{name}: {len(items)} Items aus {loaded} von {len(stash.children)} "
             "geladenen Unter-Fächern")
@@ -616,7 +663,16 @@ class MainWindow(QMainWindow):
     def _show_aggregate(self) -> None:
         """Items aller bereits geladenen Tabs zusammen anzeigen (lokal filter-/exportierbar)."""
         self._showing_aggregate = True
+        self._search_all_active = False
         self._current_tab_name = "Alle Tabs"
+        self._current_stash_id = None  # Rückkehr aus der Suche landet wieder hier
+        items, sources = self._league_wide_items()
+        self.table.setColumnHidden(TAB_COL, False)  # Aggregat: Herkunft zeigen
+        self.table_model.set_items(items, sources, request_icons=False)  # lazy
+        self._status_msg.setText(f"Alle Tabs: {len(items)} Items gesamt")
+
+    def _league_wide_items(self) -> tuple[list[Item], list[str]]:
+        """Alle gecachten Items der aktuellen Liga + Herkunfts-Fachname je Item."""
         league_items = self._items.get(self._current_league, {})
         items: list[Item] = []
         sources: list[str] = []
@@ -626,9 +682,41 @@ class MainWindow(QMainWindow):
                 continue
             items.extend(cached)
             sources.extend([stash.display_name] * len(cached))
-        self.table.setColumnHidden(TAB_COL, False)  # Aggregat: Herkunft zeigen
-        self.table_model.set_items(items, sources)
-        self._status_msg.setText(f"Alle Tabs: {len(items)} Items gesamt")
+        return items, sources
+
+    # --- Fächerübergreifende Suche (Nutzer-Feedback) --------------------- #
+
+    def _on_filter_text_changed(self, text: str) -> None:
+        """Tippen sucht liga-weit über ALLE bereits geladenen Fächer; Leeren
+        des Felds kehrt zur vorher gewählten Ansicht zurück. Eingrenzen auf
+        ein Fach geht weiterhin: Baum-Klick oder Spalten-Filter auf "Tab"."""
+        if text and not self._search_all_active:
+            self._enter_search_all()
+        elif not text and self._search_all_active:
+            self._leave_search_all()
+        self.proxy.setFilterFixedString(text)
+
+    def _enter_search_all(self) -> None:
+        self._search_all_active = True
+        self._showing_aggregate = True  # späte Einzel-Ergebnisse nicht reinfunken lassen
+        items, sources = self._league_wide_items()
+        self.table.setColumnHidden(TAB_COL, False)  # Herkunft ist Teil der Antwort
+        # request_icons=False: sonst würde die Suche zigtausend Icon-Jobs in
+        # die Worker-Queue schieben — Icons kommen lazy für sichtbare Zeilen.
+        self.table_model.set_items(items, sources, request_icons=False)
+        loaded = len({s for s in sources})
+        self._status_msg.setText(
+            f"Suche über {loaded} geladene Fächer ({len(items)} Items) — "
+            "Feld leeren führt zurück zur Fach-Ansicht")
+
+    def _leave_search_all(self) -> None:
+        self._search_all_active = False
+        if self._current_stash_id is not None:
+            self._on_stash_selected(self._current_stash_id, self._current_tab_name)
+        elif self._leaf_stashes:
+            self._show_aggregate()
+        else:
+            self.table_model.set_items([])
 
     # --- CSV-Export ------------------------------------------------------ #
 

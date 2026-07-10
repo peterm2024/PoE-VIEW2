@@ -48,6 +48,7 @@ class Item(BaseModel):
     stackSize: int | None = None
     corrupted: bool = False
     properties: list[ItemProperty] = Field(default_factory=list)
+    requirements: list[ItemProperty] = Field(default_factory=list)
     explicitMods: list[str] = Field(default_factory=list)
     implicitMods: list[str] = Field(default_factory=list)
 
@@ -77,6 +78,37 @@ def gem_level(item: Item) -> str | None:
 def gem_quality(item: Item) -> str | None:
     """Quality, normalisiert: API liefert "+20%"."""
     return get_property_value(item, "Quality")
+
+
+# Die API nennt Attribut-Anforderungen mal kurz ("Str"), mal lang
+# ("Strength") — beides real beobachtet (Cache-Analyse 2026-07-10).
+_REQUIREMENT_ALIASES = {
+    "Str": ("Str", "Strength"),
+    "Dex": ("Dex", "Dexterity"),
+    "Int": ("Int", "Intelligence"),
+}
+
+
+def req_level(item: Item) -> str | None:
+    """Benötigter Charakter-Level aus dem requirements-Array.
+
+    Exakter Namensvergleich, KEIN startswith: Heist-Ausrüstung trägt
+    "Level {0} in {1}" ("Level 2 in Any Job") — das ist ein Job-Level,
+    kein Charakter-Level, und würde die Spalte verfälschen."""
+    for req in item.requirements:
+        if req.name == "Level":
+            value = req.display_value
+            return value.split(" ")[0] if value else None
+    return None
+
+
+def req_attribute(item: Item, short: str) -> str | None:
+    """Attribut-Anforderung ("Str"/"Dex"/"Int"), Langformen inklusive."""
+    names = _REQUIREMENT_ALIASES.get(short, (short,))
+    for req in item.requirements:
+        if req.name in names:
+            return req.display_value
+    return None
 
 
 # Waffen tragen ihre Item-Klasse als ERSTE Property (ohne Werte) — das ist

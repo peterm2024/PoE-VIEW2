@@ -160,3 +160,49 @@ def test_dominant_category_majority_vote() -> None:
     assert dominant_category(items) == "Ring"
     assert dominant_category([]) is None
     assert dominant_category([_item("Mirror of Kalandra")]) is None
+
+
+# --- requirements: Anf.Lvl / Str / Dex / Int (Nutzer-Feedback) ------------- #
+
+def test_req_level_and_attributes_from_real_structure() -> None:
+    """Echte API-Struktur (Cache-Analyse 2026-07-10, "Vortex Bane"):
+    Level/Dex/Int im requirements-Array — GGG liefert das längst mit,
+    PoEDB o. Ä. ist unnötig."""
+    from poe_view.api.models import req_attribute, req_level
+    item = Item.model_validate({"typeLine": "Gutting Knife", "requirements": [
+        {"name": "Level", "values": [["56", 0]], "displayMode": 0, "type": 62},
+        {"name": "Dex", "values": [["113", 0]], "displayMode": 1, "type": 64},
+        {"name": "Int", "values": [["78", 0]], "displayMode": 1, "type": 65},
+    ]})
+    assert req_level(item) == "56"
+    assert req_attribute(item, "Dex") == "113"
+    assert req_attribute(item, "Int") == "78"
+    assert req_attribute(item, "Str") is None
+
+
+def test_req_attribute_accepts_long_names() -> None:
+    """Die API nennt Attribute mal "Str", mal "Strength" — beides beobachtet
+    (Vaal Greaves: "Strength", Lunaris Circlet: "Intelligence")."""
+    from poe_view.api.models import req_attribute
+    item = Item.model_validate({"typeLine": "Vaal Greaves", "requirements": [
+        {"name": "Strength", "values": [["117", 0]], "displayMode": 1},
+    ]})
+    assert req_attribute(item, "Str") == "117"
+
+
+def test_req_level_ignores_heist_job_level() -> None:
+    """Heist-Ausrüstung trägt "Level {0} in {1}" ("Level 2 in Any Job") —
+    das ist ein Job-Level, KEIN Charakter-Level (exakter Namensvergleich)."""
+    from poe_view.api.models import req_level
+    item = Item.model_validate({"typeLine": "Focal Stone", "requirements": [
+        {"name": "Level {0} in {1}", "values": [["2", 0], ["Any Job", 0]],
+         "displayMode": 3},
+    ]})
+    assert req_level(item) is None
+
+
+def test_item_without_requirements_returns_none() -> None:
+    from poe_view.api.models import req_attribute, req_level
+    item = Item.model_validate({"typeLine": "Chaos Orb"})
+    assert req_level(item) is None
+    assert req_attribute(item, "Str") is None
