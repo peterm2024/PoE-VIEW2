@@ -23,6 +23,11 @@ Die Mods-Spalte zeigt die explicitMods (v. a. Map-Modifikatoren);
 der Live-Filter durchsucht sie mit. Zusätzlich kann jede Spalte einen
 eigenen Filter-Ausdruck tragen (">=20", "<45", "=Text", Teilstring) —
 gesetzt über das Header-Rechtsklick-Menü, markiert mit 🔍 im Header.
+
+Vier Rarity-Checkboxen (MainWindow, neben dem Liga-Feld) filtern zusätzlich
+nach frameType (Normal/Magic/Rare/Unique) — UND-verknüpft mit allem
+anderen. Gems/Currency/… haben kein Checkbox-Äquivalent und bleiben von
+diesem Filter unberührt.
 """
 
 from __future__ import annotations
@@ -213,6 +218,17 @@ class ItemFilterProxy(QSortFilterProxyModel):
         self.setSortRole(NUMERIC_SORT_ROLE)
         self._column_filters: dict[int, str] = {}
         self._search_text = ""
+        self._hidden_rarities: set[int] = set()  # frameType, per Checkbox abgewählt
+
+    # --- Rarity-Checkboxen (Nutzer-Feedback) ------------------------------ #
+
+    def set_rarity_visible(self, frame_type: int, visible: bool) -> None:
+        self.beginFilterChange()
+        if visible:
+            self._hidden_rarities.discard(frame_type)
+        else:
+            self._hidden_rarities.add(frame_type)
+        self.endFilterChange()
 
     def setFilterFixedString(self, text: str) -> None:  # noqa: N802 (Qt-API)
         """Rohtext selbst merken statt über das (regex-escapte!) Pattern von
@@ -264,6 +280,8 @@ class ItemFilterProxy(QSortFilterProxyModel):
         item = model.item_at(row)
         if item is None:
             return True
+        if item.frameType in self._hidden_rarities:
+            return False
         for col, expr in self._column_filters.items():
             if not _expression_matches(expr, model.display_text(row, col)):
                 return False

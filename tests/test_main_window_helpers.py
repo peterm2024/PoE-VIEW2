@@ -931,3 +931,86 @@ def test_asterisk_search_shows_and_exports_entire_league(qapp, monkeypatch) -> N
 
     win.worker.stop()
     win.worker.wait(5000)
+
+
+# --- Offline-Modus (Nutzer-Feedback: GGG-Wartung am Patchday) -------------- #
+
+def test_populate_cached_leagues_works_without_network(qapp, monkeypatch) -> None:
+    """Ligen-Dropdown aus dem Cache befüllen, unabhängig vom Netzwerk — sonst
+    wäre die App bei GGG-Wartung komplett leer, obwohl der Cache alles hat."""
+    win = MainWindow()
+    submitted = []
+    monkeypatch.setattr(win.worker, "submit", lambda job: submitted.append(job))
+    t1 = _make_leaf("t1", "Currency 1")
+    win._stash_trees = {"Standard": [t1]}
+    win._items = {"Standard": {"t1": [Item.model_validate({"typeLine": "Chaos Orb"})]}}
+
+    win._populate_cached_leagues()
+
+    assert [win._league_combo.itemText(i) for i in range(win._league_combo.count())] == ["Standard"]
+    assert win._current_league == "Standard"
+    assert [s.id for s in win._leaf_stashes] == ["t1"]
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_populate_cached_leagues_noop_without_cache(qapp) -> None:
+    win = MainWindow()  # isolierter, leerer Cache (conftest)
+    assert win._league_combo.count() == 0
+    assert win._current_league == ""
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_offline_changed_shows_banner_and_marks_tree(qapp) -> None:
+    from poe_view.ui.stash_tree import _COL_STATUS
+    win = MainWindow()
+    win._current_league = "Standard"
+    t1 = _make_leaf("t1", "Currency 1")
+    win._stash_trees["Standard"] = [t1]
+    win._last_loaded["Standard"] = {"t1": datetime.now(timezone.utc).isoformat()}
+    win._activate_stash_tree([t1])
+
+    win._on_offline_changed(True)
+    assert "Offline" in win._offline_label.text()
+    button = win.tree.itemWidget(win.tree._stash_nodes["t1"], _COL_STATUS)
+    assert button.text().startswith("📴")
+
+    win._on_offline_changed(False)
+    assert win._offline_label.text() == ""
+    button = win.tree.itemWidget(win.tree._stash_nodes["t1"], _COL_STATUS)
+    assert button.text().startswith("⟳")
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+# --- Rarity-Filter-Checkboxen (Nutzer-Feedback) ---------------------------- #
+
+def test_rarity_checkboxes_exist_checked_by_default(qapp) -> None:
+    win = MainWindow()
+    assert set(win._rarity_checks) == {0, 1, 2, 3}
+    assert all(box.isChecked() for box in win._rarity_checks.values())
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_toggling_rarity_checkbox_filters_table(qapp) -> None:
+    win = MainWindow()
+    win.table_model.set_items([
+        Item.model_validate({"typeLine": "Chaos Orb", "frameType": 0}),
+        Item.model_validate({"typeLine": "Headhunter", "frameType": 3}),
+    ])
+    assert win.proxy.rowCount() == 2
+
+    win._rarity_checks[3].setChecked(False)
+    assert win.proxy.rowCount() == 1
+
+    win._rarity_checks[3].setChecked(True)
+    assert win.proxy.rowCount() == 2
+
+    win.worker.stop()
+    win.worker.wait(5000)

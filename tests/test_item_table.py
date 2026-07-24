@@ -211,3 +211,51 @@ def test_lazy_icons_requested_on_paint_not_on_set(qapp) -> None:
 
     model.data(model.index(0, ICON_COL), Qt.ItemDataRole.DecorationRole)
     assert requested == ["https://cdn/x.png"]  # und nur genau einmal
+
+
+# --- Rarity-Filter-Checkboxen (Nutzer-Feedback) ---------------------------- #
+
+def test_rarity_filter_hides_unchecked_frame_types(qapp) -> None:
+    model = ItemTableModel()
+    model.set_items([
+        Item.model_validate({"typeLine": "Chaos Orb", "frameType": 0}),
+        Item.model_validate({"typeLine": "Vaal Regalia", "frameType": 3}),
+    ])
+    proxy = ItemFilterProxy()
+    proxy.setSourceModel(model)
+
+    proxy.set_rarity_visible(3, False)  # Unique abwählen
+
+    assert proxy.rowCount() == 1
+    assert proxy.data(proxy.index(0, 2), Qt.ItemDataRole.DisplayRole) == "Chaos Orb"
+
+    proxy.set_rarity_visible(3, True)
+    assert proxy.rowCount() == 2
+
+
+def test_rarity_filter_leaves_currency_and_gems_untouched(qapp) -> None:
+    """Nur die 4 Checkboxen (Normal/Magic/Rare/Unique) — Currency (frameType
+    5) hat kein Äquivalent und bleibt immer sichtbar."""
+    model = ItemTableModel()
+    model.set_items([Item.model_validate({"typeLine": "Chaos Orb", "frameType": 5})])
+    proxy = ItemFilterProxy()
+    proxy.setSourceModel(model)
+
+    for ft in (0, 1, 2, 3):
+        proxy.set_rarity_visible(ft, False)
+
+    assert proxy.rowCount() == 1  # Currency unbeeindruckt von allen 4 Checkboxen
+
+
+def test_rarity_filter_combines_with_text_search(qapp) -> None:
+    model = ItemTableModel()
+    model.set_items([
+        Item.model_validate({"typeLine": "Beach Map", "frameType": 0}),
+        Item.model_validate({"typeLine": "Beach Map", "frameType": 2}),
+    ])
+    proxy = ItemFilterProxy()
+    proxy.setSourceModel(model)
+    proxy.setFilterFixedString("beach")
+    proxy.set_rarity_visible(0, False)
+
+    assert proxy.rowCount() == 1

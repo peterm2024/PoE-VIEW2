@@ -13,11 +13,11 @@ from datetime import datetime, timedelta, timezone
 
 from PySide6.QtCore import QSettings, Qt, QTimer
 from PySide6.QtGui import QAction, QPixmap
-from PySide6.QtWidgets import (QComboBox, QFileDialog, QLabel, QLineEdit,
-                               QMainWindow, QMenu, QMessageBox, QProgressBar,
-                               QProgressDialog, QSizePolicy, QSplitter,
-                               QTableView, QToolBar, QVBoxLayout, QWidget,
-                               QWidgetAction)
+from PySide6.QtWidgets import (QCheckBox, QComboBox, QFileDialog, QLabel,
+                               QLineEdit, QMainWindow, QMenu, QMessageBox,
+                               QProgressBar, QProgressDialog, QSizePolicy,
+                               QSplitter, QTableView, QToolBar, QVBoxLayout,
+                               QWidget, QWidgetAction)
 
 from poe_view import config
 from poe_view.api.models import Character, Item, StashTab, dominant_category
@@ -36,6 +36,7 @@ from poe_view.ui.item_table import (COLUMNS, ICON_COL, MODS_COL, TAB_COL,
 from poe_view.ui.rate_limit_dashboard import RateLimitDashboard
 from poe_view.ui.raw_data_viewer import RawDataViewer
 from poe_view.ui.stash_tree import StashTree
+from poe_view.ui.theme import RARITY_COLORS
 
 log = logging.getLogger(__name__)
 
@@ -68,6 +69,7 @@ class MainWindow(QMainWindow):
         self._worker_busy = False
         self._auto_refresh_counts: dict[str, int] = {}  # Liga → auto-aktualisierte Tabs (Session)
         self._raw_data_viewer: RawDataViewer | None = None
+        self._offline = False  # GGG nicht erreichbar (Nutzer-Feedback: Wartung am Patchday)
         self._restore_cached_data()
 
         self.worker = ApiWorker()
@@ -146,6 +148,23 @@ class MainWindow(QMainWindow):
         self._league_combo.setMinimumWidth(160)
         self._league_combo.currentTextChanged.connect(self._on_league_changed)
         toolbar.addWidget(self._league_combo)
+
+        toolbar.addWidget(QLabel("  Rarity: "))
+        # 4 Checkboxen statt Namen (Nutzer-Feedback: Namen wären zu lang) —
+        # die Farbe des Käschchens IST das Label, Tooltip trägt den Namen.
+        self._rarity_checks: dict[int, QCheckBox] = {}
+        for frame_type, name in ((0, "Normal"), (1, "Magic"), (2, "Rare"), (3, "Unique")):
+            box = QCheckBox()
+            box.setChecked(True)
+            box.setToolTip(name)
+            colour = RARITY_COLORS[frame_type]
+            box.setStyleSheet(
+                f"QCheckBox::indicator {{ width: 13px; height: 13px; border-radius: 3px; "
+                f"border: 2px solid {colour}; }} "
+                f"QCheckBox::indicator:checked {{ background-color: {colour}; }}")
+            box.toggled.connect(lambda checked, ft=frame_type: self._on_rarity_toggled(ft, checked))
+            self._rarity_checks[frame_type] = box
+            toolbar.addWidget(box)
 
         spacer = QWidget()
         spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
@@ -238,11 +257,39 @@ class MainWindow(QMainWindow):
         self._busy_indicator.setTextVisible(False)
         self._busy_indicator.hide()
         self.statusBar().addWidget(self._busy_indicator)
+        # Permanentes Offline-Banner (Nutzer-Feedback: GGG-Wartung am
+        # Patchday/Liga-Start) — separat vom transienten _status_msg, damit
+        # es nicht von der nächsten "Lade …"-Meldung überschrieben wird.
+        self._offline_label = QLabel("")
+        self._offline_label.setStyleSheet("color: #d9a441; font-weight: 600;")
+        self.statusBar().addPermanentWidget(self._offline_label)
         # Sichtbarer Nachweis, dass der Hintergrund-Auto-Refresh arbeitet
         # (Nutzer-Feedback: "Bist du dir sicher, dass das funktioniert?").
         self._auto_refresh_label = QLabel("")
         self.statusBar().addPermanentWidget(self._auto_refresh_label)
         self.statusBar().addPermanentWidget(QLabel(config.DISCLAIMER))
+
+        # Liga-Dropdown SOFORT aus dem Cache befüllen — unabhängig vom
+        # Netzwerk nutzbar (Nutzer-Feedback: GGG-Wartung am Patchday). Muss
+        # als letztes hier stehen: braucht Tree/League-Combo bereits gebaut.
+        self._populate_cached_leagues()
+
+    def _populate_cached_leagues(self) -> None:
+        """Zeigt gecachte Ligen im Dropdown, bevor überhaupt ein Netzwerk-Call
+        stattgefunden hat — die spätere LIVE-Liste (``_on_leagues``) ersetzt
+        das vollständig, sobald sie eintrifft. Ohne das wäre die App bei
+        GGG-Wartung beim Start komplett leer, obwohl der Cache längst alles
+        Nötige hätte."""
+        cached_leagues = sorted(self._stash_trees)
+        if not cached_leagues:
+            return
+        self._league_combo.blockSignals(True)
+        self._league_combo.addItems(cached_leagues)
+        self._league_combo.blockSignals(False)
+        self._on_league_changed(self._league_combo.currentText())
+
+    def _on_rarity_toggled(self, frame_type: int, visible: bool) -> None:
+        self.proxy.set_rarity_visible(frame_type, visible)
 
     # --- Spalten-Sichtbarkeit der Item-Tabelle (Nutzer-Feedback) --------- #
 
@@ -337,6 +384,7 @@ class MainWindow(QMainWindow):
         w.job_error.connect(self._on_error)
         w.bulk_progress.connect(self._on_bulk_progress)
         w.bulk_finished.connect(self._on_bulk_finished)
+        w.offline_changed.connect(self._on_offline_changed)
 
     # --- Worker-Slots (Main-Thread) ------------------------------------ #
 
@@ -784,6 +832,16 @@ class MainWindow(QMainWindow):
     def _on_error(self, message: str) -> None:
         self._status_msg.setText(f"Fehler: {message}")
         log.error("%s", message)
+
+    def _on_offline_changed(self, offline: bool) -> None:
+        """GGG nicht erreichbar (Wartung/kein Netz, §4.12) — permanentes
+        Banner statt einer Fehlermeldung, die die nächste Statuszeile
+        wegwischt, UND Markierung im Baum, dass Fächer aus dem Cache kommen."""
+        self._offline = offline
+        self.tree.set_offline(offline)
+        self._offline_label.setText(
+            "📴 Offline — GGG nicht erreichbar, zeige zwischengespeicherte Daten"
+            if offline else "")
 
     def _refresh(self) -> None:
         """Stash-Liste + Charaktere neu laden; Item-Daten bleiben unangetastet

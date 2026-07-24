@@ -11,6 +11,7 @@ die Signale entsprechen User Events an das Main-VI.
 
 from __future__ import annotations
 
+import json
 import logging
 import queue
 import threading
@@ -21,12 +22,30 @@ from PySide6.QtCore import QThread, Signal
 
 from poe_view import config
 from poe_view.api import oauth
-from poe_view.api.client import AuthError, PoeApiClient
+from poe_view.api.client import ApiError, AuthError, PoeApiClient
 from poe_view.api.models import StashTab
 from poe_view.api.rate_limiter import RateLimitManager
 from poe_view.services import icon_cache, token_store
 
 log = logging.getLogger(__name__)
+
+OFFLINE_MESSAGE = ("GGG-API nicht erreichbar (Wartung oder kein Netz) — "
+                   "zeige zwischengespeicherte Daten.")
+
+
+def _is_connectivity_issue(exc: Exception) -> bool:
+    """Unterscheidet "wir sind offline" (GGG-Wartung, kein Netz) von echten
+    Anwendungsfehlern (§4.12) — nur Ersteres soll den Offline-Modus auslösen.
+
+    httpx.TransportError: DNS/Verbindung/Timeout — nie ein Anwendungsfehler.
+    ApiError mit 5xx: Server-/Wartungsfehler (4xx bleiben echte Fehler, z. B.
+    ein falsch zusammengesetzter Substash-Pfad). json.JSONDecodeError: GGG
+    liefert bei Wartung mitunter eine HTML-Seite mit HTTP 200 statt JSON."""
+    if isinstance(exc, httpx.TransportError):
+        return True
+    if isinstance(exc, ApiError) and exc.status_code >= 500:
+        return True
+    return isinstance(exc, json.JSONDecodeError)
 
 
 # --------------------------- Job-Typen --------------------------------- #
@@ -113,11 +132,13 @@ class ApiWorker(QThread):
     busy_changed = Signal(bool)                # True, solange irgendein Job läuft (für den UI-Spinner)
     bulk_progress = Signal(int, int, str)      # done, total, aktueller Tab-Name
     bulk_finished = Signal(int, int)           # success_count, total
+    offline_changed = Signal(bool)             # True, solange GGG nicht erreichbar ist (§4.12)
 
     def __init__(self) -> None:
         super().__init__()
         self._jobs: queue.Queue = queue.Queue()
         self._cancel_bulk = threading.Event()
+        self._offline = False
         # Callback der Qt-freien API-Schicht → Qt-Signal (Schichtengrenze).
         self.rate_limiter = RateLimitManager(status_callback=self._on_rate_limit)
         self.client = PoeApiClient(self.rate_limiter)
@@ -147,11 +168,27 @@ class ApiWorker(QThread):
                 token_store.delete_token()
                 self.login_required.emit(str(exc))
             except Exception as exc:  # noqa: BLE001 — Worker darf nie sterben
-                log.exception("Job %s fehlgeschlagen", type(job).__name__)
-                self.job_error.emit(f"{type(job).__name__}: {exc}")
+                if _is_connectivity_issue(exc):
+                    self._set_offline(True)
+                    # Hintergrund-Auto-Refresh (silent) soll bei anhaltender
+                    # GGG-Wartung nicht alle paar Sekunden den Status-Text
+                    # überschreiben — das würde das Offline-Banner (MainWindow)
+                    # ständig verdecken. Manuelle Klicks bekommen die Meldung.
+                    if not getattr(job, "silent", False):
+                        self.job_error.emit(OFFLINE_MESSAGE)
+                else:
+                    log.exception("Job %s fehlgeschlagen", type(job).__name__)
+                    self.job_error.emit(f"{type(job).__name__}: {exc}")
+            else:
+                self._set_offline(False)
             finally:
                 self.busy_changed.emit(False)
         self.client.close()
+
+    def _set_offline(self, offline: bool) -> None:
+        if offline != self._offline:
+            self._offline = offline
+            self.offline_changed.emit(offline)
 
     def _dispatch(self, job) -> None:
         """Cases mit eigenem Abschlusstext (z. B. stash_items_loaded) emittieren

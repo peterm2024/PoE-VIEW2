@@ -27,7 +27,15 @@ class AuthError(Exception):
 
 
 class ApiError(Exception):
-    """Sonstiger API-Fehler mit Status und Kurztext."""
+    """Sonstiger API-Fehler mit Status und Kurztext.
+
+    ``status_code`` liegt offen, damit der Worker 5xx-Antworten (GGG-Wartung,
+    Serverfehler) von echten Client-Fehlern (4xx) unterscheiden kann —
+    Letztere sind kein Offline-Zustand, Erstere schon (§4.12)."""
+
+    def __init__(self, status_code: int, message: str) -> None:
+        super().__init__(message)
+        self.status_code = status_code
 
 
 class PoeApiClient:
@@ -67,7 +75,7 @@ class PoeApiClient:
         if resp.status_code == 401:
             raise AuthError("Nicht autorisiert — Token abgelaufen oder fehlend.")
         if resp.status_code >= 400:
-            raise ApiError(f"HTTP {resp.status_code} für {path}: {resp.text[:200]}")
+            raise ApiError(resp.status_code, f"HTTP {resp.status_code} für {path}: {resp.text[:200]}")
         return resp.json()
 
     # ------------------------------------------------------------------ #

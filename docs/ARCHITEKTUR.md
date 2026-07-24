@@ -596,6 +596,72 @@ werden erst angefordert, wenn Qt die Zeile tatsächlich malt
 ebenso viele Icon-Jobs in die sequenzielle Worker-Queue schieben und
 manuelle Klicks minutenlang hinter CDN-Fetches einreihen.
 
+**Rarity-Filter (4 Checkboxen neben dem Liga-Feld, Nutzer-Feedback):**
+Normal/Magic/Rare/Unique (frameType 0–3) — bewusst ohne Textlabel ("wären
+zu lang"), stattdessen ist die Rand-/Füllfarbe der Checkbox selbst die
+Rarity-Farbe (`theme.RARITY_COLORS`), der Name steckt nur im Tooltip. Alle
+vier sind standardmäßig angehakt (nichts ausgeblendet). Abwählen versteckt
+NUR diese eine Rarity (`ItemFilterProxy.set_rarity_visible`), UND-verknüpft
+mit Text-/Spalten-Filtern. Gems/Currency/Div Cards/… (frameType 4+) haben
+KEIN Checkbox-Äquivalent und bleiben von allen vier Checkboxen unberührt —
+der Filter grenzt Ausrüstung nach Seltenheit ein, er ist kein
+Alles-oder-nichts-Schalter über alle Item-Klassen.
+
+### 4.12 Offline-Modus: GGG-Wartung/kein Netz überbrücken
+
+Nutzer-Feedback vom Patchday/Liga-Start: "pathofexile.com is currently
+down for maintenance" — die App war zu dem Zeitpunkt faktisch unbenutzbar,
+obwohl der Datei-Cache (`data_cache.json`) längst Stash-Daten von vorher
+enthielt. Ursache: Das Liga-Dropdown wurde ausschließlich vom LIVE-Signal
+`leagues_loaded` befüllt; ohne Netzwerk kam dieses Signal nie an, also
+blieb das Dropdown leer — der Cache war zwar da, aber unerreichbar, weil
+kein UI-Pfad zu ihm führte.
+
+**Erkennung (`api_worker._is_connectivity_issue`):** Unterscheidet
+"wir sind offline" von echten Anwendungsfehlern, damit z. B. ein simpler
+404 (falsch zusammengesetzter Substash-Pfad) NICHT fälschlich das
+Offline-Banner auslöst:
+- `httpx.TransportError` (DNS/Verbindung/Timeout) → immer Konnektivität.
+- `ApiError` mit `status_code >= 500` → Server-/Wartungsfehler (502/503).
+- `json.JSONDecodeError` → GGG liefert bei Wartung mitunter eine
+  HTML-Seite mit HTTP 200 statt JSON; `resp.json()` scheitert dann.
+- Alles andere (4xx, `AuthError`, …) bleibt ein normaler Fehler.
+
+`ApiWorker.run()` fängt jede Job-Exception zentral ab: Konnektivitätsfehler
+setzen `self._offline` und emittieren `offline_changed(bool)` — aber NUR
+bei einer tatsächlichen Zustandsänderung (kein Signal-Spam bei mehreren
+aufeinanderfolgenden Fehlversuchen). Jeder erfolgreiche Job setzt
+`_offline` automatisch wieder zurück (`else`-Zweig von try/except) — der
+Zustand heilt sich selbst, sobald GGG wieder erreichbar ist, ohne dass der
+Nutzer etwas zurücksetzen müsste. **Silent-Jobs** (Hintergrund-Auto-Refresh,
+§4.8) unterdrücken bei einem Konnektivitätsfehler bewusst das
+`job_error`-Signal — bei stundenlanger Wartung würde sonst alle 20 s eine
+Fehlermeldung den Status-Text (und damit gefühlt das Offline-Banner)
+überschreiben; manuelle Klicks bekommen die Meldung weiterhin.
+
+**Cache-first beim Start (`MainWindow._populate_cached_leagues`):** Das
+Liga-Dropdown wird JETZT sofort nach dem Bau der UI aus
+`self._stash_trees` (bereits aus dem Cache restauriert) befüllt —
+komplett unabhängig davon, ob `BootstrapJob`/`FetchLeaguesJob` je eine
+Antwort bekommen. Trifft später die LIVE-Ligenliste ein, ersetzt
+`_on_leagues` das Dropdown wie bisher vollständig. Nebeneffekt: Gecachte
+Stash-Daten sind jetzt sogar ohne gültiges Token durchsuch-/exportierbar
+— ein Klick auf einen bereits geladenen Tab zeigt ihn aus
+`self._items`, ganz ohne Netzwerk-Zugriff.
+
+**Sichtbare Markierung:** Ein permanentes Banner in der Statusleiste
+("📴 Offline — GGG nicht erreichbar, zeige zwischengespeicherte Daten",
+`MainWindow._on_offline_changed`) — bewusst ein EIGENES Label, nicht der
+transiente `_status_msg`, sonst würde die nächste "Lade …"-Meldung es
+sofort wieder verdecken. Zusätzlich markiert `StashTree.set_offline(True)`
+jeden bereits geladenen Tab im Baum: aus dem Refresh-Button "⟳ vor 3d"
+wird "📴 vor 3d" (Tooltip erklärt, dass es Cache-Daten sind) — genau die
+vom Nutzer gewünschte Kennzeichnung "dass das Truhenfach aus dem
+Offline-Cache kommt". Nie geladene (⬇) Tabs bleiben unverändert, für sie
+gibt es online wie offline nichts zu zeigen. Der Button bleibt klickbar —
+ein Klick versucht trotzdem ein Neuladen und ist damit der Weg, wie die
+App die Rückkehr aus der Wartung überhaupt bemerkt.
+
 ---
 
 ## 5. UI-Konzept (Oberflächenvorschlag)
@@ -641,11 +707,12 @@ gemeinsamen Baum, die textliche Beschreibung unten ist aktuell.)
 | Bereich | Widget | Verhalten |
 |---|---|---|
 | Navigation: Charaktere | `CharacterList` (`QListWidget`) | Bewusst KEIN Tree — Charaktere haben keine Unterstruktur (Nutzer-Feedback: spart eine Ebene samt Auf-/Zuklapp-Klick). Flach, absteigend nach Level, liga-gefiltert (`MainWindow._apply_character_league_filter`, siehe §5.1). Höhe begrenzt (`setMaximumHeight`), damit der Stash-Baum den meisten Platz bekommt. |
-| Navigation: Stash | `StashTree` (`QTreeWidget`), 3 Spalten, **Header sichtbar** | Kein umschließender "Stash"-Wurzelknoten mehr — die Tabs SIND die Top-Level-Einträge (spart eine weitere Ebene). Ordner rekursiv (children), Map-Fächer zusätzlich nach Sektion gruppiert (§4.10). Namensspalte per `QHeaderView.ResizeMode.Interactive` (NICHT `Stretch` — Stretch-Spalten lassen sich in Qt nicht per Maus verbreitern, das war ein echter Bug) mit großzügiger Startbreite, per Header-Rand manuell nachziehbar. Tab-Farbe aus API als kleines Icon-Quadrat VOR dem Namen, bewusst NICHT als Textfarbe (manche API-Farben sind auf dunklem Grund sonst unlesbar). Klick auf Tab → `FetchStashItems`-Job, sofern nicht bereits im Cache. Spalte 2 (**#**) zeigt die Item-Anzahl (Nutzer-Feedback: eigene Spalte statt "(N Items)"-Text im Namen; Details §4.7.1). Spalte 3 zeigt GENAU EINEN der beiden sich gegenseitig ausschließenden Zustände (§4.7.1): **⬇**-Text, solange nie geladen, oder ein **⟳-Button mit Alters-Beschriftung** ("⟳ vor 3d") sobald mindestens einmal geladen — Klick lädt genau diesen Tab bewusst AM Cache vorbei neu (`stash_refresh_requested`-Signal). Rechtsklick öffnet ein Kontextmenü mit "🔍 Rohdaten anzeigen" (`raw_data_requested`-Signal, §4.9) — öffnet/aktualisiert den nicht-modalen Rohdaten-Mini-Viewer. |
-| Item-Tabelle rechts oben | `QTableView` + `QSortFilterProxyModel` | Spalten: Icon, Tab, Name, Typ, Level, Quality, Stack, iLvl, **Anf.Lvl, Str, Dex, Int** (benötigter Level/Attribute aus dem `requirements`-Array der API, §4.11), **Mods** (explicitMods, v. a. Map-Modifikatoren; Tooltip zeilenweise). Klick auf Spaltenkopf sortiert — **numerisch** über `NUMERIC_SORT_ROLE` (echte Zahlen statt "113" < "56"-Stringvergleich, "–" ganz unten). Das Suchfeld sucht **fächerübergreifend über die ganze Liga** (§4.11); zusätzlich je Spalte ein **Excel-artiger Filter-Ausdruck** (`>=20`, `<45`, `=Text`, Teilstring) über das Header-Rechtsklick-Menü, aktive Filter tragen 🔍 im Header. **Spalten per Rechtsklick auf den Header an-/abwählbar** (Nutzer-Feedback), Wahl persistiert in `%LOCALAPPDATA%/PoE-VIEW2/ui-settings.ini` (INI statt Registry — Datei-Ansatz, LabVIEW-portierbar); "Typ" ist default AUS (Rarity steckt bereits in der Namensfarbe). Die **Tab-Spalte wird automatisch verwaltet** und ist nicht im Menü: AUS bei Einzelfach-Auswahl (redundant), AN in Aggregat-Ansichten ("Alle Tabs", Spezial-Tab-Elternknoten, liga-weite Suche) — dort trägt sie die Fach-Herkunft ("Map (Tier 1)"). |
+| Navigation: Stash | `StashTree` (`QTreeWidget`), 3 Spalten, **Header sichtbar** | Kein umschließender "Stash"-Wurzelknoten mehr — die Tabs SIND die Top-Level-Einträge (spart eine weitere Ebene). Ordner rekursiv (children), Map-Fächer zusätzlich nach Sektion gruppiert (§4.10). Namensspalte per `QHeaderView.ResizeMode.Interactive` (NICHT `Stretch` — Stretch-Spalten lassen sich in Qt nicht per Maus verbreitern, das war ein echter Bug) mit großzügiger Startbreite, per Header-Rand manuell nachziehbar. Tab-Farbe aus API als kleines Icon-Quadrat VOR dem Namen, bewusst NICHT als Textfarbe (manche API-Farben sind auf dunklem Grund sonst unlesbar). Klick auf Tab → `FetchStashItems`-Job, sofern nicht bereits im Cache. Spalte 2 (**#**) zeigt die Item-Anzahl (Nutzer-Feedback: eigene Spalte statt "(N Items)"-Text im Namen; Details §4.7.1). Spalte 3 zeigt GENAU EINEN von DREI sich gegenseitig ausschließenden Zuständen (§4.7.1, §4.12): **⬇**-Text, solange nie geladen; ein **⟳-Button mit Alters-Beschriftung** ("⟳ vor 3d") sobald mindestens einmal geladen — Klick lädt genau diesen Tab bewusst AM Cache vorbei neu (`stash_refresh_requested`-Signal); oder **📴** statt ⟳, solange GGG nicht erreichbar ist (Offline-Modus, §4.12) — derselbe Button, nur die Beschriftung ändert sich, ein Klick versucht trotzdem ein Neuladen. Rechtsklick öffnet ein Kontextmenü mit "🔍 Rohdaten anzeigen" (`raw_data_requested`-Signal, §4.9) — öffnet/aktualisiert den nicht-modalen Rohdaten-Mini-Viewer. |
+| Rarity-Filter (Toolbar, neben Liga) | 4× `QCheckBox` ohne Text | Normal/Magic/Rare/Unique (§4.11) — Farbe des Käschchens = Rarity-Farbe, Name nur im Tooltip. Alle vier standardmäßig an; Abwählen blendet nur diese Rarity aus der Item-Tabelle aus. |
+| Item-Tabelle rechts oben | `QTableView` + `QSortFilterProxyModel` | Spalten: Icon, Tab, Name, Typ, Level, Quality, Stack, iLvl, **Anf.Lvl, Str, Dex, Int** (benötigter Level/Attribute aus dem `requirements`-Array der API, §4.11), **Mods** (explicitMods, v. a. Map-Modifikatoren; Tooltip zeilenweise). Klick auf Spaltenkopf sortiert — **numerisch** über `NUMERIC_SORT_ROLE` (echte Zahlen statt "113" < "56"-Stringvergleich, "–" ganz unten). Das Suchfeld sucht **fächerübergreifend über die ganze Liga**, durchsucht auch Item-Properties (z. B. "Item Quantity"), hat einen eingebauten Clear-Button, und zeigt bei `*` bewusst ALLES an — für den Komplett-Export einer Truhe/Liga (§4.11); zusätzlich je Spalte ein **Excel-artiger Filter-Ausdruck** (`>=20`, `<45`, `=Text`, Teilstring) über das Header-Rechtsklick-Menü, aktive Filter tragen 🔍 im Header. **Spalten per Rechtsklick auf den Header an-/abwählbar** (Nutzer-Feedback), Wahl persistiert in `%LOCALAPPDATA%/PoE-VIEW2/ui-settings.ini` (INI statt Registry — Datei-Ansatz, LabVIEW-portierbar); "Typ" ist default AUS (Rarity steckt bereits in der Namensfarbe). Die **Tab-Spalte wird automatisch verwaltet** und ist nicht im Menü: AUS bei Einzelfach-Auswahl (redundant), AN in Aggregat-Ansichten ("Alle Tabs", Spezial-Tab-Elternknoten, liga-weite Suche) — dort trägt sie die Fach-Herkunft ("Map (Tier 1)"). |
 | Item-Detail rechts unten | eigenes Widget | Großes Icon, Name in Rarity-Farbe (frameType), Properties, Mods. Aktualisiert bei Zeilenauswahl. |
 | Rate-Limit-Dashboard | `QProgressBar` pro Regel + Status-LED + Countdown | Wird ausschließlich über das Signal `rate_limit_changed` gefüttert. Farbe: grün < 60 %, gelb < 90 %, rot ab 90 %/Wartephase. Countdown zeigt verbleibende Wartezeit. *Intention: Der User soll immer sehen, WARUM die App gerade wartet.* |
-| Statusbar | `QStatusBar` + `QProgressBar` (busy) | Login-Status, laufender Job, permanenter GGG-Disclaimer. Die `QProgressBar` läuft mit `setRange(0, 0)` im "busy"-Modus (Qt animiert das eingebaut, kein eigener Timer nötig). Sichtbarkeit hängt am eigenen `busy_changed`-Signal des Workers (`True` rund um jeden Job), NICHT am `status`-Text — siehe §4.5.1 zur Begründung. |
+| Statusbar | `QStatusBar` + `QProgressBar` (busy) | Login-Status, laufender Job, permanenter GGG-Disclaimer. Die `QProgressBar` läuft mit `setRange(0, 0)` im "busy"-Modus (Qt animiert das eingebaut, kein eigener Timer nötig). Sichtbarkeit hängt am eigenen `busy_changed`-Signal des Workers (`True` rund um jeden Job), NICHT am `status`-Text — siehe §4.5.1 zur Begründung. Ein permanentes **Offline-Banner** ("📴 Offline — GGG nicht erreichbar, zeige zwischengespeicherte Daten", §4.12) erscheint bei Konnektivitätsproblemen — als eigenes Label, damit die nächste "Lade …"-Statusmeldung es nicht überschreibt. |
 
 **"Alle Tabs laden" (Bulk) und CSV-Export:** Über den Toolbar-Button "⇊ Alle
 Tabs laden" holt der `ApiWorker` (`FetchAllItemsJob`) die Items sämtlicher

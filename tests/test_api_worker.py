@@ -137,3 +137,116 @@ def test_silent_stash_items_dispatch_emits_no_status(qapp, monkeypatch) -> None:
 
     assert emitted == []
     worker.client.close()
+
+
+# --- Offline-Erkennung (Nutzer-Feedback: GGG-Wartung am Patchday) ---------- #
+
+import httpx
+import pytest
+
+from poe_view.api.client import ApiError
+from poe_view.services.api_worker import FetchStashItemsJob, _is_connectivity_issue
+
+
+@pytest.mark.parametrize("exc", [
+    httpx.ConnectError("Verbindung abgelehnt"),
+    httpx.ConnectTimeout("Timeout"),
+    ApiError(503, "HTTP 503 für /profile: Maintenance"),
+    ApiError(502, "HTTP 502 für /profile: Bad Gateway"),
+])
+def test_is_connectivity_issue_true_for_network_and_5xx(exc) -> None:
+    assert _is_connectivity_issue(exc) is True
+
+
+@pytest.mark.parametrize("exc", [
+    ApiError(404, "HTTP 404 für /stash/x: nicht gefunden"),
+    ApiError(400, "HTTP 400 für /stash/x: schlechte Anfrage"),
+    ValueError("irgendein anderer Fehler"),
+])
+def test_is_connectivity_issue_false_for_client_errors(exc) -> None:
+    """4xx sind echte Anwendungsfehler, kein Offline-Zustand — sonst würde
+    z. B. ein falsch zusammengesetzter Substash-Pfad fälschlich "Offline" zeigen."""
+    assert _is_connectivity_issue(exc) is False
+
+
+def test_connectivity_error_sets_offline_and_suppresses_status_for_silent_job(qapp, monkeypatch) -> None:
+    """Silent (Hintergrund-Auto-Refresh) darf bei anhaltender Wartung nicht
+    alle paar Sekunden das Offline-Banner mit Fehlertext überschreiben."""
+    worker = ApiWorker()
+    monkeypatch.setattr(worker.client, "get_stash",
+                        lambda league, sid, parent_id=None: (_ for _ in ()).throw(
+                            httpx.ConnectError("kein Netz")))
+    offline_events, errors = [], []
+    worker.offline_changed.connect(offline_events.append)
+    worker.job_error.connect(errors.append)
+
+    worker.submit(FetchStashItemsJob("Standard", "t1", "Tab", silent=True))
+    worker.stop()
+    worker.run()
+
+    assert offline_events == [True]
+    assert errors == []
+    worker.client.close()
+
+
+def test_connectivity_error_emits_friendly_message_for_manual_job(qapp, monkeypatch) -> None:
+    worker = ApiWorker()
+    monkeypatch.setattr(worker.client, "get_stash",
+                        lambda league, sid, parent_id=None: (_ for _ in ()).throw(
+                            httpx.ConnectError("kein Netz")))
+    offline_events, errors = [], []
+    worker.offline_changed.connect(offline_events.append)
+    worker.job_error.connect(errors.append)
+
+    worker.submit(FetchStashItemsJob("Standard", "t1", "Tab", silent=False))
+    worker.stop()
+    worker.run()
+
+    assert offline_events == [True]
+    assert len(errors) == 1 and "nicht erreichbar" in errors[0]
+    worker.client.close()
+
+
+def test_offline_clears_after_a_successful_job(qapp, monkeypatch) -> None:
+    """Selbstheilend: der nächste erfolgreiche Job (z. B. Retry per ⟳-Klick)
+    beendet den Offline-Zustand wieder — kein manuelles Zurücksetzen nötig."""
+    worker = ApiWorker()
+    fake_stash = StashTab.model_validate({
+        "id": "t1", "name": "Tab", "type": "CurrencyStash", "metadata": {}, "items": [],
+    })
+    calls = {"n": 0}
+
+    def flaky_get_stash(league, sid, parent_id=None):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise httpx.ConnectError("kein Netz")
+        return fake_stash
+
+    monkeypatch.setattr(worker.client, "get_stash", flaky_get_stash)
+    offline_events = []
+    worker.offline_changed.connect(offline_events.append)
+
+    worker.submit(FetchStashItemsJob("Standard", "t1", "Tab"))
+    worker.submit(FetchStashItemsJob("Standard", "t1", "Tab"))
+    worker.stop()
+    worker.run()
+
+    assert offline_events == [True, False]
+    worker.client.close()
+
+
+def test_offline_state_change_not_re_emitted_for_repeated_failures(qapp, monkeypatch) -> None:
+    worker = ApiWorker()
+    monkeypatch.setattr(worker.client, "get_stash",
+                        lambda league, sid, parent_id=None: (_ for _ in ()).throw(
+                            httpx.ConnectError("kein Netz")))
+    offline_events = []
+    worker.offline_changed.connect(offline_events.append)
+
+    worker.submit(FetchStashItemsJob("Standard", "t1", "Tab", silent=True))
+    worker.submit(FetchStashItemsJob("Standard", "t1", "Tab", silent=True))
+    worker.stop()
+    worker.run()
+
+    assert offline_events == [True]  # nur EIN Signal, nicht pro fehlgeschlagenem Job
+    worker.client.close()

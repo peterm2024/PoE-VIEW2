@@ -306,3 +306,52 @@ def test_tab_colour_is_icon_not_text_colour(qapp) -> None:
     # NoBrush == nie per setForeground() überschrieben, Text bleibt Theme-Farbe
     assert node.foreground(_COL_NAME).style() == Qt.BrushStyle.NoBrush
     assert not node.icon(_COL_NAME).isNull()
+
+
+# --- Offline-Markierung (Nutzer-Feedback: GGG-Wartung am Patchday) --------- #
+
+def test_set_offline_marks_loaded_tabs_leaves_unloaded_alone(qapp) -> None:
+    data = [{"id": "loaded", "name": "Currency 1", "type": "CurrencyStash", "metadata": {}},
+            {"id": "never", "name": "Currency 2", "type": "CurrencyStash", "metadata": {}}]
+    stashes = [StashTab.model_validate(d) for d in data]
+    tree = StashTree()
+    three_days_ago = (datetime.now(timezone.utc) - timedelta(days=3)).isoformat()
+    tree.set_stashes(stashes, last_loaded={"loaded": three_days_ago})
+
+    tree.set_offline(True)
+
+    loaded_button = tree.itemWidget(tree._stash_nodes["loaded"], _COL_STATUS)
+    assert loaded_button.text() == "📴 vor 3d"
+    assert "Offline-Cache" in loaded_button.toolTip()
+    # Nie geladener Tab bleibt unverändert — für ihn gibt es online wie
+    # offline nichts anzuzeigen.
+    never_node = tree._stash_nodes["never"]
+    assert never_node.text(_COL_STATUS) == "⬇"
+    assert tree.itemWidget(never_node, _COL_STATUS) is None
+
+
+def test_set_offline_false_restores_refresh_button(qapp) -> None:
+    data = [{"id": "loaded", "name": "Currency 1", "type": "CurrencyStash", "metadata": {}}]
+    stashes = [StashTab.model_validate(d) for d in data]
+    tree = StashTree()
+    three_days_ago = (datetime.now(timezone.utc) - timedelta(days=3)).isoformat()
+    tree.set_stashes(stashes, last_loaded={"loaded": three_days_ago})
+
+    tree.set_offline(True)
+    tree.set_offline(False)
+
+    button = tree.itemWidget(tree._stash_nodes["loaded"], _COL_STATUS)
+    assert button.text() == "⟳ vor 3d"
+
+
+def test_set_offline_idempotent_noop_when_unchanged(qapp) -> None:
+    """Kein unnötiges Neu-Rendern, wenn sich der Zustand gar nicht ändert."""
+    data = [{"id": "loaded", "name": "Currency 1", "type": "CurrencyStash", "metadata": {}}]
+    stashes = [StashTab.model_validate(d) for d in data]
+    tree = StashTree()
+    tree.set_stashes(stashes, last_loaded={"loaded": datetime.now(timezone.utc).isoformat()})
+
+    tree.set_offline(False)  # war schon False
+
+    button = tree.itemWidget(tree._stash_nodes["loaded"], _COL_STATUS)
+    assert button.text().startswith("⟳")

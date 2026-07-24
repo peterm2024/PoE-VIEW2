@@ -10,7 +10,10 @@ empfunden), und GENAU EINE Status-Spalte, die sich gegenseitig
 ausschließende Zustände zeigt: "⬇" (Items noch nie geladen) als reiner
 Text, oder — sobald mindestens einmal geladen — ein Refresh-Button, dessen
 Beschriftung zugleich das Alter der zuletzt geladenen Daten zeigt
-("⟳ heute", "⟳ vor 3d"). Die Namensspalte ist per Maus verbreiterbar
+("⟳ heute", "⟳ vor 3d"). Ist GGG nicht erreichbar (``set_offline``,
+Nutzer-Feedback: GGG-Wartung am Patchday), wird aus dem ⟳ ein "📴" — die
+Daten kommen dann garantiert aus dem Cache, nicht von einer frischen
+Anfrage. Die Namensspalte ist per Maus verbreiterbar
 (``Interactive`` statt ``Stretch`` — Stretch-Spalten lassen sich in Qt
 NICHT manuell resizen).
 
@@ -44,6 +47,7 @@ from PySide6.QtWidgets import (QHeaderView, QMenu, QToolButton, QTreeWidget,
 from poe_view.api.models import StashTab
 
 _DATA_ROLE = Qt.ItemDataRole.UserRole
+_LAST_LOADED_ROLE = Qt.ItemDataRole.UserRole + 1  # für set_offline(): Refresh-Button neu beschriften
 _COL_NAME, _COL_COUNT, _COL_STATUS = 0, 1, 2
 _UNLOADED_MARK = "⬇"
 
@@ -147,9 +151,25 @@ class StashTree(QTreeWidget):
         self.headerItem().setTextAlignment(_COL_COUNT, Qt.AlignmentFlag.AlignRight)
         self.headerItem().setToolTip(_COL_COUNT, "Anzahl Items (bekannt nach dem ersten Laden)")
         self.headerItem().setToolTip(
-            _COL_STATUS, "⬇ = noch nicht geladen · ⟳ = neu laden (zeigt Alter der Daten)")
+            _COL_STATUS, "⬇ = noch nicht geladen · ⟳ = neu laden (zeigt Alter der Daten) · "
+            "📴 = Offline-Cache, GGG gerade nicht erreichbar")
         self._stash_nodes: dict[str, QTreeWidgetItem] = {}  # stash_id → Knoten
+        self._offline = False  # GGG nicht erreichbar (MainWindow.set_offline)
         self.itemClicked.connect(self._on_click)
+
+    def set_offline(self, offline: bool) -> None:
+        """GGG nicht erreichbar (Wartung/kein Netz, Nutzer-Feedback Patchday):
+        markiert alle bereits geladenen Fächer als "kommt aus dem
+        Offline-Cache", statt sie unverändert wie frisch geladen wirken zu
+        lassen. Nie geladene (⬇) Fächer bleiben unverändert — für sie gibt es
+        ohnehin nichts anzuzeigen, online wie offline."""
+        if offline == self._offline:
+            return
+        self._offline = offline
+        for stash_id, node in self._stash_nodes.items():
+            last_loaded_iso = node.data(_COL_STATUS, _LAST_LOADED_ROLE)
+            if last_loaded_iso is not None:
+                self._set_status(node, stash_id, last_loaded_iso)
 
     def set_stashes(self, stashes: list[StashTab], last_loaded: dict[str, str] | None = None,
                     item_counts: dict[str, int] | None = None) -> None:
@@ -280,17 +300,25 @@ class StashTree(QTreeWidget):
 
     def _set_status(self, node: QTreeWidgetItem, stash_id: str,
                     last_loaded_iso: str | None) -> None:
+        node.setData(_COL_STATUS, _LAST_LOADED_ROLE, last_loaded_iso)
         if last_loaded_iso is None:
             self.removeItemWidget(node, _COL_STATUS)
             node.setText(_COL_STATUS, _UNLOADED_MARK)
             node.setToolTip(_COL_STATUS, "Noch nicht geladen")
             return
         name: str = node.data(0, _DATA_ROLE).display_name
+        age = format_age(last_loaded_iso)
         node.setText(_COL_STATUS, "")
         button = QToolButton()
-        button.setText(f"⟳ {format_age(last_loaded_iso)}")
         button.setAutoRaise(True)
-        button.setToolTip(f"'{name}' neu laden")
+        if self._offline:
+            button.setText(f"📴 {age}")
+            button.setToolTip(
+                f"'{name}': Offline-Cache (zuletzt {age} aktualisiert) — "
+                "Klick versucht trotzdem ein Neuladen")
+        else:
+            button.setText(f"⟳ {age}")
+            button.setToolTip(f"'{name}' neu laden")
         button.clicked.connect(lambda: self.stash_refresh_requested.emit(stash_id, name))
         self.setItemWidget(node, _COL_STATUS, button)
 
