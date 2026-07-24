@@ -259,3 +259,54 @@ def test_rarity_filter_combines_with_text_search(qapp) -> None:
     proxy.set_rarity_visible(0, False)
 
     assert proxy.rowCount() == 1
+
+
+# --- Stabile Sortierung bei Filter-Toggle (Nutzer-Feedback) ---------------- #
+
+def test_reactivating_filter_restores_original_order_on_ties(qapp) -> None:
+    """Regression: "Nach dem Deaktivieren und Reaktivieren der Suchfilter
+    sollte wieder die ursprüngliche Sortierreihenfolge auftauchen" — bei
+    gleichem Sortierwert (hier: alle ohne iLvl, also "-inf") landeten
+    reaktivierte Items sonst am Ende statt an ihrer alten Position."""
+    from PySide6.QtWidgets import QTableView
+    from poe_view.ui.item_table import COLUMNS, ItemTableModel
+    model = ItemTableModel()
+    items = [
+        Item.model_validate({"typeLine": "Echo", "frameType": 0}),
+        Item.model_validate({"typeLine": "Foxtrot", "frameType": 3}),
+        Item.model_validate({"typeLine": "Golf", "frameType": 0}),
+        Item.model_validate({"typeLine": "Hotel", "frameType": 3}),
+        Item.model_validate({"typeLine": "India", "frameType": 0}),
+    ]
+    model.set_items(items)
+    proxy = ItemFilterProxy()
+    proxy.setSourceModel(model)
+    table = QTableView()
+    table.setModel(proxy)
+    table.setSortingEnabled(True)
+    table.sortByColumn(COLUMNS.index("iLvl"), Qt.SortOrder.AscendingOrder)  # alle "-inf": Ties
+    names = lambda: [proxy.data(proxy.index(r, 2), Qt.ItemDataRole.DisplayRole)
+                     for r in range(proxy.rowCount())]
+    original = names()
+
+    proxy.set_rarity_visible(3, False)  # Unique ausblenden ("deaktivieren")
+    proxy.set_rarity_visible(3, True)   # wieder einblenden ("reaktivieren")
+
+    assert names() == original
+
+
+def test_duplicate_names_keep_source_order_after_filter_toggle(qapp) -> None:
+    """Gleicher Bug, andere Ursache: mehrere Items mit identischem Namen
+    (z. B. Currency-Stacks) sind beim Sortieren nach Name ebenfalls Ties."""
+    model = ItemTableModel()
+    items = [make_item("Chaos Orb") for _ in range(3)]
+    model.set_items(items)
+    proxy = ItemFilterProxy()
+    proxy.setSourceModel(model)
+    proxy.sort(2, Qt.SortOrder.AscendingOrder)
+
+    proxy.set_column_filter(2, "chaos")
+    proxy.set_column_filter(2, "")
+
+    order = [proxy.mapToSource(proxy.index(r, 0)).row() for r in range(proxy.rowCount())]
+    assert order == [0, 1, 2]

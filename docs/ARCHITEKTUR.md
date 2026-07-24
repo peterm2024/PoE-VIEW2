@@ -553,7 +553,12 @@ bei den Namen (`models.req_level()` / `req_attribute()`):
 eine UserRole, die für Zahlenspalten echte Floats liefert (erste Zahl im
 Anzeigetext, "+20%" → 20.0; "–" → -inf, landet also ganz unten) und für
 Textspalten den kleingeschriebenen Text. Vorher verglich Qt die
-Anzeige-Strings: "113" < "56".
+Anzeige-Strings: "113" < "56". `ItemFilterProxy.lessThan()` bricht
+Gleichstände (z. B. mehrere "-inf" ohne iLvl, oder mehrere gleichnamige
+Items) zusätzlich über die Zeilennummer im Quellmodell auf — sonst würde
+ein Filter-Toggle (Rarity-Checkbox, Spalten-Filter) zuvor ausgeblendete,
+gleichwertige Items ans Ende werfen statt an ihre alte Position
+zurückzuholen (Nutzer-Feedback, FALLSTRICKE #18).
 
 **Spalten-Filter (Excel-artig, Nutzer-Feedback "20% Quality, iLvl <45"):**
 Header-Rechtsklick zeigt oben ein Eingabefeld für die angeklickte Spalte

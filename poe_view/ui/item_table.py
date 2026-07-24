@@ -220,6 +220,28 @@ class ItemFilterProxy(QSortFilterProxyModel):
         self._search_text = ""
         self._hidden_rarities: set[int] = set()  # frameType, per Checkbox abgewählt
 
+    def lessThan(self, left: QModelIndex, right: QModelIndex) -> bool:  # noqa: N802 (Qt-API)
+        """Eigene Tie-Break-Regel für gleiche Sortierwerte (Nutzer-Feedback:
+        "nach Deaktivieren/Reaktivieren eines Filters landen die Items am
+        Ende"). Ohne das ist der Vergleich bei Gleichstand (z. B. mehrere
+        Items ohne iLvl — alle "-inf", oder mehrere "Chaos Orb") aus Sicht
+        des Sortier-Algorithmus KEIN Widerspruch zu jeder beliebigen
+        Position — Qt sortiert bei einer Filteränderung nicht immer komplett
+        neu, sondern fügt wieder sichtbare Zeilen inkrementell ein, wobei
+        gleiche Werte an der aktuellen Einfügestelle (meist ans Ende der
+        Gleichstand-Gruppe) landen statt an ihrer ursprünglichen Position.
+        Die Original-Zeilennummer im Quellmodell als zweites Kriterium macht
+        den Vergleich zu einer echten Totalordnung — es gibt dann für jedes
+        Element nur noch EINE korrekte Position, unabhängig davon, in
+        welcher Reihenfolge/wie oft Qt intern neu einsortiert."""
+        source = self.sourceModel()
+        role = self.sortRole()
+        left_value = source.data(left, role)
+        right_value = source.data(right, role)
+        if left_value == right_value:
+            return left.row() < right.row()
+        return left_value < right_value
+
     # --- Rarity-Checkboxen (Nutzer-Feedback) ------------------------------ #
 
     def set_rarity_visible(self, frame_type: int, visible: bool) -> None:
