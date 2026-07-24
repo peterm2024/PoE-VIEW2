@@ -27,6 +27,13 @@ Rechtsklick auf einen Tab öffnet ein Kontextmenü mit "Rohdaten anzeigen"
 (``raw_data_requested``-Signal) — Aufhänger für den Mini-Viewer in
 ``ui/raw_data_viewer.py`` (Nutzer-Feedback).
 
+``highlight_stash(stash_id)`` hebt einen Knoten hervor (Klick auf ein Item
+in einer Aggregat-/Suchansicht, MainWindow._on_row_selected) — klappt
+nötige Eltern-Ordner auf und scrollt hin, OHNE das ``stash_selected``-
+Signal auszulösen (nutzt ``setCurrentItem`` statt eines echten Klicks):
+sonst würde das versehentlich die gerade angezeigte Such-/Aggregat-Ansicht
+in der Item-Tabelle überschreiben (Nutzer-Feedback).
+
 Map-Stash-Kinder werden nach ``metadata.map.section`` gruppiert (Tier 1–16,
 dann Unique Maps, dann Special Maps) — ein flacher Baum mit 100+ Fächern war
 "uferlos" (Nutzer-Feedback). Die Gruppenknoten sind reine Anzeige-Hilfen
@@ -326,6 +333,23 @@ class StashTree(QTreeWidget):
         stash: StashTab | None = item.data(0, _DATA_ROLE)
         if stash is not None:
             self.stash_selected.emit(stash.id, stash.display_name)
+
+    def highlight_stash(self, stash_id: str) -> None:
+        """Hebt den Knoten eines Fachs hervor (Nutzer-Feedback: Klick auf ein
+        Item in einer Aggregat-/Suchansicht soll das Herkunfts-Fach im Baum
+        zeigen) — klappt dafür nötige Eltern-Knoten auf und scrollt hin.
+        BEWUSST ``setCurrentItem`` statt eines simulierten Klicks: das löst
+        KEIN ``itemClicked`` aus (nur echte Mausklicks tun das), die
+        Suche/Aggregat-Ansicht in der Item-Tabelle bleibt also unangetastet."""
+        node = self._stash_nodes.get(stash_id)
+        if node is None:
+            return
+        parent = node.parent()
+        while parent is not None:
+            parent.setExpanded(True)
+            parent = parent.parent()
+        self.setCurrentItem(node)
+        self.scrollToItem(node)
 
     def _on_context_menu(self, pos) -> None:
         item = self.itemAt(pos)

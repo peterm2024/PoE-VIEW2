@@ -1188,3 +1188,59 @@ def test_toolbar_context_menu_disabled(qapp) -> None:
 
     win.worker.stop()
     win.worker.wait(5000)
+
+
+# --- Baum-Hervorhebung bei Item-Auswahl (Nutzer-Feedback) ------------------ #
+
+def test_row_selection_highlights_tab_without_changing_search(qapp, monkeypatch) -> None:
+    """Nutzer-Feedback: bei "*" (alles anzeigen) soll ein Klick auf ein Item
+    das Herkunfts-Fach im Baum zeigen, DARF ABER die Suche nicht verändern."""
+    win = MainWindow()
+    win._current_league = "Standard"
+    t1, t2 = _make_leaf("t1", "Currency 1"), _make_leaf("t2", "Essence")
+    win._stash_trees["Standard"] = [t1, t2]
+    win._leaf_stashes = [t1, t2]
+    win._items["Standard"] = {
+        "t1": [Item.model_validate({"typeLine": "Chaos Orb"})],
+        "t2": [Item.model_validate({"typeLine": "Deafening Essence of Greed"})],
+    }
+    monkeypatch.setattr(win.worker, "submit", lambda job: None)
+    monkeypatch.setattr(win.tree, "highlight_stash", lambda sid: highlighted.append(sid))
+    highlighted = []
+
+    win._filter_edit.setText("*")
+    assert win.proxy.rowCount() == 2
+
+    # Zeile für "t2" (Essence) auswählen — _on_row_selected direkt aufgerufen,
+    # genau wie es sonst currentRowChanged täte (spart Selection-Flag-Kram).
+    row = next(r for r in range(win.proxy.rowCount())
+              if win.table_model.stash_id_at(win.proxy.mapToSource(win.proxy.index(r, 0)).row())
+              == "t2")
+    win._on_row_selected(win.proxy.index(row, 0), win.proxy.index(0, 0))
+
+    assert highlighted == ["t2"]
+    assert win.proxy.rowCount() == 2          # Suche unverändert
+    assert win._filter_edit.text() == "*"     # Suchfeld unverändert
+    assert win._search_all_active             # weiterhin in der Suchansicht
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_single_tab_selection_highlights_its_own_tab(qapp) -> None:
+    win = MainWindow()
+    win._current_league = "Standard"
+    tab = _make_leaf("t1", "Currency 1")
+    win._stash_trees["Standard"] = [tab]
+    win._leaf_stashes = [tab]
+    win._activate_stash_tree([tab])
+
+    highlighted = []
+    win.tree.highlight_stash = lambda sid: highlighted.append(sid)
+    win._show_items("t1", [Item.model_validate({"typeLine": "Chaos Orb"})], "Currency 1")
+    win._on_row_selected(win.proxy.index(0, 0), win.proxy.index(0, 0))
+
+    assert highlighted == ["t1"]
+
+    win.worker.stop()
+    win.worker.wait(5000)

@@ -355,3 +355,47 @@ def test_set_offline_idempotent_noop_when_unchanged(qapp) -> None:
 
     button = tree.itemWidget(tree._stash_nodes["loaded"], _COL_STATUS)
     assert button.text().startswith("⟳")
+
+
+# --- Baum-Hervorhebung bei Item-Auswahl (Nutzer-Feedback) ------------------ #
+
+def test_highlight_stash_selects_and_expands_ancestors(qapp) -> None:
+    """Klick auf ein Item in einer Aggregat-/Suchansicht soll das
+    Herkunfts-Fach im Baum zeigen — auch wenn es in einem zugeklappten
+    Ordner liegt."""
+    data = [
+        {"id": "folder1", "name": "Folder", "type": "Folder", "metadata": {"folder": True},
+         "children": [{"id": "child1", "name": "Sub", "type": "CurrencyStash", "metadata": {}}]},
+    ]
+    stashes = [StashTab.model_validate(d) for d in data]
+    tree = StashTree()
+    tree.set_stashes(stashes)
+    folder_node = tree.topLevelItem(0)
+    assert not folder_node.isExpanded()  # startet zugeklappt (Nutzer-Feedback anderswo)
+
+    tree.highlight_stash("child1")
+
+    assert folder_node.isExpanded()
+    assert tree.currentItem() is tree._stash_nodes["child1"]
+
+
+def test_highlight_stash_does_not_emit_stash_selected(qapp) -> None:
+    """Kritisch (Nutzer-Feedback): die Hervorhebung darf NICHT wie ein
+    echter Klick wirken — sonst würde sie die aktuelle Such-/Aggregat-
+    Ansicht in der Item-Tabelle überschreiben."""
+    data = [{"id": "root1", "name": "Currency 1", "type": "QuadStash", "metadata": {}}]
+    stashes = [StashTab.model_validate(d) for d in data]
+    tree = StashTree()
+    tree.set_stashes(stashes)
+    received = []
+    tree.stash_selected.connect(lambda sid, name: received.append((sid, name)))
+
+    tree.highlight_stash("root1")
+
+    assert received == []
+
+
+def test_highlight_stash_unknown_id_is_noop(qapp) -> None:
+    tree = StashTree()
+    tree.set_stashes([])
+    tree.highlight_stash("does-not-exist")  # darf nicht crashen

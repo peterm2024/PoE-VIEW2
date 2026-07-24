@@ -628,6 +628,21 @@ Sortierung über `NUMERIC_SORT_ROLE` per eigenem Tupel-Schlüssel
 "#2") — unbekannte Werte als "-inf", konsistent mit den übrigen
 Zahlenspalten.
 
+**Baum-Hervorhebung bei Zeilenauswahl (Nutzer-Feedback, v. a. relevant bei
+`*`):** `ItemTableModel` führt zusätzlich `_stash_ids` parallel zu
+`_sources`/`_tab_indices` (an denselben Aufrufstellen mitgegeben —
+`_show_items`, `_show_special_parent_aggregate`, `_league_wide_items`).
+`MainWindow._on_row_selected` ruft darüber `StashTree.highlight_stash
+(stash_id)` auf: klappt die nötigen Eltern-Ordner auf, setzt den Baum-
+Fokus auf den Knoten und scrollt ihn ins Bild. Kritischer Punkt (Nutzer-
+Feedback: "aufpassen, dass dadurch nicht automatisch die Suche geändert
+wird") — `highlight_stash` nutzt bewusst `QTreeWidget.setCurrentItem`,
+NICHT einen simulierten Klick: `itemClicked` (das Signal, an das
+`stash_selected` gekoppelt ist) feuert laut Qt nur bei echten
+Mausklicks, nicht bei programmatischen Selektionsänderungen — die
+liga-weite Suche/Aggregat-Ansicht in der Item-Tabelle bleibt dadurch
+garantiert unangetastet.
+
 **Typ-Filter (8 Checkboxen neben dem Liga-Feld, `MainWindow.TYPE_FILTER_ENTRIES`,
 Nutzer-Feedback — ursprünglich "Rarity-Filter" mit nur 4 Checkboxen, dann um
 Gem/Currency/Divination Card sowie eine Sammel-Kategorie erweitert und

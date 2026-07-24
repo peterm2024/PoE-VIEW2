@@ -709,7 +709,8 @@ class MainWindow(QMainWindow):
         self._current_stash_id = stash_id  # Rückkehrziel nach liga-weiter Suche
         tab_index = self._tab_positions().get(stash_id)
         self.table.setColumnHidden(TAB_COL, True)  # redundant bei Einzelfach
-        self.table_model.set_items(items, [name] * len(items), [tab_index] * len(items))
+        self.table_model.set_items(items, [name] * len(items), [tab_index] * len(items),
+                                   [stash_id] * len(items))
         self._status_msg.setText(f"{name}: {len(items)} Items")
         self._update_raw_viewer(stash_id, name)
 
@@ -725,6 +726,7 @@ class MainWindow(QMainWindow):
         items: list[Item] = []
         sources: list[str] = []
         tab_indices: list[int | None] = []
+        stash_ids: list[str | None] = []
         loaded = 0
         for child in stash.children:
             cached = league_items.get(child.id)
@@ -734,8 +736,10 @@ class MainWindow(QMainWindow):
             items.extend(cached)
             sources.extend([child.display_name] * len(cached))
             tab_indices.extend([positions.get(child.id)] * len(cached))
+            stash_ids.extend([child.id] * len(cached))
         self.table.setColumnHidden(TAB_COL, False)  # hier trägt sie die Info
-        self.table_model.set_items(items, sources, tab_indices, request_icons=False)  # lazy
+        self.table_model.set_items(items, sources, tab_indices, stash_ids,
+                                   request_icons=False)  # lazy
         self._status_msg.setText(
             f"{name}: {len(items)} Items aus {loaded} von {len(stash.children)} "
             "geladenen Unter-Fächern")
@@ -785,20 +789,23 @@ class MainWindow(QMainWindow):
         self._search_all_active = False
         self._current_tab_name = "Alle Tabs"
         self._current_stash_id = None  # Rückkehr aus der Suche landet wieder hier
-        items, sources, tab_indices = self._league_wide_items()
+        items, sources, tab_indices, stash_ids = self._league_wide_items()
         self.table.setColumnHidden(TAB_COL, False)  # Aggregat: Herkunft zeigen
-        self.table_model.set_items(items, sources, tab_indices, request_icons=False)  # lazy
+        self.table_model.set_items(items, sources, tab_indices, stash_ids,
+                                   request_icons=False)  # lazy
         self._status_msg.setText(f"Alle Tabs: {len(items)} Items gesamt")
 
-    def _league_wide_items(self) -> tuple[list[Item], list[str], list[int | None]]:
-        """Alle gecachten Items der aktuellen Liga + Herkunfts-Fachname und
-        Tab-Position je Item (Positions-Spalte, unterscheidet gleichnamige
-        Fächer) — die Position ist der 1-basierte Platz in ``_leaf_stashes``,
-        NICHT ``stash.index`` (§_tab_positions)."""
+    def _league_wide_items(self) -> tuple[list[Item], list[str], list[int | None], list[str | None]]:
+        """Alle gecachten Items der aktuellen Liga + Herkunfts-Fachname,
+        Tab-Position (Positions-Spalte, unterscheidet gleichnamige Fächer —
+        1-basierter Platz in ``_leaf_stashes``, NICHT ``stash.index``,
+        §_tab_positions) und Tab-ID (Baum-Hervorhebung bei Zeilenauswahl,
+        Nutzer-Feedback) je Item."""
         league_items = self._items.get(self._current_league, {})
         items: list[Item] = []
         sources: list[str] = []
         tab_indices: list[int | None] = []
+        stash_ids: list[str | None] = []
         for position, stash in enumerate(self._leaf_stashes, start=1):
             cached = league_items.get(stash.id)
             if cached is None:
@@ -806,7 +813,8 @@ class MainWindow(QMainWindow):
             items.extend(cached)
             sources.extend([stash.display_name] * len(cached))
             tab_indices.extend([position] * len(cached))
-        return items, sources, tab_indices
+            stash_ids.extend([stash.id] * len(cached))
+        return items, sources, tab_indices, stash_ids
 
     # --- Fächerübergreifende Suche (Nutzer-Feedback) --------------------- #
 
@@ -823,11 +831,11 @@ class MainWindow(QMainWindow):
     def _enter_search_all(self) -> None:
         self._search_all_active = True
         self._showing_aggregate = True  # späte Einzel-Ergebnisse nicht reinfunken lassen
-        items, sources, tab_indices = self._league_wide_items()
+        items, sources, tab_indices, stash_ids = self._league_wide_items()
         self.table.setColumnHidden(TAB_COL, False)  # Herkunft ist Teil der Antwort
         # request_icons=False: sonst würde die Suche zigtausend Icon-Jobs in
         # die Worker-Queue schieben — Icons kommen lazy für sichtbare Zeilen.
-        self.table_model.set_items(items, sources, tab_indices, request_icons=False)
+        self.table_model.set_items(items, sources, tab_indices, stash_ids, request_icons=False)
         loaded = len({s for s in sources})
         self._status_msg.setText(
             f"Suche über {loaded} geladene Fächer ({len(items)} Items) — "
@@ -894,6 +902,14 @@ class MainWindow(QMainWindow):
         item = self.table_model.item_at(source_idx.row())
         if item:
             self.detail.show_item(item, self.table_model.pixmap_for(item))
+        # Herkunfts-Fach im Baum hervorheben (Nutzer-Feedback, v. a. bei "*"
+        # bzw. Aggregat-Ansichten mit mehreren Quell-Tabs) — highlight_stash
+        # nutzt bewusst setCurrentItem statt eines Klick-Signals, damit die
+        # aktuelle Such-/Aggregat-Ansicht in der Item-Tabelle NICHT verändert
+        # wird (kein stash_selected-Signal, siehe StashTree.highlight_stash).
+        stash_id = self.table_model.stash_id_at(source_idx.row())
+        if stash_id is not None:
+            self.tree.highlight_stash(stash_id)
 
     def _on_status(self, text: str) -> None:
         """Reiner Verlaufstext — Busy-Zustand kommt separat über busy_changed

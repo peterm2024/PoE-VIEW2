@@ -92,6 +92,7 @@ class ItemTableModel(QAbstractTableModel):
         self._items: list[Item] = []
         self._sources: list[str] = []         # Tab-Name pro Item (parallel zu _items)
         self._tab_indices: list[int | None] = []  # Tab-Position pro Item (Positions-Spalte)
+        self._stash_ids: list[str | None] = []  # Herkunfts-Tab-ID (Baum-Hervorhebung)
         self._rows: list[tuple] = []          # vorgerechnete Anzeigewerte
         self._pixmaps: dict[str, QPixmap] = {}
         self._requested: set[str] = set()
@@ -101,13 +102,17 @@ class ItemTableModel(QAbstractTableModel):
 
     def set_items(self, items: list[Item], sources: list[str] | None = None,
                   tab_indices: list[int | None] | None = None,
+                  stash_ids: list[str | None] | None = None,
                   request_icons: bool = True) -> None:
         """``sources[i]`` ist der Tab-Name von ``items[i]``. Ohne Angabe leer.
         ``tab_indices[i]`` ist die 1-basierte Position des Herkunfts-Tabs in
         der aktuellen API-Antwort (MainWindow._tab_positions — NICHT
         StashTab.index, siehe dort; Basis der Positions-Spalte,
         unterscheidet gleichnamige Fächer, z. B. mehrere "Heist"-Tabs,
-        Nutzer-Feedback) — ohne Angabe unbekannt.
+        Nutzer-Feedback) — ohne Angabe unbekannt. ``stash_ids[i]`` ist die
+        Tab-ID von ``items[i]`` — Grundlage dafür, bei Zeilenauswahl das
+        richtige Fach im Stash-Baum hervorzuheben (Nutzer-Feedback,
+        wichtig gerade in Aggregat-/Suchansichten mit mehreren Quell-Tabs).
 
         ``request_icons=False`` für große Aggregate (liga-weite Suche,
         "Alle Tabs laden"): Icons werden dann lazy in ``data()`` angefordert,
@@ -117,6 +122,7 @@ class ItemTableModel(QAbstractTableModel):
         self._items = items
         self._sources = sources if sources is not None else [""] * len(items)
         self._tab_indices = tab_indices if tab_indices is not None else [None] * len(items)
+        self._stash_ids = stash_ids if stash_ids is not None else [None] * len(items)
         self._rows = [self._precompute(item) for item in items]
         self.endResetModel()
         if request_icons and self._icon_requester:
@@ -146,6 +152,9 @@ class ItemTableModel(QAbstractTableModel):
 
     def source_at(self, row: int) -> str:
         return self._sources[row] if 0 <= row < len(self._sources) else ""
+
+    def stash_id_at(self, row: int) -> str | None:
+        return self._stash_ids[row] if 0 <= row < len(self._stash_ids) else None
 
     def set_icon(self, url: str, pixmap: QPixmap) -> None:
         self._pixmaps[url] = pixmap
