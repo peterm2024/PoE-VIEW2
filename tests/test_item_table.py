@@ -343,12 +343,13 @@ def test_duplicate_names_keep_source_order_after_filter_toggle(qapp) -> None:
 
 def test_position_column_shows_tab_index_and_coordinates(qapp) -> None:
     """Nutzer-Feedback: mehrere gleichnamige Fächer (z. B. "Heist") lassen
-    sich über den Namen allein nicht unterscheiden — Tab-Index (1-basiert)
-    + Item-Koordinate innerhalb des Fachs schon."""
+    sich über den Namen allein nicht unterscheiden — Tab-Position (bereits
+    1-basiert von MainWindow._tab_positions übergeben, NICHT StashTab.index,
+    siehe FALLSTRICKE #21) + Item-Koordinate innerhalb des Fachs schon."""
     from poe_view.ui.item_table import POSITION_COL, ItemTableModel
     model = ItemTableModel()
     item = Item.model_validate({"typeLine": "Chaos Orb", "x": 4, "y": 7})
-    model.set_items([item], ["Heist"], tab_indices=[2])  # StashTab.index=2 -> "#3"
+    model.set_items([item], ["Heist"], tab_indices=[3])  # Position 3 in der API-Antwort
 
     idx = model.index(0, POSITION_COL)
     assert model.data(idx, Qt.ItemDataRole.DisplayRole) == "#3 (4, 7)"
@@ -368,7 +369,7 @@ def test_position_column_shows_tab_index_without_coordinates(qapp) -> None:
     Tab-Nr., statt eine unvollständige Koordinate vorzutäuschen."""
     from poe_view.ui.item_table import POSITION_COL, ItemTableModel
     model = ItemTableModel()
-    model.set_items([make_item("Chaos Orb")], ["Heist"], tab_indices=[0])
+    model.set_items([make_item("Chaos Orb")], ["Heist"], tab_indices=[1])
 
     idx = model.index(0, POSITION_COL)
     assert model.data(idx, Qt.ItemDataRole.DisplayRole) == "#1"

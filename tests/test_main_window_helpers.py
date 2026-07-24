@@ -1120,19 +1120,23 @@ def test_live_update_preserves_current_selection(qapp, monkeypatch) -> None:
 
 # --- Position-Spalte: Tab-Index + Koordinaten (Nutzer-Feedback) ------------ #
 
-def test_position_column_disambiguates_duplicate_tab_names(qapp, monkeypatch) -> None:
-    """Nutzer-Feedback: "ich habe mehrere gleichnamige Truhenfächer (z. B.
-    Heist)" — die Tab-Spalte zeigt bei beiden nur "Heist", die neue
-    Position-Spalte trägt den unterscheidenden Tab-Index."""
+def test_position_column_uses_list_order_not_stash_index(qapp, monkeypatch) -> None:
+    """Nutzer-Feedback: "der Index der Truhenfächer bezieht sich auf die
+    Position der jeweiligen (vergangenen) Liga" — Fächer wandern beim
+    Liga-Ende nach Standard und BEHALTEN ihren alten Index, mehrere Fächer
+    tragen dort also denselben ``index``. Die Position-Spalte muss daher
+    aus der tatsächlichen Reihenfolge der aktuellen API-Antwort kommen
+    (``_leaf_stashes``), nicht aus ``StashTab.index``. Test simuliert genau
+    das: beide "Heist"-Tabs tragen index=1 (aus zwei toten Ligen migriert)."""
     from poe_view.ui.item_table import POSITION_COL
     win = MainWindow()
     win._current_league = "Standard"
     heist1 = StashTab.model_validate({"id": "h1", "name": "Heist", "type": "NormalStash",
-                                      "index": 0, "metadata": {}})
+                                      "index": 1, "metadata": {}})
     heist2 = StashTab.model_validate({"id": "h2", "name": "Heist", "type": "NormalStash",
-                                      "index": 2, "metadata": {}})
+                                      "index": 1, "metadata": {}})  # gleicher index wie h1!
     win._stash_trees["Standard"] = [heist1, heist2]
-    win._leaf_stashes = [heist1, heist2]
+    win._leaf_stashes = [heist1, heist2]  # Reihenfolge der aktuellen API-Antwort
     win._items["Standard"] = {
         "h1": [Item.model_validate({"typeLine": "Gold Locket", "x": 1, "y": 1})],
         "h2": [Item.model_validate({"typeLine": "Gold Locket", "x": 5, "y": 3})],
@@ -1143,24 +1147,44 @@ def test_position_column_disambiguates_duplicate_tab_names(qapp, monkeypatch) ->
 
     positions = {win.table_model.display_text(r, POSITION_COL)
                 for r in range(win.table_model.rowCount())}
-    assert positions == {"#1 (1, 1)", "#3 (5, 3)"}  # eindeutig trotz gleichem Namen
+    assert positions == {"#1 (1, 1)", "#2 (5, 3)"}  # eindeutig trotz identischem index
 
     win.worker.stop()
     win.worker.wait(5000)
 
 
 def test_single_tab_view_shows_position_column(qapp) -> None:
+    """Auch im Einzelfach kommt die Tab-Nr. aus der Listen-Position
+    (``_leaf_stashes``), nicht aus ``StashTab.index`` (hier bewusst auf
+    einen irreführenden Wert gesetzt, um das zu beweisen)."""
     win = MainWindow()
     win._current_league = "Standard"
+    other = StashTab.model_validate({"id": "other", "name": "Currency", "type": "CurrencyStash",
+                                     "index": 0, "metadata": {}})
     tab = StashTab.model_validate({"id": "t1", "name": "Heist", "type": "NormalStash",
-                                   "index": 4, "metadata": {}})
-    win._stash_trees["Standard"] = [tab]
+                                   "index": 99, "metadata": {}})  # irreführender index
+    win._stash_trees["Standard"] = [other, tab]
+    win._leaf_stashes = [other, tab]  # tab ist der ZWEITE Eintrag -> Position 2
 
     win._show_items("t1", [Item.model_validate({"typeLine": "Chaos Orb", "x": 2, "y": 9})],
                     "Heist")
 
     from poe_view.ui.item_table import POSITION_COL
-    assert win.table_model.display_text(0, POSITION_COL) == "#5 (2, 9)"
+    assert win.table_model.display_text(0, POSITION_COL) == "#2 (2, 9)"
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+# --- Toolbar darf nicht versehentlich ausblendbar sein (Nutzer-Feedback) --- #
+
+def test_toolbar_context_menu_disabled(qapp) -> None:
+    """Qt bietet per Default ein Rechtsklick-Menü über der Toolbar an, mit
+    dem sie sich komplett ausblenden lässt — ohne Menüleiste gäbe es dann
+    keinen Weg zurück (Login, Refresh, Liga-Wahl, Suche wären weg)."""
+    from PySide6.QtCore import Qt
+    win = MainWindow()
+    assert win.contextMenuPolicy() == Qt.ContextMenuPolicy.NoContextMenu
 
     win.worker.stop()
     win.worker.wait(5000)

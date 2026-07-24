@@ -15,12 +15,14 @@ ausgeblendet; in Aggregat-Ansichten ("Alle Tabs laden", Klick auf einen
 Spezial-Tab-Elternknoten, liga-weite Suche) wird sie automatisch
 eingeblendet — dort ordnet sie Items ihrem Fach zu ("Map (Tier 1)").
 
-Die Position-Spalte ("#3 (4, 7)") zeigt die 1-basierte StashTab.index des
-Herkunfts-Tabs plus die Gitter-Koordinate des Items darin (API-Felder
-x/y) — der Name allein unterscheidet gleichnamige Fächer nicht (Nutzer
-hat z. B. mehrere "Heist"-Tabs). Anders als die Tab-Spalte NICHT
-automatisch verwaltet: normal toggle-/immer sichtbar, auch im Einzelfach
-nützlich (Koordinate innerhalb des GERADE angezeigten Tabs).
+Die Position-Spalte ("#3 (4, 7)") zeigt die 1-basierte Position des
+Herkunfts-Tabs INNERHALB DER AKTUELLEN LIGA-ANTWORT (MainWindow.
+_tab_positions — NICHT StashTab.index, siehe dort) plus die
+Gitter-Koordinate des Items darin (API-Felder x/y) — der Name allein
+unterscheidet gleichnamige Fächer nicht (Nutzer hat z. B. mehrere
+"Heist"-Tabs). Anders als die Tab-Spalte NICHT automatisch verwaltet:
+normal toggle-/immer sichtbar, auch im Einzelfach nützlich (Koordinate
+innerhalb des GERADE angezeigten Tabs).
 
 Anf.Lvl/Str/Dex/Int kommen aus dem requirements-Array der GGG-API — die
 Daten waren dank ``extra="allow"`` längst im Cache, wurden nur nie gezeigt
@@ -89,7 +91,7 @@ class ItemTableModel(QAbstractTableModel):
         super().__init__()
         self._items: list[Item] = []
         self._sources: list[str] = []         # Tab-Name pro Item (parallel zu _items)
-        self._tab_indices: list[int | None] = []  # StashTab.index pro Item (Positions-Spalte)
+        self._tab_indices: list[int | None] = []  # Tab-Position pro Item (Positions-Spalte)
         self._rows: list[tuple] = []          # vorgerechnete Anzeigewerte
         self._pixmaps: dict[str, QPixmap] = {}
         self._requested: set[str] = set()
@@ -101,9 +103,11 @@ class ItemTableModel(QAbstractTableModel):
                   tab_indices: list[int | None] | None = None,
                   request_icons: bool = True) -> None:
         """``sources[i]`` ist der Tab-Name von ``items[i]``. Ohne Angabe leer.
-        ``tab_indices[i]`` ist die StashTab.index des Herkunfts-Tabs (Basis
-        der Positions-Spalte, unterscheidet gleichnamige Fächer, z. B.
-        mehrere "Heist"-Tabs, Nutzer-Feedback) — ohne Angabe unbekannt.
+        ``tab_indices[i]`` ist die 1-basierte Position des Herkunfts-Tabs in
+        der aktuellen API-Antwort (MainWindow._tab_positions — NICHT
+        StashTab.index, siehe dort; Basis der Positions-Spalte,
+        unterscheidet gleichnamige Fächer, z. B. mehrere "Heist"-Tabs,
+        Nutzer-Feedback) — ohne Angabe unbekannt.
 
         ``request_icons=False`` für große Aggregate (liga-weite Suche,
         "Alle Tabs laden"): Icons werden dann lazy in ``data()`` angefordert,
@@ -167,11 +171,13 @@ class ItemTableModel(QAbstractTableModel):
         return None
 
     def _position_text(self, row: int) -> str:
-        """Tab-Nr. (1-basiert, aus StashTab.index) + Gitter-Koordinate des
-        Items — unterscheidet gleichnamige Fächer (z. B. mehrere "Heist"),
-        die Tab-Spalte allein zeigt ja nur den (u. U. mehrdeutigen) Namen."""
+        """Tab-Nr. (bereits 1-basiert von MainWindow._tab_positions
+        übergeben — Position in der aktuellen API-Antwort, NICHT
+        StashTab.index) + Gitter-Koordinate des Items — unterscheidet
+        gleichnamige Fächer (z. B. mehrere "Heist"), die Tab-Spalte allein
+        zeigt ja nur den (u. U. mehrdeutigen) Namen."""
         tab_index = self._tab_indices[row] if row < len(self._tab_indices) else None
-        tab_part = f"#{tab_index + 1}" if tab_index is not None else "–"
+        tab_part = f"#{tab_index}" if tab_index is not None else "–"
         item = self._items[row]
         if item.x is not None and item.y is not None:
             return f"{tab_part} ({item.x}, {item.y})"

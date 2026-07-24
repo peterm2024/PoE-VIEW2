@@ -128,6 +128,12 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------ #
 
     def _build_ui(self) -> None:
+        # QMainWindow bietet per Default ein Rechtsklick-Kontextmenü über der
+        # Toolbar an, mit dem sie sich komplett ausblenden lässt — OHNE Menü-
+        # leiste gäbe es dann keinen Weg mehr zurück (Login, Refresh, Liga-
+        # Wahl, Suche — alles verschwunden). Nutzer-Feedback: aus Versehen
+        # passiert. Deaktiviert.
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)
         toolbar = QToolBar()
         toolbar.setMovable(False)
         self.addToolBar(toolbar)
@@ -687,11 +693,21 @@ class MainWindow(QMainWindow):
         tab.metadata["poeview_category"] = category
         return tab.display_name
 
+    def _tab_positions(self) -> dict[str, int]:
+        """1-basierte Position jedes Fachs in der Reihenfolge, in der die API
+        sie für die AKTUELLE Liga zurückliefert (`_leaf_stashes`) — Basis der
+        Position-Spalte (§4.11). NICHT ``StashTab.index`` nehmen: Fächer
+        wandern beim Liga-Ende nach Standard und behalten dabei ihren
+        ursprünglichen Index aus der (jetzt toten) alten Liga — mehrere
+        Fächer in Standard tragen so denselben Index (Nutzer-Feedback,
+        FALLSTRICKE #21). Die JSON-Reihenfolge selbst ist dagegen die
+        tatsächliche, aktuelle Position in der Truhen-Leiste."""
+        return {stash.id: position for position, stash in enumerate(self._leaf_stashes, start=1)}
+
     def _show_items(self, stash_id: str, items: list[Item], name: str) -> None:
         self._current_tab_name = name
         self._current_stash_id = stash_id  # Rückkehrziel nach liga-weiter Suche
-        stash = self._find_stash(self._stash_trees.get(self._current_league, []), stash_id)
-        tab_index = stash.index if stash is not None else None
+        tab_index = self._tab_positions().get(stash_id)
         self.table.setColumnHidden(TAB_COL, True)  # redundant bei Einzelfach
         self.table_model.set_items(items, [name] * len(items), [tab_index] * len(items))
         self._status_msg.setText(f"{name}: {len(items)} Items")
@@ -705,6 +721,7 @@ class MainWindow(QMainWindow):
         self._current_tab_name = name
         self._current_stash_id = stash.id  # Rückkehrziel nach liga-weiter Suche
         league_items = self._items.get(self._current_league, {})
+        positions = self._tab_positions()
         items: list[Item] = []
         sources: list[str] = []
         tab_indices: list[int | None] = []
@@ -716,7 +733,7 @@ class MainWindow(QMainWindow):
             loaded += 1
             items.extend(cached)
             sources.extend([child.display_name] * len(cached))
-            tab_indices.extend([child.index] * len(cached))
+            tab_indices.extend([positions.get(child.id)] * len(cached))
         self.table.setColumnHidden(TAB_COL, False)  # hier trägt sie die Info
         self.table_model.set_items(items, sources, tab_indices, request_icons=False)  # lazy
         self._status_msg.setText(
@@ -775,18 +792,20 @@ class MainWindow(QMainWindow):
 
     def _league_wide_items(self) -> tuple[list[Item], list[str], list[int | None]]:
         """Alle gecachten Items der aktuellen Liga + Herkunfts-Fachname und
-        Tab-Index je Item (Positions-Spalte, unterscheidet gleichnamige Fächer)."""
+        Tab-Position je Item (Positions-Spalte, unterscheidet gleichnamige
+        Fächer) — die Position ist der 1-basierte Platz in ``_leaf_stashes``,
+        NICHT ``stash.index`` (§_tab_positions)."""
         league_items = self._items.get(self._current_league, {})
         items: list[Item] = []
         sources: list[str] = []
         tab_indices: list[int | None] = []
-        for stash in self._leaf_stashes:
+        for position, stash in enumerate(self._leaf_stashes, start=1):
             cached = league_items.get(stash.id)
             if cached is None:
                 continue
             items.extend(cached)
             sources.extend([stash.display_name] * len(cached))
-            tab_indices.extend([stash.index] * len(cached))
+            tab_indices.extend([position] * len(cached))
         return items, sources, tab_indices
 
     # --- Fächerübergreifende Suche (Nutzer-Feedback) --------------------- #

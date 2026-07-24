@@ -604,17 +604,25 @@ manuelle Klicks minutenlang hinter CDN-Fetches einreihen.
 **Position-Spalte ("#3 (4, 7)", Nutzer-Feedback: "mehrere gleichnamige
 Truhenfächer, z. B. Heist"):** Der Tab-NAME allein unterscheidet mehrere
 gleichnamige Fächer nicht — die Position-Spalte zeigt zusätzlich die
-1-basierte `StashTab.index` des Herkunfts-Tabs ("#3") sowie die
-Gitter-Koordinate des Items darin (API-Felder `x`/`y` am Item, bisher
-ungenutzt trotz `extra="allow"`). Anders als die Tab-Spalte NICHT
-automatisch verwaltet — sie bleibt auch im Einzelfach sichtbar (dort
-zeigt sie die Koordinate innerhalb des gerade geöffneten Tabs) und ist
-ganz normal über das Header-Menü aus-/einblendbar. Der Tab-Index wird an
-jeder `set_items()`-Aufrufstelle separat mitgegeben (`ItemTableModel`
-führt dafür `_tab_indices` parallel zu `_sources`) — MainWindows
-`_league_wide_items()` liefert ihn für Aggregat-/Suchansichten,
-`_show_items()`/`_show_special_parent_aggregate()` je für Einzelfach bzw.
-Spezial-Tab-Kinder.
+1-basierte Position des Herkunfts-Tabs ("#3") sowie die Gitter-Koordinate
+des Items darin (API-Felder `x`/`y` am Item, bisher ungenutzt trotz
+`extra="allow"`). **NICHT** `StashTab.index` als Tab-Nummer verwenden —
+Nutzer-Korrektur: der `index` bezieht sich auf die Position INNERHALB DER
+LIGA, in der ein Tab ursprünglich angelegt wurde; beim Liga-Ende wandern
+Fächer nach Standard und behalten dabei ihren alten `index`, mehrere
+Fächer in Standard tragen also denselben Wert (FALLSTRICKE #21).
+`MainWindow._tab_positions()` berechnet die Tab-Nummer stattdessen aus der
+tatsächlichen, aktuellen Reihenfolge der API-Antwort (Position in
+`_leaf_stashes`, 1-basiert durchnummeriert) — das ist die einzige
+verlässliche Quelle, weil sie nicht von Liga-Historie kontaminiert ist.
+Anders als die Tab-Spalte NICHT automatisch verwaltet — sie bleibt auch im
+Einzelfach sichtbar (dort zeigt sie die Koordinate innerhalb des gerade
+geöffneten Tabs) und ist ganz normal über das Header-Menü aus-/einblendbar.
+Die Tab-Nummer wird an jeder `set_items()`-Aufrufstelle separat mitgegeben
+(`ItemTableModel` führt dafür `_tab_indices` parallel zu `_sources`,
+bereits 1-basiert) — MainWindows `_league_wide_items()` liefert sie für
+Aggregat-/Suchansichten, `_show_items()`/`_show_special_parent_aggregate()`
+je für Einzelfach bzw. Spezial-Tab-Kinder, jeweils über `_tab_positions()`.
 
 **Typ-Filter (8 Checkboxen neben dem Liga-Feld, `MainWindow.TYPE_FILTER_ENTRIES`,
 Nutzer-Feedback — ursprünglich "Rarity-Filter" mit nur 4 Checkboxen, dann um
@@ -724,6 +732,13 @@ gemeinsamen Baum, die textliche Beschreibung unten ist aktuell.)
 │ Bereit · Eingeloggt als PeterM · Not affiliated with Grinding Gear Games│
 └─────────────────────────────────────────────────────────────────────────┘
 ```
+
+**Toolbar-Kontextmenü deaktiviert:** `QMainWindow` bietet per Default ein
+Rechtsklick-Kontextmenü über der Toolbar an, mit dem sich diese komplett
+ausblenden lässt (`setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)`
+am Fenster deaktiviert es). Ohne Menüleiste gäbe es dann keinen Weg mehr
+zurück — Login, Refresh, Liga-Wahl, Typ-Filter und Suche wären komplett
+verschwunden (Nutzer-Feedback: aus Versehen ausgelöst).
 
 **Elemente & Verhalten:**
 
