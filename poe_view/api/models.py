@@ -9,7 +9,7 @@ SubVI "Extract Gem Info" (Schleife über das properties-Array).
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 # frameType → Rarity (Textfarbe im UI)
 FRAME_TYPE_NAMES = {
@@ -53,6 +53,20 @@ class Item(BaseModel):
     requirements: list[ItemProperty] = Field(default_factory=list)
     explicitMods: list[str] = Field(default_factory=list)
     implicitMods: list[str] = Field(default_factory=list)
+
+    @field_validator("explicitMods", "implicitMods", mode="before")
+    @classmethod
+    def _normalize_mods(cls, value: object) -> object:
+        """Neuerdings (Allflame-Liga, Nutzer-Befund) liefert GGG einzelne
+        Mod-Einträge mancher Items (z. B. Currency-Beschreibungstexte) nicht
+        mehr als reinen String, sondern als ``{"description": "..."}``-Objekt
+        — Format identisch zu den ohnehin schon verschachtelten
+        properties/requirements-Werten. Auf den Anzeigetext reduzieren,
+        bevor pydantic validiert, sonst schlägt der ganze Stash-Tab fehl."""
+        if not isinstance(value, list):
+            return value
+        return [entry.get("description", str(entry)) if isinstance(entry, dict) else entry
+                for entry in value]
 
     @property
     def display_name(self) -> str:

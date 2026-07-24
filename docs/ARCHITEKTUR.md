@@ -269,6 +269,17 @@ modellieren — nichts geht verloren, nichts bricht bei API-Erweiterungen):
   `properties: list[ItemProperty]`, sockets, …
 - `ItemProperty`: name, `values: list[tuple[str, int]]`
 
+**`explicitMods`/`implicitMods` — Einträge können STRING ODER OBJEKT sein**
+(Nutzer-Befund, Allflame-Liga): GGG liefert für manche Items (u. a.
+Currency-Beschreibungstexte wie "Upgrades a normal item to a random
+rarity") einzelne Mod-Einträge nicht als reinen String, sondern als
+`{"description": "..."}`-Objekt — ohne Gegenmaßnahme bricht die
+pydantic-Validierung für den GESAMTEN Stash-Tab (alle Items darin gehen
+verloren, nicht nur das eine). Ein `field_validator(mode="before")` auf
+`Item` reduziert jeden dict-Eintrag auf sein `description`-Feld, bevor
+pydantic den Typ prüft — plain strings bleiben unverändert (siehe
+FALLSTRICKE_UND_WORKAROUNDS.md #25).
+
 **Gem-Level/Quality** (die bekannte Sonderlocke) als dokumentierte Helper:
 
 ```python

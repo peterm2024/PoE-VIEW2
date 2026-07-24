@@ -66,6 +66,27 @@ def test_unknown_fields_are_kept() -> None:
     assert item.brandNewField == {"x": 1}
 
 
+def test_explicit_mods_normalizes_description_objects() -> None:
+    """Regression (Nutzer-Befund, Allflame-Liga): GGG liefert bei manchen
+    Items (u. a. Currency-Beschreibungstexten) Mod-Einträge nicht mehr als
+    reinen String, sondern als {"description": "..."}-Objekt — sonst würde
+    der ganze Stash-Tab mit einem pydantic-ValidationError abbrechen."""
+    item = Item.model_validate({
+        "typeLine": "Orb of Transmutation",
+        "frameType": 5,
+        "explicitMods": [{"description": "Upgrades a normal item to a random rarity"}],
+        "implicitMods": ["Ganz normaler String-Mod"],
+    })
+    assert item.explicitMods == ["Upgrades a normal item to a random rarity"]
+    assert item.implicitMods == ["Ganz normaler String-Mod"]
+
+
+def test_explicit_mods_plain_strings_still_work() -> None:
+    item = Item.model_validate({"typeLine": "Map", "frameType": 0,
+                                "explicitMods": ["Area contains an additional Boss"]})
+    assert item.explicitMods == ["Area contains an additional Boss"]
+
+
 def test_stash_display_name_from_real_special_tab_structures() -> None:
     """Strukturen aus ECHTEN Rohdaten (Nutzer, 2026-07-09) — nicht aus der Doku.
 
