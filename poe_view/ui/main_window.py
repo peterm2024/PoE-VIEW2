@@ -80,6 +80,7 @@ class MainWindow(QMainWindow):
         self._auto_refresh_counts: dict[str, int] = {}  # Liga → auto-aktualisierte Tabs (Session)
         self._raw_data_viewer: RawDataViewer | None = None
         self._offline = False  # GGG nicht erreichbar (Nutzer-Feedback: Wartung am Patchday)
+        self._live_leagues: set[str] | None = None  # letzte /account/leagues-Antwort; None = noch unbekannt
         self._restore_cached_data()
 
         self.worker = ApiWorker()
@@ -316,13 +317,20 @@ class MainWindow(QMainWindow):
         (Cache: alphabetisch; live: API-Reihenfolge) bleibt sonst erhalten."""
         return sorted(leagues, key=lambda league: not self._league_has_content(league))
 
+    # Nicht-auswählbare "Überschrift" statt eines blanken Trennstrichs —
+    # macht sichtbar explizit, WARUM die unteren Einträge getrennt sind
+    # (Nutzer-Feedback: "als Offline-Liga anhängen", nicht nur positionell
+    # trennen). Text bewusst so gewählt, dass er nie mit einem echten
+    # Liga-Namen kollidiert.
+    _ARCHIVED_HEADER = "── Beendete Ligen (nur Cache, kein Online-Zugriff) ──"
+
     def _rebuild_league_combo(self, live_leagues: list[str] | None) -> None:
         """Baut das Liga-Dropdown neu auf (Nutzer-Feedback): aktuell gültige
         Ligen oben (nach Spielstand sortiert, §_sort_by_content), abgelaufene
-        — nur noch im Cache vorhandene — Ligen darunter, per horizontalem
-        Strich abgetrennt. ``live_leagues=None`` heißt "wissen wir noch
+        — nur noch im Cache vorhandene — Ligen darunter, per nicht wählbarer
+        Überschrift abgetrennt. ``live_leagues=None`` heißt "wissen wir noch
         nicht" (Start vor der ersten API-Antwort, §4.12): dann gilt der
-        gesamte Cache als "oben", ohne Trennstrich, da wir noch nicht
+        gesamte Cache als "oben", ohne Abtrennung, da wir noch nicht
         unterscheiden können, was inzwischen abgelaufen ist."""
         previous = self._league_combo.currentText()
         if live_leagues is None:
@@ -337,16 +345,48 @@ class MainWindow(QMainWindow):
         self._league_combo.clear()
         self._league_combo.addItems(top)
         if top and bottom:
-            self._league_combo.insertSeparator(self._league_combo.count())
+            self._league_combo.addItem(self._ARCHIVED_HEADER)
+            header_item = self._league_combo.model().item(self._league_combo.count() - 1)
+            header_item.setEnabled(False)  # nur Überschrift, nicht anwählbar
         self._league_combo.addItems(bottom)
         # Auswahl möglichst über den Rebuild hinweg erhalten (leeres previous
-        # NICHT suchen — sonst würde findText("") den Trennstrich treffen,
-        # dessen Text ebenfalls "" ist).
+        # NICHT suchen — sonst würde findText("") zufällig etwas mit leerem
+        # Text treffen).
         idx = self._league_combo.findText(previous) if previous else -1
         self._league_combo.setCurrentIndex(idx if idx >= 0 else 0)
         self._league_combo.blockSignals(False)
         if self._league_combo.count():
             self._on_league_changed(self._league_combo.currentText())
+        self._update_tree_offline_display()  # auch wenn _on_league_changed oben früh returnt
+
+    def _current_league_is_archived(self) -> bool:
+        """True, wenn die aktuelle Liga zwar im Cache existiert, aber nicht
+        mehr in der letzten Live-Antwort von /account/leagues auftaucht —
+        z. B. weil eine temporäre Liga beendet wurde (Nutzer-Feedback:
+        Liga-Start, "keinen Online-Zugriff mehr auf den alten Liga-Content").
+        ``None`` (noch nie eine Live-Antwort erhalten) gilt NICHT als
+        archiviert — sonst würde ein Offline-Start (§4.12) fälschlich jede
+        gecachte Liga als tot markieren."""
+        return self._live_leagues is not None and self._current_league not in self._live_leagues
+
+    def _update_tree_offline_display(self) -> None:
+        """Baum zeigt 📴 statt ⟳, wenn entweder GGG global nicht erreichbar
+        ist (§4.12) ODER die aktuell angezeigte Liga archiviert ist (Liga
+        beendet, kein Online-Zugriff mehr) — für den Nutzer bedeutet beides
+        dasselbe: "das hier ist garantiert nur Cache"."""
+        self.tree.set_offline(self._offline or self._current_league_is_archived())
+
+    def _archived_league_guard(self, message: str) -> bool:
+        """True (+ zeigt ``message``), wenn für die aktuelle Liga kein
+        Online-Zugriff mehr besteht — verhindert nutzlose Netzwerk-Versuche
+        für beendete Ligen. Bewusst PRÄVENTIV statt "versuchen und Fehler
+        behandeln": unklar, ob GGG dafür einen Fehler liefert oder still
+        eine leere Antwort (die den Cache überschreiben würde) — beides
+        wird durch den Verzicht auf den Versuch gleichermaßen vermieden."""
+        if self._current_league_is_archived():
+            self._status_msg.setText(message)
+            return True
+        return False
 
     def _on_type_toggled(self, type_key: int, visible: bool) -> None:
         self.proxy.set_type_visible(type_key, visible)
@@ -461,11 +501,12 @@ class MainWindow(QMainWindow):
         self._status_msg.setText(reason)
 
     def _on_leagues(self, leagues: list[str]) -> None:
+        self._live_leagues = set(leagues)
         self._rebuild_league_combo(leagues)
 
     def _on_league_changed(self, league: str) -> None:
-        if not league or league == self._current_league:
-            return
+        if not league or league == self._current_league or league == self._ARCHIVED_HEADER:
+            return  # Header-Zeile ist nicht anwählbar, aber sicherheitshalber abgefangen
         self._current_league = league
         self._showing_aggregate = False
         self._current_stash_id = None  # Fach-IDs gelten nur innerhalb einer Liga
@@ -479,8 +520,16 @@ class MainWindow(QMainWindow):
             self._leaf_stashes = []
         if self._search_all_active:
             self._enter_search_all()  # laufende Suche auf die neue Liga umziehen
-        # … und trotzdem im Hintergrund bestätigen/aktualisieren (wie bisher).
-        self.worker.submit(FetchStashListJob(league))
+        self._update_tree_offline_display()
+        if self._current_league_is_archived():
+            # Liga beendet (nicht mehr in /account/leagues) — kein Netzwerk-
+            # Versuch, der ohnehin nur scheitern kann (Nutzer-Feedback).
+            self._status_msg.setText(
+                f"{league}: Liga beendet — zeige den zuletzt bekannten Stand "
+                "(kein Online-Zugriff mehr).")
+        else:
+            # … und trotzdem im Hintergrund bestätigen/aktualisieren (wie bisher).
+            self.worker.submit(FetchStashListJob(league))
 
     def _on_characters(self, characters: list[Character]) -> None:
         """/character liefert ligenübergreifend; gefiltert wird lokal übers Dropdown.
@@ -598,7 +647,11 @@ class MainWindow(QMainWindow):
             # bewusst ignorieren — ein alter "0 Items"-Eintrag (von vor dem
             # Spezial-Tab-Feature) wäre sonst ein permanenter Cache-Treffer,
             # und die Kinder-Entdeckung fände nie statt (Nutzer-Befund:
-            # "musste erst manuell aktualisieren").
+            # "musste erst manuell aktualisieren"). Außer die Liga ist
+            # archiviert — dann gibt es nichts mehr zu entdecken.
+            if self._archived_league_guard(
+                    f"{name}: Liga beendet — Unter-Fächer nicht mehr abrufbar."):
+                return
             self.worker.submit(FetchStashItemsJob(self._current_league, stash_id, name))
             return
         league_items = self._items.get(self._current_league, {})
@@ -606,12 +659,17 @@ class MainWindow(QMainWindow):
             # Speicher-/Datei-Cache: kein erneuter API-Call (Doku §5)
             self._show_items(stash_id, league_items[stash_id], name)
             return
+        if self._archived_league_guard(
+                f"{name}: nie geladen — Liga beendet, jetzt nicht mehr abrufbar."):
+            return
         self.worker.submit(FetchStashItemsJob(self._current_league, stash_id, name,
                                               parent_id=self._parent_id_of(stash_id)))
 
     def _on_stash_refresh(self, stash_id: str, name: str) -> None:
         """Klick auf den Refresh-Button eines Tabs — bewusst AM Cache vorbei."""
         self._showing_aggregate = False
+        if self._archived_league_guard(f"{name}: Liga beendet — kein Refresh mehr möglich."):
+            return
         self.worker.submit(FetchStashItemsJob(self._current_league, stash_id, name,
                                               parent_id=self._parent_id_of(stash_id)))
 
@@ -754,6 +812,13 @@ class MainWindow(QMainWindow):
             QMessageBox.information(
                 self, "Alle Tabs laden",
                 "Keine Stash-Tabs geladen — bitte zuerst eine Liga wählen.")
+            return
+        if self._current_league_is_archived():
+            # Liga beendet — keiner der nicht gecachten Tabs ist noch
+            # abrufbar, "Alle Tabs laden" kann nur den Cache zusammenfassen.
+            self._show_aggregate()
+            self._status_msg.setText(
+                "Liga beendet — zeige den zuletzt bekannten Stand aller geladenen Fächer.")
             return
         league_items = self._items.get(self._current_league, {})
         # Spezial-Tabs ohne entdeckte Kinder immer mitnehmen: ein evtl.
@@ -929,15 +994,17 @@ class MainWindow(QMainWindow):
         Banner statt einer Fehlermeldung, die die nächste Statuszeile
         wegwischt, UND Markierung im Baum, dass Fächer aus dem Cache kommen."""
         self._offline = offline
-        self.tree.set_offline(offline)
+        self._update_tree_offline_display()
         self._offline_label.setText(
             "📴 Offline — GGG nicht erreichbar, zeige zwischengespeicherte Daten"
             if offline else "")
 
     def _refresh(self) -> None:
         """Stash-Liste + Charaktere neu laden; Item-Daten bleiben unangetastet
-        (dafür gibt es die gezielten Refresh-Buttons je Tab im Baum)."""
-        if self._current_league:
+        (dafür gibt es die gezielten Refresh-Buttons je Tab im Baum). Für
+        eine archivierte (beendete) Liga macht ein Stash-Listen-Refresh
+        keinen Sinn — /character bleibt aber liga-unabhängig sinnvoll."""
+        if self._current_league and not self._current_league_is_archived():
             self.worker.submit(FetchStashListJob(self._current_league))
         self.worker.submit(FetchCharactersJob())
 
@@ -994,6 +1061,8 @@ class MainWindow(QMainWindow):
         bleibt (Doku §4.8)."""
         if not self._current_league or self._worker_busy or self._bulk_dialog is not None:
             return
+        if self._current_league_is_archived():
+            return  # Liga beendet — jeder Versuch würde nur scheitern (oder Cache überschreiben)
         if self.worker.rate_limiter.headroom_fraction() < self.AUTO_REFRESH_MIN_HEADROOM:
             return
         candidate = self._pick_auto_refresh_candidate()

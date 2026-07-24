@@ -1072,10 +1072,14 @@ def test_expired_cache_only_league_appended_below_separator(qapp, monkeypatch) -
     win._on_leagues(["Standard"])  # "Legacy League" ist nicht mehr live
 
     order = [win._league_combo.itemText(i) for i in range(win._league_combo.count())]
-    sep = order.index("")
+    sep = order.index(MainWindow._ARCHIVED_HEADER)
     assert order[:sep] == ["Standard"]
     assert order[sep + 1:] == ["Legacy League"]
     assert win._league_combo.currentText() == "Standard"
+    # Header ist eine reine Überschrift, nicht anwählbar (Nutzer-Feedback:
+    # explizit als "Offline-Liga" erkennbar, nicht nur positionell getrennt).
+    header_item = win._league_combo.model().item(sep)
+    assert not header_item.isEnabled()
 
     win.worker.stop()
     win.worker.wait(5000)
@@ -1241,6 +1245,203 @@ def test_single_tab_selection_highlights_its_own_tab(qapp) -> None:
     win._on_row_selected(win.proxy.index(0, 0), win.proxy.index(0, 0))
 
     assert highlighted == ["t1"]
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+# --- Archivierte (beendete) Ligen: kein Online-Zugriff mehr (Nutzer-Feedback) #
+
+def test_current_league_is_archived_unknown_before_first_live_response(qapp) -> None:
+    """Vor der ersten /account/leagues-Antwort (Offline-Start, §4.12) gilt
+    NICHTS als archiviert — sonst würde ein reiner Cache-Start jede Liga
+    fälschlich als "beendet" markieren."""
+    win = MainWindow()
+    win._current_league = "Standard"
+    assert win._live_leagues is None
+    assert win._current_league_is_archived() is False
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_current_league_is_archived_after_league_rotation(qapp) -> None:
+    win = MainWindow()
+    win._current_league = "Legacy League"
+    win._live_leagues = {"Standard", "Hardcore", "NewLeague"}
+
+    assert win._current_league_is_archived() is True
+
+    win._current_league = "Standard"
+    assert win._current_league_is_archived() is False
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_league_changed_skips_network_for_archived_league(qapp, monkeypatch) -> None:
+    """Nutzer-Feedback: Liga-Rotation — für eine beendete Liga darf KEIN
+    FetchStashListJob mehr abgeschickt werden (kein Online-Zugriff mehr)."""
+    win = MainWindow()
+    win._live_leagues = {"NewLeague"}  # "Legacy League" ist raus
+    win._stash_trees["Legacy League"] = [_make_leaf("l1", "Currency 1")]
+    submitted = []
+    monkeypatch.setattr(win.worker, "submit", lambda job: submitted.append(job))
+
+    win._on_league_changed("Legacy League")
+
+    assert submitted == []
+    assert "beendet" in win._status_msg.text()
+    assert win._current_league == "Legacy League"  # trotzdem aktiviert (zeigt Cache)
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_stash_selected_archived_league_cache_hit_still_works(qapp, monkeypatch) -> None:
+    """Bereits geladene Items einer beendeten Liga bleiben normal nutzbar —
+    nur ein erneuter Netzwerk-Zugriff ist ausgeschlossen."""
+    win = MainWindow()
+    win._current_league = "Legacy League"
+    win._live_leagues = {"Standard"}
+    tab = _make_leaf("t1", "Currency 1")
+    win._stash_trees["Legacy League"] = [tab]
+    win._items["Legacy League"] = {"t1": [Item.model_validate({"typeLine": "Chaos Orb"})]}
+    submitted = []
+    monkeypatch.setattr(win.worker, "submit", lambda job: submitted.append(job))
+
+    win._on_stash_selected("t1", "Currency 1")
+
+    assert submitted == []
+    assert win.table_model.rowCount() == 1
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_stash_selected_archived_league_cache_miss_shows_message_no_fetch(qapp, monkeypatch) -> None:
+    win = MainWindow()
+    win._current_league = "Legacy League"
+    win._live_leagues = {"Standard"}
+    win._stash_trees["Legacy League"] = [_make_leaf("t1", "Currency 1")]
+    submitted = []
+    monkeypatch.setattr(win.worker, "submit", lambda job: submitted.append(job))
+
+    win._on_stash_selected("t1", "Currency 1")
+
+    assert submitted == []
+    assert "beendet" in win._status_msg.text()
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_stash_refresh_archived_league_no_fetch(qapp, monkeypatch) -> None:
+    win = MainWindow()
+    win._current_league = "Legacy League"
+    win._live_leagues = {"Standard"}
+    submitted = []
+    monkeypatch.setattr(win.worker, "submit", lambda job: submitted.append(job))
+
+    win._on_stash_refresh("t1", "Currency 1")
+
+    assert submitted == []
+    assert "beendet" in win._status_msg.text()
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_special_tab_undiscovered_children_archived_league_no_fetch(qapp, monkeypatch) -> None:
+    win = MainWindow()
+    win._current_league = "Legacy League"
+    win._live_leagues = {"Standard"}
+    map_stash = StashTab.model_validate({"id": "m1", "name": "M", "type": "MapStash",
+                                         "metadata": {}})
+    win._stash_trees["Legacy League"] = [map_stash]
+    submitted = []
+    monkeypatch.setattr(win.worker, "submit", lambda job: submitted.append(job))
+
+    win._on_stash_selected("m1", "M")
+
+    assert submitted == []
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_load_all_items_archived_league_shows_aggregate_without_fetch(qapp, monkeypatch) -> None:
+    win = MainWindow()
+    win._current_league = "Legacy League"
+    win._live_leagues = {"Standard"}
+    t1 = _make_leaf("t1", "Currency 1")
+    win._stash_trees["Legacy League"] = [t1]
+    win._leaf_stashes = [t1]
+    win._items["Legacy League"] = {"t1": [Item.model_validate({"typeLine": "Chaos Orb"})]}
+    submitted = []
+    monkeypatch.setattr(win.worker, "submit", lambda job: submitted.append(job))
+
+    win._load_all_items()
+
+    assert submitted == []
+    assert win.table_model.rowCount() == 1  # Aggregat trotzdem gezeigt
+    assert "beendet" in win._status_msg.text()
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_auto_refresh_skips_archived_league(qapp, monkeypatch) -> None:
+    win = MainWindow()
+    win._current_league = "Legacy League"
+    win._live_leagues = {"Standard"}
+    win._leaf_stashes = [_make_leaf("t1", "Currency 1")]  # wäre sonst ein Kandidat
+    submitted = []
+    monkeypatch.setattr(win.worker, "submit", lambda job: submitted.append(job))
+
+    win._maybe_auto_refresh()
+
+    assert submitted == []
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_update_tree_offline_display_combines_global_and_archived(qapp) -> None:
+    """📴 erscheint auch dann, wenn GGG global erreichbar ist, aber die
+    GERADE angezeigte Liga archiviert ist — und umgekehrt auch bei
+    globalem Offline-Zustand für eine ganz normale, gültige Liga."""
+    win = MainWindow()
+    win._current_league = "Legacy League"
+    win._live_leagues = {"Standard"}
+    tab = _make_leaf("t1", "Currency 1")
+    win._stash_trees["Legacy League"] = [tab]
+    win._last_loaded["Legacy League"] = {"t1": datetime.now(timezone.utc).isoformat()}
+    win._activate_stash_tree([tab])
+
+    assert win._offline is False  # GGG selbst ist erreichbar
+    win._update_tree_offline_display()
+
+    assert win.tree._offline is True  # trotzdem 📴, weil die Liga archiviert ist
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_manual_refresh_skips_stash_list_for_archived_league(qapp, monkeypatch) -> None:
+    """"⟳ Aktualisieren"-Button: Charaktere bleiben liga-unabhängig sinnvoll,
+    ein Stash-Listen-Refresh für eine beendete Liga würde nur scheitern."""
+    win = MainWindow()
+    win._current_league = "Legacy League"
+    win._live_leagues = {"Standard"}
+    submitted = []
+    monkeypatch.setattr(win.worker, "submit", lambda job: submitted.append(job))
+
+    win._refresh()
+
+    from poe_view.services.api_worker import FetchCharactersJob, FetchStashListJob
+    assert not any(isinstance(j, FetchStashListJob) for j in submitted)
+    assert any(isinstance(j, FetchCharactersJob) for j in submitted)
 
     win.worker.stop()
     win.worker.wait(5000)

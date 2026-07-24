@@ -802,21 +802,52 @@ Charaktere/Stash konsistent liga-scoped (Nutzer-Feedback 2026-07-09).
 **Sortierung/Gliederung des Liga-Dropdowns
 (`MainWindow._rebuild_league_combo`, Nutzer-Feedback):** Gültige (Live-)
 Ligen stehen oben, abgelaufene — nur noch im Datei-Cache vorhandene, von
-GGG nicht mehr gelistete — Ligen darunter, per `QComboBox.insertSeparator`
-abgetrennt. Innerhalb der gültigen Ligen sortiert `_sort_by_content` die
-mit tatsächlichem Spielstand (mindestens ein Charakter ODER bereits
-geladene Items in dieser Liga) nach vorn: GGG legt pro Account automatisch
-leere Hardcore-/Ruthless-Varianten an, ohne Sortierung landete der
+GGG nicht mehr gelistete — Ligen darunter, per einer nicht-anwählbaren
+Überschrift-Zeile ("── Beendete Ligen (nur Cache, kein Online-Zugriff) ──",
+`_ARCHIVED_HEADER`, per `QStandardItem.setEnabled(False)` deaktiviert)
+abgetrennt — bewusst KEIN blanker `insertSeparator`, damit für den Nutzer
+explizit sichtbar ist, WARUM diese Ligen unten stehen ("als Offline-Liga
+anhängen", Nutzer-Feedback), nicht nur eine positionelle Trennung.
+Innerhalb der gültigen Ligen sortiert `_sort_by_content` die mit
+tatsächlichem Spielstand (mindestens ein Charakter ODER bereits geladene
+Items in dieser Liga) nach vorn: GGG legt pro Account automatisch leere
+Hardcore-/Ruthless-Varianten an, ohne Sortierung landete der
 Programmstart so zufällig auf einer komplett leeren Liga, nur weil die
 API sie zuerst zurückgab ("Hardcore zuerst, alle Felder leer"). Der Sort
 ist stabil — die relative Reihenfolge innerhalb "hat Inhalt"/"leer" bleibt
 die der API bzw. (alphabetisch) des Caches. Ein Liga-Listen-Refresh
 (`_on_leagues`) behält die aktuell ausgewählte Liga bei (`findText` auf
-den bisherigen Text vor dem Neuaufbau) — bewusst OHNE `findText("")`,
-sonst würde ein leerer Vorwert den (ebenfalls textleeren) Trennstrich
-treffen. Vor der ersten Live-Antwort (`live_leagues=None`, Offline-Start
-§4.12) gilt der GESAMTE Cache als "oben", ohne Trennstrich — wir wissen
-zu diesem Zeitpunkt noch nicht, was inzwischen abgelaufen ist.
+den bisherigen Text vor dem Neuaufbau) — bewusst OHNE `findText("")` bei
+leerem Vorwert. Vor der ersten Live-Antwort (`live_leagues=None`,
+Offline-Start §4.12) gilt der GESAMTE Cache als "oben", ohne Abtrennung —
+wir wissen zu diesem Zeitpunkt noch nicht, was inzwischen abgelaufen ist.
+
+**Archivierte Ligen: kein Online-Zugriff mehr (Nutzer-Feedback, Liga-Start
+— die alte temporäre Liga ist beendet).** `MainWindow._live_leagues`
+merkt sich die letzte `/account/leagues`-Antwort als Set;
+`_current_league_is_archived()` prüft, ob die GERADE angezeigte Liga
+darin fehlt (`None`, also vor der ersten Antwort, gilt NICHT als
+archiviert — sonst würde ein Offline-Start jede gecachte Liga fälschlich
+als tot markieren). Ist eine Liga archiviert, unterdrückt
+`_archived_league_guard()` JEDEN Netzwerk-Versuch dafür und zeigt
+stattdessen eine erklärende Statusmeldung — betrifft `_on_league_changed`
+(kein `FetchStashListJob`), `_on_stash_selected`/`_on_stash_refresh`
+(kein `FetchStashItemsJob`, auch nicht für unentdeckte Spezial-Tab-Kinder),
+`_load_all_items` (zeigt nur den Cache-Aggregat, kein Bulk-Fetch),
+`_refresh()` (kein Stash-Listen-Refresh, `/character` bleibt aber
+liga-unabhängig sinnvoll) und `_maybe_auto_refresh` (kein Kandidat aus
+einer archivierten Liga). Bewusst PRÄVENTIV statt "versuchen und Fehler
+behandeln": unklar (und ohne Netzwerkzugriff in dieser Umgebung nicht
+verifizierbar), ob GGG für eine tote Liga einen HTTP-Fehler liefert oder
+still eine LEERE Erfolgsantwort — Letzteres würde beim bisherigen
+Cache-Ersetzungs-Verhalten (`_on_stash_list` überschreibt `_stash_trees`
+mit der Antwort) den kompletten gecachten Stand der toten Liga
+unwiederbringlich löschen. Ein präventiver Verzicht auf den Versuch
+vermeidet beide möglichen Ausfallarten gleichermaßen. `StashTree` zeigt
+für die aktuell archivierte Liga dasselbe 📴 wie beim globalen
+Offline-Modus (`_update_tree_offline_display` kombiniert beide
+Bedingungen mit ODER) — der Refresh-Button bleibt klickbar, aber
+`_on_stash_refresh` fängt den Klick vorher ab.
 
 **Rarity-Farben** (frameType → Textfarbe im Detail/Namen, `theme.RARITY_COLORS`):
 0 normal (weiß), 1 magic (blau), 2 rare (gelb), 3 unique (orange), 4 gem
