@@ -63,6 +63,53 @@ def test_filter_matches_explicit_mods(qapp) -> None:
     assert proxy.data(proxy.index(0, 2), Qt.ItemDataRole.DisplayRole) == "Beach Map"
 
 
+def test_filter_matches_property_text(qapp) -> None:
+    """Nutzer-Feedback: Suche nach "Quantity" fand nur die Chisel (Mod-Text),
+    nicht die Maps selbst — deren Quantity/Rarity/Drop Chance stecken als
+    PROPERTY (nicht als explicitMods), z. B. {"name": "Item Quantity",
+    "values": [["+23%", 1]]}. Reale Struktur, Cache-Analyse 2026-07-10."""
+    model = ItemTableModel()
+    map_with_quantity = Item.model_validate({
+        "typeLine": "Oppressive Map", "properties": [
+            {"name": "Item Quantity", "values": [["+23%", 1]]},
+        ]})
+    model.set_items([map_with_quantity, make_item("Dunes Map")], ["Maps", "Maps"])
+    proxy = ItemFilterProxy()
+    proxy.setSourceModel(model)
+
+    proxy.setFilterFixedString("quantity")
+
+    assert proxy.rowCount() == 1
+    assert proxy.data(proxy.index(0, 2), Qt.ItemDataRole.DisplayRole) == "Oppressive Map"
+
+
+def test_wildcard_asterisk_shows_everything(qapp) -> None:
+    """"*" im Suchfeld zeigt bewusst ALLES — für den Komplett-Export einer
+    ganzen Truhe (Nutzer-Feedback). Ohne Sonderbehandlung würde "*" als
+    escapter Regex-Text ("\\*") ankommen und NICHTS treffen."""
+    model = ItemTableModel()
+    model.set_items([make_item("Chaos Orb"), make_item("Beach Map")], ["A", "B"])
+    proxy = ItemFilterProxy()
+    proxy.setSourceModel(model)
+
+    proxy.setFilterFixedString("*")
+
+    assert proxy.rowCount() == 2
+
+
+def test_empty_filter_still_shows_everything(qapp) -> None:
+    """Regression: das Umstellen auf ein eigenes _search_text-Feld darf das
+    bisherige Verhalten bei leerem Suchfeld nicht verändern."""
+    model = ItemTableModel()
+    model.set_items([make_item("Chaos Orb")], ["A"])
+    proxy = ItemFilterProxy()
+    proxy.setSourceModel(model)
+
+    proxy.setFilterFixedString("")
+
+    assert proxy.rowCount() == 1
+
+
 # --- Anforderungs-Spalten (Anf.Lvl/Str/Dex/Int) + numerische Sortierung ---- #
 
 def make_weapon(name: str, level: str, dex: str) -> Item:

@@ -202,15 +202,24 @@ def _expression_matches(expr: str, cell_text: str) -> bool:
 
 
 class ItemFilterProxy(QSortFilterProxyModel):
-    """Filtert lokal über Name + Typ + Tab + Mods — kostet bewusst keine
-    API-Calls. Zusätzlich je Spalte ein optionaler Filter-Ausdruck
-    (Header-Rechtsklick), UND-verknüpft mit dem globalen Suchfeld."""
+    """Filtert lokal über Name + Typ + Tab + Mods + Properties — kostet
+    bewusst keine API-Calls. Zusätzlich je Spalte ein optionaler
+    Filter-Ausdruck (Header-Rechtsklick), UND-verknüpft mit dem globalen
+    Suchfeld. "*" im Suchfeld zeigt bewusst ALLES (Komplett-Export)."""
 
     def __init__(self) -> None:
         super().__init__()
         self.setFilterCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
         self.setSortRole(NUMERIC_SORT_ROLE)
         self._column_filters: dict[int, str] = {}
+        self._search_text = ""
+
+    def setFilterFixedString(self, text: str) -> None:  # noqa: N802 (Qt-API)
+        """Rohtext selbst merken statt über das (regex-escapte!) Pattern von
+        Qt zurückzulesen — sonst würde "*" als "\\*" ankommen und nie als
+        Wildcard erkannt werden."""
+        self._search_text = text or ""
+        super().setFilterFixedString(text)
 
     # --- Spalten-Filter -------------------------------------------------- #
 
@@ -258,10 +267,20 @@ class ItemFilterProxy(QSortFilterProxyModel):
         for col, expr in self._column_filters.items():
             if not _expression_matches(expr, model.display_text(row, col)):
                 return False
-        pattern = self.filterRegularExpression().pattern()
-        if not pattern:
+        text = self._search_text.strip()
+        if not text:
             return True
+        if text == "*":
+            # Wildcard: gesamten (bereits geladenen) Inhalt zeigen — z. B. um
+            # eine komplette Truhe/Liga in einem Rutsch als CSV zu exportieren.
+            return True
+        # Properties (z. B. "Item Quantity: +23%") sind KEINE explicitMods —
+        # ohne sie fände die Suche Maps mit Quantity/Rarity/Pack Size/Drop
+        # Chance nie (Nutzer-Feedback: "nach Quantity gesucht, nur Chisel
+        # gefunden" — die Chisel-Beschreibung nennt "Item Quantity" im Mod-
+        # Text, die Maps selbst tragen den Wert nur als Property).
+        prop_text = " ".join(f"{p.name} {p.display_value or ''}" for p in item.properties)
         haystack = (f"{item.display_name} {item.typeLine} {item.baseType} "
                    f"{item.rarity} {model.source_at(row)} "
-                   f"{' '.join(item.explicitMods)}")  # Maps nach Mods filtern
-        return pattern.lower() in haystack.lower()
+                   f"{' '.join(item.explicitMods)} {prop_text}")
+        return text.lower() in haystack.lower()

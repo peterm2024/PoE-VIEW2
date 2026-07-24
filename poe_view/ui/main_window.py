@@ -151,8 +151,9 @@ class MainWindow(QMainWindow):
         spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         toolbar.addWidget(spacer)
         self._filter_edit = QLineEdit()
-        self._filter_edit.setPlaceholderText("🔍 Suche über alle Fächer der Liga (lokal)")
+        self._filter_edit.setPlaceholderText("🔍 Suche über alle Fächer der Liga — * für alles")
         self._filter_edit.setFixedWidth(260)
+        self._filter_edit.setClearButtonEnabled(True)  # eingebautes "x" zum Leeren
         toolbar.addWidget(self._filter_edit)
 
         # Linke Seite: Charakterliste (flach) oben, Stash-Baum unten — je mit

@@ -570,7 +570,24 @@ um (Tab-Spalte = Herkunfts-Fach), Leeren des Felds kehrt zur vorher
 gewählten Ansicht zurück (`_current_stash_id` als Rückkehrziel; Baum-Klick
 während der Suche beendet sie ebenfalls). Liga-Wechsel zieht eine aktive
 Suche auf die neue Liga um. Eingrenzen auf ein Fach: Baum-Klick oder
-Spalten-Filter auf der Tab-Spalte.
+Spalten-Filter auf der Tab-Spalte. Ein eingebauter Clear-Button
+(`setClearButtonEnabled`) leert das Feld per Klick auf das "x" am rechten
+Rand.
+
+Die globale Suche durchsucht Name/Typ/Tab/Mods **und Properties**
+(Nutzer-Feedback: "nach Quantity gesucht, nur Chisel gefunden" — Map-
+Attribute wie Item Quantity/Rarity/Pack Size/Map Drop Chance stecken NICHT
+in `explicitMods`, sondern als eigene `properties`-Einträge, z. B.
+`{"name": "Item Quantity", "values": [["+23%", 1]]}`; ohne deren Text im
+Such-Haystack waren betroffene Maps nie über die Suche auffindbar).
+**"\*" als Suchtext zeigt bewusst ALLES** — gedacht für den
+Komplett-Export einer ganzen Truhe/Liga über den bestehenden CSV-Export
+(`_visible_rows` exportiert ohnehin die aktuell sichtbaren/gefilterten
+Zeilen). Technischer Haken: `QSortFilterProxyModel.setFilterFixedString`
+escaped den Text intern für die interne Regex (`"*"` → `"\*"`), das
+zurückgelesene `filterRegularExpression().pattern()` wäre also NIE der
+Rohtext — `ItemFilterProxy` überschreibt `setFilterFixedString` deshalb,
+um sich den unescapten Suchtext selbst zu merken.
 
 **Lazy-Icon-Loading:** Aggregat-Ansichten (Suche, "Alle Tabs",
 Spezial-Eltern) rufen `set_items(…, request_icons=False)` auf — Icons

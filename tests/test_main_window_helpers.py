@@ -895,3 +895,39 @@ def test_clear_column_filters_resets_all(qapp) -> None:
 
     win.worker.stop()
     win.worker.wait(5000)
+
+
+def test_search_field_has_clear_button(qapp) -> None:
+    """Nutzer-Feedback: kleines "x" am rechten Rand zum Leeren des Suchfelds
+    — Qt bringt das nativ mit (QLineEdit.setClearButtonEnabled)."""
+    win = MainWindow()
+    assert win._filter_edit.isClearButtonEnabled()
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_asterisk_search_shows_and_exports_entire_league(qapp, monkeypatch) -> None:
+    """"*" im Suchfeld zeigt den GESAMTEN (bereits geladenen) Liga-Inhalt —
+    Nutzer-Feedback: "damit ich den gesamten Inhalt exportieren kann"."""
+    win = MainWindow()
+    win._current_league = "Standard"
+    t1, t2 = _make_leaf("t1", "Currency 1"), _make_leaf("t2", "Essence")
+    win._stash_trees["Standard"] = [t1, t2]
+    win._leaf_stashes = [t1, t2]
+    win._items["Standard"] = {
+        "t1": [Item.model_validate({"typeLine": "Chaos Orb"})],
+        "t2": [Item.model_validate({"typeLine": "Deafening Essence of Greed"})],
+    }
+    monkeypatch.setattr(win.worker, "submit", lambda job: None)
+    win._show_items("t1", win._items["Standard"]["t1"], "Currency 1")
+
+    win._filter_edit.setText("*")
+
+    assert win.proxy.rowCount() == 2  # alles, nicht nur der zuvor gewählte Tab
+    rows = win._visible_rows()  # das nutzt der CSV-Export
+    assert {name for _, item in rows for name in [item.display_name]} == \
+        {"Chaos Orb", "Deafening Essence of Greed"}
+
+    win.worker.stop()
+    win.worker.wait(5000)
