@@ -1014,3 +1014,87 @@ def test_toggling_rarity_checkbox_filters_table(qapp) -> None:
 
     win.worker.stop()
     win.worker.wait(5000)
+
+
+# --- Liga-Dropdown: gültige zuerst, abgelaufene abgetrennt (Nutzer-Feedback) #
+
+def test_league_with_content_sorted_before_empty_league(qapp, monkeypatch) -> None:
+    """Nutzer-Feedback: "Hardcore wird zuerst angezeigt, obwohl ich dort
+    keinen Spielstand habe — alle Felder leer." Ligen mit Charakteren/Items
+    sollen vor leeren Ligen stehen, unabhängig von der API-Reihenfolge."""
+    win = MainWindow()
+    monkeypatch.setattr(win.worker, "submit", lambda job: None)
+    win._stash_trees = {
+        "Hardcore": [_make_leaf("h1", "Currency 1")],
+        "Standard": [_make_leaf("s1", "Currency 1")],
+    }
+    win._all_characters = [make_char("Held", "Standard")]
+    win._items = {"Standard": {"s1": [Item.model_validate({"typeLine": "Chaos Orb"})]}}
+
+    win._on_leagues(["Hardcore", "Standard"])  # API liefert Hardcore zuerst
+
+    order = [win._league_combo.itemText(i) for i in range(win._league_combo.count())]
+    assert order == ["Standard", "Hardcore"]
+    assert win._league_combo.currentText() == "Standard"
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_expired_cache_only_league_appended_below_separator(qapp, monkeypatch) -> None:
+    """Ligen, die nicht mehr in der Live-Liste stehen, aber noch im Cache
+    sind (abgelaufen/rotiert), kommen unten, getrennt durch einen Strich."""
+    win = MainWindow()
+    monkeypatch.setattr(win.worker, "submit", lambda job: None)
+    win._stash_trees = {
+        "Standard": [_make_leaf("s1", "Currency 1")],
+        "Legacy League": [_make_leaf("l1", "Currency 1")],
+    }
+
+    win._on_leagues(["Standard"])  # "Legacy League" ist nicht mehr live
+
+    order = [win._league_combo.itemText(i) for i in range(win._league_combo.count())]
+    sep = order.index("")
+    assert order[:sep] == ["Standard"]
+    assert order[sep + 1:] == ["Legacy League"]
+    assert win._league_combo.currentText() == "Standard"
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_no_separator_when_no_expired_leagues(qapp, monkeypatch) -> None:
+    win = MainWindow()
+    monkeypatch.setattr(win.worker, "submit", lambda job: None)
+    win._stash_trees = {"Standard": [_make_leaf("s1", "Currency 1")]}
+
+    win._on_leagues(["Standard"])
+
+    order = [win._league_combo.itemText(i) for i in range(win._league_combo.count())]
+    assert order == ["Standard"]  # kein "" (Trennstrich) ohne abgelaufene Ligen
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_live_update_preserves_current_selection(qapp, monkeypatch) -> None:
+    """Ein Liga-Listen-Refresh darf den Nutzer nicht aus der gerade
+    betrachteten Liga werfen, auch wenn sich die Sortierung ändert."""
+    win = MainWindow()
+    monkeypatch.setattr(win.worker, "submit", lambda job: None)
+    win._stash_trees = {
+        "Hardcore": [_make_leaf("h1", "Currency 1")],
+        "Standard": [_make_leaf("s1", "Currency 1")],
+    }
+    win._on_leagues(["Hardcore", "Standard"])
+    win._league_combo.setCurrentText("Hardcore")
+    assert win._current_league == "Hardcore"
+
+    win._all_characters = [make_char("Held", "Standard")]  # jetzt hat Standard Inhalt
+    win._on_leagues(["Hardcore", "Standard"])  # erneuter Refresh
+
+    assert win._league_combo.currentText() == "Hardcore"  # Auswahl bleibt erhalten
+    assert win._current_league == "Hardcore"
+
+    win.worker.stop()
+    win.worker.wait(5000)

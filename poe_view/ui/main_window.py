@@ -280,13 +280,54 @@ class MainWindow(QMainWindow):
         das vollständig, sobald sie eintrifft. Ohne das wäre die App bei
         GGG-Wartung beim Start komplett leer, obwohl der Cache längst alles
         Nötige hätte."""
-        cached_leagues = sorted(self._stash_trees)
-        if not cached_leagues:
-            return
+        self._rebuild_league_combo(None)
+
+    def _league_has_content(self, league: str) -> bool:
+        """Hat der Nutzer dort tatsächlich einen Spielstand (Charaktere ODER
+        bereits geladene Items)? Grundlage der Dropdown-Sortierung — GGG legt
+        pro Account automatisch leere Hardcore-/Ruthless-Varianten an, auch
+        wenn der Nutzer dort nie gespielt hat (Nutzer-Feedback: "Hardcore
+        zuerst, obwohl ich noch keinen Hardcore-Spielstand habe")."""
+        if any(c.league == league for c in self._all_characters):
+            return True
+        return any(self._items.get(league, {}).values())
+
+    def _sort_by_content(self, leagues: list[str]) -> list[str]:
+        """Ligen mit Spielstand zuerst — stabil, die restliche Reihenfolge
+        (Cache: alphabetisch; live: API-Reihenfolge) bleibt sonst erhalten."""
+        return sorted(leagues, key=lambda league: not self._league_has_content(league))
+
+    def _rebuild_league_combo(self, live_leagues: list[str] | None) -> None:
+        """Baut das Liga-Dropdown neu auf (Nutzer-Feedback): aktuell gültige
+        Ligen oben (nach Spielstand sortiert, §_sort_by_content), abgelaufene
+        — nur noch im Cache vorhandene — Ligen darunter, per horizontalem
+        Strich abgetrennt. ``live_leagues=None`` heißt "wissen wir noch
+        nicht" (Start vor der ersten API-Antwort, §4.12): dann gilt der
+        gesamte Cache als "oben", ohne Trennstrich, da wir noch nicht
+        unterscheiden können, was inzwischen abgelaufen ist."""
+        previous = self._league_combo.currentText()
+        if live_leagues is None:
+            top, bottom = sorted(self._stash_trees), []
+        else:
+            live_set = set(live_leagues)
+            top = list(live_leagues)
+            bottom = sorted(league for league in self._stash_trees if league not in live_set)
+        top = self._sort_by_content(top)
+
         self._league_combo.blockSignals(True)
-        self._league_combo.addItems(cached_leagues)
+        self._league_combo.clear()
+        self._league_combo.addItems(top)
+        if top and bottom:
+            self._league_combo.insertSeparator(self._league_combo.count())
+        self._league_combo.addItems(bottom)
+        # Auswahl möglichst über den Rebuild hinweg erhalten (leeres previous
+        # NICHT suchen — sonst würde findText("") den Trennstrich treffen,
+        # dessen Text ebenfalls "" ist).
+        idx = self._league_combo.findText(previous) if previous else -1
+        self._league_combo.setCurrentIndex(idx if idx >= 0 else 0)
         self._league_combo.blockSignals(False)
-        self._on_league_changed(self._league_combo.currentText())
+        if self._league_combo.count():
+            self._on_league_changed(self._league_combo.currentText())
 
     def _on_rarity_toggled(self, frame_type: int, visible: bool) -> None:
         self.proxy.set_rarity_visible(frame_type, visible)
@@ -401,12 +442,7 @@ class MainWindow(QMainWindow):
         self._status_msg.setText(reason)
 
     def _on_leagues(self, leagues: list[str]) -> None:
-        self._league_combo.blockSignals(True)
-        self._league_combo.clear()
-        self._league_combo.addItems(leagues)
-        self._league_combo.blockSignals(False)
-        if leagues:
-            self._on_league_changed(self._league_combo.currentText())
+        self._rebuild_league_combo(leagues)
 
     def _on_league_changed(self, league: str) -> None:
         if not league or league == self._current_league:

@@ -747,6 +747,25 @@ auch die Stash-Tabs bestimmt. Ein Wechsel zwischen Ligen ist bei Items/Stash
 ohnehin nicht möglich; die Vereinheitlichung spart eine Baum-Ebene und macht
 Charaktere/Stash konsistent liga-scoped (Nutzer-Feedback 2026-07-09).
 
+**Sortierung/Gliederung des Liga-Dropdowns
+(`MainWindow._rebuild_league_combo`, Nutzer-Feedback):** Gültige (Live-)
+Ligen stehen oben, abgelaufene — nur noch im Datei-Cache vorhandene, von
+GGG nicht mehr gelistete — Ligen darunter, per `QComboBox.insertSeparator`
+abgetrennt. Innerhalb der gültigen Ligen sortiert `_sort_by_content` die
+mit tatsächlichem Spielstand (mindestens ein Charakter ODER bereits
+geladene Items in dieser Liga) nach vorn: GGG legt pro Account automatisch
+leere Hardcore-/Ruthless-Varianten an, ohne Sortierung landete der
+Programmstart so zufällig auf einer komplett leeren Liga, nur weil die
+API sie zuerst zurückgab ("Hardcore zuerst, alle Felder leer"). Der Sort
+ist stabil — die relative Reihenfolge innerhalb "hat Inhalt"/"leer" bleibt
+die der API bzw. (alphabetisch) des Caches. Ein Liga-Listen-Refresh
+(`_on_leagues`) behält die aktuell ausgewählte Liga bei (`findText` auf
+den bisherigen Text vor dem Neuaufbau) — bewusst OHNE `findText("")`,
+sonst würde ein leerer Vorwert den (ebenfalls textleeren) Trennstrich
+treffen. Vor der ersten Live-Antwort (`live_leagues=None`, Offline-Start
+§4.12) gilt der GESAMTE Cache als "oben", ohne Trennstrich — wir wissen
+zu diesem Zeitpunkt noch nicht, was inzwischen abgelaufen ist.
+
 **Rarity-Farben** (frameType → Textfarbe im Detail/Namen):
 0 normal (weiß), 1 magic (blau), 2 rare (gelb), 3 unique (orange), 4 gem (türkis), 5 currency (gold).
 
