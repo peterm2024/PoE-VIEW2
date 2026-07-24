@@ -183,6 +183,19 @@ class ItemTableModel(QAbstractTableModel):
             return f"{tab_part} ({item.x}, {item.y})"
         return tab_part
 
+    def _position_sort_key(self, row: int) -> tuple[float, float, float]:
+        """Numerischer Sortierschlüssel für die Position-Spalte: Tab-Nr.
+        zuerst (unterscheidet Fächer), dann x, dann y — sonst würde "#10"
+        alphabetisch VOR "#2" einsortieren (Nutzer-Feedback). Unbekannte
+        Werte wie bei den übrigen Zahlenspalten als "-inf" (§ NUMERIC_SORT_ROLE)."""
+        tab_index = self._tab_indices[row] if row < len(self._tab_indices) else None
+        item = self._items[row]
+        return (
+            float(tab_index) if tab_index is not None else float("-inf"),
+            float(item.x) if item.x is not None else float("-inf"),
+            float(item.y) if item.y is not None else float("-inf"),
+        )
+
     def display_text(self, row: int, col: int) -> str:
         """Anzeigetext einer Zelle — auch Basis der Spalten-Filter im Proxy."""
         if col == TAB_COL:
@@ -201,6 +214,8 @@ class ItemTableModel(QAbstractTableModel):
         if role == NUMERIC_SORT_ROLE:
             # Numerische Spalten als Zahl sortieren ("–" ganz nach unten),
             # alle anderen weiterhin als (kleingeschriebener) Text.
+            if col == POSITION_COL:
+                return self._position_sort_key(index.row())
             text = self.display_text(index.row(), col)
             if _NUMERIC_FROM_COL <= col < MODS_COL:
                 number = _first_number(text)

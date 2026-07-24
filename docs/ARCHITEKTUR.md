@@ -623,6 +623,10 @@ Die Tab-Nummer wird an jeder `set_items()`-Aufrufstelle separat mitgegeben
 bereits 1-basiert) — MainWindows `_league_wide_items()` liefert sie für
 Aggregat-/Suchansichten, `_show_items()`/`_show_special_parent_aggregate()`
 je für Einzelfach bzw. Spezial-Tab-Kinder, jeweils über `_tab_positions()`.
+Sortierung über `NUMERIC_SORT_ROLE` per eigenem Tupel-Schlüssel
+`(Tab-Nr., x, y)` (Nutzer-Feedback: "#10" sortierte alphabetisch VOR
+"#2") — unbekannte Werte als "-inf", konsistent mit den übrigen
+Zahlenspalten.
 
 **Typ-Filter (8 Checkboxen neben dem Liga-Feld, `MainWindow.TYPE_FILTER_ENTRIES`,
 Nutzer-Feedback — ursprünglich "Rarity-Filter" mit nur 4 Checkboxen, dann um

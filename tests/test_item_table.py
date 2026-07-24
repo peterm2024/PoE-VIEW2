@@ -373,3 +373,44 @@ def test_position_column_shows_tab_index_without_coordinates(qapp) -> None:
 
     idx = model.index(0, POSITION_COL)
     assert model.data(idx, Qt.ItemDataRole.DisplayRole) == "#1"
+
+
+def test_position_column_sorts_numerically_not_alphabetically(qapp) -> None:
+    """Nutzer-Feedback: "#10" landete alphabetisch VOR "#2" — die Spalte
+    muss numerisch nach Tab-Nr. (dann x, y) sortieren."""
+    from PySide6.QtWidgets import QTableView
+    from poe_view.ui.item_table import POSITION_COL, ItemTableModel
+    model = ItemTableModel()
+    items = [make_item("A"), make_item("B"), make_item("C")]
+    model.set_items(items, ["Tab", "Tab", "Tab"], tab_indices=[10, 2, 1])
+    proxy = ItemFilterProxy()
+    proxy.setSourceModel(model)
+    table = QTableView()
+    table.setModel(proxy)
+    table.setSortingEnabled(True)
+    table.sortByColumn(POSITION_COL, Qt.SortOrder.AscendingOrder)
+
+    order = [proxy.data(proxy.index(r, POSITION_COL), Qt.ItemDataRole.DisplayRole)
+             for r in range(proxy.rowCount())]
+    assert order == ["#1", "#2", "#10"]
+
+
+def test_position_column_sorts_by_coordinates_within_same_tab(qapp) -> None:
+    from PySide6.QtWidgets import QTableView
+    from poe_view.ui.item_table import POSITION_COL, ItemTableModel
+    model = ItemTableModel()
+    items = [
+        Item.model_validate({"typeLine": "A", "x": 9, "y": 0}),
+        Item.model_validate({"typeLine": "B", "x": 1, "y": 5}),
+    ]
+    model.set_items(items, ["Tab", "Tab"], tab_indices=[1, 1])
+    proxy = ItemFilterProxy()
+    proxy.setSourceModel(model)
+    table = QTableView()
+    table.setModel(proxy)
+    table.setSortingEnabled(True)
+    table.sortByColumn(POSITION_COL, Qt.SortOrder.AscendingOrder)
+
+    order = [proxy.data(proxy.index(r, POSITION_COL), Qt.ItemDataRole.DisplayRole)
+             for r in range(proxy.rowCount())]
+    assert order == ["#1 (1, 5)", "#1 (9, 0)"]
