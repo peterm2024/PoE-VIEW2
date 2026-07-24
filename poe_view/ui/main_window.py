@@ -218,6 +218,7 @@ class MainWindow(QMainWindow):
         char_label.setStyleSheet("font-weight: 600; padding: 2px 4px;")
         self.character_list = CharacterList()
         self.character_list.character_selected.connect(self._on_character_selected)
+        self.character_list.character_refresh_requested.connect(self._on_character_refresh)
         self.character_list.setMaximumHeight(220)
 
         stash_label = QLabel("Stash")
@@ -710,7 +711,15 @@ class MainWindow(QMainWindow):
             self.tree.update_label(stash_id, relabelled)
         if silent:
             self._update_auto_refresh_label()
-        elif not self._showing_aggregate:
+        # Bei einem STILLEN Refresh die sichtbare Tabelle nur dann live
+        # aktualisieren, wenn genau DIESES Fach gerade als Einzelansicht
+        # offen ist (Regression, Nutzer-Feedback: das Live-Halten des
+        # aktuellen Fachs aktualisierte bisher nur den Cache/Baum, NICHT
+        # die Tabelle — "lebt" war es also gar nicht). Bei einem
+        # Sweep-Kandidaten (ein ANDERES Fach) oder während einer Aggregat-/
+        # Such-Ansicht bleibt die Tabelle unangetastet, sonst würde ein
+        # Hintergrund-Job die aktuelle Ansicht des Nutzers wegreißen.
+        if not self._showing_aggregate and (not silent or stash_id == self._current_stash_id):
             self._show_items(stash_id, items, name)
 
     def _on_stash_children(self, league: str, stash_id: str, name: str,
@@ -988,6 +997,14 @@ class MainWindow(QMainWindow):
         self._status_msg.setText(f"Lade Ausrüstung: {char.name} …")
         self.worker.submit(FetchCharacterItemsJob(char.name))
 
+    def _on_character_refresh(self, char: Character) -> None:
+        """Rechtsklick → "Aktualisieren" — bewusst AM Cache vorbei, analog
+        `_on_stash_refresh`. Schaltet die Ansicht (wie beim Stash-Refresh
+        auch) auf diesen Charakter um, sobald das Ergebnis eintrifft."""
+        self._current_character_name = char.name
+        self._status_msg.setText(f"Lade Ausrüstung: {char.name} …")
+        self.worker.submit(FetchCharacterItemsJob(char.name))
+
     def _on_character_items(self, name: str, items: list[Item]) -> None:
         """``name`` kommt aus dem Signal, nicht aus der Auswahl — sonst könnte
         ein spät eintreffender Job Daten eines inzwischen abgewählten
@@ -1112,13 +1129,19 @@ class MainWindow(QMainWindow):
     # --- Hintergrund-Auto-Refresh (Nutzer-Feedback) ---------------------- #
 
     def _maybe_auto_refresh(self) -> None:
-        """Läuft alle paar Sekunden per QTimer; lädt höchstens ZWEI Tabs neu —
-        das gerade angezeigte Fach (immer, unabhängig von seinem Alter, damit
-        die aktuelle Ansicht "lebt", Nutzer-Feedback) UND den normalen
-        Sweep-Kandidaten (füllt nach und nach den Rest der Truhe) — und nur,
+        """Läuft alle paar Sekunden per QTimer; lädt höchstens ZWEI Dinge neu —
+        das gerade angezeigte Fach ODER der gerade angezeigte Charakter
+        (immer, unabhängig vom Alter, damit die aktuelle Ansicht "lebt",
+        Nutzer-Feedback — beide schließen sich gegenseitig aus, siehe
+        `_current_stash_id`/`_current_character_name`) UND der normale
+        Sweep-Kandidat (füllt nach und nach den Rest der Truhe) — und nur,
         wenn genug Rate-Limit-Budget für manuelle Klicks übrig bleibt
         (Doku §4.8). Deshalb ist ``AUTO_REFRESH_INTERVAL_MS`` doppelt so groß
-        wie früher, als pro Tick nur ein Job rausging."""
+        wie früher, als pro Tick nur ein Job rausging. Charaktere haben
+        KEINEN eigenen Sweep — anders als bei 391 Stash-Tabs ist die
+        Charakterliste klein genug, dass "irgendwann von selbst" keinen
+        Mehrwert hätte; nicht angezeigte Charaktere bleiben bis zum
+        nächsten Klick oder manuellen Refresh (Rechtsklick) unverändert."""
         if not self._current_league or self._worker_busy or self._bulk_dialog is not None:
             return
         if self._current_league_is_archived():
@@ -1130,6 +1153,8 @@ class MainWindow(QMainWindow):
             self.worker.submit(FetchStashItemsJob(
                 self._current_league, current_id, self._current_tab_name,
                 parent_id=self._parent_id_of(current_id), silent=True))
+        elif self._current_character_name is not None:
+            self.worker.submit(FetchCharacterItemsJob(self._current_character_name, silent=True))
         candidate = self._pick_auto_refresh_candidate()
         if candidate is not None and candidate.id != current_id:
             self.worker.submit(FetchStashItemsJob(

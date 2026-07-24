@@ -93,6 +93,7 @@ class FetchStashItemsJob:
 @dataclass
 class FetchCharacterItemsJob:
     name: str
+    silent: bool = False  # True = Hintergrund-Auto-Refresh (aktuell angezeigter Charakter)
 
 
 @dataclass
@@ -226,10 +227,12 @@ class ApiWorker(QThread):
                     self.status.emit(f"Lade Items: {name} …")
                 stash = self.client.get_stash(league, sid, parent_id)
                 self._emit_stash_result(league, sid, name, stash, silent)
-            case FetchCharacterItemsJob(name=name):
-                self.status.emit(f"Lade Ausrüstung: {name} …")
+            case FetchCharacterItemsJob(name=name, silent=silent):
+                if not silent:
+                    self.status.emit(f"Lade Ausrüstung: {name} …")
                 self.character_items_loaded.emit(name, self.client.get_character_items(name))
-                self.status.emit("Bereit")
+                if not silent:
+                    self.status.emit("Bereit")
             case FetchIconJob(url=url):
                 self._fetch_icon(url)
             case FetchAllItemsJob(league=league, stashes=stashes):

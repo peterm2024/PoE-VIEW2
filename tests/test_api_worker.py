@@ -156,6 +156,25 @@ def test_silent_stash_items_dispatch_emits_no_status(qapp, monkeypatch) -> None:
     worker.client.close()
 
 
+def test_silent_character_items_dispatch_emits_no_status(qapp, monkeypatch) -> None:
+    """Analog zu Stash-Items: der Live-Refresh des gerade angezeigten
+    Charakters darf den Status-Text nicht mit Ladehinweisen stören."""
+    worker = ApiWorker()
+    item = Item.model_validate({"typeLine": "Chaos Orb", "frameType": 5})
+    monkeypatch.setattr(worker.client, "get_character_items", lambda name: [item])
+
+    emitted: list[str] = []
+    worker.status.connect(emitted.append)
+    results = []
+    worker.character_items_loaded.connect(lambda name, items: results.append((name, items)))
+
+    worker._dispatch(FetchCharacterItemsJob("WitchOfPeter", silent=True))
+
+    assert emitted == []
+    assert results == [("WitchOfPeter", [item])]  # Ergebnis kommt trotzdem an
+    worker.client.close()
+
+
 # --- Offline-Erkennung (Nutzer-Feedback: GGG-Wartung am Patchday) ---------- #
 
 import httpx

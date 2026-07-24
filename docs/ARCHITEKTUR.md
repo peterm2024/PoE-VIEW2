@@ -395,14 +395,27 @@ im Hintergrund pro Tick **bis zu zwei** Stash-Tabs neu — der Nutzer muss
 dafür nichts tun, alte Daten "verwesen" aber nicht auf unbestimmte Zeit
 (Nutzer-Feedback):
 
-1. **Das gerade angezeigte Fach** (`MainWindow._current_stash_id`, sofern
-   gesetzt) — IMMER, unabhängig von seinem Alter (die 1-Tag-Schonfrist des
-   Sweeps unten gilt hier nicht), damit die aktuell geöffnete Ansicht
-   "lebt" (Nutzer-Feedback). Ist die Aggregat-/Alle-Tabs-Ansicht aktiv, ist
-   `_current_stash_id` `None` und dieser Schritt entfällt.
+1. **Das gerade angezeigte Fach ODER der gerade angezeigte Charakter**
+   (`MainWindow._current_stash_id` bzw. `_current_character_name`, beide
+   schließen sich gegenseitig aus — siehe §4.13) — IMMER, unabhängig vom
+   Alter (die 1-Tag-Schonfrist des Sweeps unten gilt hier nicht), damit
+   die aktuell geöffnete Ansicht "lebt" (Nutzer-Feedback). Ist die
+   Aggregat-/Alle-Tabs-Ansicht aktiv, sind beide `None` und dieser Schritt
+   entfällt. Charaktere haben KEINEN eigenen Sweep (siehe §4.13) — nur
+   das gerade offene Fach ODER der gerade offene Charakter wird hier
+   behandelt, nie beide gleichzeitig.
 2. **Der normale Sweep-Kandidat** (`_pick_auto_refresh_candidate`, siehe
    unten) — füllt nach und nach den Rest der Truhe. Ist er identisch mit
    dem gerade angezeigten Fach, wird er nicht doppelt angefragt.
+
+**Korrektur (FALLSTRICKE #27):** Ein stiller (`silent=True`) Treffer für
+GENAU das gerade offene Einzelfach zeichnet inzwischen auch die sichtbare
+Tabelle neu (`MainWindow._on_stash_items` prüft zusätzlich
+`stash_id == self._current_stash_id`) — ursprünglich aktualisierte der
+Live-Refresh nur den Cache/die Alters-Anzeige im Baum, nicht die Tabelle
+selbst, "lebte" also gar nicht sichtbar. Ein stiller Treffer für ein
+ANDERES Fach (der Sweep-Kandidat) oder während einer Aggregat-/Such-
+Ansicht bleibt weiterhin unangetastet.
 
 Da pro Tick jetzt bis zu zwei statt einem Job rausgeht, wurde
 `AUTO_REFRESH_INTERVAL_MS` verdoppelt (20 s → 40 s) — die
@@ -778,12 +791,31 @@ werden wie `_items`/`_last_loaded` in `data_cache.CachedData` persistiert
 (überlebt einen Neustart) und überleben ohne Login/Netzwerk (analog
 §4.12 Offline-Modus — cache-first, kein Zwang zum erneuten Abruf).
 Ein Klick auf einen bereits geladenen Charakter zeigt sofort den Cache,
-kein automatisches Neuladen (noch kein eigener Refresh-Button für
-Charaktere — Folgefeature bei Bedarf, analog dem "⟳" der Stash-Tabs).
-`_on_character_items` prüft `name == self._current_character_name`
-(analog `_on_stash_items`/`league != self._current_league`), damit ein
-spät eintreffendes Ergebnis eines inzwischen abgewählten Charakters nur
-noch gecacht, aber nicht mehr angezeigt wird.
+kein automatisches Neuladen. `_on_character_items` prüft
+`name == self._current_character_name` (analog
+`_on_stash_items`/`league != self._current_league`), damit ein spät
+eintreffendes Ergebnis eines inzwischen abgewählten Charakters nur noch
+gecacht, aber nicht mehr angezeigt wird.
+
+**Frisch halten — zwei Wege, wie bei Stash-Tabs** (Nutzer-Rückfrage: "ich
+bin mir nicht sicher, wie oft GGG das Inventar aktualisiert" — die
+Antwort darauf ist unbekannt/nicht verifizierbar, also macht die App
+ihre EIGENE Aktualität stattdessen selbst kontrollierbar):
+
+1. **Automatisch, nur der gerade angezeigte Charakter:** Ist
+   `_current_character_name` gesetzt, nimmt `_maybe_auto_refresh` (§4.8)
+   ihn statt des Stash-Fachs als "aktuelle Ansicht"-Job (`silent=True`,
+   `FetchCharacterItemsJob`) — beide schließen sich gegenseitig aus, pro
+   Tick geht höchstens einer der beiden raus. Anders als Stash-Tabs haben
+   Charaktere KEINEN eigenen Sweep-Mechanismus: Die Charakterliste ist
+   klein genug, dass "andere Charaktere irgendwann von selbst auffrischen"
+   keinen Mehrwert hätte — nicht angezeigte Charaktere bleiben unverändert,
+   bis sie angeklickt oder manuell aktualisiert werden.
+2. **Manuell, für JEDEN Charakter:** Rechtsklick in der Charakterliste →
+   "⟳ Aktualisieren" (`CharacterList.character_refresh_requested` →
+   `MainWindow._on_character_refresh`) — bewusst AM Cache vorbei, analog
+   `_on_stash_refresh`, und schaltet die Ansicht auf diesen Charakter um
+   (wie ein Klick, nur mit erzwungenem Neuladen statt Cache-Treffer).
 
 ---
 

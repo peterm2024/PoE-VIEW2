@@ -163,6 +163,9 @@ def test_on_stash_items_ignores_result_for_stale_league(qapp) -> None:
 
 
 def test_on_stash_items_silent_updates_cache_but_not_table(qapp) -> None:
+    """Kein Fach ist gerade geöffnet (_current_stash_id ist None) — ein
+    stiller Sweep-Treffer für irgendein Fach darf die (leere) Tabelle
+    nicht anfassen."""
     win = MainWindow()
     win._current_league = "Standard"
     item = Item.model_validate({"typeLine": "Chaos Orb", "frameType": 5})
@@ -171,6 +174,43 @@ def test_on_stash_items_silent_updates_cache_but_not_table(qapp) -> None:
 
     assert win._items["Standard"]["t1"] == [item]
     assert win.table_model.rowCount() == 0  # Anzeige unangetastet (Nutzer-Feedback)
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_on_stash_items_silent_refresh_of_currently_open_tab_updates_table(qapp) -> None:
+    """Regression: das Live-Halten des GERADE GEÖFFNETEN Fachs (Nutzer-Feedback,
+    Auto-Refresh) aktualisierte bisher nur den Cache, nicht die sichtbare
+    Tabelle — "lebt" war es also nicht. Silent + stash_id == _current_stash_id
+    muss die Tabelle jetzt trotzdem neu zeichnen."""
+    win = MainWindow()
+    win._current_league = "Standard"
+    win._current_stash_id = "t1"  # "t1" ist gerade als Einzelfach geöffnet
+    item = Item.model_validate({"typeLine": "Chaos Orb", "frameType": 5})
+
+    win._on_stash_items("Standard", "t1", "Tab", [item], silent=True)
+
+    assert win.table_model.rowCount() == 1  # jetzt sichtbar aktualisiert
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_on_stash_items_silent_refresh_of_other_tab_does_not_replace_open_view(qapp) -> None:
+    """Gegenprobe: während Fach "t1" offen ist, darf ein stiller Sweep-Treffer
+    für ein ANDERES Fach ("t2") die Ansicht nicht wegreißen."""
+    win = MainWindow()
+    win._current_league = "Standard"
+    win._current_stash_id = "t1"
+    win.table_model.set_items(
+        [Item.model_validate({"typeLine": "Existing"})], ["Tab"], [None], ["t1"])
+
+    win._on_stash_items("Standard", "t2", "Other Tab",
+                       [Item.model_validate({"typeLine": "Chaos Orb"})], silent=True)
+
+    assert win.table_model.rowCount() == 1
+    assert win.table_model.item_at(0).typeLine == "Existing"  # unverändert
 
     win.worker.stop()
     win.worker.wait(5000)
@@ -241,6 +281,80 @@ def test_on_character_items_ignores_late_result_for_deselected_character(qapp) -
 
     assert win._character_items["WitchOfPeter"] == [item]  # gecacht …
     assert win.table_model.rowCount() == 0  # … aber nicht angezeigt
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_character_refresh_bypasses_cache_and_switches_view(qapp, monkeypatch) -> None:
+    """Rechtsklick "Aktualisieren" — bewusst AM Cache vorbei, analog
+    _on_stash_refresh, und schaltet die Ansicht auf diesen Charakter um."""
+    win = MainWindow()
+    char = make_char("WitchOfPeter", "Standard")
+    win._character_items["WitchOfPeter"] = [Item.model_validate({"typeLine": "Old Item"})]
+
+    submitted = []
+    monkeypatch.setattr(win.worker, "submit", lambda job: submitted.append(job))
+
+    win._on_character_refresh(char)
+
+    assert len(submitted) == 1
+    assert submitted[0].name == "WitchOfPeter"
+    assert submitted[0].silent is False
+    assert win._current_character_name == "WitchOfPeter"
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_maybe_auto_refresh_keeps_currently_displayed_character_live(qapp, monkeypatch) -> None:
+    """Nutzer-Feedback: der gerade angezeigte Charakter soll wie das gerade
+    angezeigte Truhenfach bei jedem Tick live gehalten werden — der normale
+    Stash-Sweep läuft daneben unverändert weiter."""
+    win = MainWindow()
+    win._current_league = "Standard"
+    now = datetime.now(timezone.utc)
+    win._leaf_stashes = [_make_leaf("t1", "Tab 1")]
+    win._last_loaded["Standard"] = {"t1": (now - timedelta(days=5)).isoformat()}
+    win._current_character_name = "WitchOfPeter"  # kein Fach offen (_current_stash_id bleibt None)
+
+    submitted = []
+    monkeypatch.setattr(win.worker, "submit", lambda job: submitted.append(job))
+    monkeypatch.setattr(win.worker.rate_limiter, "headroom_fraction", lambda: 1.0)
+
+    win._maybe_auto_refresh()
+
+    character_jobs = [j for j in submitted if hasattr(j, "name")]
+    stash_jobs = [j for j in submitted if hasattr(j, "stash_id")]
+    assert len(character_jobs) == 1
+    assert character_jobs[0].name == "WitchOfPeter"
+    assert character_jobs[0].silent is True
+    assert len(stash_jobs) == 1  # normaler Sweep läuft unabhängig weiter
+    assert stash_jobs[0].stash_id == "t1"
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_maybe_auto_refresh_prefers_open_tab_over_character_when_both_set(qapp, monkeypatch) -> None:
+    """_current_stash_id und _current_character_name schließen sich beim
+    normalen Ablauf gegenseitig aus (siehe _show_items/_show_character_items) —
+    sollten sie doch beide gesetzt sein, gewinnt das offene Fach, damit pro
+    Tick höchstens EIN "aktuelle Ansicht"-Job rausgeht."""
+    win = MainWindow()
+    win._current_league = "Standard"
+    win._leaf_stashes = []
+    win._current_stash_id = "t1"
+    win._current_character_name = "WitchOfPeter"
+
+    submitted = []
+    monkeypatch.setattr(win.worker, "submit", lambda job: submitted.append(job))
+    monkeypatch.setattr(win.worker.rate_limiter, "headroom_fraction", lambda: 1.0)
+
+    win._maybe_auto_refresh()
+
+    assert len(submitted) == 1
+    assert submitted[0].stash_id == "t1"
 
     win.worker.stop()
     win.worker.wait(5000)
