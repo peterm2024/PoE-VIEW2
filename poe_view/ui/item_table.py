@@ -15,6 +15,13 @@ ausgeblendet; in Aggregat-Ansichten ("Alle Tabs laden", Klick auf einen
 Spezial-Tab-Elternknoten, liga-weite Suche) wird sie automatisch
 eingeblendet — dort ordnet sie Items ihrem Fach zu ("Map (Tier 1)").
 
+Die Position-Spalte ("#3 (4, 7)") zeigt die 1-basierte StashTab.index des
+Herkunfts-Tabs plus die Gitter-Koordinate des Items darin (API-Felder
+x/y) — der Name allein unterscheidet gleichnamige Fächer nicht (Nutzer
+hat z. B. mehrere "Heist"-Tabs). Anders als die Tab-Spalte NICHT
+automatisch verwaltet: normal toggle-/immer sichtbar, auch im Einzelfach
+nützlich (Koordinate innerhalb des GERADE angezeigten Tabs).
+
 Anf.Lvl/Str/Dex/Int kommen aus dem requirements-Array der GGG-API — die
 Daten waren dank ``extra="allow"`` längst im Cache, wurden nur nie gezeigt
 (Nutzer-Feedback; PoEDB o. Ä. ist damit unnötig).
@@ -52,13 +59,17 @@ _EXPLICIT_TYPES = frozenset({0, 1, 2, 3, 4, 5, 6})
 def _type_key(frame_type: int) -> int:
     return frame_type if frame_type in _EXPLICIT_TYPES else OTHER_TYPE
 
-COLUMNS = ("Icon", "Tab", "Name", "Typ", "Level", "Qual.", "Stack", "iLvl",
+COLUMNS = ("Icon", "Tab", "Position", "Name", "Typ", "Level", "Qual.", "Stack", "iLvl",
            "Anf.Lvl", "Str", "Dex", "Int", "Mods")
 ICON_COL = 0
 TAB_COL = 1
-_NAME_COL = 2
-_NUMERIC_FROM_COL = 4  # Level, Qual., Stack, iLvl, Anf.Lvl, Str, Dex, Int
-MODS_COL = 12          # Mods (v. a. Maps) — linksbündig, nicht numerisch
+POSITION_COL = 2       # Tab-Nr. + Gitter-Koordinate — unterscheidet gleichnamige Fächer
+_NAME_COL = 3
+_NUMERIC_FROM_COL = 5  # Level, Qual., Stack, iLvl, Anf.Lvl, Str, Dex, Int
+MODS_COL = 13          # Mods (v. a. Maps) — linksbündig, nicht numerisch
+# Spalten VOR dem vorgerechneten _rows-Tupel (Icon, Tab, Position) — Offset
+# für den Zugriff _rows[row][col - _ROWS_OFFSET] in display_text().
+_ROWS_OFFSET = 3
 
 # Sortierung/Vergleich über echte Zahlen statt Anzeigetext — sonst sortiert
 # "113" vor "56" (Stringvergleich). Der Proxy nutzt diese Rolle als sortRole.
@@ -78,6 +89,7 @@ class ItemTableModel(QAbstractTableModel):
         super().__init__()
         self._items: list[Item] = []
         self._sources: list[str] = []         # Tab-Name pro Item (parallel zu _items)
+        self._tab_indices: list[int | None] = []  # StashTab.index pro Item (Positions-Spalte)
         self._rows: list[tuple] = []          # vorgerechnete Anzeigewerte
         self._pixmaps: dict[str, QPixmap] = {}
         self._requested: set[str] = set()
@@ -86,8 +98,12 @@ class ItemTableModel(QAbstractTableModel):
     # --- Daten setzen -------------------------------------------------- #
 
     def set_items(self, items: list[Item], sources: list[str] | None = None,
+                  tab_indices: list[int | None] | None = None,
                   request_icons: bool = True) -> None:
         """``sources[i]`` ist der Tab-Name von ``items[i]``. Ohne Angabe leer.
+        ``tab_indices[i]`` ist die StashTab.index des Herkunfts-Tabs (Basis
+        der Positions-Spalte, unterscheidet gleichnamige Fächer, z. B.
+        mehrere "Heist"-Tabs, Nutzer-Feedback) — ohne Angabe unbekannt.
 
         ``request_icons=False`` für große Aggregate (liga-weite Suche,
         "Alle Tabs laden"): Icons werden dann lazy in ``data()`` angefordert,
@@ -96,6 +112,7 @@ class ItemTableModel(QAbstractTableModel):
         self.beginResetModel()
         self._items = items
         self._sources = sources if sources is not None else [""] * len(items)
+        self._tab_indices = tab_indices if tab_indices is not None else [None] * len(items)
         self._rows = [self._precompute(item) for item in items]
         self.endResetModel()
         if request_icons and self._icon_requester:
@@ -149,12 +166,25 @@ class ItemTableModel(QAbstractTableModel):
             return "" if section == ICON_COL else COLUMNS[section]
         return None
 
+    def _position_text(self, row: int) -> str:
+        """Tab-Nr. (1-basiert, aus StashTab.index) + Gitter-Koordinate des
+        Items — unterscheidet gleichnamige Fächer (z. B. mehrere "Heist"),
+        die Tab-Spalte allein zeigt ja nur den (u. U. mehrdeutigen) Namen."""
+        tab_index = self._tab_indices[row] if row < len(self._tab_indices) else None
+        tab_part = f"#{tab_index + 1}" if tab_index is not None else "–"
+        item = self._items[row]
+        if item.x is not None and item.y is not None:
+            return f"{tab_part} ({item.x}, {item.y})"
+        return tab_part
+
     def display_text(self, row: int, col: int) -> str:
         """Anzeigetext einer Zelle — auch Basis der Spalten-Filter im Proxy."""
         if col == TAB_COL:
             return self._sources[row] or "–"
-        if col > TAB_COL:
-            return self._rows[row][col - 2]
+        if col == POSITION_COL:
+            return self._position_text(row)
+        if col > POSITION_COL:
+            return self._rows[row][col - _ROWS_OFFSET]
         return ""
 
     def data(self, index: QModelIndex, role):

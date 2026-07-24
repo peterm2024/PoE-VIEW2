@@ -8,9 +8,10 @@ RARITY_COLORS = {
     1: "#8888ff",  # Magic
     2: "#d9d955",  # Rare
     3: "#c96f2e",  # Unique
-    4: "#3fb8ae",  # Gem
+    4: "#2ecc94",  # Gem — deutlich grüner/türkiser als Divination Card (Nutzer-Feedback:
+                   # die beiden waren zuvor kaum zu unterscheiden)
     5: "#b3a06a",  # Currency
-    6: "#0ebac5",  # Divination Card
+    6: "#1fa8e0",  # Divination Card — deutlich blauer/cyaniger als Gem
     9: "#82ad6a",  # Relic
 }
 

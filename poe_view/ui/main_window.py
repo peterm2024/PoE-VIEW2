@@ -31,8 +31,9 @@ from poe_view.services.api_worker import (ApiWorker, BootstrapJob,
 from poe_view.services.csv_export import export_items, sanitize_filename
 from poe_view.ui.character_list import CharacterList
 from poe_view.ui.item_detail import ItemDetail
-from poe_view.ui.item_table import (COLUMNS, ICON_COL, MODS_COL, TAB_COL,
-                                    ItemFilterProxy, ItemTableModel)
+from poe_view.ui.item_table import (COLUMNS, ICON_COL, MODS_COL,
+                                    POSITION_COL, TAB_COL, ItemFilterProxy,
+                                    ItemTableModel)
 from poe_view.ui.rate_limit_dashboard import RateLimitDashboard
 from poe_view.ui.raw_data_viewer import RawDataViewer
 from poe_view.ui.stash_tree import StashTree
@@ -226,6 +227,7 @@ class MainWindow(QMainWindow):
         self.table.verticalHeader().hide()
         self.table.setColumnWidth(0, 36)
         self.table.setColumnWidth(1, 110)
+        self.table.setColumnWidth(POSITION_COL, 100)
         for name in ("Anf.Lvl", "Str", "Dex", "Int"):  # schmale Zahlenspalten
             self.table.setColumnWidth(COLUMNS.index(name), 58)
         self.table.setColumnWidth(MODS_COL, 320)
@@ -688,8 +690,10 @@ class MainWindow(QMainWindow):
     def _show_items(self, stash_id: str, items: list[Item], name: str) -> None:
         self._current_tab_name = name
         self._current_stash_id = stash_id  # Rückkehrziel nach liga-weiter Suche
+        stash = self._find_stash(self._stash_trees.get(self._current_league, []), stash_id)
+        tab_index = stash.index if stash is not None else None
         self.table.setColumnHidden(TAB_COL, True)  # redundant bei Einzelfach
-        self.table_model.set_items(items, [name] * len(items))
+        self.table_model.set_items(items, [name] * len(items), [tab_index] * len(items))
         self._status_msg.setText(f"{name}: {len(items)} Items")
         self._update_raw_viewer(stash_id, name)
 
@@ -703,6 +707,7 @@ class MainWindow(QMainWindow):
         league_items = self._items.get(self._current_league, {})
         items: list[Item] = []
         sources: list[str] = []
+        tab_indices: list[int | None] = []
         loaded = 0
         for child in stash.children:
             cached = league_items.get(child.id)
@@ -711,8 +716,9 @@ class MainWindow(QMainWindow):
             loaded += 1
             items.extend(cached)
             sources.extend([child.display_name] * len(cached))
+            tab_indices.extend([child.index] * len(cached))
         self.table.setColumnHidden(TAB_COL, False)  # hier trägt sie die Info
-        self.table_model.set_items(items, sources, request_icons=False)  # lazy
+        self.table_model.set_items(items, sources, tab_indices, request_icons=False)  # lazy
         self._status_msg.setText(
             f"{name}: {len(items)} Items aus {loaded} von {len(stash.children)} "
             "geladenen Unter-Fächern")
@@ -762,23 +768,26 @@ class MainWindow(QMainWindow):
         self._search_all_active = False
         self._current_tab_name = "Alle Tabs"
         self._current_stash_id = None  # Rückkehr aus der Suche landet wieder hier
-        items, sources = self._league_wide_items()
+        items, sources, tab_indices = self._league_wide_items()
         self.table.setColumnHidden(TAB_COL, False)  # Aggregat: Herkunft zeigen
-        self.table_model.set_items(items, sources, request_icons=False)  # lazy
+        self.table_model.set_items(items, sources, tab_indices, request_icons=False)  # lazy
         self._status_msg.setText(f"Alle Tabs: {len(items)} Items gesamt")
 
-    def _league_wide_items(self) -> tuple[list[Item], list[str]]:
-        """Alle gecachten Items der aktuellen Liga + Herkunfts-Fachname je Item."""
+    def _league_wide_items(self) -> tuple[list[Item], list[str], list[int | None]]:
+        """Alle gecachten Items der aktuellen Liga + Herkunfts-Fachname und
+        Tab-Index je Item (Positions-Spalte, unterscheidet gleichnamige Fächer)."""
         league_items = self._items.get(self._current_league, {})
         items: list[Item] = []
         sources: list[str] = []
+        tab_indices: list[int | None] = []
         for stash in self._leaf_stashes:
             cached = league_items.get(stash.id)
             if cached is None:
                 continue
             items.extend(cached)
             sources.extend([stash.display_name] * len(cached))
-        return items, sources
+            tab_indices.extend([stash.index] * len(cached))
+        return items, sources, tab_indices
 
     # --- Fächerübergreifende Suche (Nutzer-Feedback) --------------------- #
 
@@ -795,11 +804,11 @@ class MainWindow(QMainWindow):
     def _enter_search_all(self) -> None:
         self._search_all_active = True
         self._showing_aggregate = True  # späte Einzel-Ergebnisse nicht reinfunken lassen
-        items, sources = self._league_wide_items()
+        items, sources, tab_indices = self._league_wide_items()
         self.table.setColumnHidden(TAB_COL, False)  # Herkunft ist Teil der Antwort
         # request_icons=False: sonst würde die Suche zigtausend Icon-Jobs in
         # die Worker-Queue schieben — Icons kommen lazy für sichtbare Zeilen.
-        self.table_model.set_items(items, sources, request_icons=False)
+        self.table_model.set_items(items, sources, tab_indices, request_icons=False)
         loaded = len({s for s in sources})
         self._status_msg.setText(
             f"Suche über {loaded} geladene Fächer ({len(items)} Items) — "

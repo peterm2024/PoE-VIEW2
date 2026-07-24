@@ -46,6 +46,8 @@ class Item(BaseModel):
     frameType: int = 0
     ilvl: int | None = None
     stackSize: int | None = None
+    x: int | None = None    # Gitter-Koordinate innerhalb des Stash-Tabs
+    y: int | None = None
     corrupted: bool = False
     properties: list[ItemProperty] = Field(default_factory=list)
     requirements: list[ItemProperty] = Field(default_factory=list)

@@ -30,7 +30,7 @@ def test_missing_source_falls_back_to_dash(qapp) -> None:
 def test_name_column_unaffected_by_tab_column_insertion(qapp) -> None:
     model = ItemTableModel()
     model.set_items([make_item("Chaos Orb")], ["Currency 1"])
-    idx = model.index(0, 2)  # Name-Spalte
+    idx = model.index(0, 3)  # Name-Spalte (nach Icon, Tab, Position)
     assert model.data(idx, Qt.ItemDataRole.DisplayRole) == "Chaos Orb"
 
 
@@ -60,7 +60,7 @@ def test_filter_matches_explicit_mods(qapp) -> None:
     proxy.setFilterFixedString("beyond")
 
     assert proxy.rowCount() == 1
-    assert proxy.data(proxy.index(0, 2), Qt.ItemDataRole.DisplayRole) == "Beach Map"
+    assert proxy.data(proxy.index(0, 3), Qt.ItemDataRole.DisplayRole) == "Beach Map"
 
 
 def test_filter_matches_property_text(qapp) -> None:
@@ -80,7 +80,7 @@ def test_filter_matches_property_text(qapp) -> None:
     proxy.setFilterFixedString("quantity")
 
     assert proxy.rowCount() == 1
-    assert proxy.data(proxy.index(0, 2), Qt.ItemDataRole.DisplayRole) == "Oppressive Map"
+    assert proxy.data(proxy.index(0, 3), Qt.ItemDataRole.DisplayRole) == "Oppressive Map"
 
 
 def test_wildcard_asterisk_shows_everything(qapp) -> None:
@@ -173,7 +173,7 @@ def test_column_filter_reduces_rows_and_marks_header(qapp) -> None:
 
     proxy.set_column_filter(req_col, "<60")
     assert proxy.rowCount() == 1
-    assert proxy.data(proxy.index(0, 2), Qt.ItemDataRole.DisplayRole) == "A"
+    assert proxy.data(proxy.index(0, 3), Qt.ItemDataRole.DisplayRole) == "A"
     assert proxy.headerData(req_col, Qt.Orientation.Horizontal,
                             Qt.ItemDataRole.DisplayRole) == "Anf.Lvl 🔍"
 
@@ -227,7 +227,7 @@ def test_type_filter_hides_unchecked_frame_types(qapp) -> None:
     proxy.set_type_visible(3, False)  # Unique abwählen
 
     assert proxy.rowCount() == 1
-    assert proxy.data(proxy.index(0, 2), Qt.ItemDataRole.DisplayRole) == "Chaos Orb"
+    assert proxy.data(proxy.index(0, 3), Qt.ItemDataRole.DisplayRole) == "Chaos Orb"
 
     proxy.set_type_visible(3, True)
     assert proxy.rowCount() == 2
@@ -250,7 +250,7 @@ def test_type_filter_covers_gem_currency_divination_card(qapp) -> None:
 
     proxy.set_type_visible(4, False)  # Gem abwählen
     assert proxy.rowCount() == 1
-    assert proxy.data(proxy.index(0, 2), Qt.ItemDataRole.DisplayRole) == "The Fiend"
+    assert proxy.data(proxy.index(0, 3), Qt.ItemDataRole.DisplayRole) == "The Fiend"
 
 
 def test_type_filter_other_bucket_covers_quest_prophecy_relic(qapp) -> None:
@@ -271,7 +271,7 @@ def test_type_filter_other_bucket_covers_quest_prophecy_relic(qapp) -> None:
     proxy.set_type_visible(OTHER_TYPE, False)
 
     assert proxy.rowCount() == 1
-    assert proxy.data(proxy.index(0, 2), Qt.ItemDataRole.DisplayRole) == "Chaos Orb"
+    assert proxy.data(proxy.index(0, 3), Qt.ItemDataRole.DisplayRole) == "Chaos Orb"
 
 
 def test_type_filter_combines_with_text_search(qapp) -> None:
@@ -312,7 +312,7 @@ def test_reactivating_filter_restores_original_order_on_ties(qapp) -> None:
     table.setModel(proxy)
     table.setSortingEnabled(True)
     table.sortByColumn(COLUMNS.index("iLvl"), Qt.SortOrder.AscendingOrder)  # alle "-inf": Ties
-    names = lambda: [proxy.data(proxy.index(r, 2), Qt.ItemDataRole.DisplayRole)
+    names = lambda: [proxy.data(proxy.index(r, 3), Qt.ItemDataRole.DisplayRole)
                      for r in range(proxy.rowCount())]
     original = names()
 
@@ -337,3 +337,38 @@ def test_duplicate_names_keep_source_order_after_filter_toggle(qapp) -> None:
 
     order = [proxy.mapToSource(proxy.index(r, 0)).row() for r in range(proxy.rowCount())]
     assert order == [0, 1, 2]
+
+
+# --- Position-Spalte: Tab-Index + Koordinaten (Nutzer-Feedback) ------------ #
+
+def test_position_column_shows_tab_index_and_coordinates(qapp) -> None:
+    """Nutzer-Feedback: mehrere gleichnamige Fächer (z. B. "Heist") lassen
+    sich über den Namen allein nicht unterscheiden — Tab-Index (1-basiert)
+    + Item-Koordinate innerhalb des Fachs schon."""
+    from poe_view.ui.item_table import POSITION_COL, ItemTableModel
+    model = ItemTableModel()
+    item = Item.model_validate({"typeLine": "Chaos Orb", "x": 4, "y": 7})
+    model.set_items([item], ["Heist"], tab_indices=[2])  # StashTab.index=2 -> "#3"
+
+    idx = model.index(0, POSITION_COL)
+    assert model.data(idx, Qt.ItemDataRole.DisplayRole) == "#3 (4, 7)"
+
+
+def test_position_column_dash_without_tab_index(qapp) -> None:
+    from poe_view.ui.item_table import POSITION_COL, ItemTableModel
+    model = ItemTableModel()
+    model.set_items([make_item("Chaos Orb")])  # kein tab_indices, keine Koordinate
+
+    idx = model.index(0, POSITION_COL)
+    assert model.data(idx, Qt.ItemDataRole.DisplayRole) == "–"
+
+
+def test_position_column_shows_tab_index_without_coordinates(qapp) -> None:
+    """Items ohne x/y (z. B. manche Substash-Antworten) zeigen nur die
+    Tab-Nr., statt eine unvollständige Koordinate vorzutäuschen."""
+    from poe_view.ui.item_table import POSITION_COL, ItemTableModel
+    model = ItemTableModel()
+    model.set_items([make_item("Chaos Orb")], ["Heist"], tab_indices=[0])
+
+    idx = model.index(0, POSITION_COL)
+    assert model.data(idx, Qt.ItemDataRole.DisplayRole) == "#1"

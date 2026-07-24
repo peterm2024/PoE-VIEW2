@@ -817,7 +817,7 @@ def test_typing_in_search_switches_to_league_wide_view(qapp, monkeypatch) -> Non
     win._filter_edit.setText("essence")          # tippen → liga-weite Ansicht
     assert win.table_model.rowCount() == 2       # Model hält ALLE Items der Liga
     assert win.proxy.rowCount() == 1             # Filter zeigt nur den Treffer
-    assert win.proxy.data(win.proxy.index(0, 2),
+    assert win.proxy.data(win.proxy.index(0, 3),
                           Qt.ItemDataRole.DisplayRole) == "Deafening Essence of Greed"
     assert not win.table.isColumnHidden(TAB_COL)  # Herkunfts-Fach ist Teil der Antwort
 
@@ -1028,7 +1028,7 @@ def test_other_type_checkbox_hides_relic_and_unknown(qapp) -> None:
 
     win._type_checks[OTHER_TYPE].setChecked(False)
     assert win.proxy.rowCount() == 1
-    assert win.proxy.data(win.proxy.index(0, 2)) == "Chaos Orb"
+    assert win.proxy.data(win.proxy.index(0, 3)) == "Chaos Orb"
 
     win.worker.stop()
     win.worker.wait(5000)
@@ -1113,6 +1113,54 @@ def test_live_update_preserves_current_selection(qapp, monkeypatch) -> None:
 
     assert win._league_combo.currentText() == "Hardcore"  # Auswahl bleibt erhalten
     assert win._current_league == "Hardcore"
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+# --- Position-Spalte: Tab-Index + Koordinaten (Nutzer-Feedback) ------------ #
+
+def test_position_column_disambiguates_duplicate_tab_names(qapp, monkeypatch) -> None:
+    """Nutzer-Feedback: "ich habe mehrere gleichnamige Truhenfächer (z. B.
+    Heist)" — die Tab-Spalte zeigt bei beiden nur "Heist", die neue
+    Position-Spalte trägt den unterscheidenden Tab-Index."""
+    from poe_view.ui.item_table import POSITION_COL
+    win = MainWindow()
+    win._current_league = "Standard"
+    heist1 = StashTab.model_validate({"id": "h1", "name": "Heist", "type": "NormalStash",
+                                      "index": 0, "metadata": {}})
+    heist2 = StashTab.model_validate({"id": "h2", "name": "Heist", "type": "NormalStash",
+                                      "index": 2, "metadata": {}})
+    win._stash_trees["Standard"] = [heist1, heist2]
+    win._leaf_stashes = [heist1, heist2]
+    win._items["Standard"] = {
+        "h1": [Item.model_validate({"typeLine": "Gold Locket", "x": 1, "y": 1})],
+        "h2": [Item.model_validate({"typeLine": "Gold Locket", "x": 5, "y": 3})],
+    }
+    monkeypatch.setattr(win.worker, "submit", lambda job: None)
+
+    win._show_aggregate()
+
+    positions = {win.table_model.display_text(r, POSITION_COL)
+                for r in range(win.table_model.rowCount())}
+    assert positions == {"#1 (1, 1)", "#3 (5, 3)"}  # eindeutig trotz gleichem Namen
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_single_tab_view_shows_position_column(qapp) -> None:
+    win = MainWindow()
+    win._current_league = "Standard"
+    tab = StashTab.model_validate({"id": "t1", "name": "Heist", "type": "NormalStash",
+                                   "index": 4, "metadata": {}})
+    win._stash_trees["Standard"] = [tab]
+
+    win._show_items("t1", [Item.model_validate({"typeLine": "Chaos Orb", "x": 2, "y": 9})],
+                    "Heist")
+
+    from poe_view.ui.item_table import POSITION_COL
+    assert win.table_model.display_text(0, POSITION_COL) == "#5 (2, 9)"
 
     win.worker.stop()
     win.worker.wait(5000)
