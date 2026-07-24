@@ -44,6 +44,34 @@ def test_save_and_load_roundtrip_preserves_nested_tree_and_items(tmp_path, monke
     assert restored.last_loaded["Standard"]["t1"] == "2026-07-08T12:00:00+00:00"
 
 
+def test_save_and_load_roundtrip_preserves_character_items(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(data_cache, "_CACHE_FILE", tmp_path / "cache.json")
+    item = Item.model_validate({"typeLine": "Sword", "frameType": 2, "inventoryId": "Weapon"})
+
+    data = data_cache.CachedData()
+    data.character_items = {"WitchOfPeter": [item]}
+    data.character_items_loaded = {"WitchOfPeter": "2026-07-08T12:00:00+00:00"}
+    data_cache.save(data)
+
+    restored = data_cache.load()
+    assert restored is not None
+    assert restored.character_items["WitchOfPeter"][0].typeLine == "Sword"
+    assert restored.character_items_loaded["WitchOfPeter"] == "2026-07-08T12:00:00+00:00"
+
+
+def test_load_defaults_character_items_to_empty_dict_for_old_cache_files(tmp_path, monkeypatch) -> None:
+    """Cache-Dateien von vor diesem Feature kennen 'character_items' noch nicht."""
+    path = tmp_path / "old-cache.json"
+    path.write_text(
+        '{"account_name": "", "characters": [], "stash_trees": {}, "items_by_league": {}}',
+        encoding="utf-8")
+    monkeypatch.setattr(data_cache, "_CACHE_FILE", path)
+    restored = data_cache.load()
+    assert restored is not None
+    assert restored.character_items == {}
+    assert restored.character_items_loaded == {}
+
+
 def test_load_defaults_last_loaded_to_empty_dict_for_old_cache_files(tmp_path, monkeypatch) -> None:
     """Ältere Cache-Dateien (vor diesem Feature) haben kein 'last_loaded' — darf nicht crashen."""
     path = tmp_path / "old-cache.json"

@@ -176,6 +176,76 @@ def test_on_stash_items_silent_updates_cache_but_not_table(qapp) -> None:
     win.worker.wait(5000)
 
 
+def test_character_selected_fetches_items_when_not_cached(qapp, monkeypatch) -> None:
+    win = MainWindow()
+    char = make_char("WitchOfPeter", "Standard")
+
+    submitted = []
+    monkeypatch.setattr(win.worker, "submit", lambda job: submitted.append(job))
+
+    win._on_character_selected(char)
+
+    assert len(submitted) == 1
+    assert submitted[0].name == "WitchOfPeter"
+    assert win.table_model.rowCount() == 0  # noch nichts geladen
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_character_selected_shows_cached_items_without_fetching(qapp, monkeypatch) -> None:
+    win = MainWindow()
+    char = make_char("WitchOfPeter", "Standard")
+    item = Item.model_validate({"typeLine": "Chaos Orb", "frameType": 5, "inventoryId": "MainInventory"})
+    win._character_items["WitchOfPeter"] = [item]
+
+    submitted = []
+    monkeypatch.setattr(win.worker, "submit", lambda job: submitted.append(job))
+
+    win._on_character_selected(char)
+
+    assert submitted == []  # Cache-Treffer: kein erneuter API-Call
+    assert win.table_model.rowCount() == 1
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_on_character_items_caches_and_shows_slot_as_source(qapp) -> None:
+    from poe_view.ui.item_table import TAB_COL
+
+    win = MainWindow()
+    win._current_character_name = "WitchOfPeter"
+    weapon = Item.model_validate({"typeLine": "Sword", "frameType": 2, "inventoryId": "Weapon"})
+
+    win._on_character_items("WitchOfPeter", [weapon])
+
+    assert win._character_items["WitchOfPeter"] == [weapon]
+    assert win.table_model.rowCount() == 1
+    assert win.table_model.source_at(0) == "Weapon"     # Slot statt Tab-Name
+    assert not win.table.isColumnHidden(TAB_COL)
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_on_character_items_ignores_late_result_for_deselected_character(qapp) -> None:
+    """Analog _on_stash_items: ein spät eintreffender Job für einen inzwischen
+    abgewählten Charakter darf die aktuelle Ansicht nicht überschreiben,
+    soll das Ergebnis aber trotzdem cachen."""
+    win = MainWindow()
+    win._current_character_name = "OtherCharacter"
+    item = Item.model_validate({"typeLine": "Chaos Orb", "frameType": 5})
+
+    win._on_character_items("WitchOfPeter", [item])
+
+    assert win._character_items["WitchOfPeter"] == [item]  # gecacht …
+    assert win.table_model.rowCount() == 0  # … aber nicht angezeigt
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
 def _make_leaf(stash_id: str, name: str) -> StashTab:
     return StashTab.model_validate({"id": stash_id, "name": name, "type": "CurrencyStash",
                                      "metadata": {}})

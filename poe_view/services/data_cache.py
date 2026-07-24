@@ -35,6 +35,8 @@ class CachedData:
         self.stash_trees: dict[str, list[StashTab]] = {}         # Liga → Baumstruktur
         self.items_by_league: dict[str, dict[str, list[Item]]] = {}  # Liga → {stash_id: Items}
         self.last_loaded: dict[str, dict[str, str]] = {}         # Liga → {stash_id: ISO-Zeitstempel}
+        self.character_items: dict[str, list[Item]] = {}         # Charaktername → Ausrüstung+Inventar
+        self.character_items_loaded: dict[str, str] = {}         # Charaktername → ISO-Zeitstempel
 
 
 def save(data: CachedData) -> None:
@@ -52,6 +54,11 @@ def save(data: CachedData) -> None:
             for league, stashes in data.items_by_league.items()
         },
         "last_loaded": data.last_loaded,
+        "character_items": {
+            name: [i.model_dump(mode="json") for i in items]
+            for name, items in data.character_items.items()
+        },
+        "character_items_loaded": data.character_items_loaded,
     }
     try:
         config.ensure_dirs()
@@ -79,6 +86,13 @@ def load() -> CachedData | None:
             for league, stashes in payload["items_by_league"].items()
         }
         data.last_loaded = payload.get("last_loaded", {})
+        # .get() mit Default: Cache-Dateien von VOR diesem Feature kennen
+        # diese Schlüssel noch nicht — sollen aber weiter ladbar bleiben.
+        data.character_items = {
+            name: [Item.model_validate(i) for i in items]
+            for name, items in payload.get("character_items", {}).items()
+        }
+        data.character_items_loaded = payload.get("character_items_loaded", {})
         _backfill_last_loaded(data)
         return data
     except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError):

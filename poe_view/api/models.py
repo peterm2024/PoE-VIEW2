@@ -48,6 +48,7 @@ class Item(BaseModel):
     stackSize: int | None = None
     x: int | None = None    # Gitter-Koordinate innerhalb des Stash-Tabs
     y: int | None = None
+    inventoryId: str = ""  # bei Charakter-Items der Slot ("Weapon", "BodyArmour", "MainInventory", …)
     corrupted: bool = False
     properties: list[ItemProperty] = Field(default_factory=list)
     requirements: list[ItemProperty] = Field(default_factory=list)

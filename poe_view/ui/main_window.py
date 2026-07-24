@@ -24,6 +24,7 @@ from poe_view.api.models import Character, Item, StashTab, dominant_category
 from poe_view.services import data_cache
 from poe_view.services.api_worker import (ApiWorker, BootstrapJob,
                                           FetchAllItemsJob,
+                                          FetchCharacterItemsJob,
                                           FetchCharactersJob, FetchIconJob,
                                           FetchLeaguesJob, FetchStashItemsJob,
                                           FetchStashListJob, LoginJob,
@@ -80,6 +81,9 @@ class MainWindow(QMainWindow):
         self._showing_aggregate = False
         self._search_all_active = False        # Suchfeld → liga-weite Ansicht aktiv
         self._current_stash_id: str | None = None  # zuletzt gewähltes Fach (Rückkehrziel)
+        self._character_items: dict[str, list[Item]] = {}       # Charaktername → Ausrüstung+Inventar
+        self._character_items_loaded: dict[str, str] = {}       # Charaktername → ISO-Zeitstempel
+        self._current_character_name: str | None = None         # gerade angezeigter Charakter
         self._worker_busy = False
         self._auto_refresh_counts: dict[str, int] = {}  # Liga → auto-aktualisierte Tabs (Session)
         self._raw_data_viewer: RawDataViewer | None = None
@@ -118,6 +122,8 @@ class MainWindow(QMainWindow):
         self._stash_trees = cached.stash_trees
         self._items = cached.items_by_league
         self._last_loaded = cached.last_loaded
+        self._character_items = cached.character_items
+        self._character_items_loaded = cached.character_items_loaded
         log.info("Daten-Cache geladen: %d Charaktere, %d Liga(en)",
                  len(cached.characters), len(cached.stash_trees))
 
@@ -128,6 +134,8 @@ class MainWindow(QMainWindow):
         data.stash_trees = self._stash_trees
         data.items_by_league = self._items
         data.last_loaded = self._last_loaded
+        data.character_items = self._character_items
+        data.character_items_loaded = self._character_items_loaded
         data_cache.save(data)
 
     # ------------------------------------------------------------------ #
@@ -481,6 +489,7 @@ class MainWindow(QMainWindow):
         w.stash_list_loaded.connect(self._on_stash_list)
         w.stash_items_loaded.connect(self._on_stash_items)
         w.stash_children_loaded.connect(self._on_stash_children)
+        w.character_items_loaded.connect(self._on_character_items)
         w.icon_loaded.connect(self._on_icon)
         w.rate_limit_changed.connect(self.dashboard.update_state)
         w.status.connect(self._on_status)
@@ -514,6 +523,7 @@ class MainWindow(QMainWindow):
         self._current_league = league
         self._showing_aggregate = False
         self._current_stash_id = None  # Fach-IDs gelten nur innerhalb einer Liga
+        self._current_character_name = None
         self._apply_character_league_filter()
         cached_tree = self._stash_trees.get(league)
         if cached_tree is not None:
@@ -774,6 +784,7 @@ class MainWindow(QMainWindow):
     def _show_items(self, stash_id: str, items: list[Item], name: str) -> None:
         self._current_tab_name = name
         self._current_stash_id = stash_id  # Rückkehrziel nach liga-weiter Suche
+        self._current_character_name = None
         tab_index = self._tab_positions().get(stash_id)
         self.table.setColumnHidden(TAB_COL, True)  # redundant bei Einzelfach
         self.table_model.set_items(items, [name] * len(items), [tab_index] * len(items),
@@ -788,6 +799,7 @@ class MainWindow(QMainWindow):
         self._showing_aggregate = True
         self._current_tab_name = name
         self._current_stash_id = stash.id  # Rückkehrziel nach liga-weiter Suche
+        self._current_character_name = None
         league_items = self._items.get(self._current_league, {})
         positions = self._tab_positions()
         items: list[Item] = []
@@ -863,6 +875,7 @@ class MainWindow(QMainWindow):
         self._search_all_active = False
         self._current_tab_name = "Alle Tabs"
         self._current_stash_id = None  # Rückkehr aus der Suche landet wieder hier
+        self._current_character_name = None
         items, sources, tab_indices, stash_ids = self._league_wide_items()
         self.table.setColumnHidden(TAB_COL, False)  # Aggregat: Herkunft zeigen
         self.table_model.set_items(items, sources, tab_indices, stash_ids,
@@ -905,6 +918,7 @@ class MainWindow(QMainWindow):
     def _enter_search_all(self) -> None:
         self._search_all_active = True
         self._showing_aggregate = True  # späte Einzel-Ergebnisse nicht reinfunken lassen
+        self._current_character_name = None
         items, sources, tab_indices, stash_ids = self._league_wide_items()
         self.table.setColumnHidden(TAB_COL, False)  # Herkunft ist Teil der Antwort
         # request_icons=False: sonst würde die Suche zigtausend Icon-Jobs in
@@ -962,9 +976,42 @@ class MainWindow(QMainWindow):
         return rows
 
     def _on_character_selected(self, char: Character) -> None:
-        self._status_msg.setText(
-            f"{char.name} — {char.class_} {char.level} ({char.league}). "
-            "Charakter-Equipment-Ansicht folgt in einer späteren Version.")
+        """Zeigt Ausrüstung + Inventar des Charakters in der Item-Tabelle —
+        wie bei Stash-Fächern: Cache-Treffer zeigen sofort an, sonst wird
+        einmalig nachgeladen (kein automatisches Neuladen bei jedem Klick,
+        Doku §4.4/§5)."""
+        self._current_character_name = char.name
+        cached = self._character_items.get(char.name)
+        if cached is not None:
+            self._show_character_items(char.name, cached)
+            return
+        self._status_msg.setText(f"Lade Ausrüstung: {char.name} …")
+        self.worker.submit(FetchCharacterItemsJob(char.name))
+
+    def _on_character_items(self, name: str, items: list[Item]) -> None:
+        """``name`` kommt aus dem Signal, nicht aus der Auswahl — sonst könnte
+        ein spät eintreffender Job Daten eines inzwischen abgewählten
+        Charakters in die aktuelle Ansicht einsickern lassen (analog
+        `_on_stash_items`)."""
+        self._character_items[name] = items
+        self._character_items_loaded[name] = datetime.now(timezone.utc).isoformat()
+        self._persist_cache()
+        if name != self._current_character_name:
+            return
+        self._show_character_items(name, items)
+
+    def _show_character_items(self, name: str, items: list[Item]) -> None:
+        """Slot (``inventoryId``, z. B. "Weapon"/"BodyArmour"/"MainInventory")
+        übernimmt die Rolle der Tab-Spalte — analog zu den Aggregat-Ansichten
+        der Stash-Tabs. Kein Truhenfach beteiligt: Position-Spalte zeigt nur
+        die Item-Koordinate (falls vorhanden), Baum-Hervorhebung entfällt."""
+        self._showing_aggregate = False
+        self._search_all_active = False
+        self._current_stash_id = None
+        self.table.setColumnHidden(TAB_COL, False)
+        sources = [item.inventoryId or "?" for item in items]
+        self.table_model.set_items(items, sources, [None] * len(items), [None] * len(items))
+        self._status_msg.setText(f"{name}: {len(items)} Items (Ausrüstung + Inventar)")
 
     def _on_icon(self, url: str, data: bytes) -> None:
         pixmap = QPixmap()

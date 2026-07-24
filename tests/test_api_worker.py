@@ -5,8 +5,8 @@ Netzwerk) — der Client wird per Monkeypatch durch eine Fake-Methode ersetzt.
 """
 
 from poe_view.api.models import Item, StashTab
-from poe_view.services.api_worker import (ApiWorker, FetchLeaguesJob,
-                                          FetchStashItemsJob)
+from poe_view.services.api_worker import (ApiWorker, FetchCharacterItemsJob,
+                                          FetchLeaguesJob, FetchStashItemsJob)
 
 
 def test_stash_items_dispatch_does_not_emit_bereit_after_result(qapp, monkeypatch) -> None:
@@ -38,6 +38,23 @@ def test_leagues_dispatch_emits_bereit_after_result(qapp, monkeypatch) -> None:
     worker._dispatch(FetchLeaguesJob())
 
     assert emitted == ["Lade Ligen …", "Bereit"]
+    worker.client.close()
+
+
+def test_character_items_dispatch_emits_name_and_items(qapp, monkeypatch) -> None:
+    worker = ApiWorker()
+    item = Item.model_validate({"typeLine": "Chaos Orb", "frameType": 5})
+    monkeypatch.setattr(worker.client, "get_character_items", lambda name: [item])
+
+    emitted: list[str] = []
+    worker.status.connect(emitted.append)
+    results: list[tuple[str, list[Item]]] = []
+    worker.character_items_loaded.connect(lambda name, items: results.append((name, items)))
+
+    worker._dispatch(FetchCharacterItemsJob("WitchOfPeter"))
+
+    assert emitted == ["Lade Ausrüstung: WitchOfPeter …", "Bereit"]
+    assert results == [("WitchOfPeter", [item])]
     worker.client.close()
 
 

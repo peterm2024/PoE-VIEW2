@@ -745,6 +745,48 @@ App die Rückkehr aus der Wartung überhaupt bemerkt.
 
 ---
 
+### 4.13 Charakter-Ausrüstung (`MainWindow._on_character_selected`)
+
+Klick auf einen Charakter zeigt Ausrüstung + Inventar in derselben
+Item-Tabelle wie Stash-Fächer — bewusst KEINE eigene Paperdoll-Ansicht,
+um die gesamte vorhandene Infrastruktur (Spalten, Filter, Suche
+innerhalb der Ansicht, Icon-Lazy-Loading, CSV-Export) wiederzuverwenden.
+
+**Endpunkt:** `GET /character/{name}` (`PoeApiClient.get_character_items`)
+liefert ein `character`-Objekt (Singular, wie `stash` beim Einzel-Tab)
+mit den Item-Listen `equipment`/`inventory`/`jewels`/`rucksack` — der
+Client fasst alle vier zu einer einzigen `list[Item]` zusammen. Diese
+Feldnamen stammen aus der offiziell dokumentierten GGG-Schema-Beschreibung;
+anders als sämtliche Stash-Strukturen in diesem Projekt sind sie **NICHT**
+an echten Rohdaten verifiziert (kein Zugriff auf einen echten
+Charakter-Endpunkt-Response beim Bau dieses Features) — siehe
+FALLSTRICKE_UND_WORKAROUNDS.md #26. Fehlende Listen werden als leer
+behandelt statt einen Fehler zu werfen.
+
+**Slot statt Tab:** `Item.inventoryId` (neues typisiertes Feld, z. B.
+`"Weapon"`, `"BodyArmour"`, `"MainInventory"`) übernimmt die Rolle der
+Tab-Spalte — exakt dasselbe Muster wie bei den Stash-Aggregat-Ansichten
+(§4.10/§4.11), nur dass hier der Ausrüstungs-Slot statt des Tab-Namens
+steht. Kein Truhenfach ist beteiligt: `_current_stash_id` wird auf `None`
+gesetzt (keine Baum-Hervorhebung), die Position-Spalte zeigt nur die
+Item-Koordinate, falls die API eine liefert (bei ausgerüsteten Items
+vermutlich nicht, bei Inventar-Items evtl. schon).
+
+**Cache-Verhalten identisch zu Stash-Fächern:** `MainWindow._character_items`
+(Charaktername → Items) + `_character_items_loaded` (→ ISO-Zeitstempel)
+werden wie `_items`/`_last_loaded` in `data_cache.CachedData` persistiert
+(überlebt einen Neustart) und überleben ohne Login/Netzwerk (analog
+§4.12 Offline-Modus — cache-first, kein Zwang zum erneuten Abruf).
+Ein Klick auf einen bereits geladenen Charakter zeigt sofort den Cache,
+kein automatisches Neuladen (noch kein eigener Refresh-Button für
+Charaktere — Folgefeature bei Bedarf, analog dem "⟳" der Stash-Tabs).
+`_on_character_items` prüft `name == self._current_character_name`
+(analog `_on_stash_items`/`league != self._current_league`), damit ein
+spät eintreffendes Ergebnis eines inzwischen abgewählten Charakters nur
+noch gecacht, aber nicht mehr angezeigt wird.
+
+---
+
 ## 5. UI-Konzept (Oberflächenvorschlag)
 
 Ein Hauptfenster: Navigation links (Charaktere + Stash getrennt), Items

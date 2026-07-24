@@ -16,7 +16,7 @@ from urllib.parse import quote
 import httpx
 
 from poe_view import config
-from poe_view.api.models import Character, StashTab
+from poe_view.api.models import Character, Item, StashTab
 from poe_view.api.rate_limiter import RateLimitManager
 
 log = logging.getLogger(__name__)
@@ -93,6 +93,21 @@ class PoeApiClient:
     def get_characters(self) -> list[Character]:
         data = self._get("/character")
         return [Character.model_validate(c) for c in data.get("characters", [])]
+
+    def get_character_items(self, name: str) -> list[Item]:
+        """Ausrüstung + Inventar EINES Charakters (Antwort-Key 'character',
+        Singular, wie schon bei ``get_stash``). Die Item-Listen 'equipment'/
+        'inventory'/'jewels'/'rucksack' entsprechen der offiziell dokumentierten
+        GGG-Schema-Beschreibung — anders als die Stash-Endpunkte bislang NICHT
+        an echten Rohdaten verifiziert (siehe FALLSTRICKE_UND_WORKAROUNDS.md
+        #26). Fehlende Listen werden als leer behandelt statt einen Fehler zu
+        werfen — einzelne Feld-Abweichungen sollen nicht den ganzen Abruf
+        scheitern lassen."""
+        data = self._get(f"/character/{quote(name)}")
+        char = data.get("character", {})
+        items = (char.get("equipment", []) + char.get("inventory", [])
+                 + char.get("jewels", []) + char.get("rucksack", []))
+        return [Item.model_validate(i) for i in items]
 
     def get_stashes(self, league: str) -> list[StashTab]:
         """Stash-Tab-Liste (ohne Items). Liga-Namen können Leerzeichen enthalten!"""
