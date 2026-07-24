@@ -379,10 +379,25 @@ totals`, rekursiv nach oben durchgereicht, sobald eine Zahl sich ändert).
 
 ### 4.8 Hintergrund-Auto-Refresh (`MainWindow._maybe_auto_refresh`)
 
-Ein `QTimer` im Main-Thread (alle `AUTO_REFRESH_INTERVAL_MS` = 20 s) lädt
-im Hintergrund höchstens **einen** bereits bekannten, aber veralteten
-Stash-Tab neu — der Nutzer muss dafür nichts tun, alte Daten "verwesen"
-aber nicht auf unbestimmte Zeit (Nutzer-Feedback).
+Ein `QTimer` im Main-Thread (alle `AUTO_REFRESH_INTERVAL_MS` = 40 s) lädt
+im Hintergrund pro Tick **bis zu zwei** Stash-Tabs neu — der Nutzer muss
+dafür nichts tun, alte Daten "verwesen" aber nicht auf unbestimmte Zeit
+(Nutzer-Feedback):
+
+1. **Das gerade angezeigte Fach** (`MainWindow._current_stash_id`, sofern
+   gesetzt) — IMMER, unabhängig von seinem Alter (die 1-Tag-Schonfrist des
+   Sweeps unten gilt hier nicht), damit die aktuell geöffnete Ansicht
+   "lebt" (Nutzer-Feedback). Ist die Aggregat-/Alle-Tabs-Ansicht aktiv, ist
+   `_current_stash_id` `None` und dieser Schritt entfällt.
+2. **Der normale Sweep-Kandidat** (`_pick_auto_refresh_candidate`, siehe
+   unten) — füllt nach und nach den Rest der Truhe. Ist er identisch mit
+   dem gerade angezeigten Fach, wird er nicht doppelt angefragt.
+
+Da pro Tick jetzt bis zu zwei statt einem Job rausgeht, wurde
+`AUTO_REFRESH_INTERVAL_MS` verdoppelt (20 s → 40 s) — die
+Gesamt-Anfragerate ans Rate-Limit bleibt damit wie vorher, sonst würde ein
+Tick den Worker-Thread in `RateLimitManager.check_and_wait` in eine
+Warteschleife (Timeout) laufen lassen (Nutzer-Feedback).
 
 **Auswahl (`_pick_auto_refresh_candidate`):**
 
@@ -427,7 +442,12 @@ angezeigte Liga einsickern lassen.
 `MainWindow._update_auto_refresh_label`) zählt die in dieser Session
 still aktualisierten Tabs der aktuellen Liga gegen die Gesamtzahl der
 Tabs — der Nutzer kann so jederzeit prüfen, dass der Hintergrund-Refresher
-tatsächlich arbeitet (Nutzer-Feedback).
+tatsächlich arbeitet (Nutzer-Feedback). Gezählt wird pro Fach nur der
+**erste** stille Ladevorgang (`_on_stash_items`/`_on_stash_children`
+prüfen, ob die `stash_id` bereits in `_last_loaded` steht, BEVOR sie den
+neuen Zeitstempel einträgt) — sonst würde das wiederholte Live-Halten des
+gerade angezeigten Fachs (Punkt 1 oben, jeder Tick) den Zähler weit über
+die Gesamtzahl Y hinaustreiben.
 
 **Migration von Bestandsdaten:** Cache-Dateien von vor dem
 `last_loaded`-Feature enthalten keine Zeitstempel — ohne Gegenmaßnahme

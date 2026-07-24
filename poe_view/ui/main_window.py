@@ -46,7 +46,11 @@ class MainWindow(QMainWindow):
     # Hintergrund-Auto-Refresh (Nutzer-Feedback): nie jünger als 1 Tag anfassen
     # (dafür reicht der manuelle Refresh völlig), und dem Nutzer immer mind.
     # die Hälfte des Rate-Limit-Budgets für manuelle Klicks übrig lassen.
-    AUTO_REFRESH_INTERVAL_MS = 20_000
+    # Pro Tick können jetzt BIS ZU ZWEI Jobs rausgehen (das gerade angezeigte
+    # Fach + der normale Sweep-Kandidat, Nutzer-Feedback) — Intervall verdoppelt,
+    # damit die Gesamt-Anfragerate ans Rate-Limit gegenüber vorher gleich bleibt
+    # und wir nicht in dessen Sperre (Timeout) laufen.
+    AUTO_REFRESH_INTERVAL_MS = 40_000
     AUTO_REFRESH_MIN_AGE = timedelta(days=1)
     AUTO_REFRESH_MIN_HEADROOM = 0.5
 
@@ -679,9 +683,13 @@ class MainWindow(QMainWindow):
         sonst würde ein spät eintreffender Hintergrund-Job die Daten der
         MOMENTAN aktiven Liga verfälschen, falls der Nutzer zwischenzeitlich
         die Liga gewechselt hat."""
+        already_loaded = stash_id in self._last_loaded.get(league, {})
         self._last_loaded.setdefault(league, {})[stash_id] = datetime.now(timezone.utc).isoformat()
         self._items.setdefault(league, {})[stash_id] = items
-        if silent:
+        if silent and not already_loaded:
+            # Nur NEU geladene Fächer zählen für "X von Y Stash-Tabs" — sonst
+            # würde das wiederholte Live-Halten des gerade angezeigten Fachs
+            # (jeder Auto-Refresh-Tick) den Zähler weit über Y treiben.
             self._auto_refresh_counts[league] = self._auto_refresh_counts.get(league, 0) + 1
         relabelled = self._stamp_category(league, stash_id, items)
         self._persist_cache()
@@ -700,6 +708,7 @@ class MainWindow(QMainWindow):
         """Ein Spezial-Tab (MapStash/UniqueStash) hat statt Items Unter-Tabs
         geliefert — in Baumstruktur und Anzeige einhängen. Deren Items werden
         wie bei normalen Tabs erst per Klick (oder Auto-Refresh) geladen."""
+        already_loaded = stash_id in self._last_loaded.get(league, {})
         self._last_loaded.setdefault(league, {})[stash_id] = datetime.now(timezone.utc).isoformat()
         # Ein evtl. vorhandener alter Item-Eintrag des Eltern-Tabs ist Müll
         # (Spezial-Tabs haben nie eigene Items) — raus damit, sonst wäre der
@@ -710,7 +719,7 @@ class MainWindow(QMainWindow):
             tab = self._find_stash(tree, stash_id)
             if tab is not None:
                 tab.children = children
-        if silent:
+        if silent and not already_loaded:  # siehe _on_stash_items: nicht über Y hinauszählen
             self._auto_refresh_counts[league] = self._auto_refresh_counts.get(league, 0) + 1
         self._persist_cache()
         if league != self._current_league:
@@ -1056,17 +1065,26 @@ class MainWindow(QMainWindow):
     # --- Hintergrund-Auto-Refresh (Nutzer-Feedback) ---------------------- #
 
     def _maybe_auto_refresh(self) -> None:
-        """Läuft alle paar Sekunden per QTimer; lädt höchstens EINEN Tab neu,
-        und nur, wenn genug Rate-Limit-Budget für manuelle Klicks übrig
-        bleibt (Doku §4.8)."""
+        """Läuft alle paar Sekunden per QTimer; lädt höchstens ZWEI Tabs neu —
+        das gerade angezeigte Fach (immer, unabhängig von seinem Alter, damit
+        die aktuelle Ansicht "lebt", Nutzer-Feedback) UND den normalen
+        Sweep-Kandidaten (füllt nach und nach den Rest der Truhe) — und nur,
+        wenn genug Rate-Limit-Budget für manuelle Klicks übrig bleibt
+        (Doku §4.8). Deshalb ist ``AUTO_REFRESH_INTERVAL_MS`` doppelt so groß
+        wie früher, als pro Tick nur ein Job rausging."""
         if not self._current_league or self._worker_busy or self._bulk_dialog is not None:
             return
         if self._current_league_is_archived():
             return  # Liga beendet — jeder Versuch würde nur scheitern (oder Cache überschreiben)
         if self.worker.rate_limiter.headroom_fraction() < self.AUTO_REFRESH_MIN_HEADROOM:
             return
+        current_id = self._current_stash_id
+        if current_id is not None:
+            self.worker.submit(FetchStashItemsJob(
+                self._current_league, current_id, self._current_tab_name,
+                parent_id=self._parent_id_of(current_id), silent=True))
         candidate = self._pick_auto_refresh_candidate()
-        if candidate is not None:
+        if candidate is not None and candidate.id != current_id:
             self.worker.submit(FetchStashItemsJob(
                 self._current_league, candidate.id, candidate.display_name,
                 parent_id=candidate.parent, silent=True))

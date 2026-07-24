@@ -318,6 +318,73 @@ def test_maybe_auto_refresh_skips_when_worker_busy_or_low_headroom(qapp, monkeyp
     win.worker.wait(5000)
 
 
+def test_maybe_auto_refresh_also_refreshes_currently_displayed_tab(qapp, monkeypatch) -> None:
+    """Nutzer-Feedback: das gerade angezeigte Fach soll bei jedem Auto-Refresh-
+    Tick ZUSÄTZLICH zum normalen Sweep-Kandidaten aktualisiert werden — auch
+    wenn es frisch geladen ist (die 1-Tag-Schonfrist gilt nur für den Sweep)."""
+    win = MainWindow()
+    win._current_league = "Standard"
+    now = datetime.now(timezone.utc)
+    win._leaf_stashes = [_make_leaf("current", "Current Tab"), _make_leaf("stale", "Stale Tab")]
+    win._last_loaded["Standard"] = {
+        "current": now.isoformat(),  # gerade erst geladen — würde den Sweep NICHT triggern
+        "stale": (now - timedelta(days=5)).isoformat(),
+    }
+    win._current_stash_id = "current"
+
+    submitted = []
+    monkeypatch.setattr(win.worker, "submit", lambda job: submitted.append(job))
+    monkeypatch.setattr(win.worker.rate_limiter, "headroom_fraction", lambda: 1.0)
+
+    win._maybe_auto_refresh()
+
+    assert {job.stash_id for job in submitted} == {"current", "stale"}
+    assert all(job.silent is True for job in submitted)
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_maybe_auto_refresh_dedupes_when_current_tab_is_also_the_sweep_candidate(
+        qapp, monkeypatch) -> None:
+    win = MainWindow()
+    win._current_league = "Standard"
+    now = datetime.now(timezone.utc)
+    win._leaf_stashes = [_make_leaf("t1", "Tab 1")]
+    win._last_loaded["Standard"] = {"t1": (now - timedelta(days=5)).isoformat()}
+    win._current_stash_id = "t1"
+
+    submitted = []
+    monkeypatch.setattr(win.worker, "submit", lambda job: submitted.append(job))
+    monkeypatch.setattr(win.worker.rate_limiter, "headroom_fraction", lambda: 1.0)
+
+    win._maybe_auto_refresh()
+
+    assert len(submitted) == 1  # nicht doppelt anfragen, wenn beide dasselbe Fach meinen
+    assert submitted[0].stash_id == "t1"
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_auto_refresh_counter_does_not_inflate_from_repeated_current_tab_refresh(qapp) -> None:
+    """Regression: das wiederholte Live-Halten des angezeigten Fachs (jeder
+    Tick) darf den "X von Y"-Zähler nicht über die Gesamtzahl der Fächer
+    hinaustreiben — nur der ERSTE Ladevorgang eines Fachs zählt."""
+    win = MainWindow()
+    win._current_league = "Standard"
+    win._leaf_stashes = [_make_leaf("t1", "Tab 1")]
+
+    win._on_stash_items("Standard", "t1", "Tab 1", [], silent=True)
+    win._on_stash_items("Standard", "t1", "Tab 1", [], silent=True)
+    win._on_stash_items("Standard", "t1", "Tab 1", [], silent=True)
+
+    assert win._auto_refresh_counts["Standard"] == 1
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
 # --- Rohdaten-Mini-Viewer (Nutzer-Feedback) ------------------------------ #
 
 def test_build_raw_stash_payload_merges_tab_metadata_and_items(qapp) -> None:
