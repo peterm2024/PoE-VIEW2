@@ -213,9 +213,9 @@ def test_lazy_icons_requested_on_paint_not_on_set(qapp) -> None:
     assert requested == ["https://cdn/x.png"]  # und nur genau einmal
 
 
-# --- Rarity-Filter-Checkboxen (Nutzer-Feedback) ---------------------------- #
+# --- Typ-Filter-Checkboxen (Nutzer-Feedback) ------------------------------- #
 
-def test_rarity_filter_hides_unchecked_frame_types(qapp) -> None:
+def test_type_filter_hides_unchecked_frame_types(qapp) -> None:
     model = ItemTableModel()
     model.set_items([
         Item.model_validate({"typeLine": "Chaos Orb", "frameType": 0}),
@@ -224,30 +224,57 @@ def test_rarity_filter_hides_unchecked_frame_types(qapp) -> None:
     proxy = ItemFilterProxy()
     proxy.setSourceModel(model)
 
-    proxy.set_rarity_visible(3, False)  # Unique abwählen
+    proxy.set_type_visible(3, False)  # Unique abwählen
 
     assert proxy.rowCount() == 1
     assert proxy.data(proxy.index(0, 2), Qt.ItemDataRole.DisplayRole) == "Chaos Orb"
 
-    proxy.set_rarity_visible(3, True)
+    proxy.set_type_visible(3, True)
     assert proxy.rowCount() == 2
 
 
-def test_rarity_filter_leaves_currency_and_gems_untouched(qapp) -> None:
-    """Nur die 4 Checkboxen (Normal/Magic/Rare/Unique) — Currency (frameType
-    5) hat kein Äquivalent und bleibt immer sichtbar."""
+def test_type_filter_covers_gem_currency_divination_card(qapp) -> None:
+    """Nutzer-Feedback: Currency, Gems und Div Cards haben jetzt eigene
+    Checkboxen (frameType 5/4/6) statt immer sichtbar zu bleiben."""
     model = ItemTableModel()
-    model.set_items([Item.model_validate({"typeLine": "Chaos Orb", "frameType": 5})])
+    model.set_items([
+        Item.model_validate({"typeLine": "Chaos Orb", "frameType": 5}),
+        Item.model_validate({"typeLine": "Awakened Gem", "frameType": 4}),
+        Item.model_validate({"typeLine": "The Fiend", "frameType": 6}),
+    ])
     proxy = ItemFilterProxy()
     proxy.setSourceModel(model)
 
-    for ft in (0, 1, 2, 3):
-        proxy.set_rarity_visible(ft, False)
+    proxy.set_type_visible(5, False)  # Currency abwählen
+    assert proxy.rowCount() == 2
 
-    assert proxy.rowCount() == 1  # Currency unbeeindruckt von allen 4 Checkboxen
+    proxy.set_type_visible(4, False)  # Gem abwählen
+    assert proxy.rowCount() == 1
+    assert proxy.data(proxy.index(0, 2), Qt.ItemDataRole.DisplayRole) == "The Fiend"
 
 
-def test_rarity_filter_combines_with_text_search(qapp) -> None:
+def test_type_filter_other_bucket_covers_quest_prophecy_relic(qapp) -> None:
+    """frameTypes ohne eigene Checkbox (Quest=7, Prophecy=8, Relic=9,
+    unbekannt=99) laufen gemeinsam unter der "Sonstige"-Checkbox (OTHER_TYPE)."""
+    from poe_view.ui.theme import OTHER_TYPE
+    model = ItemTableModel()
+    model.set_items([
+        Item.model_validate({"typeLine": "Quest Item", "frameType": 7}),
+        Item.model_validate({"typeLine": "Prophecy", "frameType": 8}),
+        Item.model_validate({"typeLine": "Relic", "frameType": 9}),
+        Item.model_validate({"typeLine": "Unbekannt", "frameType": 99}),
+        Item.model_validate({"typeLine": "Chaos Orb", "frameType": 5}),
+    ])
+    proxy = ItemFilterProxy()
+    proxy.setSourceModel(model)
+
+    proxy.set_type_visible(OTHER_TYPE, False)
+
+    assert proxy.rowCount() == 1
+    assert proxy.data(proxy.index(0, 2), Qt.ItemDataRole.DisplayRole) == "Chaos Orb"
+
+
+def test_type_filter_combines_with_text_search(qapp) -> None:
     model = ItemTableModel()
     model.set_items([
         Item.model_validate({"typeLine": "Beach Map", "frameType": 0}),
@@ -256,7 +283,7 @@ def test_rarity_filter_combines_with_text_search(qapp) -> None:
     proxy = ItemFilterProxy()
     proxy.setSourceModel(model)
     proxy.setFilterFixedString("beach")
-    proxy.set_rarity_visible(0, False)
+    proxy.set_type_visible(0, False)
 
     assert proxy.rowCount() == 1
 
@@ -289,8 +316,8 @@ def test_reactivating_filter_restores_original_order_on_ties(qapp) -> None:
                      for r in range(proxy.rowCount())]
     original = names()
 
-    proxy.set_rarity_visible(3, False)  # Unique ausblenden ("deaktivieren")
-    proxy.set_rarity_visible(3, True)   # wieder einblenden ("reaktivieren")
+    proxy.set_type_visible(3, False)  # Unique ausblenden ("deaktivieren")
+    proxy.set_type_visible(3, True)   # wieder einblenden ("reaktivieren")
 
     assert names() == original
 

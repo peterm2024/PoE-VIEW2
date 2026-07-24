@@ -987,18 +987,19 @@ def test_offline_changed_shows_banner_and_marks_tree(qapp) -> None:
     win.worker.wait(5000)
 
 
-# --- Rarity-Filter-Checkboxen (Nutzer-Feedback) ---------------------------- #
+# --- Typ-Filter-Checkboxen (Nutzer-Feedback) ------------------------------- #
 
-def test_rarity_checkboxes_exist_checked_by_default(qapp) -> None:
+def test_type_checkboxes_exist_checked_by_default(qapp) -> None:
+    from poe_view.ui.theme import OTHER_TYPE
     win = MainWindow()
-    assert set(win._rarity_checks) == {0, 1, 2, 3}
-    assert all(box.isChecked() for box in win._rarity_checks.values())
+    assert set(win._type_checks) == {0, 1, 2, 3, 4, 5, 6, OTHER_TYPE}
+    assert all(box.isChecked() for box in win._type_checks.values())
 
     win.worker.stop()
     win.worker.wait(5000)
 
 
-def test_toggling_rarity_checkbox_filters_table(qapp) -> None:
+def test_toggling_type_checkbox_filters_table(qapp) -> None:
     win = MainWindow()
     win.table_model.set_items([
         Item.model_validate({"typeLine": "Chaos Orb", "frameType": 0}),
@@ -1006,11 +1007,28 @@ def test_toggling_rarity_checkbox_filters_table(qapp) -> None:
     ])
     assert win.proxy.rowCount() == 2
 
-    win._rarity_checks[3].setChecked(False)
+    win._type_checks[3].setChecked(False)
     assert win.proxy.rowCount() == 1
 
-    win._rarity_checks[3].setChecked(True)
+    win._type_checks[3].setChecked(True)
     assert win.proxy.rowCount() == 2
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_other_type_checkbox_hides_relic_and_unknown(qapp) -> None:
+    from poe_view.ui.theme import OTHER_TYPE
+    win = MainWindow()
+    win.table_model.set_items([
+        Item.model_validate({"typeLine": "Chaos Orb", "frameType": 5}),
+        Item.model_validate({"typeLine": "Relic-Item", "frameType": 9}),
+    ])
+    assert win.proxy.rowCount() == 2
+
+    win._type_checks[OTHER_TYPE].setChecked(False)
+    assert win.proxy.rowCount() == 1
+    assert win.proxy.data(win.proxy.index(0, 2)) == "Chaos Orb"
 
     win.worker.stop()
     win.worker.wait(5000)

@@ -14,6 +14,12 @@ RARITY_COLORS = {
     9: "#82ad6a",  # Relic
 }
 
+# Sentinel (KEIN echter frameType) für den Typ-Filter (MainWindow, item_table):
+# alles ohne eigene Checkbox (Quest, Prophecy, Relic, Unbekanntes) landet
+# hier — Pink, weil in RARITY_COLORS noch frei (Nutzer-Feedback).
+OTHER_TYPE = -1
+TYPE_FILTER_COLOR = "#e05fae"
+
 DASH_OK = "#6fae5c"
 DASH_WARN = "#d3a94e"
 DASH_BAD = "#c05b4d"

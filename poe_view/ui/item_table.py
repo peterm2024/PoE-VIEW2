@@ -24,10 +24,11 @@ der Live-Filter durchsucht sie mit. Zusätzlich kann jede Spalte einen
 eigenen Filter-Ausdruck tragen (">=20", "<45", "=Text", Teilstring) —
 gesetzt über das Header-Rechtsklick-Menü, markiert mit 🔍 im Header.
 
-Vier Rarity-Checkboxen (MainWindow, neben dem Liga-Feld) filtern zusätzlich
-nach frameType (Normal/Magic/Rare/Unique) — UND-verknüpft mit allem
-anderen. Gems/Currency/… haben kein Checkbox-Äquivalent und bleiben von
-diesem Filter unberührt.
+Acht Typ-Checkboxen (MainWindow, neben dem Liga-Feld) filtern zusätzlich
+nach frameType — UND-verknüpft mit allem anderen: die vier PoE-Rarities
+(Normal/Magic/Rare/Unique), dazu Gem/Currency/Divination Card, und eine
+letzte "Sonstige"-Checkbox (Pink) für alles ohne eigene Kategorie (Quest,
+Prophecy, Relic, unbekannte frameTypes) — siehe ``_type_key``.
 """
 
 from __future__ import annotations
@@ -41,7 +42,15 @@ from PySide6.QtGui import QBrush, QColor, QPixmap
 
 from poe_view.api.models import (Item, gem_level, gem_quality, req_attribute,
                                  req_level)
-from poe_view.ui.theme import RARITY_COLORS
+from poe_view.ui.theme import OTHER_TYPE, RARITY_COLORS
+
+# frameTypes mit eigener Checkbox (MainWindow.TYPE_FILTER_ENTRIES) — alles
+# andere läuft für den Typ-Filter unter OTHER_TYPE ("Sonstige").
+_EXPLICIT_TYPES = frozenset({0, 1, 2, 3, 4, 5, 6})
+
+
+def _type_key(frame_type: int) -> int:
+    return frame_type if frame_type in _EXPLICIT_TYPES else OTHER_TYPE
 
 COLUMNS = ("Icon", "Tab", "Name", "Typ", "Level", "Qual.", "Stack", "iLvl",
            "Anf.Lvl", "Str", "Dex", "Int", "Mods")
@@ -218,7 +227,7 @@ class ItemFilterProxy(QSortFilterProxyModel):
         self.setSortRole(NUMERIC_SORT_ROLE)
         self._column_filters: dict[int, str] = {}
         self._search_text = ""
-        self._hidden_rarities: set[int] = set()  # frameType, per Checkbox abgewählt
+        self._hidden_types: set[int] = set()  # _type_key(frameType), per Checkbox abgewählt
 
     def lessThan(self, left: QModelIndex, right: QModelIndex) -> bool:  # noqa: N802 (Qt-API)
         """Eigene Tie-Break-Regel für gleiche Sortierwerte (Nutzer-Feedback:
@@ -242,14 +251,16 @@ class ItemFilterProxy(QSortFilterProxyModel):
             return left.row() < right.row()
         return left_value < right_value
 
-    # --- Rarity-Checkboxen (Nutzer-Feedback) ------------------------------ #
+    # --- Typ-Checkboxen (Nutzer-Feedback) --------------------------------- #
 
-    def set_rarity_visible(self, frame_type: int, visible: bool) -> None:
+    def set_type_visible(self, type_key: int, visible: bool) -> None:
+        """``type_key`` ist ein frameType (0–6) oder ``theme.OTHER_TYPE``
+        (Sammel-Kategorie "Sonstige")."""
         self.beginFilterChange()
         if visible:
-            self._hidden_rarities.discard(frame_type)
+            self._hidden_types.discard(type_key)
         else:
-            self._hidden_rarities.add(frame_type)
+            self._hidden_types.add(type_key)
         self.endFilterChange()
 
     def setFilterFixedString(self, text: str) -> None:  # noqa: N802 (Qt-API)
@@ -302,7 +313,7 @@ class ItemFilterProxy(QSortFilterProxyModel):
         item = model.item_at(row)
         if item is None:
             return True
-        if item.frameType in self._hidden_rarities:
+        if _type_key(item.frameType) in self._hidden_types:
             return False
         for col, expr in self._column_filters.items():
             if not _expression_matches(expr, model.display_text(row, col)):

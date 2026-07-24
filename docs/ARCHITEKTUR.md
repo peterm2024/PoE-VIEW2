@@ -556,7 +556,7 @@ Textspalten den kleingeschriebenen Text. Vorher verglich Qt die
 Anzeige-Strings: "113" < "56". `ItemFilterProxy.lessThan()` bricht
 Gleichstände (z. B. mehrere "-inf" ohne iLvl, oder mehrere gleichnamige
 Items) zusätzlich über die Zeilennummer im Quellmodell auf — sonst würde
-ein Filter-Toggle (Rarity-Checkbox, Spalten-Filter) zuvor ausgeblendete,
+ein Filter-Toggle (Typ-Checkbox, Spalten-Filter) zuvor ausgeblendete,
 gleichwertige Items ans Ende werfen statt an ihre alte Position
 zurückzuholen (Nutzer-Feedback, FALLSTRICKE #18).
 
@@ -601,16 +601,19 @@ werden erst angefordert, wenn Qt die Zeile tatsächlich malt
 ebenso viele Icon-Jobs in die sequenzielle Worker-Queue schieben und
 manuelle Klicks minutenlang hinter CDN-Fetches einreihen.
 
-**Rarity-Filter (4 Checkboxen neben dem Liga-Feld, Nutzer-Feedback):**
-Normal/Magic/Rare/Unique (frameType 0–3) — bewusst ohne Textlabel ("wären
-zu lang"), stattdessen ist die Rand-/Füllfarbe der Checkbox selbst die
-Rarity-Farbe (`theme.RARITY_COLORS`), der Name steckt nur im Tooltip. Alle
-vier sind standardmäßig angehakt (nichts ausgeblendet). Abwählen versteckt
-NUR diese eine Rarity (`ItemFilterProxy.set_rarity_visible`), UND-verknüpft
-mit Text-/Spalten-Filtern. Gems/Currency/Div Cards/… (frameType 4+) haben
-KEIN Checkbox-Äquivalent und bleiben von allen vier Checkboxen unberührt —
-der Filter grenzt Ausrüstung nach Seltenheit ein, er ist kein
-Alles-oder-nichts-Schalter über alle Item-Klassen.
+**Typ-Filter (8 Checkboxen neben dem Liga-Feld, `MainWindow.TYPE_FILTER_ENTRIES`,
+Nutzer-Feedback — ursprünglich "Rarity-Filter" mit nur 4 Checkboxen, dann um
+Gem/Currency/Divination Card sowie eine Sammel-Kategorie erweitert und
+entsprechend umbenannt):** Normal/Magic/Rare/Unique/Gem/Currency/Div Card
+(frameType 0–6) plus **"Sonstige"** (`theme.OTHER_TYPE = -1`, Pink) für
+alles ohne eigene Kategorie — Quest, Prophecy, Relic, unbekannte
+frameTypes (`item_table._type_key()` mappt jeden frameType auf sich selbst
+oder auf `OTHER_TYPE`). Bewusst ohne Textlabel ("wären zu lang"),
+stattdessen ist die Rand-/Füllfarbe der Checkbox selbst die Typ-Farbe
+(`theme.RARITY_COLORS`, Pink aus `theme.TYPE_FILTER_COLOR` für "Sonstige"),
+der Name steckt nur im Tooltip. Alle acht sind standardmäßig angehakt.
+Abwählen versteckt NUR diese eine Kategorie
+(`ItemFilterProxy.set_type_visible`), UND-verknüpft mit Text-/Spalten-Filtern.
 
 ### 4.12 Offline-Modus: GGG-Wartung/kein Netz überbrücken
 
@@ -713,7 +716,7 @@ gemeinsamen Baum, die textliche Beschreibung unten ist aktuell.)
 |---|---|---|
 | Navigation: Charaktere | `CharacterList` (`QListWidget`) | Bewusst KEIN Tree — Charaktere haben keine Unterstruktur (Nutzer-Feedback: spart eine Ebene samt Auf-/Zuklapp-Klick). Flach, absteigend nach Level, liga-gefiltert (`MainWindow._apply_character_league_filter`, siehe §5.1). Höhe begrenzt (`setMaximumHeight`), damit der Stash-Baum den meisten Platz bekommt. |
 | Navigation: Stash | `StashTree` (`QTreeWidget`), 3 Spalten, **Header sichtbar** | Kein umschließender "Stash"-Wurzelknoten mehr — die Tabs SIND die Top-Level-Einträge (spart eine weitere Ebene). Ordner rekursiv (children), Map-Fächer zusätzlich nach Sektion gruppiert (§4.10). Namensspalte per `QHeaderView.ResizeMode.Interactive` (NICHT `Stretch` — Stretch-Spalten lassen sich in Qt nicht per Maus verbreitern, das war ein echter Bug) mit großzügiger Startbreite, per Header-Rand manuell nachziehbar. Tab-Farbe aus API als kleines Icon-Quadrat VOR dem Namen, bewusst NICHT als Textfarbe (manche API-Farben sind auf dunklem Grund sonst unlesbar). Klick auf Tab → `FetchStashItems`-Job, sofern nicht bereits im Cache. Spalte 2 (**#**) zeigt die Item-Anzahl (Nutzer-Feedback: eigene Spalte statt "(N Items)"-Text im Namen; Details §4.7.1). Spalte 3 zeigt GENAU EINEN von DREI sich gegenseitig ausschließenden Zuständen (§4.7.1, §4.12): **⬇**-Text, solange nie geladen; ein **⟳-Button mit Alters-Beschriftung** ("⟳ vor 3d") sobald mindestens einmal geladen — Klick lädt genau diesen Tab bewusst AM Cache vorbei neu (`stash_refresh_requested`-Signal); oder **📴** statt ⟳, solange GGG nicht erreichbar ist (Offline-Modus, §4.12) — derselbe Button, nur die Beschriftung ändert sich, ein Klick versucht trotzdem ein Neuladen. Rechtsklick öffnet ein Kontextmenü mit "🔍 Rohdaten anzeigen" (`raw_data_requested`-Signal, §4.9) — öffnet/aktualisiert den nicht-modalen Rohdaten-Mini-Viewer. |
-| Rarity-Filter (Toolbar, neben Liga) | 4× `QCheckBox` ohne Text | Normal/Magic/Rare/Unique (§4.11) — Farbe des Käschchens = Rarity-Farbe, Name nur im Tooltip. Alle vier standardmäßig an; Abwählen blendet nur diese Rarity aus der Item-Tabelle aus. |
+| Typ-Filter (Toolbar, neben Liga) | 8× `QCheckBox` ohne Text | Normal/Magic/Rare/Unique/Gem/Currency/Div Card + "Sonstige" (§4.11) — Farbe des Käschchens = Typ-Farbe (Pink für "Sonstige"), Name nur im Tooltip. Alle acht standardmäßig an; Abwählen blendet nur diese eine Kategorie aus der Item-Tabelle aus. |
 | Item-Tabelle rechts oben | `QTableView` + `QSortFilterProxyModel` | Spalten: Icon, Tab, Name, Typ, Level, Quality, Stack, iLvl, **Anf.Lvl, Str, Dex, Int** (benötigter Level/Attribute aus dem `requirements`-Array der API, §4.11), **Mods** (explicitMods, v. a. Map-Modifikatoren; Tooltip zeilenweise). Klick auf Spaltenkopf sortiert — **numerisch** über `NUMERIC_SORT_ROLE` (echte Zahlen statt "113" < "56"-Stringvergleich, "–" ganz unten). Das Suchfeld sucht **fächerübergreifend über die ganze Liga**, durchsucht auch Item-Properties (z. B. "Item Quantity"), hat einen eingebauten Clear-Button, und zeigt bei `*` bewusst ALLES an — für den Komplett-Export einer Truhe/Liga (§4.11); zusätzlich je Spalte ein **Excel-artiger Filter-Ausdruck** (`>=20`, `<45`, `=Text`, Teilstring) über das Header-Rechtsklick-Menü, aktive Filter tragen 🔍 im Header. **Spalten per Rechtsklick auf den Header an-/abwählbar** (Nutzer-Feedback), Wahl persistiert in `%LOCALAPPDATA%/PoE-VIEW2/ui-settings.ini` (INI statt Registry — Datei-Ansatz, LabVIEW-portierbar); "Typ" ist default AUS (Rarity steckt bereits in der Namensfarbe). Die **Tab-Spalte wird automatisch verwaltet** und ist nicht im Menü: AUS bei Einzelfach-Auswahl (redundant), AN in Aggregat-Ansichten ("Alle Tabs", Spezial-Tab-Elternknoten, liga-weite Suche) — dort trägt sie die Fach-Herkunft ("Map (Tier 1)"). |
 | Item-Detail rechts unten | eigenes Widget | Großes Icon, Name in Rarity-Farbe (frameType), Properties, Mods. Aktualisiert bei Zeilenauswahl. |
 | Rate-Limit-Dashboard | `QProgressBar` pro Regel + Status-LED + Countdown | Wird ausschließlich über das Signal `rate_limit_changed` gefüttert. Farbe: grün < 60 %, gelb < 90 %, rot ab 90 %/Wartephase. Countdown zeigt verbleibende Wartezeit. *Intention: Der User soll immer sehen, WARUM die App gerade wartet.* |

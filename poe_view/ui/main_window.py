@@ -36,7 +36,7 @@ from poe_view.ui.item_table import (COLUMNS, ICON_COL, MODS_COL, TAB_COL,
 from poe_view.ui.rate_limit_dashboard import RateLimitDashboard
 from poe_view.ui.raw_data_viewer import RawDataViewer
 from poe_view.ui.stash_tree import StashTree
-from poe_view.ui.theme import RARITY_COLORS
+from poe_view.ui.theme import OTHER_TYPE, RARITY_COLORS, TYPE_FILTER_COLOR
 
 log = logging.getLogger(__name__)
 
@@ -48,6 +48,15 @@ class MainWindow(QMainWindow):
     AUTO_REFRESH_INTERVAL_MS = 20_000
     AUTO_REFRESH_MIN_AGE = timedelta(days=1)
     AUTO_REFRESH_MIN_HEADROOM = 0.5
+
+    # Typ-Filter-Checkboxen (Nutzer-Feedback): die vier PoE-Rarities, dazu
+    # Gem/Currency/Divination Card, und "Sonstige" (OTHER_TYPE) für den
+    # Rest (Quest, Prophecy, Relic, Unbekanntes).
+    TYPE_FILTER_ENTRIES = (
+        (0, "Normal"), (1, "Magic"), (2, "Rare"), (3, "Unique"),
+        (4, "Gem"), (5, "Currency"), (6, "Div Card"),
+        (OTHER_TYPE, "Sonstige"),
+    )
 
     def __init__(self) -> None:
         super().__init__()
@@ -149,21 +158,23 @@ class MainWindow(QMainWindow):
         self._league_combo.currentTextChanged.connect(self._on_league_changed)
         toolbar.addWidget(self._league_combo)
 
-        toolbar.addWidget(QLabel("  Rarity: "))
-        # 4 Checkboxen statt Namen (Nutzer-Feedback: Namen wären zu lang) —
+        toolbar.addWidget(QLabel("  Typ: "))
+        # 8 Checkboxen statt Namen (Nutzer-Feedback: Namen wären zu lang) —
         # die Farbe des Käschchens IST das Label, Tooltip trägt den Namen.
-        self._rarity_checks: dict[int, QCheckBox] = {}
-        for frame_type, name in ((0, "Normal"), (1, "Magic"), (2, "Rare"), (3, "Unique")):
+        # Die letzte ("Sonstige", Pink) fängt alles ohne eigene Kategorie
+        # auf: Quest, Prophecy, Relic, unbekannte frameTypes (§4.11).
+        self._type_checks: dict[int, QCheckBox] = {}
+        for type_key, name in self.TYPE_FILTER_ENTRIES:
             box = QCheckBox()
             box.setChecked(True)
             box.setToolTip(name)
-            colour = RARITY_COLORS[frame_type]
+            colour = RARITY_COLORS.get(type_key, TYPE_FILTER_COLOR)
             box.setStyleSheet(
                 f"QCheckBox::indicator {{ width: 13px; height: 13px; border-radius: 3px; "
                 f"border: 2px solid {colour}; }} "
                 f"QCheckBox::indicator:checked {{ background-color: {colour}; }}")
-            box.toggled.connect(lambda checked, ft=frame_type: self._on_rarity_toggled(ft, checked))
-            self._rarity_checks[frame_type] = box
+            box.toggled.connect(lambda checked, tk=type_key: self._on_type_toggled(tk, checked))
+            self._type_checks[type_key] = box
             toolbar.addWidget(box)
 
         spacer = QWidget()
@@ -329,8 +340,8 @@ class MainWindow(QMainWindow):
         if self._league_combo.count():
             self._on_league_changed(self._league_combo.currentText())
 
-    def _on_rarity_toggled(self, frame_type: int, visible: bool) -> None:
-        self.proxy.set_rarity_visible(frame_type, visible)
+    def _on_type_toggled(self, type_key: int, visible: bool) -> None:
+        self.proxy.set_type_visible(type_key, visible)
 
     # --- Spalten-Sichtbarkeit der Item-Tabelle (Nutzer-Feedback) --------- #
 
