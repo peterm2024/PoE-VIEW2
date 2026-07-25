@@ -65,9 +65,9 @@ Detail-Panel darunter:
 
 Fertig kompilierte `.exe` je Version:
 **[Releases-Seite](https://github.com/peterm2024/PoE-VIEW2/releases)**
-→ neueste Version → `PoE-VIEW2.exe` herunterladen, `.env` daneben legen
-(siehe [.env.example](.env.example), mindestens `POE_CONTACT_EMAIL`
-ausfüllen), starten.
+→ neueste Version → `PoE-VIEW2.exe` herunterladen und starten. Keine
+Installation, keine Konfiguration, kein Python nötig — beim ersten Start
+einmal auf "🔑 Login" klicken und den GGG-Login im Browser bestätigen.
 
 Windows SmartScreen warnt bei unsignierten `.exe`-Dateien routinemäßig
 vor "unbekanntem Herausgeber" — das betrifft jede nicht codesignierte
@@ -90,21 +90,23 @@ cd PoE-VIEW2
 python -m venv .venv
 .venv\Scripts\activate          # Linux/Mac: source .venv/bin/activate
 pip install -r requirements.txt
-copy .env.example .env          # Linux/Mac: cp .env.example .env
 python main.py
 ```
 
-Vor dem ersten Start `.env` ausfüllen:
+Eine `.env` ist **nicht** nötig — Client-ID und Kontaktadresse haben
+funktionierende Standardwerte. Nur wer PoE-VIEW2 forkt und selbst
+verteilt, sollte sie überschreiben (`.env.example` als Vorlage, Details
+darin):
 
-- **`POE_CLIENT_ID`** — Standardwert (`poeview`) ist eine bereits bei GGG
-  registrierte öffentliche Client-ID und funktioniert ohne weiteres
-  Zutun. Nur bei Bedarf (z. B. eigene Distribution) eine eigene
-  registrieren: <https://www.pathofexile.com/developer/docs/authorization>
-  — dann muss der in `.env.example` eingetragene Redirect-Port (`64338`)
-  mit dem bei der Registrierung hinterlegten Redirect-URI übereinstimmen.
-- **`POE_CONTACT_EMAIL`** — Pflichtfeld laut GGG-API-Richtlinien für den
-  User-Agent-Header. Bleibt ausschließlich lokal in der `.env`, landet
-  nirgends im Repository oder in Log-/Cache-Dateien.
+- **`POE_CLIENT_ID`** — Standard `poeview`, bereits bei GGG registriert.
+  Eine eigene registrieren:
+  <https://www.pathofexile.com/developer/docs/authorization> — dann muss
+  der Redirect-Port (`64338`) mit dem hinterlegten Redirect-URI
+  übereinstimmen.
+- **`POE_CONTACT_EMAIL`** — Kontakt im User-Agent, laut
+  [GGG-Doku](https://www.pathofexile.com/developer/docs) zur
+  Identifikation der *Anwendung* gedacht (nicht des einzelnen Nutzers).
+  Bei einer eigenen Distribution auf die eigene Adresse setzen.
 
 Beim ersten Start öffnet ein Klick auf "🔑 Login" den Standard-Browser
 für den GGG-OAuth-Login; danach bleibt PoE-VIEW2 bis zum Ablauf des

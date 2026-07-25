@@ -1011,14 +1011,29 @@ unterscheiden) — Gem zieht Richtung Grün, Divination Card Richtung Blau.
 
 ## 7. Security & Open Source
 
-- Client-ID/Kontakt-E-Mail in `.env` (Vorlage: `.env.example`); `.env` steht
-  in `.gitignore`. Als *public client* mit PKCE gibt es **kein** Client-Secret.
+- Client-ID und Kontaktadresse haben funktionierende Standardwerte in
+  `config.py`; `.env` (Vorlage: `.env.example`) überschreibt sie nur bei
+  Bedarf und steht in `.gitignore`. Als *public client* mit PKCE gibt es
+  **kein** Client-Secret — es gibt also nichts Geheimes zu verteilen.
 - Access-Token nur im Windows Credential Manager, nie auf Platte/im Repo.
 - Disclaimer in UI (Statusbar + Über-Dialog) und README:
   *"This product isn't affiliated with or endorsed by Grinding Gear Games in any way."*
 - Lizenz: MIT (siehe `LICENSE`).
-- Die Kontakt-E-Mail für den User-Agent kommt ausschließlich aus der lokalen
-  `.env` (`POE_CONTACT_EMAIL`) — sie steht nirgends im Repository.
+
+### 7.1 Kontaktadresse im User-Agent
+
+GGG schreibt das Format `OAuth {clientId}/{version} (contact: {contact})`
+vor ([Doku](https://www.pathofexile.com/developer/docs)). Der Kontakt
+identifiziert laut Doku und GGGs eigenem Beispiel die **Anwendung bzw.
+deren Betreiber**, nicht den einzelnen Endnutzer — deshalb steht in
+`config.DEFAULT_CONTACT_EMAIL` eine feste, bewusst öffentliche
+Projekt-Adresse, und Nutzer einer fertigen `.exe` müssen nichts
+konfigurieren. Das ist ein eigens angelegter Alias, **keine private
+Adresse** (die Regel aus FALLSTRICKE #3 gilt unverändert weiter).
+
+Wer PoE-VIEW2 forkt und selbst verteilt, sollte `POE_CONTACT_EMAIL` per
+`.env` auf die eigene Adresse setzen — sonst landen GGG-Rückfragen zur
+fremden Distribution beim ursprünglichen Autor.
 
 ## 8. Roadmap / Meilensteine
 

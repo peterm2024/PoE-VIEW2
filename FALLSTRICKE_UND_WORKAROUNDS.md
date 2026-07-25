@@ -29,6 +29,8 @@ Dieses Dokument dokumentiert die technischen Hürden, die während der Entwicklu
 2. Verifikation über die komplette Historie: `git log --all -p | grep <lokaler-teil-der-e-mail>` muss 0 Treffer liefern — das ist jetzt fester Schritt vor jedem Push, wenn Personenbezug im Spiel sein könnte.
 3. **Regel:** Kontaktdaten (E-Mail etc.) werden nie direkt in Dateien geschrieben, sondern ausschließlich als `<platzhalter>` dokumentiert und zur Laufzeit aus der lokalen, gitignorten `.env` gelesen (`config.CONTACT_EMAIL`, siehe `poe_view/config.py`).
 
+**Nachtrag (Release-Vorbereitung):** Die Regel gilt unverändert für **private** Adressen. Seit der Veröffentlichung steht in `config.DEFAULT_CONTACT_EMAIL` allerdings bewusst eine feste Adresse im Code — ein eigens für dieses Projekt angelegter Alias ohne Personenbezug. Grund: GGG verlangt den Kontakt zur Identifikation der **Anwendung**, nicht des Endnutzers (siehe ARCHITEKTUR.md §7.1), und Nutzer einer fertigen `.exe` sollen nichts konfigurieren müssen. Die präzisere Formulierung der Regel lautet also: *personenbezogene* Kontaktdaten nie ins Repo — eine zweckgebundene, öffentlich gedachte Projektadresse dagegen schon, und zwar absichtlich sichtbar statt versteckt.
+
 ---
 
 ## 4. `QT_QPA_PLATFORM=offscreen` für automatisierte Smoke-Tests unter Windows

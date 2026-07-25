@@ -29,12 +29,13 @@ pyinstaller PoE-VIEW2.spec
 Ergebnis: `dist/PoE-VIEW2.exe` (Single-File, ~60 MB — enthält Python +
 Qt, braucht auf dem Zielrechner nichts weiter installiert).
 
-**Vor dem Hochladen manuell testen:** `.env` (mind. `POE_CONTACT_EMAIL`)
-neben die `.exe` legen, starten, kompletten Login-Flow einmal durchspielen
-(Browser öffnet sich, Login bei GGG, Rückkehr in die App, Liga/Stash
-laden). PyInstaller-Builds können an Stellen brechen, die im
-`python main.py`-Betrieb nie auffallen (fehlende Hidden Imports, Pfade
-relativ zu `__file__` statt zur `.exe`, siehe `poe_view/config.py`).
+**Vor dem Hochladen manuell testen:** `.exe` in einen leeren Ordner
+kopieren (bewusst **ohne** `.env` — genau so bekommt sie der Nutzer),
+starten, kompletten Login-Flow einmal durchspielen (Browser öffnet sich,
+Login bei GGG, Rückkehr in die App, Liga/Stash laden). PyInstaller-Builds
+können an Stellen brechen, die im `python main.py`-Betrieb nie auffallen
+(fehlende Hidden Imports, Pfade relativ zu `__file__` statt zur `.exe`,
+siehe `poe_view/config.py`).
 
 **Bekannter Stolperstein:** Windows SmartScreen/Antivirus-Software warnt
 bei unsignierten `.exe`-Dateien routinemäßig ("Unbekannter Herausgeber")

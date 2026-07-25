@@ -33,7 +33,18 @@ load_dotenv(PROJECT_ROOT / ".env")
 
 # --- OAuth2 (PKCE, public client — kein Secret) ---
 CLIENT_ID = os.getenv("POE_CLIENT_ID", "poeview")
-CONTACT_EMAIL = os.getenv("POE_CONTACT_EMAIL", "").strip()
+
+# Kontaktadresse für den User-Agent (GGG-Pflicht, siehe user_agent()).
+# BEWUSST fest im Code und öffentlich: Laut GGG-Doku identifiziert dieses
+# Feld die ANWENDUNG bzw. deren Betreiber, nicht den einzelnen Endnutzer —
+# GGGs eigenes Beispiel ist ebenfalls eine feste App-Adresse. Nutzer einer
+# fertigen .exe müssen deshalb nichts konfigurieren. Es ist ein eigens für
+# dieses Projekt angelegter Alias, KEINE private Adresse (siehe
+# FALLSTRICKE_UND_WORKAROUNDS.md #3). Wer PoE-VIEW2 forkt und selbst
+# verteilt, sollte per .env die eigene Adresse setzen — dann landen
+# GGG-Rückfragen zur eigenen Distribution auch beim richtigen Empfänger.
+DEFAULT_CONTACT_EMAIL = "poeview2@gmx.net"
+CONTACT_EMAIL = os.getenv("POE_CONTACT_EMAIL", "").strip() or DEFAULT_CONTACT_EMAIL
 REDIRECT_PORT = 64338  # fest in der GGG-Client-Registrierung hinterlegt
 REDIRECT_URI = f"http://localhost:{REDIRECT_PORT}/callback"
 SCOPES = "account:profile account:stashes account:characters account:leagues"
@@ -52,18 +63,15 @@ DISCLAIMER = "This product isn't affiliated with or endorsed by Grinding Gear Ga
 
 
 def user_agent() -> str:
-    """User-Agent nach GGG-Vorgabe: 'OAuth {client_id}/{version} (contact: …)'.
+    """User-Agent im exakt von GGG vorgeschriebenen Format:
+    ``OAuth {clientId}/{version} (contact: {contact})``
+    (Quelle: https://www.pathofexile.com/developer/docs).
 
-    Die E-Mail ist Pflicht laut GGG-API-Regeln; ohne sie liefern wir einen
-    Platzhalter, damit die App startet — der Login-Flow warnt dann sichtbar.
+    ``CONTACT_EMAIL`` hat immer einen Wert (Default oben), der Header ist
+    also nie unvollständig — auch nicht bei einer frisch ausgepackten .exe
+    ohne jede Konfiguration.
     """
-    contact = CONTACT_EMAIL or "no-contact-configured"
-    return f"OAuth {CLIENT_ID}/{__version__} (contact: {contact})"
-
-
-def is_configured() -> bool:
-    """True, wenn die lokale .env vollständig ist (Kontakt-E-Mail gesetzt)."""
-    return bool(CONTACT_EMAIL) and "@" in CONTACT_EMAIL
+    return f"OAuth {CLIENT_ID}/{__version__} (contact: {CONTACT_EMAIL})"
 
 
 def ensure_dirs() -> None:

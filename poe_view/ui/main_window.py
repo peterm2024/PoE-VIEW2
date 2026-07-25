@@ -120,10 +120,6 @@ class MainWindow(QMainWindow):
         self._auto_refresh_timer.timeout.connect(self._maybe_auto_refresh)
         self._auto_refresh_timer.start()
 
-        if not config.is_configured():
-            self._status_msg.setText(
-                "⚠ POE_CONTACT_EMAIL fehlt in der .env — bitte .env.example kopieren und ausfüllen.")
-
     # ------------------------------------------------------------------ #
 
     def _restore_cached_data(self) -> None:
@@ -1269,10 +1265,3 @@ class MainWindow(QMainWindow):
             self.worker.terminate()
             self.worker.wait(1000)
         event.accept()
-
-
-def show_config_hint(parent=None) -> None:
-    QMessageBox.warning(
-        parent, "Konfiguration fehlt",
-        "Bitte .env.example nach .env kopieren und POE_CONTACT_EMAIL eintragen.\n"
-        "Die GGG-API verlangt eine Kontaktadresse im User-Agent.")
