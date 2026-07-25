@@ -21,7 +21,14 @@ from poe_view import __version__
 if sys.platform == "win32":
     import winreg
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
+# In einer PyInstaller-.exe zeigt __file__ in den temporären Entpackungs-
+# ordner (sys._MEIPASS) — NICHT dorthin, wo die eigentliche .exe liegt und
+# der Nutzer seine .env hinlegen würde. `sys.frozen` (von PyInstaller
+# gesetzt) erkennt diesen Fall; dann zählt das Verzeichnis der .exe selbst.
+if getattr(sys, "frozen", False):
+    PROJECT_ROOT = Path(sys.executable).resolve().parent
+else:
+    PROJECT_ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(PROJECT_ROOT / ".env")
 
 # --- OAuth2 (PKCE, public client — kein Secret) ---

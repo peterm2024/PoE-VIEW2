@@ -1,0 +1,3 @@
+# Nur für Maintainer, die eine Release-.exe bauen (siehe RELEASING.md) —
+# normale Nutzer/Entwickler brauchen diese Datei NICHT.
+pyinstaller>=6.21

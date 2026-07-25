@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QFileDialog, QLabel,
                                QSplitter, QTableView, QToolBar, QVBoxLayout,
                                QWidget, QWidgetAction)
 
-from poe_view import config
+from poe_view import __version__, config
 from poe_view.api.models import Character, Item, StashTab, dominant_category
 from poe_view.services import data_cache
 from poe_view.services.api_worker import (ApiWorker, BootstrapJob,
@@ -66,7 +66,7 @@ class MainWindow(QMainWindow):
 
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("PoE-VIEW2")
+        self.setWindowTitle(f"PoE-VIEW2 v{__version__}")
         self.resize(1100, 700)
 
         self._account_name: str = ""

@@ -1,5 +1,8 @@
 # PoE-VIEW2
 
+[![Release](https://img.shields.io/github/v/release/peterm2024/PoE-VIEW2?label=Release)](https://github.com/peterm2024/PoE-VIEW2/releases)
+[![Lizenz: MIT](https://img.shields.io/badge/Lizenz-MIT-blue.svg)](LICENSE)
+
 Ein Desktop-Tool für **Path of Exile**: zeigt deine Charaktere und
 Stash-Tabs über die offizielle GGG-API an, durchsucht sie liga-weit und
 fächerübergreifend, und hält alles automatisch, aber rate-limit-schonend,
@@ -58,6 +61,19 @@ Detail-Panel darunter:
 - **Rohdaten-Mini-Viewer** je Stash-Tab für alle, die der Anzeige nicht
   trauen und das rohe JSON sehen wollen.
 
+## Download (Windows, kein Python nötig)
+
+Fertig kompilierte `.exe` je Version:
+**[Releases-Seite](https://github.com/peterm2024/PoE-VIEW2/releases)**
+→ neueste Version → `PoE-VIEW2.exe` herunterladen, `.env` daneben legen
+(siehe [.env.example](.env.example), mindestens `POE_CONTACT_EMAIL`
+ausfüllen), starten.
+
+Windows SmartScreen warnt bei unsignierten `.exe`-Dateien routinemäßig
+vor "unbekanntem Herausgeber" — das betrifft jede nicht codesignierte
+Anwendung und ist kein Hinweis auf ein Problem. Über "Weitere
+Informationen" → "Trotzdem ausführen" bestätigen.
+
 ## Tech-Stack
 
 - Python 3.12+, [PySide6](https://doc.qt.io/qtforpython/) (GUI),
@@ -66,7 +82,7 @@ Detail-Panel darunter:
   [keyring](https://pypi.org/project/keyring/) (Token-Speicherung)
 - OAuth2 mit PKCE gegen die offizielle GGG-API (kein Client-Secret nötig)
 
-## Setup
+## Setup aus dem Quellcode (für Entwicklung/Beitrag)
 
 ```bash
 git clone https://github.com/peterm2024/PoE-VIEW2.git
@@ -80,11 +96,12 @@ python main.py
 
 Vor dem ersten Start `.env` ausfüllen:
 
-- **`POE_CLIENT_ID`** — eine eigene, bei GGG registrierte OAuth-Client-ID
-  (public client, PKCE, kein Secret). Registrierung:
-  <https://www.pathofexile.com/developer/docs/authorization>. Der in
-  `.env.example` eingetragene Redirect-Port (`64338`) muss mit dem bei
-  der Registrierung hinterlegten Redirect-URI übereinstimmen.
+- **`POE_CLIENT_ID`** — Standardwert (`poeview`) ist eine bereits bei GGG
+  registrierte öffentliche Client-ID und funktioniert ohne weiteres
+  Zutun. Nur bei Bedarf (z. B. eigene Distribution) eine eigene
+  registrieren: <https://www.pathofexile.com/developer/docs/authorization>
+  — dann muss der in `.env.example` eingetragene Redirect-Port (`64338`)
+  mit dem bei der Registrierung hinterlegten Redirect-URI übereinstimmen.
 - **`POE_CONTACT_EMAIL`** — Pflichtfeld laut GGG-API-Richtlinien für den
   User-Agent-Header. Bleibt ausschließlich lokal in der `.env`, landet
   nirgends im Repository oder in Log-/Cache-Dateien.
@@ -92,6 +109,8 @@ Vor dem ersten Start `.env` ausfüllen:
 Beim ersten Start öffnet ein Klick auf "🔑 Login" den Standard-Browser
 für den GGG-OAuth-Login; danach bleibt PoE-VIEW2 bis zum Ablauf des
 Tokens (von GGG vorgegeben) eingeloggt.
+
+Eine eigene `.exe` bauen: siehe [RELEASING.md](RELEASING.md).
 
 ## Tests
 
@@ -104,6 +123,7 @@ sämtliche UI-Logik (ohne echte Netzwerk-Calls, per Monkeypatching) ab.
 
 ## Dokumentation
 
+- [CHANGELOG.md](CHANGELOG.md) — was sich von Version zu Version ändert.
 - [docs/ARCHITEKTUR.md](docs/ARCHITEKTUR.md) — Architektur-Entscheidungen
   und das Zusammenspiel der Komponenten.
 - [FALLSTRICKE_UND_WORKAROUNDS.md](FALLSTRICKE_UND_WORKAROUNDS.md) —
