@@ -1148,6 +1148,35 @@ def test_typing_in_search_switches_to_league_wide_view(qapp, monkeypatch) -> Non
     win.worker.wait(5000)
 
 
+def test_wildcard_search_also_includes_character_inventory_items(qapp) -> None:
+    """Nutzer-Feedback: "Bei der '*'-Suche sollte auch über sämtliche
+    Inventar-Items gesucht werden" — Charaktere DIESER Liga zählen mit."""
+    win = MainWindow()
+    win._current_league = "Standard"
+    win._leaf_stashes = [_make_leaf("t1", "Currency 1")]
+    win._items["Standard"] = {"t1": [Item.model_validate({"typeLine": "Chaos Orb"})]}
+    win._all_characters = [
+        make_char("WitchOfPeter", "Standard"),
+        make_char("OtherLeagueChar", "Hardcore"),  # andere Liga — darf NICHT mitzählen
+    ]
+    win._character_items = {
+        "WitchOfPeter": [Item.model_validate(
+            {"typeLine": "Kaom's Heart", "frameType": 3, "inventoryId": "BodyArmour"})],
+        "OtherLeagueChar": [Item.model_validate({"typeLine": "Should Not Appear"})],
+    }
+
+    win._filter_edit.setText("*")
+
+    assert win.table_model.rowCount() == 2  # Stash-Item + Charakter-Item, NICHT das der anderen Liga
+    type_lines = {win.table_model.item_at(i).typeLine for i in range(2)}
+    assert type_lines == {"Chaos Orb", "Kaom's Heart"}
+    sources = {win.table_model.source_at(i) for i in range(2)}
+    assert sources == {"Currency 1", "WitchOfPeter: BodyArmour"}
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
 def test_tree_click_during_search_shows_single_tab(qapp, monkeypatch) -> None:
     """Baum-Klick während aktiver Suche beendet die liga-weite Ansicht."""
     win = MainWindow()

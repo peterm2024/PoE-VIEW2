@@ -649,7 +649,13 @@ während der Suche beendet sie ebenfalls). Liga-Wechsel zieht eine aktive
 Suche auf die neue Liga um. Eingrenzen auf ein Fach: Baum-Klick oder
 Spalten-Filter auf der Tab-Spalte. Ein eingebauter Clear-Button
 (`setClearButtonEnabled`) leert das Feld per Klick auf das "x" am rechten
-Rand.
+Rand. Seit Nutzer-Feedback ("bei der '\*'-Suche sollte auch über sämtliche
+Inventar-Items gesucht werden") liefert `_league_wide_items()` (§4.13)
+zusätzlich Ausrüstung + Inventar aller bereits geladenen Charaktere DIESER
+Liga mit — Quelle dann "Charaktername: Slot" statt Fach-Name, Position/
+Baum-Hervorhebung entfallen (kein Truhenfach beteiligt). Betrifft
+gleichermaßen "Alle Tabs laden" (`_show_aggregate`), da beide dieselbe
+Aggregations-Funktion nutzen.
 
 Die globale Suche durchsucht Name/Typ/Tab/Mods **und Properties**
 (Nutzer-Feedback: "nach Quantity gesucht, nur Chisel gefunden" — Map-

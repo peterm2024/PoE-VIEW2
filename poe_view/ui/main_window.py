@@ -908,7 +908,8 @@ class MainWindow(QMainWindow):
         self._show_aggregate()
 
     def _show_aggregate(self) -> None:
-        """Items aller bereits geladenen Tabs zusammen anzeigen (lokal filter-/exportierbar)."""
+        """Items aller bereits geladenen Tabs UND Charaktere dieser Liga
+        zusammen anzeigen (lokal filter-/exportierbar), siehe `_league_wide_items`."""
         self._showing_aggregate = True
         self._search_all_active = False
         self._current_tab_name = "Alle Tabs"
@@ -925,7 +926,14 @@ class MainWindow(QMainWindow):
         Tab-Position (Positions-Spalte, unterscheidet gleichnamige Fächer —
         1-basierter Platz in ``_leaf_stashes``, NICHT ``stash.index``,
         §_tab_positions) und Tab-ID (Baum-Hervorhebung bei Zeilenauswahl,
-        Nutzer-Feedback) je Item."""
+        Nutzer-Feedback) je Item.
+
+        Enthält seit Nutzer-Feedback ("bei der '*'-Suche sollte auch über
+        sämtliche Inventar-Items gesucht werden") zusätzlich Ausrüstung +
+        Inventar aller Charaktere DIESER Liga, sofern bereits einmal
+        geladen (§4.13) — Quelle dafür ist "Charaktername: Slot" statt
+        eines Fach-Namens; Position/Tab-ID bleiben `None` (kein Truhenfach
+        beteiligt, keine Baum-Hervorhebung möglich)."""
         league_items = self._items.get(self._current_league, {})
         items: list[Item] = []
         sources: list[str] = []
@@ -939,6 +947,16 @@ class MainWindow(QMainWindow):
             sources.extend([stash.display_name] * len(cached))
             tab_indices.extend([position] * len(cached))
             stash_ids.extend([stash.id] * len(cached))
+        for char in self._all_characters:
+            if char.league != self._current_league:
+                continue
+            cached = self._character_items.get(char.name)
+            if not cached:
+                continue
+            items.extend(cached)
+            sources.extend(f"{char.name}: {item.inventoryId or '?'}" for item in cached)
+            tab_indices.extend([None] * len(cached))
+            stash_ids.extend([None] * len(cached))
         return items, sources, tab_indices, stash_ids
 
     # --- Fächerübergreifende Suche (Nutzer-Feedback) --------------------- #
@@ -964,7 +982,7 @@ class MainWindow(QMainWindow):
         self.table_model.set_items(items, sources, tab_indices, stash_ids, request_icons=False)
         loaded = len({s for s in sources})
         self._status_msg.setText(
-            f"Suche über {loaded} geladene Fächer ({len(items)} Items) — "
+            f"Suche über {loaded} geladene Fächer/Charaktere ({len(items)} Items) — "
             "Feld leeren führt zurück zur Fach-Ansicht")
 
     def _leave_search_all(self) -> None:
