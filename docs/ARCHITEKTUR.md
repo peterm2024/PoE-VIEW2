@@ -1024,12 +1024,21 @@ unterscheiden) — Gem zieht Richtung Grün, Divination Card Richtung Blau.
 
 | # | Meilenstein | Inhalt | Definition of Done |
 |---|---|---|---|
-| M0 | Gerüst | Projektstruktur, config, Logging, leeres MainWindow | App startet, Fenster sichtbar |
-| M1 | Auth | OAuth2 PKCE, Callback-Server, TokenStore | Login-Roundtrip liefert Profil-Namen |
-| M2 | Rate-Limiter | Manager + Header-Parsing + Unit-Tests (Fixtures!) | Tests grün, inkl. Mehrfach-Regeln & Sperre |
-| M3 | Daten | Client-Endpunkte + pydantic-Modelle + Worker | Charaktere & Stash-Liste im Log/CLI |
-| M4 | UI-Basis | Tree, Tabelle, Dashboard verdrahtet | Tab anklicken → Items erscheinen, Dashboard live |
-| M5 | Politur | Icons+Cache, Item-Detail, Filter/Sortierung, Disclaimer | v0.1-Release auf GitHub |
+| M0 | Gerüst | Projektstruktur, config, Logging, leeres MainWindow | ✅ erledigt |
+| M1 | Auth | OAuth2 PKCE, Callback-Server, TokenStore | ✅ erledigt |
+| M2 | Rate-Limiter | Manager + Header-Parsing + Unit-Tests (Fixtures!) | ✅ erledigt |
+| M3 | Daten | Client-Endpunkte + pydantic-Modelle + Worker | ✅ erledigt |
+| M4 | UI-Basis | Tree, Tabelle, Dashboard verdrahtet | ✅ erledigt |
+| M5 | Politur | Icons+Cache, Item-Detail, Filter/Sortierung, Disclaimer | ✅ erledigt |
 
 *Empfohlene Reihenfolge-Intention: Der Rate-Limiter (M2) kommt VOR den ersten
 massenhaften API-Calls (M3+) — dieselbe Lektion wie im LabVIEW-Projekt.*
+
+Diese ursprüngliche Roadmap ist seit Längerem komplett abgearbeitet — die
+App ist im täglichen Gebrauch (siehe README, Abschnitt "Status"). Danach
+kamen deutlich mehr Features hinzu, als hier je geplant waren (Offline-
+Modus, Charakter-Ausrüstung, Typ-Filter, Spalten-Filter, liga-weite
+Suche, Auto-Refresh, archivierte Ligen, …) — die laufende, ungeplante
+Weiterentwicklung ist am besten über die Git-Historie und
+FALLSTRICKE_UND_WORKAROUNDS.md nachvollziehbar, nicht über eine feste
+Meilenstein-Liste.
