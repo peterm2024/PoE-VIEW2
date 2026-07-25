@@ -62,11 +62,14 @@ def test_mark_loaded_replaces_download_marker_with_refresh_button(qapp) -> None:
     tree.set_stashes(stashes)
     assert tree._stash_nodes["root1"].text(_COL_STATUS) == "⬇"
 
-    tree.mark_loaded("root1", datetime.now(timezone.utc).isoformat())
+    now = datetime.now(timezone.utc)
+    tree.mark_loaded("root1", now.isoformat())
 
     node = tree._stash_nodes["root1"]
     assert node.text(_COL_STATUS) == ""
-    assert tree.itemWidget(node, _COL_STATUS).text() == "⟳ heute"
+    # Exakte Uhrzeit statt "heute" (Nutzer-Feedback: sonst unsichtbar, OB der
+    # Auto-Refresh innerhalb desselben Tages tatsächlich gegriffen hat).
+    assert tree.itemWidget(node, _COL_STATUS).text() == f"⟳ {now.astimezone().strftime('%H:%M:%S')}"
 
 
 def test_mark_loaded_updates_item_count_column(qapp) -> None:
@@ -98,9 +101,13 @@ def test_refresh_button_click_emits_signal(qapp) -> None:
 
 
 def test_format_age() -> None:
-    now = datetime(2026, 7, 9, tzinfo=timezone.utc)
-    assert format_age(now.isoformat(), now=now) == "heute"
-    assert format_age((now - timedelta(hours=5)).isoformat(), now=now) == "heute"
+    """Regression (Nutzer-Feedback): "heute" allein verschleierte, ob ein
+    Fach innerhalb desselben Tages tatsächlich neu geladen wurde — jetzt
+    die exakte (lokale) Uhrzeit statt eines pauschalen "heute"."""
+    now = datetime(2026, 7, 9, 15, 30, 0, tzinfo=timezone.utc)
+    five_hours_ago = now - timedelta(hours=5)
+    assert format_age(now.isoformat(), now=now) == now.astimezone().strftime("%H:%M:%S")
+    assert format_age(five_hours_ago.isoformat(), now=now) == five_hours_ago.astimezone().strftime("%H:%M:%S")
     assert format_age((now - timedelta(days=1)).isoformat(), now=now) == "vor 1d"
     assert format_age((now - timedelta(days=12)).isoformat(), now=now) == "vor 12d"
 

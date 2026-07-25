@@ -502,6 +502,36 @@ def test_maybe_auto_refresh_skips_when_worker_busy_or_low_headroom(qapp, monkeyp
     win.worker.wait(5000)
 
 
+def test_maybe_auto_refresh_stops_after_token_expires_mid_session(qapp, monkeypatch) -> None:
+    """Regression (Nutzer-Rückfrage 'Automatik hat nicht hingehauen'):
+    real im Log beobachtet — nach einem abgelaufenen Token lief der
+    Auto-Refresh alle 40s stur mit demselben, bereits ungültigen Token
+    weiter gegen die API (mehrere Minuten lang HTTP 401 in Folge), bis der
+    Nutzer den Login-Button von Hand bemerkte. `login_required` muss den
+    Auto-Refresh sofort stoppen; `logged_in` ihn wieder erlauben."""
+    win = MainWindow()
+    win._current_league = "Standard"
+    now = datetime.now(timezone.utc)
+    win._leaf_stashes = [_make_leaf("t1", "Tab 1")]
+    win._last_loaded["Standard"] = {"t1": (now - timedelta(days=5)).isoformat()}
+
+    submitted = []
+    monkeypatch.setattr(win.worker, "submit", lambda job: submitted.append(job))
+    monkeypatch.setattr(win.worker.rate_limiter, "headroom_fraction", lambda: 1.0)
+
+    win._on_login_required("Token abgelaufen")
+    win._maybe_auto_refresh()
+    assert submitted == []  # nicht stur mit dem toten Token weiterversuchen
+
+    win._on_logged_in("PeterM")  # submitted FetchLeaguesJob/FetchCharactersJob — nicht relevant hier
+    submitted.clear()
+    win._maybe_auto_refresh()
+    assert len(submitted) == 1  # nach erneutem Login läuft der Auto-Refresh wieder
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
 def test_maybe_auto_refresh_also_refreshes_currently_displayed_tab(qapp, monkeypatch) -> None:
     """Nutzer-Feedback: das gerade angezeigte Fach soll bei jedem Auto-Refresh-
     Tick ZUSÄTZLICH zum normalen Sweep-Kandidaten aktualisiert werden — auch

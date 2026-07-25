@@ -85,6 +85,12 @@ class MainWindow(QMainWindow):
         self._character_items_loaded: dict[str, str] = {}       # Charaktername → ISO-Zeitstempel
         self._current_character_name: str | None = None         # gerade angezeigter Charakter
         self._worker_busy = False
+        # Startwert True: der bestehende `_current_league`-Guard blockiert den
+        # Auto-Refresh ohnehin, bis eine Liga aktiv ist (was einen
+        # erfolgreichen Login voraussetzt) — dieses Flag greift NUR für den
+        # Fall, dass der Token MITTEN in der Session abläuft (`login_required`
+        # setzt es dann auf False, `logged_in` wieder auf True).
+        self._logged_in = True
         self._auto_refresh_counts: dict[str, int] = {}  # Liga → auto-aktualisierte Tabs (Session)
         self._raw_data_viewer: RawDataViewer | None = None
         self._offline = False  # GGG nicht erreichbar (Nutzer-Feedback: Wartung am Patchday)
@@ -504,12 +510,23 @@ class MainWindow(QMainWindow):
 
     def _on_logged_in(self, account_name: str) -> None:
         self._account_name = account_name
+        self._logged_in = True
         self._login_action.setText(f"⚷ {account_name}")
         self._login_action.setEnabled(False)
         self.worker.submit(FetchLeaguesJob())
         self.worker.submit(FetchCharactersJob())
 
     def _on_login_required(self, reason: str) -> None:
+        """Auch vom Token-Ablauf MITTEN in der Session erreicht (nicht nur
+        beim Start) — ``AuthError`` kann aus jedem Job kommen, auch einem
+        stillen Auto-Refresh-Tick. ``_logged_in = False`` stoppt in diesem
+        Fall den Auto-Refresh (§4.8), sonst würde er alle 40s mit demselben,
+        bereits als ungültig bekannten Token weiter gegen die API laufen —
+        real beobachtet: mehrere Minuten lang HTTP 401 im Log, alle exakt
+        AUTO_REFRESH_INTERVAL_MS auseinander, bis der Nutzer den Login-Button
+        von Hand bemerkt (Nutzer-Rückfrage "Automatik hat nicht hingehauen").
+        """
+        self._logged_in = False
         self._login_action.setEnabled(True)
         self._login_action.setText("🔑 Login")
         self._status_msg.setText(reason)
@@ -1143,6 +1160,14 @@ class MainWindow(QMainWindow):
         Mehrwert hätte; nicht angezeigte Charaktere bleiben bis zum
         nächsten Klick oder manuellen Refresh (Rechtsklick) unverändert."""
         if not self._current_league or self._worker_busy or self._bulk_dialog is not None:
+            return
+        if not self._logged_in:
+            # Token abgelaufen/ungültig (AuthError, z. B. mitten in der
+            # Session) — ohne diese Bremse würde JEDER Tick erneut mit dem
+            # bereits als ungültig bekannten Token gegen die API laufen und
+            # scheitern, real beobachtet über mehrere Minuten alle 40s in
+            # Folge (siehe _on_login_required). Manuelle Klicks dürfen es
+            # trotzdem versuchen — die zeigen ihr Ergebnis sofort sichtbar.
             return
         if self._current_league_is_archived():
             return  # Liga beendet — jeder Versuch würde nur scheitern (oder Cache überschreiben)

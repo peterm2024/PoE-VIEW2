@@ -9,8 +9,10 @@ Zahl als "(N Items)"-Text im Namen, das wurde als unübersichtlich
 empfunden), und GENAU EINE Status-Spalte, die sich gegenseitig
 ausschließende Zustände zeigt: "⬇" (Items noch nie geladen) als reiner
 Text, oder — sobald mindestens einmal geladen — ein Refresh-Button, dessen
-Beschriftung zugleich das Alter der zuletzt geladenen Daten zeigt
-("⟳ heute", "⟳ vor 3d"). Ist GGG nicht erreichbar (``set_offline``,
+Beschriftung zugleich das Alter der zuletzt geladenen Daten zeigt —
+heute geladene Fächer als exakte Uhrzeit ("⟳ 14:32:46", Nutzer-Feedback:
+"heute" allein verschleierte, OB der Auto-Refresh gerade wirklich
+gegriffen hat), ältere als Tage ("⟳ vor 3d"). Ist GGG nicht erreichbar (``set_offline``,
 Nutzer-Feedback: GGG-Wartung am Patchday), wird aus dem ⟳ ein "📴" — die
 Daten kommen dann garantiert aus dem Cache, nicht von einer frischen
 Anfrage. Die Namensspalte ist per Maus verbreiterbar
@@ -72,13 +74,23 @@ def _colour_swatch(hex_colour: str, size: int = 12) -> QIcon:
 
 
 def format_age(last_loaded_iso: str, *, now: datetime | None = None) -> str:
-    """"heute" / "vor 1d" / "vor 12d" — kurze Beschriftung für den Refresh-Button."""
+    """Exakte lokale Uhrzeit ("14:32:46") für heute geladene Fächer, sonst
+    "vor 1d" / "vor 12d" — kurze Beschriftung für den Refresh-Button.
+
+    Vorher stand hier pauschal "heute", was jeden Auto-Refresh innerhalb
+    desselben Tages unsichtbar machte (Nutzer-Feedback: "automatisch hat
+    nicht hingehauen" — tatsächlich lief der Live-Refresh alle 40s
+    zuverlässig, nur die Anzeige änderte sich den ganzen Tag über nie).
+    Die Sekunden-Genauigkeit macht jeden einzelnen Tick sichtbar."""
     try:
         loaded_at = datetime.fromisoformat(last_loaded_iso)
     except ValueError:
         return "?"
-    days = ((now or datetime.now(timezone.utc)) - loaded_at).days
-    return "heute" if days <= 0 else f"vor {days}d"
+    now_dt = now or datetime.now(timezone.utc)
+    days = (now_dt - loaded_at).days
+    if days <= 0:
+        return loaded_at.astimezone().strftime("%H:%M:%S")
+    return f"vor {days}d"
 
 
 def _map_info(stash: StashTab) -> dict:
@@ -321,7 +333,7 @@ class StashTree(QTreeWidget):
         if self._offline:
             button.setText(f"📴 {age}")
             button.setToolTip(
-                f"'{name}': Offline-Cache (zuletzt {age} aktualisiert) — "
+                f"'{name}': Offline-Cache (zuletzt aktualisiert: {age}) — "
                 "Klick versucht trotzdem ein Neuladen")
         else:
             button.setText(f"⟳ {age}")
