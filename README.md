@@ -12,23 +12,19 @@ Credential Manager.
 
 ## Screenshots
 
-*Alle Screenshots zeigen synthetische Demo-Daten ("Demo-Liga"), keinen
+*Beide Screenshots zeigen synthetische Demo-Daten ("Demo-Liga"), keinen
 echten Account.*
 
-**Stash-Ansicht** — Item-Tabelle mit Mods, Item-Detail-Panel und dem
-Live-Rate-Limit-Dashboard unten:
+**Liga-weite "\*"-Suche** — alle Stash-Tabs *und* Charaktere gemischt in
+einer Tabelle (Tab-Spalte zeigt die Herkunft), Typ-Filter und
+Rate-Limit-Dashboard im Blick:
 
-![Stash-Ansicht mit Item-Detail und Rate-Limit-Dashboard](docs/screenshots/stash-rares.png)
+![Liga-weite Suche über Fächer und Charaktere](docs/screenshots/uebersicht.png)
 
-**Liga-weite Aggregat-/Suchansicht** — alle Fächer auf einen Blick, Tab-
-und Positions-Spalte zeigen die Herkunft jedes Items:
+**Einzelnes Fach mit Item-Detail** — ein Item ausgewählt, Mods im
+Detail-Panel darunter:
 
-![Aggregat-Ansicht "Alle Tabs"](docs/screenshots/alle-tabs.png)
-
-**Charakter-Ansicht** — Ausrüstung und Inventar wie ein Stash-Fach
-durchsuchbar:
-
-![Charakter-Ausrüstung](docs/screenshots/charakter-ausruestung.png)
+![Einzelnes Fach mit ausgewähltem Item und Mods](docs/screenshots/item-details.png)
 
 ## Features
 
