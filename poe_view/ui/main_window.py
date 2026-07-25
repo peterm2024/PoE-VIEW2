@@ -98,10 +98,22 @@ class MainWindow(QMainWindow):
         self._restore_cached_data()
 
         self.worker = ApiWorker()
+        # BootstrapJob MUSS als ERSTER Job in der Queue landen — VOR jedem
+        # Job, den `_build_ui()` (z. B. über `_populate_cached_leagues()` →
+        # `_on_league_changed`) synchron mit-auslöst. Sonst würde ein
+        # ungeloggter FetchStashListJob VOR dem Bootstrap laufen, mit einem
+        # HTTP-Client ohne gesetzten Token — GGG antwortet mit 401, unser
+        # AuthError-Handler löscht daraufhin den (eigentlich gültigen!)
+        # gespeicherten Token, und Bootstrap findet ihn dann schon gelöscht
+        # vor. Real beobachtet: Nutzer-Rückfrage "warum wird mein Token
+        # zwischendurch invalid, sollte doch Stunden gültig sein" — der Token
+        # war nie wirklich abgelaufen, wir haben ihn uns selbst zerstört
+        # (FALLSTRICKE #30). `submit()` ist eine reine Queue-Operation und
+        # funktioniert bereits vor `worker.start()`.
+        self.worker.submit(BootstrapJob())
         self._build_ui()
         self._connect_worker()
         self.worker.start()
-        self.worker.submit(BootstrapJob())
 
         self._auto_refresh_timer = QTimer(self)
         self._auto_refresh_timer.setInterval(self.AUTO_REFRESH_INTERVAL_MS)

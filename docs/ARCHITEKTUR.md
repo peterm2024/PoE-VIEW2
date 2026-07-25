@@ -329,6 +329,24 @@ Abschlusstext setzt (Ligen, Charaktere, Stash-Liste). Cases mit eigenem
 Abschlusstext (`FetchStashItemsJob`, `FetchAllItemsJob`) emittieren bewusst
 kein "Bereit".
 
+#### 4.5.2 Job-Reihenfolge beim Start: BootstrapJob MUSS zuerst in der Queue stehen
+
+`MainWindow.__init__` submitted `BootstrapJob()` VOR dem Aufruf von
+`self._build_ui()` — nicht danach, wie man beim Lesen des restlichen Codes
+erwarten würde. Grund (FALLSTRICKE #30): `_build_ui()` löst als letzten
+Schritt `_populate_cached_leagues()` aus, das bei vorhandenem Cache sofort
+`_on_league_changed()` → `worker.submit(FetchStashListJob(liga))` aufruft.
+Da der `ApiWorker`-Thread seine Queue strikt FIFO abarbeitet, würde dieser
+Job VOR dem Bootstrap laufen, wenn Bootstrap erst danach submitted würde —
+mit einem `PoeApiClient`, dessen Token noch nie gesetzt wurde. GGG
+antwortet dann mit HTTP 401, der `AuthError`-Handler löscht darauf den
+GESPEICHERTEN (eigentlich noch stundenlang gültigen!) Token, und der
+gleich danach laufende Bootstrap findet keinen Token mehr vor — ein
+kompletter, unnötiger Neu-Login bei praktisch jedem Programmstart mit
+gecachter Liga. `submit()` ist reine Queue-Einreihung und funktioniert
+bereits vor `worker.start()`; die Submit-REIHENFOLGE (nicht die Reihenfolge
+der umgebenden Funktionsaufrufe) bestimmt, was der Worker zuerst sieht.
+
 ### 4.6 Icon-Cache (`services/icon_cache.py`)
 
 - Cache-Ordner: `%LOCALAPPDATA%/PoE-VIEW2/icon-cache/`

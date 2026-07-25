@@ -147,6 +147,42 @@ def test_restore_cached_data_populates_state_at_startup(qapp, monkeypatch, tmp_p
     win.worker.wait(5000)
 
 
+def test_bootstrap_job_is_submitted_before_cached_league_restore_jobs(
+        qapp, monkeypatch, tmp_path) -> None:
+    """Regression (Nutzer-Rückfrage "warum wird mein Token zwischendurch
+    invalid, sollte doch Stunden gültig sein"): Ursache war eine falsche
+    Job-Reihenfolge, keine echte Ablauf. `_populate_cached_leagues()`
+    (Teil von `_build_ui()`) restauriert beim Start die zuletzt aktive
+    Liga aus dem Cache und submitted dafür sofort einen FetchStashListJob
+    — lief der VOR BootstrapJob, hätte der HTTP-Client noch keinen Token
+    gesetzt, GGG hätte mit 401 geantwortet, und der AuthError-Handler
+    hätte den eigentlich noch stundenlang gültigen, gespeicherten Token
+    gelöscht (echtes Log-Muster: 401 direkt nach "Daten-Cache geladen").
+    BootstrapJob muss deshalb IMMER der erste Job in der Queue sein."""
+    from poe_view.services import data_cache
+    from poe_view.services.api_worker import ApiWorker, BootstrapJob
+
+    cache_path = tmp_path / "cache.json"
+    monkeypatch.setattr(data_cache, "_CACHE_FILE", cache_path)
+    data = data_cache.CachedData()
+    data.stash_trees = {"Standard": [_make_leaf("t1", "Tab 1")]}
+    data_cache.save(data)
+
+    monkeypatch.setattr(ApiWorker, "start", lambda self: None)  # Worker-Thread nie starten
+
+    win = MainWindow()
+
+    jobs = []
+    while not win.worker._jobs.empty():
+        jobs.append(win.worker._jobs.get_nowait())
+
+    assert isinstance(jobs[0], BootstrapJob)
+    assert any(type(j).__name__ == "FetchStashListJob" for j in jobs[1:])
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
 def test_on_stash_items_ignores_result_for_stale_league(qapp) -> None:
     """Regression: ein Hintergrund-Job für Liga X darf nicht in die Anzeige der
     inzwischen aktiven Liga Y einsickern — nur in den Cache."""
