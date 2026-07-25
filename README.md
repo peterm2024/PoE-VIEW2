@@ -2,12 +2,13 @@
 
 Ein Desktop-Tool für **Path of Exile**: zeigt deine Charaktere und
 Stash-Tabs über die offizielle GGG-API an, durchsucht sie liga-weit und
-fächerübergreifend, und hält alles automatisch (aber Rate-Limit-schonend)
-aktuell — mit Offline-Fallback, wenn GGG mal nicht erreichbar ist.
+fächerübergreifend, und hält alles automatisch, aber rate-limit-schonend,
+aktuell — mit Offline-Fallback, falls GGG einmal nicht erreichbar ist.
 
-Kein Screenshot-Update-Reminder, keine dritte Partei sieht deine Daten:
-Login läuft per OAuth2 direkt gegen `api.pathofexile.com`, das Token
-landet ausschließlich im Windows Credential Manager.
+Login läuft ausschließlich per OAuth2 direkt gegen `api.pathofexile.com`
+— PoE-VIEW2 bekommt dein Passwort nie zu Gesicht, und keine dritte Partei
+hat Zugriff auf deine Daten. Das Access-Token liegt sicher im Windows
+Credential Manager.
 
 ## Screenshots
 
@@ -61,21 +62,6 @@ durchsuchbar:
 - **Rohdaten-Mini-Viewer** je Stash-Tab für alle, die der Anzeige nicht
   trauen und das rohe JSON sehen wollen.
 
-## Warum Python? Verhältnis zum LabVIEW-Original
-
-PoE-VIEW2 ist die **Python-Referenzimplementierung** des ursprünglichen
-LabVIEW-Projekts *PoE-VIEW*. Architektur und Code sind bewusst so
-dokumentiert, dass sich Erkenntnisse (v. a. zum Rate-Limiting und zu
-GGG-API-Eigenheiten) später zurück nach LabVIEW portieren lassen — siehe
-[docs/ARCHITEKTUR.md](docs/ARCHITEKTUR.md), insbesondere die
-Mapping-Tabelle *Python ↔ LabVIEW*.
-
-Jede gelöste technische Hürde, jeder GGG-API-Sonderfall und jeder
-gefundene Bug samt Ursache werden laufend in
-[FALLSTRICKE_UND_WORKAROUNDS.md](FALLSTRICKE_UND_WORKAROUNDS.md)
-festgehalten — nützlich sowohl als Nachschlagewerk als auch als
-Entwicklungs-Tagebuch.
-
 ## Tech-Stack
 
 - Python 3.12+, [PySide6](https://doc.qt.io/qtforpython/) (GUI),
@@ -119,6 +105,19 @@ pytest
 
 Die Test-Suite deckt Datenmodelle, API-Client, Rate-Limiter, Worker und
 sämtliche UI-Logik (ohne echte Netzwerk-Calls, per Monkeypatching) ab.
+
+## Dokumentation
+
+- [docs/ARCHITEKTUR.md](docs/ARCHITEKTUR.md) — Architektur-Entscheidungen
+  und das Zusammenspiel der Komponenten.
+- [FALLSTRICKE_UND_WORKAROUNDS.md](FALLSTRICKE_UND_WORKAROUNDS.md) —
+  jede gelöste technische Hürde und jeder gefundene GGG-API-Sonderfall,
+  samt Ursache und Lösung.
+
+*Hintergrund:* Der Vorgänger *PoE-VIEW* war ursprünglich als
+LabVIEW-Anwendung geplant. Mit KI-gestützter Entwicklung ließ sich
+dieselbe Idee in Python deutlich schneller und robuster umsetzen — das
+LabVIEW-Vorhaben ist deshalb bis auf Weiteres zurückgestellt.
 
 ## Status
 
