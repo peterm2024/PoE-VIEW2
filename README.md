@@ -3,76 +3,76 @@
 [![Release](https://img.shields.io/github/v/release/peterm2024/PoE-VIEW2?label=Release)](https://github.com/peterm2024/PoE-VIEW2/releases)
 [![Lizenz: MIT](https://img.shields.io/badge/Lizenz-MIT-blue.svg)](LICENSE)
 
-Ein Desktop-Tool für **Path of Exile**: zeigt deine Charaktere und
-Stash-Tabs über die offizielle GGG-API an, durchsucht sie liga-weit und
-fächerübergreifend, und hält alles automatisch, aber rate-limit-schonend,
-aktuell — mit Offline-Fallback, falls GGG einmal nicht erreichbar ist.
+Ein Desktop-Tool für **Path of Exile**. Es zeigt Charaktere und
+Stash-Tabs über die offizielle GGG-API an, durchsucht sie liga-weit über
+alle Fächer hinweg und hält die Daten automatisch aktuell, ohne das
+API-Rate-Limit auszureizen. Ist die GGG-API nicht erreichbar, arbeitet
+PoE-VIEW2 mit dem lokalen Cache weiter.
 
-Login läuft ausschließlich per OAuth2 direkt gegen `api.pathofexile.com`
-— PoE-VIEW2 bekommt dein Passwort nie zu Gesicht, und keine dritte Partei
-hat Zugriff auf deine Daten. Das Access-Token liegt sicher im Windows
-Credential Manager.
+Der Login läuft per OAuth2 direkt gegen `api.pathofexile.com`. PoE-VIEW2
+sieht das Passwort zu keinem Zeitpunkt, und es ist keine dritte Partei
+beteiligt. Das Access-Token liegt im Windows Credential Manager.
 
 ## Screenshots
 
-*Beide Screenshots zeigen synthetische Demo-Daten ("Demo-Liga"), keinen
-echten Account.*
+*Beide Screenshots zeigen synthetische Demo-Daten, keinen echten Account.*
 
-**Liga-weite "\*"-Suche** — alle Stash-Tabs *und* Charaktere gemischt in
-einer Tabelle (Tab-Spalte zeigt die Herkunft), Typ-Filter und
-Rate-Limit-Dashboard im Blick:
+Liga-weite Suche mit `*`: Stash-Tabs und Charaktere erscheinen gemeinsam
+in einer Tabelle, die Tab-Spalte nennt die Herkunft. Oben die
+Typ-Filter, unten das Rate-Limit-Dashboard.
 
 ![Liga-weite Suche über Fächer und Charaktere](docs/screenshots/uebersicht.png)
 
-**Einzelnes Fach mit Item-Detail** — ein Item ausgewählt, Mods im
-Detail-Panel darunter:
+Einzelnes Stash-Fach mit ausgewähltem Item; die Mods stehen im
+Detail-Panel darunter.
 
 ![Einzelnes Fach mit ausgewähltem Item und Mods](docs/screenshots/item-details.png)
 
 ## Features
 
-- **Login per OAuth2 (PKCE)** direkt gegen die offizielle GGG-API — kein
-  Passwort läuft jemals durch PoE-VIEW2, das Access-Token liegt sicher im
-  Windows Credential Manager (nie als Klartextdatei).
-- **Stash-Baum** mit Ordnern, Spezial-Tabs (Map-/Unique-Stash) automatisch
-  nach Sektion bzw. Kategorie gruppiert.
-- **Item-Tabelle** mit Icon, Herkunfts-Fach, Position (Tab + Gitter-
-  Koordinate — unterscheidet auch gleichnamige Fächer), Name, Typ, Level,
-  Qualität, Stack-Größe, iLvl, Anforderungen (Level/Str/Dex/Int) und Mods.
-- **Excel-artige Spalten-Filter** per Rechtsklick auf einen Spaltenkopf
-  (z. B. `>=20` für Quality, `<45` für iLvl).
-- **Liga-weite Suche** über alle bereits geladenen Fächer *und*
-  Charaktere gleichzeitig — `*` als Suchtext zeigt bewusst alles, gedacht
-  für den Komplett-Export einer ganzen Liga.
-- **Typ-Filter** (Normal/Magic/Rare/Unique/Gem/Currency/Divination Card/
-  Sonstige) als farbige Checkboxen neben dem Liga-Dropdown.
-- **Charakter-Ansicht**: Ausrüstung + Inventar eines Charakters in
-  derselben Tabelle, genauso durchsuch- und filterbar wie ein Stash-Fach.
-- **CSV-Export** der gerade sichtbaren (gefilterten) Items.
-- **Automatischer Hintergrund-Refresh**: hält das gerade geöffnete Fach
-  bzw. den gerade angezeigten Charakter laufend aktuell und füllt
-  nebenbei nach und nach den Rest der Truhe — ohne das Rate-Limit für
-  eigene Klicks zu verbrauchen.
-- **Offline-Modus**: Bei GGG-Wartung oder Netzausfall zeigt die App
-  automatisch den letzten bekannten Cache-Stand, deutlich als solcher
-  markiert (📴), statt einfach leer zu bleiben.
-- **Live-Dashboard fürs Rate-Limit** (Regeln, aktuelle Auslastung,
-  Sperren) — nie mehr raten, wie viel API-Budget noch übrig ist.
-- **Rohdaten-Mini-Viewer** je Stash-Tab für alle, die der Anzeige nicht
-  trauen und das rohe JSON sehen wollen.
+- **Login per OAuth2 (PKCE)** gegen die offizielle GGG-API. Das
+  Access-Token liegt im Windows Credential Manager, nicht als Klartext
+  auf der Platte.
+- **Stash-Baum** mit Ordnern; Spezial-Tabs (Map- und Unique-Stash) werden
+  automatisch nach Sektion bzw. Kategorie gruppiert.
+- **Item-Tabelle** mit Icon, Herkunfts-Fach, Position (Tab-Nummer und
+  Gitter-Koordinate, unterscheidet auch gleichnamige Fächer), Name, Typ,
+  Level, Qualität, Stack-Größe, iLvl, Anforderungen (Level, Str, Dex,
+  Int) und Mods.
+- **Spalten-Filter** per Rechtsklick auf einen Spaltenkopf, mit
+  Vergleichsausdrücken wie `>=20` für Quality oder `<45` für iLvl.
+- **Liga-weite Suche** über alle geladenen Fächer und Charaktere
+  gleichzeitig. `*` als Suchtext zeigt den gesamten Bestand an, gedacht
+  für den vollständigen Export einer Liga.
+- **Typ-Filter** für Normal, Magic, Rare, Unique, Gem, Currency,
+  Divination Card und Sonstige, als farbige Checkboxen neben der
+  Liga-Auswahl.
+- **Charakter-Ansicht**: Ausrüstung und Inventar erscheinen in derselben
+  Tabelle wie Stash-Items und sind genauso durchsuch- und filterbar.
+- **CSV-Export** der aktuell sichtbaren, gefilterten Items.
+- **Automatischer Hintergrund-Refresh**: hält das geöffnete Fach oder den
+  angezeigten Charakter aktuell und lädt nach und nach die übrigen Fächer
+  nach, ohne das Rate-Limit-Budget für manuelle Abfragen aufzubrauchen.
+- **Offline-Betrieb**: Bei GGG-Wartung oder fehlender Verbindung zeigt
+  die Anwendung den zuletzt bekannten Stand aus dem Cache, sichtbar als
+  solcher markiert (📴).
+- **Rate-Limit-Dashboard** mit Regeln, aktueller Auslastung und aktiven
+  Sperren.
+- **Rohdaten-Viewer** je Stash-Tab, der die unveränderte API-Antwort
+  anzeigt.
 
 ## Download (Windows, kein Python nötig)
 
-Fertig kompilierte `.exe` je Version:
-**[Releases-Seite](https://github.com/peterm2024/PoE-VIEW2/releases)**
-→ neueste Version → `PoE-VIEW2.exe` herunterladen und starten. Keine
-Installation, keine Konfiguration, kein Python nötig — beim ersten Start
-einmal auf "🔑 Login" klicken und den GGG-Login im Browser bestätigen.
+Auf der [Releases-Seite](https://github.com/peterm2024/PoE-VIEW2/releases)
+steht zu jeder Version eine fertig kompilierte `PoE-VIEW2.exe` bereit.
+Herunterladen und starten genügt; es ist weder eine Installation noch
+eine Konfiguration nötig. Beim ersten Start führt ein Klick auf "Login"
+durch die GGG-Anmeldung im Browser.
 
-Windows SmartScreen warnt bei unsignierten `.exe`-Dateien routinemäßig
-vor "unbekanntem Herausgeber" — das betrifft jede nicht codesignierte
-Anwendung und ist kein Hinweis auf ein Problem. Über "Weitere
-Informationen" → "Trotzdem ausführen" bestätigen.
+Windows SmartScreen warnt bei unsignierten Anwendungen vor einem
+"unbekannten Herausgeber". Das betrifft jede nicht codesignierte
+Anwendung und lässt sich über "Weitere Informationen" und "Trotzdem
+ausführen" bestätigen.
 
 ## Tech-Stack
 
@@ -82,7 +82,7 @@ Informationen" → "Trotzdem ausführen" bestätigen.
   [keyring](https://pypi.org/project/keyring/) (Token-Speicherung)
 - OAuth2 mit PKCE gegen die offizielle GGG-API (kein Client-Secret nötig)
 
-## Setup aus dem Quellcode (für Entwicklung/Beitrag)
+## Setup aus dem Quellcode
 
 ```bash
 git clone https://github.com/peterm2024/PoE-VIEW2.git
@@ -93,26 +93,25 @@ pip install -r requirements.txt
 python main.py
 ```
 
-Eine `.env` ist **nicht** nötig — Client-ID und Kontaktadresse haben
-funktionierende Standardwerte. Nur wer PoE-VIEW2 forkt und selbst
-verteilt, sollte sie überschreiben (`.env.example` als Vorlage, Details
-darin):
+Eine `.env` ist nicht erforderlich; Client-ID und Kontaktadresse haben
+funktionierende Standardwerte. Wer PoE-VIEW2 forkt und selbst verteilt,
+sollte beide überschreiben (`.env.example` dient als Vorlage):
 
-- **`POE_CLIENT_ID`** — Standard `poeview`, bereits bei GGG registriert.
-  Eine eigene registrieren:
-  <https://www.pathofexile.com/developer/docs/authorization> — dann muss
-  der Redirect-Port (`64338`) mit dem hinterlegten Redirect-URI
-  übereinstimmen.
-- **`POE_CONTACT_EMAIL`** — Kontakt im User-Agent, laut
-  [GGG-Doku](https://www.pathofexile.com/developer/docs) zur
-  Identifikation der *Anwendung* gedacht (nicht des einzelnen Nutzers).
-  Bei einer eigenen Distribution auf die eigene Adresse setzen.
+- **`POE_CLIENT_ID`** — Standard ist `poeview`, eine bei GGG registrierte
+  öffentliche Client-ID. Eine eigene lässt sich unter
+  <https://www.pathofexile.com/developer/docs/authorization> registrieren;
+  der Redirect-Port `64338` muss dann mit dem dort hinterlegten
+  Redirect-URI übereinstimmen.
+- **`POE_CONTACT_EMAIL`** — Kontaktangabe im User-Agent. Sie identifiziert
+  laut [GGG-Dokumentation](https://www.pathofexile.com/developer/docs) die
+  Anwendung, nicht den einzelnen Nutzer, und sollte bei eigener
+  Distribution auf die eigene Adresse zeigen.
 
-Beim ersten Start öffnet ein Klick auf "🔑 Login" den Standard-Browser
-für den GGG-OAuth-Login; danach bleibt PoE-VIEW2 bis zum Ablauf des
-Tokens (von GGG vorgegeben) eingeloggt.
+Beim ersten Start öffnet der Login-Button den Standard-Browser für die
+GGG-Anmeldung. Danach bleibt die Anmeldung bis zum Ablauf des Tokens
+bestehen; die Gültigkeitsdauer gibt GGG vor.
 
-Eine eigene `.exe` bauen: siehe [RELEASING.md](RELEASING.md).
+Zum Bauen einer eigenen `.exe` siehe [RELEASING.md](RELEASING.md).
 
 ## Tests
 
@@ -121,29 +120,26 @@ pytest
 ```
 
 Die Test-Suite deckt Datenmodelle, API-Client, Rate-Limiter, Worker und
-sämtliche UI-Logik (ohne echte Netzwerk-Calls, per Monkeypatching) ab.
+die UI-Logik ab. Sie kommt ohne Netzwerkzugriff aus.
 
 ## Dokumentation
 
-- [CHANGELOG.md](CHANGELOG.md) — was sich von Version zu Version ändert.
-- [docs/ARCHITEKTUR.md](docs/ARCHITEKTUR.md) — Architektur-Entscheidungen
-  und das Zusammenspiel der Komponenten.
+- [CHANGELOG.md](CHANGELOG.md) — Änderungen je Version.
+- [docs/ARCHITEKTUR.md](docs/ARCHITEKTUR.md) — Aufbau der Anwendung und
+  Begründung der Entwurfsentscheidungen.
+- [docs/api-notes/ggg-api.md](docs/api-notes/ggg-api.md) — beobachtetes
+  Verhalten der GGG-API, inklusive Abweichungen von der offiziellen
+  Dokumentation.
 - [FALLSTRICKE_UND_WORKAROUNDS.md](FALLSTRICKE_UND_WORKAROUNDS.md) —
-  jede gelöste technische Hürde und jeder gefundene GGG-API-Sonderfall,
-  samt Ursache und Lösung.
-
-*Hintergrund:* Der Vorgänger *PoE-VIEW* war ursprünglich als
-LabVIEW-Anwendung geplant. Mit KI-gestützter Entwicklung ließ sich
-dieselbe Idee in Python deutlich schneller und robuster umsetzen — das
-LabVIEW-Vorhaben ist deshalb bis auf Weiteres zurückgestellt.
+  gelöste technische Hürden samt Ursache und Lösung.
 
 ## Status
 
-PoE-VIEW2 ist im täglichen Gebrauch: Login, Stash-/Charakter-Browsing,
-Suche, Filter, CSV-Export, Auto-Refresh und Offline-Fallback
-funktionieren. Als Ein-Personen-Community-Projekt ohne Anspruch auf
-Vollständigkeit gegenüber der offiziellen PoE-Website — Bugs und fehlende
-Ecken sind erwartbar, Issues/PRs willkommen.
+PoE-VIEW2 ist im täglichen Gebrauch. Login, Stash- und
+Charakter-Ansichten, Suche, Filter, CSV-Export, Auto-Refresh und der
+Offline-Betrieb funktionieren. Das Projekt entsteht in Einzelarbeit und
+erhebt keinen Anspruch auf Vollständigkeit gegenüber der offiziellen
+PoE-Website. Fehlerberichte und Pull Requests sind willkommen.
 
 ## Lizenz
 

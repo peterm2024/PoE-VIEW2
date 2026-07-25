@@ -3,8 +3,7 @@
 Alle Modelle erlauben unbekannte Zusatzfelder (``extra="allow"``): die API
 liefert weit mehr, als wir anzeigen — nichts bricht bei API-Erweiterungen.
 
-LabVIEW-Äquivalent: Typedef-Cluster; ``get_property_value`` entspricht dem
-SubVI "Extract Gem Info" (Schleife über das properties-Array).
+Beobachtetes Verhalten der einzelnen Felder: docs/api-notes/ggg-api.md.
 """
 
 from __future__ import annotations
@@ -58,11 +57,11 @@ class Item(BaseModel):
     @field_validator("explicitMods", "implicitMods", mode="before")
     @classmethod
     def _normalize_mods(cls, value: object) -> object:
-        """Neuerdings (Allflame-Liga, Nutzer-Befund) liefert GGG einzelne
-        Mod-Einträge mancher Items (z. B. Currency-Beschreibungstexte) nicht
-        mehr als reinen String, sondern als ``{"description": "..."}``-Objekt
-        — Format identisch zu den ohnehin schon verschachtelten
-        properties/requirements-Werten. Auf den Anzeigetext reduzieren,
+        """GGG liefert einzelne Mod-Einträge mancher Items, etwa
+        Currency-Beschreibungstexte, nicht als reinen String, sondern als
+        ``{"description": "..."}``-Objekt. Das Format entspricht den ohnehin
+        verschachtelten properties- und requirements-Werten. Auf den
+        Anzeigetext reduzieren,
         bevor pydantic validiert, sonst schlägt der ganze Stash-Tab fehl."""
         if not isinstance(value, list):
             return value
@@ -79,7 +78,7 @@ class Item(BaseModel):
 
 
 def get_property_value(item: Item, prop_name: str) -> str | None:
-    """Property per Name suchen — es gibt KEINE festen JSON-Keys dafür."""
+    """Property per Name suchen — es gibt keine festen JSON-Keys dafür."""
     for prop in item.properties:
         if prop.name == prop_name:
             return prop.display_value
@@ -109,7 +108,7 @@ _REQUIREMENT_ALIASES = {
 def req_level(item: Item) -> str | None:
     """Benötigter Charakter-Level aus dem requirements-Array.
 
-    Exakter Namensvergleich, KEIN startswith: Heist-Ausrüstung trägt
+    Exakter Namensvergleich, kein startswith: Heist-Ausrüstung trägt
     "Level {0} in {1}" ("Level 2 in Any Job") — das ist ein Job-Level,
     kein Charakter-Level, und würde die Spalte verfälschen."""
     for req in item.requirements:
@@ -137,7 +136,7 @@ _WEAPON_CLASSES = frozenset({
     "Wand", "Fishing Rod",
 })
 
-# baseType-ENDUNG → Kategorie (endswith, NICHT substring: "Ringmail Coat"
+# baseType-ENDUNG → Kategorie (endswith, nicht substring: "Ringmail Coat"
 # ist ein Body Armour, kein Ring!). Reihenfolge = Priorität.
 _BASETYPE_CATEGORIES = (
     ("Flask", "Flask"), ("Jewel", "Jewel"), ("Quiver", "Quiver"), ("Ring", "Ring"),
@@ -172,7 +171,7 @@ def item_category(item: Item) -> str | None:
 
 def dominant_category(items: list[Item]) -> str | None:
     """Häufigste Kategorie einer Item-Liste — benennt Unique-Stash-Fächer,
-    die von der API völlig namenlos geliefert werden (Nutzer-Feedback)."""
+    die von der API völlig namenlos geliefert werden."""
     counts: dict[str, int] = {}
     for item in items:
         category = item_category(item)
@@ -184,7 +183,7 @@ def dominant_category(items: list[Item]) -> str | None:
 class StashTab(BaseModel):
     """Stash-Tab; Ordner haben ``children`` (rekursiv) und metadata.folder=true.
 
-    ``metadata.colour`` ist Hex OHNE '#'-Präfix (Beobachtung aus dem Test-VI).
+    ``metadata.colour`` ist Hex ohne '#'-Präfix.
     Spezial-Tabs (MapStash, UniqueStash) liefern beim Einzel-Abruf ebenfalls
     ``children`` (ein Unter-Tab pro Map-Typ bzw. Unique-Kategorie) statt
     ``items``; deren Items kommen vom Substash-Endpunkt und die Kinder tragen
@@ -215,10 +214,10 @@ class StashTab(BaseModel):
     @property
     def display_name(self) -> str:
         """Anzeigename aus den real beobachteten Spezial-Tab-Strukturen (echte
-        Rohdaten 2026-07-09, siehe docs/api-notes/labview-test-vi.md):
+        Rohdaten, siehe docs/api-notes/ggg-api.md):
 
         - Map-Kinder: metadata.map.name ("Map (Tier 6)" — der Tier steckt IM
-          Namen, es gibt KEIN separates tier-Feld). Das name-Feld der Kinder
+          Namen, es gibt kein separates tier-Feld). Das name-Feld der Kinder
           ist daneben wertlos ("1"), AUSSER es ist ein GGG-Suffix mit
           führendem Leerzeichen (" (Remove-only)") — das hängen wir an.
         - Unique-Kinder: völlig namenlos (nur metadata.items = Anzahl) →
@@ -233,7 +232,7 @@ class StashTab(BaseModel):
         # Von UNS gestempelte Kategorie (dominant_category nach dem ersten
         # Item-Load, Präfix "poeview_" = synthetisch) — namenlose Unique-
         # Stash-Fächer heißen damit "Ring" statt "UniqueStash". Die
-        # Item-Anzahl steht in der eigenen Baum-Spalte (Nutzer-Feedback),
+        # Item-Anzahl steht in der eigenen Baum-Spalte,
         # nicht mehr im Namen.
         return self.metadata.get("poeview_category") or self.type or self.id[:8]
 

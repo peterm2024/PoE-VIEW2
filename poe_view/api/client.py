@@ -1,10 +1,7 @@
 """PoeApiClient: persistente HTTP-Session + Endpunkte (docs/ARCHITEKTUR.md §4.2).
 
-Jeder Request läuft durch ``_get`` — Rate-Limit-Check davor, State-Update
+Jeder Request läuft durch ``_get``: Rate-Limit-Check davor, State-Update
 danach. Kein Endpunkt kann das umgehen.
-
-LabVIEW-Äquivalent: der persistente HTTP-Client-Handle mit festen Headern;
-``_get`` ≙ SubVI "HTTP GET wrapped".
 """
 
 from __future__ import annotations
@@ -79,7 +76,7 @@ class PoeApiClient:
         return resp.json()
 
     # ------------------------------------------------------------------ #
-    # Endpunkte (Pfade erprobt im LabVIEW-Test-VI)                        #
+    # Endpunkte (siehe docs/api-notes/ggg-api.md)                         #
     # ------------------------------------------------------------------ #
 
     def get_profile(self) -> dict:
@@ -98,7 +95,7 @@ class PoeApiClient:
         """Ausrüstung + Inventar EINES Charakters (Antwort-Key 'character',
         Singular, wie schon bei ``get_stash``). Die Item-Listen 'equipment'/
         'inventory'/'jewels'/'rucksack' entsprechen der offiziell dokumentierten
-        GGG-Schema-Beschreibung — anders als die Stash-Endpunkte bislang NICHT
+        GGG-Schema-Beschreibung — anders als die Stash-Endpunkte bislang nicht
         an echten Rohdaten verifiziert (siehe FALLSTRICKE_UND_WORKAROUNDS.md
         #26). Fehlende Listen werden als leer behandelt statt einen Fehler zu
         werfen — einzelne Feld-Abweichungen sollen nicht den ganzen Abruf

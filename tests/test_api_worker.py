@@ -23,7 +23,7 @@ def test_stash_items_dispatch_does_not_emit_bereit_after_result(qapp, monkeypatc
 
     worker._dispatch(FetchStashItemsJob("Standard", "t1", "Currency 1"))
 
-    assert emitted == ["Lade Items: Currency 1 …"]  # KEIN "Bereit" danach
+    assert emitted == ["Lade Items: Currency 1 …"]  # kein "Bereit" danach
     worker.client.close()
 
 
@@ -175,7 +175,7 @@ def test_silent_character_items_dispatch_emits_no_status(qapp, monkeypatch) -> N
     worker.client.close()
 
 
-# --- Offline-Erkennung (Nutzer-Feedback: GGG-Wartung am Patchday) ---------- #
+# --- Offline-Erkennung (GGG-Wartung am Patchday) ---------- #
 
 import httpx
 import pytest

@@ -32,7 +32,7 @@ def make_char(name: str, league: str) -> Character:
 
 
 def test_character_league_filter_only_shows_current_league(qapp) -> None:
-    """Kein Liga-Level mehr in der Liste — das Dropdown filtert stattdessen (Nutzer-Feedback)."""
+    """Kein Liga-Level mehr in der Liste — das Dropdown filtert stattdessen."""
     win = MainWindow()
     win._current_league = "Settlers"
     win._on_characters([make_char("A", "Settlers"), make_char("B", "Standard"),
@@ -149,16 +149,16 @@ def test_restore_cached_data_populates_state_at_startup(qapp, monkeypatch, tmp_p
 
 def test_bootstrap_job_is_submitted_before_cached_league_restore_jobs(
         qapp, monkeypatch, tmp_path) -> None:
-    """Regression (Nutzer-Rückfrage "warum wird mein Token zwischendurch
+    """Regression (Rückfrage "warum wird mein Token zwischendurch
     invalid, sollte doch Stunden gültig sein"): Ursache war eine falsche
     Job-Reihenfolge, keine echte Ablauf. `_populate_cached_leagues()`
     (Teil von `_build_ui()`) restauriert beim Start die zuletzt aktive
     Liga aus dem Cache und submitted dafür sofort einen FetchStashListJob
-    — lief der VOR BootstrapJob, hätte der HTTP-Client noch keinen Token
+    — lief der vor BootstrapJob, hätte der HTTP-Client noch keinen Token
     gesetzt, GGG hätte mit 401 geantwortet, und der AuthError-Handler
     hätte den eigentlich noch stundenlang gültigen, gespeicherten Token
     gelöscht (echtes Log-Muster: 401 direkt nach "Daten-Cache geladen").
-    BootstrapJob muss deshalb IMMER der erste Job in der Queue sein."""
+    BootstrapJob muss deshalb immer der erste Job in der Queue sein."""
     from poe_view.services import data_cache
     from poe_view.services.api_worker import ApiWorker, BootstrapJob
 
@@ -192,7 +192,7 @@ def test_on_stash_items_ignores_result_for_stale_league(qapp) -> None:
     win._on_stash_items("Hardcore", "t1", "Tab", [], silent=False)
 
     assert win._items["Hardcore"]["t1"] == []  # landet trotzdem im Cache …
-    assert "t1" not in win.tree._stash_nodes  # … aber NICHT in der aktiven Baum-Anzeige
+    assert "t1" not in win.tree._stash_nodes  # … aber nicht in der aktiven Baum-Anzeige
 
     win.worker.stop()
     win.worker.wait(5000)
@@ -209,17 +209,17 @@ def test_on_stash_items_silent_updates_cache_but_not_table(qapp) -> None:
     win._on_stash_items("Standard", "t1", "Tab", [item], silent=True)
 
     assert win._items["Standard"]["t1"] == [item]
-    assert win.table_model.rowCount() == 0  # Anzeige unangetastet (Nutzer-Feedback)
+    assert win.table_model.rowCount() == 0  # Anzeige unangetastet
 
     win.worker.stop()
     win.worker.wait(5000)
 
 
 def test_on_stash_items_silent_refresh_of_currently_open_tab_updates_table(qapp) -> None:
-    """Regression: das Live-Halten des GERADE GEÖFFNETEN Fachs (Nutzer-Feedback,
-    Auto-Refresh) aktualisierte bisher nur den Cache, nicht die sichtbare
-    Tabelle — "lebt" war es also nicht. Silent + stash_id == _current_stash_id
-    muss die Tabelle jetzt trotzdem neu zeichnen."""
+    """Regression: Das Live-Halten des gerade geöffneten Fachs durch den
+    Auto-Refresh aktualisierte zunächst nur den Cache, nicht die sichtbare
+    Tabelle. Ein stiller Refresh mit stash_id == _current_stash_id muss die
+    Tabelle deshalb neu zeichnen."""
     win = MainWindow()
     win._current_league = "Standard"
     win._current_stash_id = "t1"  # "t1" ist gerade als Einzelfach geöffnet
@@ -344,7 +344,7 @@ def test_character_refresh_bypasses_cache_and_switches_view(qapp, monkeypatch) -
 
 
 def test_maybe_auto_refresh_keeps_currently_displayed_character_live(qapp, monkeypatch) -> None:
-    """Nutzer-Feedback: der gerade angezeigte Charakter soll wie das gerade
+    """der gerade angezeigte Charakter soll wie das gerade
     angezeigte Truhenfach bei jedem Tick live gehalten werden — der normale
     Stash-Sweep läuft daneben unverändert weiter."""
     win = MainWindow()
@@ -415,7 +415,7 @@ def test_pick_auto_refresh_candidate_ignores_only_recent_tabs(qapp) -> None:
 
 
 def test_pick_auto_refresh_candidate_includes_never_loaded_tabs(qapp) -> None:
-    """Regression: Nutzer-Feedback — bei 391 Tabs bleibt der Zähler sonst für immer
+    """Regression: bei 391 Tabs bleibt der Zähler sonst für immer
     auf 0 stehen, weil nie geladene Tabs ohne diese Regel gar keine Kandidaten sind."""
     win = MainWindow()
     win._current_league = "Standard"
@@ -463,7 +463,7 @@ def test_pick_auto_refresh_candidate_prefers_oldest_stale_tab(qapp) -> None:
 
 
 def test_pick_auto_refresh_candidate_deprioritises_remove_only_tabs(qapp) -> None:
-    """Nutzer-Feedback: Tabs mit 'Remove-only' im Namen nur nehmen, wenn es
+    """Tabs mit 'Remove-only' im Namen nur nehmen, wenn es
     keine andere stale Alternative gibt."""
     win = MainWindow()
     win._current_league = "Standard"
@@ -482,7 +482,7 @@ def test_pick_auto_refresh_candidate_deprioritises_remove_only_tabs(qapp) -> Non
 
 
 def test_auto_refresh_counter_label_counts_silent_loads(qapp) -> None:
-    """Nutzer-Feedback: sichtbarer Nachweis „X von Y Stash-Tabs aktualisiert“."""
+    """sichtbarer Nachweis „X von Y Stash-Tabs aktualisiert“."""
     win = MainWindow()
     win._current_league = "Standard"
     win._leaf_stashes = [_make_leaf("t1", "Tab 1"), _make_leaf("t2", "Tab 2")]
@@ -492,7 +492,7 @@ def test_auto_refresh_counter_label_counts_silent_loads(qapp) -> None:
     win._on_stash_items("Standard", "t1", "Tab 1", [], silent=True)
     assert win._auto_refresh_label.text() == "Auto-Refresh: 1 von 2 Stash-Tabs aktualisiert"
 
-    # Manuelle (nicht-silente) Ladevorgänge zählen NICHT als Auto-Refresh.
+    # Manuelle (nicht-silente) Ladevorgänge zählen nicht als Auto-Refresh.
     win._on_stash_items("Standard", "t2", "Tab 2", [], silent=False)
     assert win._auto_refresh_label.text() == "Auto-Refresh: 1 von 2 Stash-Tabs aktualisiert"
 
@@ -539,7 +539,7 @@ def test_maybe_auto_refresh_skips_when_worker_busy_or_low_headroom(qapp, monkeyp
 
 
 def test_maybe_auto_refresh_stops_after_token_expires_mid_session(qapp, monkeypatch) -> None:
-    """Regression (Nutzer-Rückfrage 'Automatik hat nicht hingehauen'):
+    """Regression (Rückfrage 'Automatik hat nicht hingehauen'):
     real im Log beobachtet — nach einem abgelaufenen Token lief der
     Auto-Refresh alle 40s stur mit demselben, bereits ungültigen Token
     weiter gegen die API (mehrere Minuten lang HTTP 401 in Folge), bis der
@@ -569,7 +569,7 @@ def test_maybe_auto_refresh_stops_after_token_expires_mid_session(qapp, monkeypa
 
 
 def test_maybe_auto_refresh_also_refreshes_currently_displayed_tab(qapp, monkeypatch) -> None:
-    """Nutzer-Feedback: das gerade angezeigte Fach soll bei jedem Auto-Refresh-
+    """das gerade angezeigte Fach soll bei jedem Auto-Refresh-
     Tick ZUSÄTZLICH zum normalen Sweep-Kandidaten aktualisiert werden — auch
     wenn es frisch geladen ist (die 1-Tag-Schonfrist gilt nur für den Sweep)."""
     win = MainWindow()
@@ -577,7 +577,7 @@ def test_maybe_auto_refresh_also_refreshes_currently_displayed_tab(qapp, monkeyp
     now = datetime.now(timezone.utc)
     win._leaf_stashes = [_make_leaf("current", "Current Tab"), _make_leaf("stale", "Stale Tab")]
     win._last_loaded["Standard"] = {
-        "current": now.isoformat(),  # gerade erst geladen — würde den Sweep NICHT triggern
+        "current": now.isoformat(),  # gerade erst geladen — würde den Sweep nicht triggern
         "stale": (now - timedelta(days=5)).isoformat(),
     }
     win._current_stash_id = "current"
@@ -635,7 +635,7 @@ def test_auto_refresh_counter_does_not_inflate_from_repeated_current_tab_refresh
     win.worker.wait(5000)
 
 
-# --- Rohdaten-Mini-Viewer (Nutzer-Feedback) ------------------------------ #
+# --- Rohdaten-Mini-Viewer ------------------------------ #
 
 def test_build_raw_stash_payload_merges_tab_metadata_and_items(qapp) -> None:
     win = MainWindow()
@@ -690,7 +690,7 @@ def test_update_raw_viewer_only_refreshes_when_visible(qapp) -> None:
 
 
 def test_on_raw_data_requested_opens_viewer_and_shows_cached_data(qapp) -> None:
-    """Rechtsklick 'Rohdaten anzeigen' öffnet den Viewer UND lädt (bei Cache-Treffer
+    """Rechtsklick 'Rohdaten anzeigen' öffnet den Viewer und lädt (bei Cache-Treffer
     sofort) die Daten hinein — wie ein normaler Linksklick auf den Tab."""
     win = MainWindow()
     win._current_league = "Standard"
@@ -711,7 +711,7 @@ def test_on_raw_data_requested_opens_viewer_and_shows_cached_data(qapp) -> None:
 
 
 def test_raw_viewer_follows_tab_switches(qapp) -> None:
-    """Kern des Nutzer-Wunsches: der Viewer aktualisiert sich beim Durchklicken
+    """Der Viewer aktualisiert sich beim Durchklicken
     verschiedener Tabs von selbst, ohne dass erneut rechtsgeklickt werden muss."""
     win = MainWindow()
     win._current_league = "Standard"
@@ -735,7 +735,7 @@ def test_raw_viewer_follows_tab_switches(qapp) -> None:
     win.worker.wait(5000)
 
 
-# --- Spezial-Tabs: MapStash/UniqueStash (Nutzer-Feedback) ----------------- #
+# --- Spezial-Tabs: MapStash/UniqueStash ----------------- #
 
 def _map_child(child_id: str, parent_id: str, map_name: str, items: int | None = None) -> StashTab:
     metadata: dict = {"map": {"name": map_name, "tier": 16}}
@@ -790,7 +790,7 @@ def test_on_stash_children_grafts_into_tree_and_updates_leaves(qapp) -> None:
 
 
 def test_on_stash_children_shows_aggregate_count_on_parent_node(qapp) -> None:
-    """Nutzer-Feedback: Item-Anzahl in eigener Spalte — der Spezial-Tab-Eltern-
+    """Item-Anzahl in eigener Spalte — der Spezial-Tab-Eltern-
     knoten selbst zeigt die Summe der (bekannten) Kind-Anzahlen."""
     win = MainWindow()
     win._current_league = "Standard"
@@ -819,7 +819,7 @@ def test_merge_known_children_survives_stash_list_refresh(qapp) -> None:
     old_map.children = [_map_child("c1", "m1", "Beach Map")]
     win._stash_trees["Standard"] = [old_map]
 
-    # Frische Liste von der API: MapStash OHNE children (wie die API sie liefert)
+    # Frische Liste von der API: MapStash ohne children (wie die API sie liefert)
     fresh = [StashTab.model_validate({"id": "m1", "name": "Maps", "type": "MapStash",
                                        "metadata": {}})]
     win._on_stash_list(fresh)
@@ -853,7 +853,7 @@ def test_click_on_special_tab_child_submits_job_with_parent_id(qapp, monkeypatch
 
 
 def test_special_tab_click_bypasses_stale_zero_item_cache(qapp, monkeypatch) -> None:
-    """Nutzer-Befund: MapStash 'funktionierte nicht', bis manuell aktualisiert
+    """MapStash 'funktionierte nicht', bis manuell aktualisiert
     wurde. Ursache: ein alter '0 Items'-Cache-Eintrag (von vor dem Spezial-Tab-
     Feature) war ein permanenter Cache-Treffer — die Kinder-Entdeckung fand nie
     statt. Spezial-Tabs ohne bekannte Kinder müssen den Item-Cache ignorieren."""
@@ -939,7 +939,7 @@ def test_load_all_includes_special_tabs_despite_cache_entry(qapp, monkeypatch) -
 # --- Item-Spalten: Sichtbarkeit + kontextabhängige Tab-Spalte ------------- #
 
 def test_typ_column_hidden_by_default_mods_visible(qapp) -> None:
-    """Nutzer-Feedback: Typ default aus (Rarity steckt in der Namensfarbe),
+    """Typ default aus (Rarity steckt in der Namensfarbe),
     Mods-Spalte (Map-Modifikatoren) sichtbar."""
     from poe_view.ui.item_table import COLUMNS
     win = MainWindow()
@@ -970,7 +970,7 @@ def test_column_toggle_persists_across_restart(qapp) -> None:
 
 
 def test_tab_column_auto_hidden_for_single_tab_shown_for_aggregate(qapp) -> None:
-    """Nutzer-Feedback: Im Einzelfach ist die Herkunft redundant, im Aggregat
+    """Im Einzelfach ist die Herkunft redundant, im Aggregat
     ("Map"-Elternknoten, "Alle Tabs") ist sie die entscheidende Info."""
     from poe_view.ui.item_table import TAB_COL
     win = MainWindow()
@@ -1020,13 +1020,13 @@ def test_special_parent_click_aggregates_loaded_children(qapp) -> None:
 
 
 def _unique_child(child_id: str, parent_id: str = "u1") -> StashTab:
-    """Namenloses Unique-Fach in der ECHTEN Struktur (nur metadata.items)."""
+    """Namenloses Unique-Fach in der echten Struktur (nur metadata.items)."""
     return StashTab.model_validate({"id": child_id, "name": "", "parent": parent_id,
                                     "type": "UniqueStash", "metadata": {"items": 2}})
 
 
 def test_unique_child_gets_category_name_after_item_load(qapp) -> None:
-    """Nutzer-Feedback: "über die Kategorie gehen, z. B. Two Handed Axe, Ring, Flask"."""
+    """"über die Kategorie gehen, z. B. Two Handed Axe, Ring, Flask"."""
     win = MainWindow()
     win._current_league = "Standard"
     unique = StashTab.model_validate({"id": "u1", "name": "Uniq", "type": "UniqueStash",
@@ -1110,10 +1110,10 @@ def test_auto_refresh_passes_parent_id_for_special_tab_children(qapp, monkeypatc
     win.worker.stop()
     win.worker.wait(5000)
 
-# --- Fächerübergreifende Suche + Spalten-Filter (Nutzer-Feedback) ---------- #
+# --- Fächerübergreifende Suche + Spalten-Filter ---------- #
 
 def test_typing_in_search_switches_to_league_wide_view(qapp, monkeypatch) -> None:
-    """Tippen sucht über ALLE geladenen Fächer der Liga; Leeren des Felds
+    """Tippen sucht über alle geladenen Fächer der Liga; Leeren des Felds
     führt zurück zum vorher gewählten Fach — alles ohne API-Call."""
     from PySide6.QtCore import Qt
     from poe_view.ui.item_table import TAB_COL
@@ -1132,7 +1132,7 @@ def test_typing_in_search_switches_to_league_wide_view(qapp, monkeypatch) -> Non
     assert win.table_model.rowCount() == 1
 
     win._filter_edit.setText("essence")          # tippen → liga-weite Ansicht
-    assert win.table_model.rowCount() == 2       # Model hält ALLE Items der Liga
+    assert win.table_model.rowCount() == 2       # Model hält alle Items der Liga
     assert win.proxy.rowCount() == 1             # Filter zeigt nur den Treffer
     assert win.proxy.data(win.proxy.index(0, 3),
                           Qt.ItemDataRole.DisplayRole) == "Deafening Essence of Greed"
@@ -1149,7 +1149,7 @@ def test_typing_in_search_switches_to_league_wide_view(qapp, monkeypatch) -> Non
 
 
 def test_wildcard_search_also_includes_character_inventory_items(qapp) -> None:
-    """Nutzer-Feedback: "Bei der '*'-Suche sollte auch über sämtliche
+    """"Bei der '*'-Suche sollte auch über sämtliche
     Inventar-Items gesucht werden" — Charaktere DIESER Liga zählen mit."""
     win = MainWindow()
     win._current_league = "Standard"
@@ -1157,7 +1157,7 @@ def test_wildcard_search_also_includes_character_inventory_items(qapp) -> None:
     win._items["Standard"] = {"t1": [Item.model_validate({"typeLine": "Chaos Orb"})]}
     win._all_characters = [
         make_char("WitchOfPeter", "Standard"),
-        make_char("OtherLeagueChar", "Hardcore"),  # andere Liga — darf NICHT mitzählen
+        make_char("OtherLeagueChar", "Hardcore"),  # andere Liga — darf nicht mitzählen
     ]
     win._character_items = {
         "WitchOfPeter": [Item.model_validate(
@@ -1167,7 +1167,7 @@ def test_wildcard_search_also_includes_character_inventory_items(qapp) -> None:
 
     win._filter_edit.setText("*")
 
-    assert win.table_model.rowCount() == 2  # Stash-Item + Charakter-Item, NICHT das der anderen Liga
+    assert win.table_model.rowCount() == 2  # Stash-Item + Charakter-Item, nicht das der anderen Liga
     type_lines = {win.table_model.item_at(i).typeLine for i in range(2)}
     assert type_lines == {"Chaos Orb", "Kaom's Heart"}
     sources = {win.table_model.source_at(i) for i in range(2)}
@@ -1244,7 +1244,7 @@ def test_clear_column_filters_resets_all(qapp) -> None:
 
 
 def test_search_field_has_clear_button(qapp) -> None:
-    """Nutzer-Feedback: kleines "x" am rechten Rand zum Leeren des Suchfelds
+    """kleines "x" am rechten Rand zum Leeren des Suchfelds
     — Qt bringt das nativ mit (QLineEdit.setClearButtonEnabled)."""
     win = MainWindow()
     assert win._filter_edit.isClearButtonEnabled()
@@ -1254,8 +1254,8 @@ def test_search_field_has_clear_button(qapp) -> None:
 
 
 def test_asterisk_search_shows_and_exports_entire_league(qapp, monkeypatch) -> None:
-    """"*" im Suchfeld zeigt den GESAMTEN (bereits geladenen) Liga-Inhalt —
-    Nutzer-Feedback: "damit ich den gesamten Inhalt exportieren kann"."""
+    """"*" im Suchfeld zeigt den gesamten (bereits geladenen) Liga-Inhalt —
+    "damit ich den gesamten Inhalt exportieren kann"."""
     win = MainWindow()
     win._current_league = "Standard"
     t1, t2 = _make_leaf("t1", "Currency 1"), _make_leaf("t2", "Essence")
@@ -1279,7 +1279,7 @@ def test_asterisk_search_shows_and_exports_entire_league(qapp, monkeypatch) -> N
     win.worker.wait(5000)
 
 
-# --- Offline-Modus (Nutzer-Feedback: GGG-Wartung am Patchday) -------------- #
+# --- Offline-Modus (GGG-Wartung am Patchday) -------------- #
 
 def test_populate_cached_leagues_works_without_network(qapp, monkeypatch) -> None:
     """Ligen-Dropdown aus dem Cache befüllen, unabhängig vom Netzwerk — sonst
@@ -1333,7 +1333,7 @@ def test_offline_changed_shows_banner_and_marks_tree(qapp) -> None:
     win.worker.wait(5000)
 
 
-# --- Typ-Filter-Checkboxen (Nutzer-Feedback) ------------------------------- #
+# --- Typ-Filter-Checkboxen ------------------------------- #
 
 def test_type_checkboxes_exist_checked_by_default(qapp) -> None:
     from poe_view.ui.theme import OTHER_TYPE
@@ -1380,10 +1380,10 @@ def test_other_type_checkbox_hides_relic_and_unknown(qapp) -> None:
     win.worker.wait(5000)
 
 
-# --- Liga-Dropdown: gültige zuerst, abgelaufene abgetrennt (Nutzer-Feedback) #
+# --- Liga-Dropdown: gültige zuerst, abgelaufene abgetrennt #
 
 def test_league_with_content_sorted_before_empty_league(qapp, monkeypatch) -> None:
-    """Nutzer-Feedback: "Hardcore wird zuerst angezeigt, obwohl ich dort
+    """"Hardcore wird zuerst angezeigt, obwohl ich dort
     keinen Spielstand habe — alle Felder leer." Ligen mit Charakteren/Items
     sollen vor leeren Ligen stehen, unabhängig von der API-Reihenfolge."""
     win = MainWindow()
@@ -1422,7 +1422,7 @@ def test_expired_cache_only_league_appended_below_separator(qapp, monkeypatch) -
     assert order[:sep] == ["Standard"]
     assert order[sep + 1:] == ["Legacy League"]
     assert win._league_combo.currentText() == "Standard"
-    # Header ist eine reine Überschrift, nicht anwählbar (Nutzer-Feedback:
+    # Header ist eine reine Überschrift, nicht anwählbar (
     # explizit als "Offline-Liga" erkennbar, nicht nur positionell getrennt).
     header_item = win._league_combo.model().item(sep)
     assert not header_item.isEnabled()
@@ -1468,10 +1468,10 @@ def test_live_update_preserves_current_selection(qapp, monkeypatch) -> None:
     win.worker.wait(5000)
 
 
-# --- Position-Spalte: Tab-Index + Koordinaten (Nutzer-Feedback) ------------ #
+# --- Position-Spalte: Tab-Index + Koordinaten ------------ #
 
 def test_position_column_uses_list_order_not_stash_index(qapp, monkeypatch) -> None:
-    """Nutzer-Feedback: "der Index der Truhenfächer bezieht sich auf die
+    """"der Index der Truhenfächer bezieht sich auf die
     Position der jeweiligen (vergangenen) Liga" — Fächer wandern beim
     Liga-Ende nach Standard und BEHALTEN ihren alten Index, mehrere Fächer
     tragen dort also denselben ``index``. Die Position-Spalte muss daher
@@ -1526,7 +1526,7 @@ def test_single_tab_view_shows_position_column(qapp) -> None:
     win.worker.wait(5000)
 
 
-# --- Toolbar darf nicht versehentlich ausblendbar sein (Nutzer-Feedback) --- #
+# --- Toolbar darf nicht versehentlich ausblendbar sein --- #
 
 def test_toolbar_context_menu_disabled(qapp) -> None:
     """Qt bietet per Default ein Rechtsklick-Menü über der Toolbar an, mit
@@ -1540,10 +1540,10 @@ def test_toolbar_context_menu_disabled(qapp) -> None:
     win.worker.wait(5000)
 
 
-# --- Baum-Hervorhebung bei Item-Auswahl (Nutzer-Feedback) ------------------ #
+# --- Baum-Hervorhebung bei Item-Auswahl ------------------ #
 
 def test_row_selection_highlights_tab_without_changing_search(qapp, monkeypatch) -> None:
-    """Nutzer-Feedback: bei "*" (alles anzeigen) soll ein Klick auf ein Item
+    """bei "*" (alles anzeigen) soll ein Klick auf ein Item
     das Herkunfts-Fach im Baum zeigen, DARF ABER die Suche nicht verändern."""
     win = MainWindow()
     win._current_league = "Standard"
@@ -1596,7 +1596,7 @@ def test_single_tab_selection_highlights_its_own_tab(qapp) -> None:
     win.worker.wait(5000)
 
 
-# --- Archivierte (beendete) Ligen: kein Online-Zugriff mehr (Nutzer-Feedback) #
+# --- Archivierte (beendete) Ligen: kein Online-Zugriff mehr #
 
 def test_current_league_is_archived_unknown_before_first_live_response(qapp) -> None:
     """Vor der ersten /account/leagues-Antwort (Offline-Start, §4.12) gilt
@@ -1626,7 +1626,7 @@ def test_current_league_is_archived_after_league_rotation(qapp) -> None:
 
 
 def test_league_changed_skips_network_for_archived_league(qapp, monkeypatch) -> None:
-    """Nutzer-Feedback: Liga-Rotation — für eine beendete Liga darf KEIN
+    """Liga-Rotation — für eine beendete Liga darf kein
     FetchStashListJob mehr abgeschickt werden (kein Online-Zugriff mehr)."""
     win = MainWindow()
     win._live_leagues = {"NewLeague"}  # "Legacy League" ist raus

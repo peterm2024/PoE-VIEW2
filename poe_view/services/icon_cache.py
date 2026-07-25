@@ -1,7 +1,7 @@
 """Datei-Cache für Item-Icons (docs/ARCHITEKTUR.md §4.6).
 
 Dateiname = SHA-1 der URL (URLs enthalten Query-Parameter und Sonderzeichen).
-Vor jedem Download wird der Cache geprüft — wie im LabVIEW-Original.
+Vor jedem Download wird der Cache geprüft.
 """
 
 from __future__ import annotations

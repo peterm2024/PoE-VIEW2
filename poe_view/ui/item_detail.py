@@ -1,6 +1,5 @@
 """Item-Detail-Panel: großes Icon, Name in Rarity-Farbe, Properties und Mods.
 
-LabVIEW-Äquivalent: Picture Control + formatierte String-Anzeige.
 """
 
 from __future__ import annotations

@@ -15,8 +15,9 @@ from poe_view.ui.main_window import MainWindow
 def _setup_logging() -> None:
     """Konsole + rotierende Datei; Request-/Rate-Limit-Details auf DEBUG.
 
-    Die Logdatei ist bewusst ausführlich — sie ist unsere Referenz für
-    Rate-Limit-Analysen (und ggf. für eine spätere LabVIEW-Portierung).
+    Die Logdatei ist bewusst ausführlich; sie ist die Referenz für
+    Rate-Limit-Analysen und hat bereits mehrfach Fehlerursachen
+    aufgedeckt (siehe FALLSTRICKE_UND_WORKAROUNDS.md #28, #30).
     """
     config.ensure_dirs()
     handlers: list[logging.Handler] = [

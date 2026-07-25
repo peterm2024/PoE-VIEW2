@@ -1,8 +1,7 @@
 """Token-Speicherung im Windows Credential Manager (via ``keyring``).
 
-Intention: Das Access-Token (10 h gültig) landet NIE als Klartext-Datei auf
-der Platte und NIE im Repository. LabVIEW-Original nutzte eine externe Datei —
-das hier ist das sicherere Pendant.
+Das Access-Token (10 Stunden gültig) landet dadurch weder als
+Klartextdatei auf der Platte noch im Repository.
 """
 
 from __future__ import annotations

@@ -1,7 +1,7 @@
 """Item-Tabelle: Model/View mit Sortierung und Live-Filter.
 
-LabVIEW-Äquivalent: Multicolumn Listbox — hier sauberer als
-QAbstractTableModel + QSortFilterProxyModel (Sortieren/Filtern kostenlos).
+Aufgebaut aus QAbstractTableModel und QSortFilterProxyModel; Sortieren
+und Filtern übernimmt damit Qt.
 
 Icons werden asynchron nachgeladen: das Model meldet fehlende URLs über den
 ``icon_requester``-Callback (MainWindow → FetchIconJob) und bekommt die
@@ -17,16 +17,16 @@ eingeblendet — dort ordnet sie Items ihrem Fach zu ("Map (Tier 1)").
 
 Die Position-Spalte ("#3 (4, 7)") zeigt die 1-basierte Position des
 Herkunfts-Tabs INNERHALB DER AKTUELLEN LIGA-ANTWORT (MainWindow.
-_tab_positions — NICHT StashTab.index, siehe dort) plus die
+_tab_positions — nicht StashTab.index, siehe dort) plus die
 Gitter-Koordinate des Items darin (API-Felder x/y) — der Name allein
 unterscheidet gleichnamige Fächer nicht (Nutzer hat z. B. mehrere
-"Heist"-Tabs). Anders als die Tab-Spalte NICHT automatisch verwaltet:
+"Heist"-Tabs). Anders als die Tab-Spalte nicht automatisch verwaltet:
 normal toggle-/immer sichtbar, auch im Einzelfach nützlich (Koordinate
 innerhalb des GERADE angezeigten Tabs).
 
 Anf.Lvl/Str/Dex/Int kommen aus dem requirements-Array der GGG-API — die
 Daten waren dank ``extra="allow"`` längst im Cache, wurden nur nie gezeigt
-(Nutzer-Feedback; PoEDB o. Ä. ist damit unnötig).
+(eine externe Quelle wie PoEDB ist dafür nicht nötig).
 
 Die Mods-Spalte zeigt die explicitMods (v. a. Map-Modifikatoren);
 der Live-Filter durchsucht sie mit. Zusätzlich kann jede Spalte einen
@@ -34,7 +34,7 @@ eigenen Filter-Ausdruck tragen (">=20", "<45", "=Text", Teilstring) —
 gesetzt über das Header-Rechtsklick-Menü, markiert mit 🔍 im Header.
 
 Acht Typ-Checkboxen (MainWindow, neben dem Liga-Feld) filtern zusätzlich
-nach frameType — UND-verknüpft mit allem anderen: die vier PoE-Rarities
+nach frameType — und-verknüpft mit allem anderen: die vier PoE-Rarities
 (Normal/Magic/Rare/Unique), dazu Gem/Currency/Divination Card, und eine
 letzte "Sonstige"-Checkbox (Pink) für alles ohne eigene Kategorie (Quest,
 Prophecy, Relic, unbekannte frameTypes) — siehe ``_type_key``.
@@ -69,7 +69,7 @@ POSITION_COL = 2       # Tab-Nr. + Gitter-Koordinate — unterscheidet gleichnam
 _NAME_COL = 3
 _NUMERIC_FROM_COL = 5  # Level, Qual., Stack, iLvl, Anf.Lvl, Str, Dex, Int
 MODS_COL = 13          # Mods (v. a. Maps) — linksbündig, nicht numerisch
-# Spalten VOR dem vorgerechneten _rows-Tupel (Icon, Tab, Position) — Offset
+# Spalten vor dem vorgerechneten _rows-Tupel (Icon, Tab, Position) — Offset
 # für den Zugriff _rows[row][col - _ROWS_OFFSET] in display_text().
 _ROWS_OFFSET = 3
 
@@ -106,13 +106,15 @@ class ItemTableModel(QAbstractTableModel):
                   request_icons: bool = True) -> None:
         """``sources[i]`` ist der Tab-Name von ``items[i]``. Ohne Angabe leer.
         ``tab_indices[i]`` ist die 1-basierte Position des Herkunfts-Tabs in
-        der aktuellen API-Antwort (MainWindow._tab_positions — NICHT
-        StashTab.index, siehe dort; Basis der Positions-Spalte,
-        unterscheidet gleichnamige Fächer, z. B. mehrere "Heist"-Tabs,
-        Nutzer-Feedback) — ohne Angabe unbekannt. ``stash_ids[i]`` ist die
-        Tab-ID von ``items[i]`` — Grundlage dafür, bei Zeilenauswahl das
-        richtige Fach im Stash-Baum hervorzuheben (Nutzer-Feedback,
-        wichtig gerade in Aggregat-/Suchansichten mit mehreren Quell-Tabs).
+        der aktuellen API-Antwort (``MainWindow._tab_positions``, bewusst
+        nicht ``StashTab.index``). Sie bildet die Grundlage der
+        Positions-Spalte und unterscheidet gleichnamige Fächer, etwa
+        mehrere Heist-Tabs. Ohne Angabe bleibt sie unbekannt.
+
+        ``stash_ids[i]`` ist die Tab-ID von ``items[i]`` und ermöglicht es,
+        bei Zeilenauswahl das richtige Fach im Stash-Baum hervorzuheben.
+        Das ist vor allem in Aggregat- und Suchansichten mit mehreren
+        Quell-Tabs relevant.
 
         ``request_icons=False`` für große Aggregate (liga-weite Suche,
         "Alle Tabs laden"): Icons werden dann lazy in ``data()`` angefordert,
@@ -181,7 +183,7 @@ class ItemTableModel(QAbstractTableModel):
 
     def _position_text(self, row: int) -> str:
         """Tab-Nr. (bereits 1-basiert von MainWindow._tab_positions
-        übergeben — Position in der aktuellen API-Antwort, NICHT
+        übergeben — Position in der aktuellen API-Antwort, nicht
         StashTab.index) + Gitter-Koordinate des Items — unterscheidet
         gleichnamige Fächer (z. B. mehrere "Heist"), die Tab-Spalte allein
         zeigt ja nur den (u. U. mehrdeutigen) Namen."""
@@ -195,7 +197,7 @@ class ItemTableModel(QAbstractTableModel):
     def _position_sort_key(self, row: int) -> tuple[float, float, float]:
         """Numerischer Sortierschlüssel für die Position-Spalte: Tab-Nr.
         zuerst (unterscheidet Fächer), dann x, dann y — sonst würde "#10"
-        alphabetisch VOR "#2" einsortieren (Nutzer-Feedback). Unbekannte
+        alphabetisch vor "#2" einsortieren. Unbekannte
         Werte wie bei den übrigen Zahlenspalten als "-inf" (§ NUMERIC_SORT_ROLE)."""
         tab_index = self._tab_indices[row] if row < len(self._tab_indices) else None
         item = self._items[row]
@@ -254,7 +256,7 @@ _OP_RE = re.compile(r"^\s*(<=|>=|!=|<>|<|>|=)\s*(.+)$")
 
 def _expression_matches(expr: str, cell_text: str) -> bool:
     """Excel-artige Mini-Ausdrücke: ">=20", "<45", "=Beach Map", sonst
-    Teilstring. Numerisch wird verglichen, sobald Operand UND Zelle eine
+    Teilstring. Numerisch wird verglichen, sobald Operand und Zelle eine
     Zahl hergeben ("+20%" zählt als 20) — sonst Textvergleich; Zellen ohne
     Zahl ("–") fallen bei <,>,<=,>= bewusst raus (wie in Excel)."""
     m = _OP_RE.match(expr)
@@ -278,8 +280,8 @@ def _expression_matches(expr: str, cell_text: str) -> bool:
 class ItemFilterProxy(QSortFilterProxyModel):
     """Filtert lokal über Name + Typ + Tab + Mods + Properties — kostet
     bewusst keine API-Calls. Zusätzlich je Spalte ein optionaler
-    Filter-Ausdruck (Header-Rechtsklick), UND-verknüpft mit dem globalen
-    Suchfeld. "*" im Suchfeld zeigt bewusst ALLES (Komplett-Export)."""
+    Filter-Ausdruck (Header-Rechtsklick), und-verknüpft mit dem globalen
+    Suchfeld. "*" im Suchfeld zeigt bewusst alles (Komplett-Export)."""
 
     def __init__(self) -> None:
         super().__init__()
@@ -290,12 +292,12 @@ class ItemFilterProxy(QSortFilterProxyModel):
         self._hidden_types: set[int] = set()  # _type_key(frameType), per Checkbox abgewählt
 
     def lessThan(self, left: QModelIndex, right: QModelIndex) -> bool:  # noqa: N802 (Qt-API)
-        """Eigene Tie-Break-Regel für gleiche Sortierwerte (Nutzer-Feedback:
-        "nach Deaktivieren/Reaktivieren eines Filters landen die Items am
-        Ende"). Ohne das ist der Vergleich bei Gleichstand (z. B. mehrere
-        Items ohne iLvl — alle "-inf", oder mehrere "Chaos Orb") aus Sicht
-        des Sortier-Algorithmus KEIN Widerspruch zu jeder beliebigen
-        Position — Qt sortiert bei einer Filteränderung nicht immer komplett
+        """Eigene Tie-Break-Regel für gleiche Sortierwerte.
+
+        Ohne sie ist der Vergleich bei Gleichstand (mehrere Items ohne
+        iLvl, alle mit "-inf", oder mehrere gleichnamige Currency-Stacks)
+        aus Sicht des Sortier-Algorithmus mit jeder beliebigen Position
+        vereinbar. Qt sortiert bei einer Filteränderung nicht immer komplett
         neu, sondern fügt wieder sichtbare Zeilen inkrementell ein, wobei
         gleiche Werte an der aktuellen Einfügestelle (meist ans Ende der
         Gleichstand-Gruppe) landen statt an ihrer ursprünglichen Position.
@@ -311,7 +313,7 @@ class ItemFilterProxy(QSortFilterProxyModel):
             return left.row() < right.row()
         return left_value < right_value
 
-    # --- Typ-Checkboxen (Nutzer-Feedback) --------------------------------- #
+    # --- Typ-Checkboxen --------------------------------- #
 
     def set_type_visible(self, type_key: int, visible: bool) -> None:
         """``type_key`` ist ein frameType (0–6) oder ``theme.OTHER_TYPE``
@@ -385,9 +387,9 @@ class ItemFilterProxy(QSortFilterProxyModel):
             # Wildcard: gesamten (bereits geladenen) Inhalt zeigen — z. B. um
             # eine komplette Truhe/Liga in einem Rutsch als CSV zu exportieren.
             return True
-        # Properties (z. B. "Item Quantity: +23%") sind KEINE explicitMods —
+        # Properties (z. B. "Item Quantity: +23%") sind keine explicitMods —
         # ohne sie fände die Suche Maps mit Quantity/Rarity/Pack Size/Drop
-        # Chance nie (Nutzer-Feedback: "nach Quantity gesucht, nur Chisel
+        # Chance nie ("nach Quantity gesucht, nur Chisel
         # gefunden" — die Chisel-Beschreibung nennt "Item Quantity" im Mod-
         # Text, die Maps selbst tragen den Wert nur als Property).
         prop_text = " ".join(f"{p.name} {p.display_value or ''}" for p in item.properties)

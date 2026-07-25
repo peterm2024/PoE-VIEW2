@@ -1,47 +1,44 @@
-"""Stash-Baum links unten (docs/ARCHITEKTUR.md §5) — nur noch Stash-Tabs.
+"""Stash-Baum (docs/ARCHITEKTUR.md §5).
 
-Kein umschließender "Stash"-Wurzelknoten mehr: Die Tabs sind direkt die
-Top-Level-Einträge des Baums (spart eine Ebene, Nutzer-Feedback). Die
-Charakterliste lebt separat in ``character_list.py``.
+Die Stash-Tabs sind direkt die Top-Level-Einträge des Baums; ein
+umschließender Wurzelknoten würde nur eine Ebene kosten. Die
+Charakterliste liegt separat in ``character_list.py``.
 
-Drei Spalten: Name, Item-Anzahl ("#", Nutzer-Feedback — vorher stand die
-Zahl als "(N Items)"-Text im Namen, das wurde als unübersichtlich
-empfunden), und GENAU EINE Status-Spalte, die sich gegenseitig
-ausschließende Zustände zeigt: "⬇" (Items noch nie geladen) als reiner
-Text, oder — sobald mindestens einmal geladen — ein Refresh-Button, dessen
-Beschriftung zugleich das Alter der zuletzt geladenen Daten zeigt —
-heute geladene Fächer als exakte Uhrzeit ("⟳ 14:32:46", Nutzer-Feedback:
-"heute" allein verschleierte, OB der Auto-Refresh gerade wirklich
-gegriffen hat), ältere als Tage ("⟳ vor 3d"). Ist GGG nicht erreichbar (``set_offline``,
-Nutzer-Feedback: GGG-Wartung am Patchday), wird aus dem ⟳ ein "📴" — die
-Daten kommen dann garantiert aus dem Cache, nicht von einer frischen
-Anfrage. Die Namensspalte ist per Maus verbreiterbar
-(``Interactive`` statt ``Stretch`` — Stretch-Spalten lassen sich in Qt
-NICHT manuell resizen).
+Der Baum hat drei Spalten:
 
-LabVIEW-Äquivalent: Tree Control mit rekursivem Laden der children. Die
-Tab-Farbe (metadata.colour, hex ohne '#') wird NICHT als Textfarbe verwendet
-(einige API-Farben sind dunkel genug, um auf dunklem Grund unlesbar zu
-werden) — stattdessen als kleines Farbquadrat vor dem Namen (Icon), Text
-bleibt immer in der normalen, garantiert lesbaren Vordergrundfarbe.
+* **Name** mit der Tab-Farbe als kleinem Farbquadrat davor. Die Farbe
+  (``metadata.colour``, Hex ohne '#') dient bewusst nicht als Textfarbe,
+  da einige API-Farben auf dunklem Grund unlesbar wären. Die Spalte ist
+  per Maus verbreiterbar; dafür ist ``Interactive`` nötig, denn
+  ``Stretch``-Spalten lassen sich in Qt nicht manuell verbreitern.
+* **#** mit der Item-Anzahl.
+* **Status** mit genau einem von zwei sich ausschließenden Zuständen:
+  "⬇" als reiner Text, solange nie geladen wurde, sonst ein
+  Refresh-Button, dessen Beschriftung das Alter der Daten trägt. Heute
+  geladene Fächer erscheinen mit exakter Uhrzeit ("⟳ 14:32:46"), ältere
+  mit Tagesangabe ("⟳ vor 3d"). Ist GGG nicht erreichbar
+  (``set_offline``), wird aus dem ⟳ ein "📴"; die Daten stammen dann
+  sicher aus dem Cache.
 
 Rechtsklick auf einen Tab öffnet ein Kontextmenü mit "Rohdaten anzeigen"
-(``raw_data_requested``-Signal) — Aufhänger für den Mini-Viewer in
-``ui/raw_data_viewer.py`` (Nutzer-Feedback).
+(``raw_data_requested``), das den Viewer in ``ui/raw_data_viewer.py``
+speist.
 
-``highlight_stash(stash_id)`` hebt einen Knoten hervor (Klick auf ein Item
-in einer Aggregat-/Suchansicht, MainWindow._on_row_selected) — klappt
-nötige Eltern-Ordner auf und scrollt hin, OHNE das ``stash_selected``-
-Signal auszulösen (nutzt ``setCurrentItem`` statt eines echten Klicks):
-sonst würde das versehentlich die gerade angezeigte Such-/Aggregat-Ansicht
-in der Item-Tabelle überschreiben (Nutzer-Feedback).
+``highlight_stash(stash_id)`` hebt einen Knoten hervor, wenn in einer
+Aggregat- oder Suchansicht eine Zeile ausgewählt wird
+(``MainWindow._on_row_selected``). Die Methode klappt die nötigen
+Eltern-Ordner auf und scrollt zum Knoten, löst aber kein
+``stash_selected`` aus: Sie nutzt ``setCurrentItem`` statt eines echten
+Klicks, weil sonst die laufende Such- oder Aggregat-Ansicht in der
+Item-Tabelle überschrieben würde.
 
-Map-Stash-Kinder werden nach ``metadata.map.section`` gruppiert (Tier 1–16,
-dann Unique Maps, dann Special Maps) — ein flacher Baum mit 100+ Fächern war
-"uferlos" (Nutzer-Feedback). Die Gruppenknoten sind reine Anzeige-Hilfen
-(kein _DATA_ROLE → nicht klick-/refreshbar); die Datenschicht
-(MainWindow._stash_trees, _leaf_stashes, Cache) bleibt flach. Ihre
-Item-Anzahl ist die Summe der (bekannten) Kind-Anzahlen.
+Map-Stash-Kinder werden nach ``metadata.map.section`` gruppiert (Tier
+1–16, dann Unique Maps, dann Special Maps), da ein flacher Baum mit über
+100 Fächern unübersichtlich ist. Die Gruppenknoten sind reine
+Anzeige-Hilfen ohne ``_DATA_ROLE`` und daher weder klick- noch
+aktualisierbar; die Datenschicht (``MainWindow._stash_trees``,
+``_leaf_stashes``, Cache) bleibt flach. Ihre Item-Anzahl ist die Summe
+der bekannten Kind-Anzahlen.
 """
 
 from __future__ import annotations
@@ -78,7 +75,7 @@ def format_age(last_loaded_iso: str, *, now: datetime | None = None) -> str:
     "vor 1d" / "vor 12d" — kurze Beschriftung für den Refresh-Button.
 
     Vorher stand hier pauschal "heute", was jeden Auto-Refresh innerhalb
-    desselben Tages unsichtbar machte (Nutzer-Feedback: "automatisch hat
+    desselben Tages unsichtbar machte ("automatisch hat
     nicht hingehauen" — tatsächlich lief der Live-Refresh alle 40s
     zuverlässig, nur die Anzeige änderte sich den ganzen Tag über nie).
     Die Sekunden-Genauigkeit macht jeden einzelnen Tick sichtbar."""
@@ -158,7 +155,7 @@ class StashTree(QTreeWidget):
         self.customContextMenuRequested.connect(self._on_context_menu)
         header = self.header()
         header.setStretchLastSection(False)
-        # Interactive statt Stretch: Stretch-Spalten sind in Qt NICHT per
+        # Interactive statt Stretch: Stretch-Spalten sind in Qt nicht per
         # Maus verbreiterbar (das war der Bug hinter "Spalten lassen sich
         # nicht verbreitern"). Initialbreite grob großzügig gewählt.
         header.setSectionResizeMode(_COL_NAME, QHeaderView.ResizeMode.Interactive)
@@ -177,7 +174,7 @@ class StashTree(QTreeWidget):
         self.itemClicked.connect(self._on_click)
 
     def set_offline(self, offline: bool) -> None:
-        """GGG nicht erreichbar (Wartung/kein Netz, Nutzer-Feedback Patchday):
+        """GGG nicht erreichbar (Wartung oder kein Netz):
         markiert alle bereits geladenen Fächer als "kommt aus dem
         Offline-Cache", statt sie unverändert wie frisch geladen wirken zu
         lassen. Nie geladene (⬇) Fächer bleiben unverändert — für sie gibt es
@@ -205,7 +202,7 @@ class StashTree(QTreeWidget):
         overrides = item_counts or {}
         for stash in stashes:
             self.addTopLevelItem(self._build_node(stash, overrides))
-        # Status erst NACH dem Einhängen setzen — setItemWidget wirkt nur
+        # Status erst nach dem Einhängen setzen — setItemWidget wirkt nur
         # auf Items, die bereits Teil des Baums sind.
         for stash_id, node in self._stash_nodes.items():
             self._set_status(node, stash_id, last_loaded.get(stash_id))
@@ -233,7 +230,7 @@ class StashTree(QTreeWidget):
                      item_counts: dict[str, int] | None = None,
                      expand: bool = True) -> None:
         """Hängt die entdeckten Unter-Tabs eines Spezial-Tabs (MapStash, …) unter
-        dessen Knoten — OHNE den restlichen Baum neu aufzubauen (Aufklapp-Zustand
+        dessen Knoten — ohne den restlichen Baum neu aufzubauen (Aufklapp-Zustand
         und Scroll-Position bleiben erhalten)."""
         parent_node = self._stash_nodes.get(parent_id)
         if parent_node is None:
@@ -269,7 +266,7 @@ class StashTree(QTreeWidget):
         return stash.metadata.get("items")
 
     def _refresh_ancestor_totals(self, node: QTreeWidgetItem) -> None:
-        """Summe der Kind-Anzahlen nach oben durchreichen (Gruppen- UND
+        """Summe der Kind-Anzahlen nach oben durchreichen (Gruppen- und
         Ordner-Knoten) — z. B. "Tier 6" zeigt die Summe seiner Fächer."""
         parent = node.parent()
         while parent is not None:
@@ -285,8 +282,9 @@ class StashTree(QTreeWidget):
 
     def _attach_children(self, parent_node: QTreeWidgetItem, children: list[StashTab],
                          overrides: dict[str, int]) -> None:
-        """Kinder einhängen — Map-Fächer gruppiert nach Sektion (Nutzer-Feedback:
-        100+ flache Fächer waren "uferlos"), alles andere flach."""
+        """Kinder einhängen. Map-Fächer werden nach Sektion gruppiert, da
+        über 100 flache Fächer unübersichtlich sind; alles andere bleibt
+        flach."""
         grouped = group_map_children(children)
         if grouped is None:
             for child in children:
@@ -347,11 +345,11 @@ class StashTree(QTreeWidget):
             self.stash_selected.emit(stash.id, stash.display_name)
 
     def highlight_stash(self, stash_id: str) -> None:
-        """Hebt den Knoten eines Fachs hervor (Nutzer-Feedback: Klick auf ein
+        """Hebt den Knoten eines Fachs hervor (Klick auf ein
         Item in einer Aggregat-/Suchansicht soll das Herkunfts-Fach im Baum
         zeigen) — klappt dafür nötige Eltern-Knoten auf und scrollt hin.
         BEWUSST ``setCurrentItem`` statt eines simulierten Klicks: das löst
-        KEIN ``itemClicked`` aus (nur echte Mausklicks tun das), die
+        kein ``itemClicked`` aus (nur echte Mausklicks tun das), die
         Suche/Aggregat-Ansicht in der Item-Tabelle bleibt also unangetastet."""
         node = self._stash_nodes.get(stash_id)
         if node is None:

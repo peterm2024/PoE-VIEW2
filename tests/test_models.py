@@ -1,7 +1,7 @@
 """Tests für die Datenmodelle — v. a. die Gem-Property-Extraktion
 (Level/Quality haben keine festen JSON-Keys) und den rekursiven Stash-Baum.
-Die JSON-Strukturen entsprechen den Beobachtungen aus dem LabVIEW-Test-VI
-(docs/api-notes/labview-test-vi.md).
+Die JSON-Strukturen entsprechen den in docs/api-notes/ggg-api.md
+festgehaltenen Beobachtungen.
 """
 
 from poe_view.api.models import (Character, Item, StashTab, dominant_category,
@@ -48,7 +48,7 @@ def test_stash_tree_recursive_with_colour() -> None:
     }
     tab = StashTab.model_validate(data)
     assert tab.is_folder
-    assert tab.colour == "#7c5436"          # API liefert Hex OHNE '#'
+    assert tab.colour == "#7c5436"          # API liefert Hex ohne '#'
     assert tab.children[0].type == "CurrencyStash"
     assert tab.children[0].folder == "7dd8293e2a"
     assert not tab.children[0].is_folder
@@ -67,7 +67,7 @@ def test_unknown_fields_are_kept() -> None:
 
 
 def test_explicit_mods_normalizes_description_objects() -> None:
-    """Regression (Nutzer-Befund, Allflame-Liga): GGG liefert bei manchen
+    """Regression (Allflame-Liga): GGG liefert bei manchen
     Items (u. a. Currency-Beschreibungstexten) Mod-Einträge nicht mehr als
     reinen String, sondern als {"description": "..."}-Objekt — sonst würde
     der ganze Stash-Tab mit einem pydantic-ValidationError abbrechen."""
@@ -88,7 +88,7 @@ def test_explicit_mods_plain_strings_still_work() -> None:
 
 
 def test_stash_display_name_from_real_special_tab_structures() -> None:
-    """Strukturen aus ECHTEN Rohdaten (Nutzer, 2026-07-09) — nicht aus der Doku.
+    """Strukturen aus echten Rohdaten (Nutzer, 2026-07-09) — nicht aus der Doku.
 
     Map-Kinder: map.name enthält den Tier bereits ("Map (Tier 6)"), das
     name-Feld ist entweder wertlos ("1") oder ein GGG-Suffix mit führendem
@@ -120,7 +120,7 @@ def test_stash_display_name_from_real_special_tab_structures() -> None:
     assert ro_child.display_name == "Death and Taxes (Remove-only)"
 
     # Unique-Kind: völlig namenlos → Typ (Item-Anzahl steht in der eigenen
-    # Baum-Spalte, nicht mehr im Namen, Nutzer-Feedback)
+    # Baum-Spalte, nicht mehr im Namen)
     uniq_child = StashTab.model_validate({"id": "d", "name": "", "parent": "u1",
                                           "type": "UniqueStash",
                                           "metadata": {"items": 5}})
@@ -183,7 +183,7 @@ def test_dominant_category_majority_vote() -> None:
     assert dominant_category([_item("Mirror of Kalandra")]) is None
 
 
-# --- requirements: Anf.Lvl / Str / Dex / Int (Nutzer-Feedback) ------------- #
+# --- requirements: Anf.Lvl / Str / Dex / Int ------------- #
 
 def test_req_level_and_attributes_from_real_structure() -> None:
     """Echte API-Struktur (Cache-Analyse 2026-07-10, "Vortex Bane"):
@@ -213,7 +213,7 @@ def test_req_attribute_accepts_long_names() -> None:
 
 def test_req_level_ignores_heist_job_level() -> None:
     """Heist-Ausrüstung trägt "Level {0} in {1}" ("Level 2 in Any Job") —
-    das ist ein Job-Level, KEIN Charakter-Level (exakter Namensvergleich)."""
+    das ist ein Job-Level, kein Charakter-Level (exakter Namensvergleich)."""
     from poe_view.api.models import req_level
     item = Item.model_validate({"typeLine": "Focal Stone", "requirements": [
         {"name": "Level {0} in {1}", "values": [["2", 0], ["Any Job", 0]],

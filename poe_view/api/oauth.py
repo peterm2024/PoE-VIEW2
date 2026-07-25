@@ -1,11 +1,9 @@
 """OAuth2 Authorization-Code-Flow mit PKCE gegen die GGG-API.
 
-Ablauf (docs/ARCHITEKTUR.md §4.1; Parameter erprobt im LabVIEW-Test-VI):
+Ablauf (docs/ARCHITEKTUR.md §4.1, Parameter siehe docs/api-notes/ggg-api.md):
 verifier/challenge/state erzeugen → Browser öffnen → lokaler Callback-Server
 fängt den Redirect → state prüfen → code gegen Token tauschen.
 
-LabVIEW-Äquivalent: der obere Frame des Test-VIs (SHA256→Base64URL,
-TCP-Listener auf Port 64338, "State OK?"-Vergleich, Token-POST).
 """
 
 from __future__ import annotations

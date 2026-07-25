@@ -1,16 +1,11 @@
-# PoE-VIEW2 — Architektur & Konzept
+# PoE-VIEW2 — Architektur
 
-**Stand:** 2026-07-09 · **Status:** Entwurf (v0.1)
+PoE-VIEW2 ist eine Desktop-Anwendung, die über die offizielle GGG-API
+Accounts, Charaktere und Stash-Tabs ausliest, filtert und darstellt.
 
-PoE-VIEW2 ist die Python-Referenzimplementierung des LabVIEW-Tools **PoE-VIEW**:
-ein Community-Tool, das über die offizielle GGG-API Accounts, Charaktere und
-Stash-Tabs ausliest, filtert und übersichtlich darstellt.
-
-> **Dokumentations-Leitlinie:** Dieses Projekt dient als Vorlage für eine spätere
-> (Rück-)Portierung nach LabVIEW. Deshalb dokumentieren wir nicht nur *was* der
-> Code tut (funktionell), sondern auch *warum* er so gebaut ist (intentionell).
-> Jedes Modul erhält einen Docstring mit einem Abschnitt **"LabVIEW-Äquivalent"**,
-> der beschreibt, wie das Konzept in LabVIEW umgesetzt wird/wurde.
+Dieses Dokument beschreibt den Aufbau der Anwendung und begründet die
+getroffenen Entscheidungen. Es richtet sich an Entwickler, die am Code
+arbeiten oder ihn nachvollziehen wollen.
 
 ---
 
@@ -20,70 +15,46 @@ Stash-Tabs ausliest, filtert und übersichtlich darstellt.
 
 - Account-Login via OAuth2 (PKCE), Token-Verwaltung
 - Charaktere und Stash-Tabs (inkl. verschachtelter Ordner) anzeigen
-- Items mit Eigenschaften (Level, Quality bei Gems, …) tabellarisch darstellen, sortier- und filterbar
-- Item-Icons anzeigen (mit lokalem Cache)
-- Striktes, für den User sichtbares Rate-Limit-Management (kein 429/Bann)
-- Saubere, LabVIEW-portierbare Architektur mit ausführlicher Dokumentation
-- Open-Source-tauglich (keine Secrets im Code, Disclaimer)
+- Items mit ihren Eigenschaften tabellarisch darstellen, sortier- und filterbar
+- Item-Icons anzeigen, mit lokalem Cache
+- Striktes, für den Nutzer sichtbares Rate-Limit-Management (kein 429, kein Bann)
+- Open-Source-tauglich: keine Secrets im Code, Disclaimer vorhanden
 
-**Nicht-Ziele (vorerst)**
+**Nicht-Ziele**
 
-- Trade-/Preis-Funktionen, Markt-Anbindung
+- Trade- und Preis-Funktionen, Markt-Anbindung
 - Schreibende API-Zugriffe
-- Mehrbenutzer-/Serverbetrieb — das Tool ist eine lokale Desktop-App
+- Mehrbenutzer- oder Serverbetrieb; PoE-VIEW2 ist eine lokale Desktop-App
 
 ---
 
-## 2. Tech-Stack & Begründung
+## 2. Tech-Stack
 
-| Bereich | Wahl | Begründung (Intention) |
+| Bereich | Wahl | Begründung |
 |---|---|---|
-| GUI | **PySide6** (Qt 6) | Tree-Views, Tabellen, Signale/Slots — entspricht 1:1 den LabVIEW-Konzepten (Tree Control, Multicolumn Listbox, User Events). LGPL-lizenziert, Open-Source-kompatibel. |
-| HTTP | **httpx** (synchron, mit `Client`) | Persistente Session mit festen Headern = LabVIEW "persistenter HTTP-Client-Handle". |
-| Datenmodelle | **pydantic v2** | Validiertes JSON-Parsing; Modelle entsprechen LabVIEW-Clustern/Typedefs. |
-| Nebenläufigkeit | **QThread-Worker + Qt-Signale** (bewusst *kein* asyncio) | Siehe 2.1 — beste Abbildbarkeit auf LabVIEW. |
-| Konfiguration | `.env` / `config.json` (in `.gitignore`) | Kein Client-Secret im Code (Open-Source-Compliance). |
-| Token-Speicherung | `keyring` (Windows Credential Manager) | Entspricht der LabVIEW-Lösung "externe Datei", aber sicherer. |
+| GUI | **PySide6** (Qt 6) | Ausgereifte Tree-Views und Tabellen, Signale/Slots für die Thread-Kommunikation. LGPL-lizenziert und damit Open-Source-kompatibel. |
+| HTTP | **httpx** (synchron) | Persistente Session mit festen Headern, Connection-Pooling. |
+| Datenmodelle | **pydantic v2** | Validiertes JSON-Parsing mit `extra="allow"` für unbekannte API-Felder. |
+| Nebenläufigkeit | **QThread-Worker + Qt-Signale** | Siehe 2.1. |
+| Konfiguration | `.env` (optional, in `.gitignore`) | Überschreibt die Standardwerte in `config.py`. |
+| Token-Speicherung | `keyring` (Windows Credential Manager) | Kein Klartext-Token auf der Platte. |
 
-### 2.1 Warum Threads statt asyncio?
+### 2.1 Threads statt asyncio
 
-Gemini hatte `asyncio` empfohlen. Wir entscheiden uns **bewusst dagegen**
-*(Entscheidung bestätigt 2026-07-09; eine LabVIEW-Rückportierung ist
-inzwischen optional, das Argument gilt auch ohne sie)*:
+Die Entscheidung fiel bewusst gegen `asyncio`:
 
-- **Einfachste robuste Qt-Integration:** Qt hat einen eigenen Event-Loop;
-  asyncio daneben zu betreiben erfordert eine Brücke (z. B. `qasync`) —
-  eine zusätzliche Abhängigkeit und Fehlerquelle ohne Nutzen für uns.
-- Die App macht wenige, **sequenzielle** API-Calls — Parallelität ist nicht
-  gewollt (Rate-Limit!), asyncio brächte hier keinen praktischen Vorteil.
-- Bonus LabVIEW: Das Modell *"Worker-Thread + Queue + blockierendes Sleep"*
-  entspricht exakt LabVIEWs QMH/Producer-Consumer mit `Wait (ms)`. Falls
-  doch je portiert wird, bleibt die Ablauflogik 1:1 übertragbar —
-  `asyncio`-Coroutinen hätten kein LabVIEW-Gegenstück.
+- Qt bringt einen eigenen Event-Loop mit. `asyncio` parallel zu betreiben
+  erfordert eine Brücke wie `qasync` und damit eine zusätzliche
+  Abhängigkeit samt Fehlerquelle.
+- Die Anwendung setzt wenige, streng sequenzielle API-Calls ab.
+  Parallelität ist wegen des Rate-Limits ohnehin nicht erwünscht, `asyncio`
+  brächte also keinen praktischen Vorteil.
 
-**Regel:** UI läuft im Main-Thread. Alle API-Calls laufen in einem einzigen
-API-Worker-Thread, der Aufträge aus einer Queue abarbeitet (sequenziell — das
-vereinfacht auch das Rate-Limiting). Ergebnisse gehen per Qt-Signal zurück an
-die UI. Die UI blockiert dadurch nie, auch wenn der Rate-Limiter 60 s wartet.
-
-### 2.2 Konzept-Mapping Python ↔ LabVIEW
-
-Diese Tabelle ist der "Rosetta-Stein" für die spätere Portierung:
-
-| LabVIEW | Python (PoE-VIEW2) |
-|---|---|
-| Functional Global Variable (FGV) | Singleton-Klasse mit `threading.Lock` (`RateLimitManager`) |
-| Shift-Register-State der FGV | Instanzattribute der Singleton-Klasse |
-| Cluster / Typedef | pydantic-Modell bzw. `dataclass` |
-| User Event → Main-VI | Qt-Signal → Slot im MainWindow |
-| Queued Message Handler / Producer-Consumer | `ApiWorker` (QThread) + `queue.Queue` von Job-Objekten |
-| `Wait (ms)` im FGV-Case "Check & Wait" | `time.sleep()` im Worker-Thread (nie im Main-Thread!) |
-| Tree Control | `QTreeWidget` |
-| Multicolumn Listbox | `QTableView` + `QAbstractTableModel` + `QSortFilterProxyModel` |
-| Picture Control | `QLabel` mit `QPixmap` |
-| Persistenter HTTP-Client-Handle | `httpx.Client`-Instanz mit Default-Headern |
-| Hex-Farbe → U32 | `QColor("#rrggbb")` |
-| Fehler-Cluster | Exceptions + `error`-Signal des Workers |
+Daraus folgt: Die UI läuft im Main-Thread. Sämtliche API-Calls laufen in
+einem einzigen Worker-Thread, der Aufträge aus einer Queue sequenziell
+abarbeitet. Ergebnisse gehen per Qt-Signal zurück an die UI. Die
+Oberfläche blockiert deshalb auch dann nicht, wenn der Rate-Limiter 60
+Sekunden wartet.
 
 ---
 
@@ -111,9 +82,8 @@ die API-Schicht weiß nichts von Qt, die UI weiß nichts von HTTP.
 └─────────────────────────────────────────────────────────┘
 ```
 
-*Intention:* Die API-Schicht ist ohne GUI testbar (pytest, auch offline mit
-gespeicherten JSON-Antworten) und entspricht in LabVIEW den SubVIs ohne
-Frontpanel-Bezug.
+Die API-Schicht ist dadurch ohne GUI testbar, auch offline mit
+gespeicherten JSON-Antworten.
 
 ### 3.1 Projektstruktur
 
@@ -128,10 +98,10 @@ PoE-VIEW2/
 │   ├── api/
 │   │   ├── oauth.py            # OAuth2 PKCE + lokaler Callback-Server
 │   │   ├── client.py           # PoeApiClient: httpx.Client, Header, Endpunkte
-│   │   ├── rate_limiter.py     # RateLimitManager (≙ FGV)
+│   │   ├── rate_limiter.py     # RateLimitManager
 │   │   └── models.py           # pydantic: Character, StashTab, Item, ItemProperty
 │   ├── services/
-│   │   ├── api_worker.py       # QThread + Job-Queue (≙ QMH-Loop)
+│   │   ├── api_worker.py       # QThread + Job-Queue
 │   │   ├── icon_cache.py       # Icon-Download + Datei-Cache
 │   │   ├── data_cache.py       # Charaktere/Stash/Items überleben einen Neustart
 │   │   ├── csv_export.py       # Item-Export als CSV
@@ -161,8 +131,8 @@ PoE-VIEW2/
 
 ### 4.1 OAuth2 mit PKCE (`api/oauth.py`)
 
-Ablauf (identisch zur LabVIEW-Implementierung; erprobte Parameter siehe
-[api-notes/labview-test-vi.md](api-notes/labview-test-vi.md)):
+Ablauf (erprobte Parameter siehe
+[api-notes/ggg-api.md](api-notes/ggg-api.md)):
 
 1. `code_verifier` (Zufallsstring), `code_challenge` (SHA-256, base64url) und
    `state` (64-Bit-Zufall, `%016x`) erzeugen.
@@ -170,8 +140,8 @@ Ablauf (identisch zur LabVIEW-Implementierung; erprobte Parameter siehe
    `http.server`, ein einziger Request) — Port 64338 ist als Redirect-URI der
    Client-Registrierung fest hinterlegt.
 3. Browser mit der GGG-Authorize-URL öffnen (`webbrowser.open`).
-4. Callback abfangen → `state` prüfen (CSRF-Schutz, ≙ "State OK?" im Test-VI)
-   → `code` extrahieren → Erfolgsseite ausliefern → Server beenden.
+4. Callback abfangen, `state` prüfen (CSRF-Schutz), `code` extrahieren,
+   Erfolgsseite ausliefern, Server beenden.
 5. `code` + `code_verifier` gegen Access-Token tauschen (gültig ~10 h).
 6. Token im Windows Credential Manager speichern (`keyring`); beim App-Start
    prüfen, ob ein gültiges Token existiert → Login-Schritt überspringen.
@@ -189,16 +159,13 @@ Ablauf (identisch zur LabVIEW-Implementierung; erprobte Parameter siehe
 
 ```python
 def _get(self, path: str, policy_hint: str) -> httpx.Response:
-    """Zentraler GET. LabVIEW-Äquivalent: SubVI 'HTTP GET wrapped'.
-
-    Intention: Rate-Limit-Check VOR und State-Update NACH jedem
-    Request erzwingen — kein Endpunkt kann das umgehen.
-    """
-    self.rate_limiter.check_and_wait(policy_hint)   # ≙ FGV-Case "Check & Wait"
+    """Zentraler GET: erzwingt den Rate-Limit-Check vor und das
+    State-Update nach jedem Request. Kein Endpunkt kann das umgehen."""
+    self.rate_limiter.check_and_wait(policy_hint)
     resp = self._http.get(self.BASE_URL + path)
-    self.rate_limiter.update_from_headers(resp.headers)  # ≙ Header-Parsing
+    self.rate_limiter.update_from_headers(resp.headers)
     if resp.status_code == 429:
-        # Defensive: Retry-After respektieren, einmal wiederholen
+        # Retry-After respektieren, genau einmal wiederholen
         ...
     resp.raise_for_status()
     return resp
@@ -209,13 +176,14 @@ def _get(self, path: str, policy_hint: str) -> httpx.Response:
 - Liga-Namen können Leerzeichen enthalten (`SSF Ruthless`) → Pfadsegmente
   immer per `urllib.parse.quote` encoden.
 
-### 4.3 Rate-Limit-Manager (`api/rate_limiter.py`) — das Kernsystem
+### 4.3 Rate-Limit-Manager (`api/rate_limiter.py`)
 
-Direkte Übersetzung der LabVIEW-FGV. Threadsicher via `threading.Lock`
-(in v1 nur ein API-Thread, aber der Lock dokumentiert die Intention und
-entspricht der Nicht-Reentranz einer FGV).
+Die zentrale Komponente der Anwendung: Sie verhindert HTTP 429 und die
+daraus folgenden temporären Sperren. Threadsicher über `threading.Lock`
+(aktuell greift nur ein API-Thread darauf zu, der Lock hält die
+Anforderung dennoch fest).
 
-**Datenmodell** (≙ FGV-Cluster):
+**Datenmodell:**
 
 ```python
 @dataclass
@@ -230,11 +198,11 @@ class RateLimitRule:
 class PolicyState:
     policy_name: str            # aus X-Rate-Limit-Policy
     rules: list[RateLimitRule]  # mehrere Regeln, z. B. "10:15:60,30:300:1800"
-    last_update: float          # Timestamp (≙ LastUpdate im Shift-Register)
+    last_update: float          # Timestamp des letzten Header-Updates
 ```
 
-**Header-Parsing** — hier steckte der LabVIEW-Bug (Mapping Current/Max),
-deshalb halten wir das Format explizit fest:
+**Header-Parsing.** Das Format ist hier explizit festgehalten, weil die
+Zuordnung von Regel zu Verbrauch eine bekannte Fehlerquelle ist:
 
 - `X-Rate-Limit-Account` = Regeln: `Max:Window:LockTime[,Max:Window:LockTime…]`
 - `X-Rate-Limit-Account-State` = Verbrauch: `Current:Window:AktiveSperre[,…]`
@@ -252,10 +220,10 @@ deshalb halten wir das Format explizit fest:
 - `update_from_headers(headers)` — nach jedem Request: Header parsen,
   State + Timestamp aktualisieren.
 - **Status-Callback:** Der Manager meldet jede Zustandsänderung und jeden
-  Warte-Countdown über einen Callback nach außen (≙ User Event an das Main-VI).
-  Der `ApiWorker` verdrahtet diesen Callback mit einem Qt-Signal
-  `rate_limit_changed(policy, rules, wait_remaining_s)` → füttert das Dashboard.
-  *Intention:* Der Manager selbst bleibt Qt-frei (Schichtentrennung).
+  Warte-Countdown über einen Callback nach außen. Der `ApiWorker`
+  verbindet diesen Callback mit dem Qt-Signal
+  `rate_limit_changed(policy, rules, wait_remaining_s)`, das wiederum das
+  Dashboard speist. So bleibt der Manager selbst frei von Qt-Abhängigkeiten.
 
 ### 4.4 Datenmodelle (`api/models.py`)
 
@@ -269,39 +237,35 @@ modellieren — nichts geht verloren, nichts bricht bei API-Erweiterungen):
   `properties: list[ItemProperty]`, sockets, …
 - `ItemProperty`: name, `values: list[tuple[str, int]]`
 
-**`explicitMods`/`implicitMods` — Einträge können STRING ODER OBJEKT sein**
-(Nutzer-Befund, Allflame-Liga): GGG liefert für manche Items (u. a.
-Currency-Beschreibungstexte wie "Upgrades a normal item to a random
-rarity") einzelne Mod-Einträge nicht als reinen String, sondern als
-`{"description": "..."}`-Objekt — ohne Gegenmaßnahme bricht die
-pydantic-Validierung für den GESAMTEN Stash-Tab (alle Items darin gehen
-verloren, nicht nur das eine). Ein `field_validator(mode="before")` auf
-`Item` reduziert jeden dict-Eintrag auf sein `description`-Feld, bevor
-pydantic den Typ prüft — plain strings bleiben unverändert (siehe
-FALLSTRICKE_UND_WORKAROUNDS.md #25).
+**`explicitMods`/`implicitMods`: Einträge können String oder Objekt sein.**
+GGG liefert für manche Items, etwa Currency-Beschreibungstexte, einzelne
+Mod-Einträge als `{"description": "..."}`-Objekt statt als String. Ohne
+Gegenmaßnahme scheitert die pydantic-Validierung für den gesamten
+Stash-Tab, nicht nur für das betroffene Item. Ein
+`field_validator(mode="before")` auf `Item` reduziert jeden dict-Eintrag
+vor der Typprüfung auf sein `description`-Feld; Strings bleiben
+unverändert (siehe FALLSTRICKE_UND_WORKAROUNDS.md #25).
 
-**Gem-Level/Quality** (die bekannte Sonderlocke) als dokumentierte Helper:
+**Gem-Level und Quality** haben keine festen JSON-Keys, sondern liegen im
+`properties`-Array. Dafür gibt es dokumentierte Helper:
 
 ```python
 def get_property(item: Item, prop_name: str) -> str | None:
-    """Sucht eine Property per Name. Wert steckt in values[0][0].
+    """Sucht eine Property per Name; der Wert steckt in values[0][0].
 
-    Intention: Die API hat KEINE festen Keys für Level/Quality —
-    sie liegen als Einträge im 'properties'-Array. Quality kommt
-    als '+20%' und wird hier normalisiert.
-    LabVIEW-Äquivalent: Schleife über properties-Array im SubVI
-    'Extract Gem Info'.
+    Die API hat keine festen Keys für Level oder Quality, beide liegen
+    als Einträge im 'properties'-Array. Quality kommt als '+20%'.
     """
 ```
 
 ### 4.5 API-Worker (`services/api_worker.py`)
 
-Ein `QThread` mit Job-Queue — das Python-Pendant zum LabVIEW-QMH:
+Ein `QThread` mit Job-Queue:
 
 - Jobs sind kleine Objekte: `FetchCharacters`, `FetchStashList(league)`,
-  `FetchStashItems(league, stash_id)`, `FetchIcon(url)`, `Login`, …
-- Der Worker arbeitet die Queue **sequenziell** ab (ein Request nach dem
-  anderen → Rate-Limiter bleibt einfach und deterministisch).
+  `FetchStashItems(league, stash_id)`, `FetchIcon(url)`, `Login` und weitere.
+- Der Worker arbeitet die Queue **sequenziell** ab. Ein Request nach dem
+  anderen hält den Rate-Limiter einfach und deterministisch.
 - Ergebnisse/Fehler per Signal: `characters_loaded`, `stash_list_loaded`,
   `stash_items_loaded(league, stash_id, name, items, silent)` (die Liga
   reist explizit im Signal mit, siehe FALLSTRICKE_UND_WORKAROUNDS.md #10),
@@ -311,41 +275,43 @@ Ein `QThread` mit Job-Queue — das Python-Pendant zum LabVIEW-QMH:
 
 #### 4.5.1 Status-Text vs. Busy-Zustand — zwei getrennte Signale
 
-`status(str)` (Verlaufstext, z. B. "Lade Items: Currency 1 …") und
-`busy_changed(bool)` (steuert nur den Spinner) sind bewusst getrennt.
+`status(str)` trägt den Verlaufstext ("Lade Items: Currency 1 …"),
+`busy_changed(bool)` steuert ausschließlich den Spinner. Die Trennung hat
+einen konkreten Grund.
 
-*Ursprünglicher Bug:* `_dispatch()` emittierte früher am Ende JEDES Jobs
-unbedingt `status.emit("Bereit")`. Da Qt Cross-Thread-Signale FIFO in der
-Reihenfolge des Absendens auf dem Main-Thread verarbeitet, kam dieses
-"Bereit" nach `stash_items_loaded` immer als Letztes an und überschrieb die
-gerade erst gesetzte, spezifischere Meldung ("Currency 1: 45 Items") sofort
-wieder — sichtbar war es nur, wenn der Tab aus dem Netz kam (bei einem
-Cache-Treffer gab es kein nachfolgendes "Bereit", das den Text stiehlt).
+*Ursprünglicher Fehler:* `_dispatch()` sendete am Ende jedes Jobs
+`status.emit("Bereit")`. Qt verarbeitet Cross-Thread-Signale auf dem
+Main-Thread in der Reihenfolge des Absendens, deshalb traf dieses "Bereit"
+stets nach `stash_items_loaded` ein und überschrieb die spezifischere
+Meldung "Currency 1: 45 Items" sofort wieder. Auffällig war das nur bei
+Tabs aus dem Netz; bei einem Cache-Treffer folgte kein "Bereit", das den
+Text hätte verdrängen können.
 
-*Lösung:* `run()` emittiert `busy_changed(True/False)` rund um JEDEN Job
-(`try/finally`), unabhängig vom Inhalt. `status.emit("Bereit")` gibt es nur
-noch in den Cases, deren Ergebnis-Signal in der UI KEINEN eigenen
-Abschlusstext setzt (Ligen, Charaktere, Stash-Liste). Cases mit eigenem
-Abschlusstext (`FetchStashItemsJob`, `FetchAllItemsJob`) emittieren bewusst
-kein "Bereit".
+*Lösung:* `run()` sendet `busy_changed(True/False)` per `try/finally` um
+jeden Job, unabhängig von dessen Inhalt. `status.emit("Bereit")` bleibt
+den Jobs vorbehalten, deren Ergebnis-Signal in der UI keinen eigenen
+Abschlusstext setzt (Ligen, Charaktere, Stash-Liste). Jobs mit eigenem
+Abschlusstext (`FetchStashItemsJob`, `FetchAllItemsJob`) senden es nicht.
 
-#### 4.5.2 Job-Reihenfolge beim Start: BootstrapJob MUSS zuerst in der Queue stehen
+#### 4.5.2 Job-Reihenfolge beim Start
 
-`MainWindow.__init__` submitted `BootstrapJob()` VOR dem Aufruf von
-`self._build_ui()` — nicht danach, wie man beim Lesen des restlichen Codes
-erwarten würde. Grund (FALLSTRICKE #30): `_build_ui()` löst als letzten
-Schritt `_populate_cached_leagues()` aus, das bei vorhandenem Cache sofort
-`_on_league_changed()` → `worker.submit(FetchStashListJob(liga))` aufruft.
-Da der `ApiWorker`-Thread seine Queue strikt FIFO abarbeitet, würde dieser
-Job VOR dem Bootstrap laufen, wenn Bootstrap erst danach submitted würde —
-mit einem `PoeApiClient`, dessen Token noch nie gesetzt wurde. GGG
-antwortet dann mit HTTP 401, der `AuthError`-Handler löscht darauf den
-GESPEICHERTEN (eigentlich noch stundenlang gültigen!) Token, und der
-gleich danach laufende Bootstrap findet keinen Token mehr vor — ein
-kompletter, unnötiger Neu-Login bei praktisch jedem Programmstart mit
-gecachter Liga. `submit()` ist reine Queue-Einreihung und funktioniert
-bereits vor `worker.start()`; die Submit-REIHENFOLGE (nicht die Reihenfolge
-der umgebenden Funktionsaufrufe) bestimmt, was der Worker zuerst sieht.
+`MainWindow.__init__` reiht `BootstrapJob()` vor dem Aufruf von
+`self._build_ui()` ein, nicht danach. Der Grund (FALLSTRICKE #30):
+`_build_ui()` ruft zuletzt `_populate_cached_leagues()` auf, das bei
+vorhandenem Cache sofort `_on_league_changed()` und damit
+`worker.submit(FetchStashListJob(liga))` auslöst.
+
+Da der `ApiWorker` seine Queue strikt nach FIFO abarbeitet, liefe dieser
+Job vor dem Bootstrap, wenn der Bootstrap erst danach eingereiht würde,
+und zwar mit einem `PoeApiClient` ohne gesetztes Token. GGG antwortet mit
+HTTP 401, woraufhin der `AuthError`-Handler das gespeicherte, tatsächlich
+noch stundenlang gültige Token löscht. Der unmittelbar folgende Bootstrap
+findet dann kein Token mehr vor. Ergebnis wäre ein überflüssiger Neu-Login
+bei praktisch jedem Start mit gecachter Liga.
+
+`submit()` ist reine Queue-Einreihung und funktioniert bereits vor
+`worker.start()`. Maßgeblich ist die Reihenfolge der `submit()`-Aufrufe,
+nicht die der umgebenden Funktionsaufrufe.
 
 ### 4.6 Icon-Cache (`services/icon_cache.py`)
 
@@ -356,10 +322,10 @@ der umgebenden Funktionsaufrufe) bestimmt, was der Worker zuerst sieht.
 
 ### 4.7 Persistenter Daten-Cache (`services/data_cache.py`)
 
-Charaktere, Stash-Struktur und bereits geladene Items überleben einen
-Neustart — eine JSON-Datei (`%LOCALAPPDATA%/PoE-VIEW2/data-cache.json`)
-statt einer Datenbank: Der Datenumfang rechtfertigt keine Datenbank, und
-JSON ist 1:1 nach LabVIEW portierbar ("Flatten/Unflatten to JSON").
+Charaktere, Stash-Struktur und bereits geladene Items überstehen einen
+Neustart. Als Speicher dient eine JSON-Datei
+(`%LOCALAPPDATA%/PoE-VIEW2/data-cache.json`) statt einer Datenbank; der
+Datenumfang von einigen hundert Items rechtfertigt keine.
 
 - **Struktur:** `stash_trees: {Liga: [StashTab, …]}` (Baum OHNE Items — die
   Stash-LISTE der API liefert nie Items, die kommen ausschließlich vom
@@ -390,38 +356,36 @@ JSON ist 1:1 nach LabVIEW portierbar ("Flatten/Unflatten to JSON").
 
 `StashTree` hat drei Spalten: Name, **# (Item-Anzahl)** und Status.
 
-Die Status-Spalte zeigt bewusst nur EINEN von zwei sich gegenseitig
-ausschließenden Zuständen (Nutzer-Feedback: "wir benötigen im Stash-Tree
-nur entweder das Download-Symbol oder das Refresh-Symbol"): **entweder**
-"⬇" (noch nie geladen, reiner Text) **oder**, sobald mindestens einmal
-geladen, ein Refresh-Button, dessen Beschriftung zugleich das Alter der
-Daten trägt — heute geladen als exakte lokale Uhrzeit ("⟳ 14:32:46"),
-älter als Tage ("⟳ vor 3d", `stash_tree.format_age()`). Ursprünglich
-stand hier pauschal "heute", was jeden Auto-Refresh innerhalb desselben
-Tages unsichtbar machte (FALLSTRICKE #29) — die Sekunden-genaue Uhrzeit
-macht jeden einzelnen 40s-Tick des Live-Refresh (§4.8) sichtbar.
+Die Status-Spalte zeigt genau einen von zwei sich gegenseitig
+ausschließenden Zuständen: entweder "⬇" als reinen Text, solange der Tab
+nie geladen wurde, oder, sobald er mindestens einmal geladen wurde, einen
+Refresh-Button, dessen Beschriftung zugleich das Alter der Daten trägt.
+Heute geladene Tabs erscheinen mit exakter lokaler Uhrzeit
+("⟳ 14:32:46"), ältere mit Tagesangabe ("⟳ vor 3d",
+`stash_tree.format_age()`). Ursprünglich stand dort pauschal "heute", was
+jeden Auto-Refresh innerhalb desselben Tages unsichtbar machte
+(FALLSTRICKE #29); die sekundengenaue Uhrzeit macht jeden 40-Sekunden-Tick
+des Live-Refresh (§4.8) nachvollziehbar.
 
-Die **#-Spalte** trägt die Item-Anzahl — ursprünglich stand die Zahl als
-"(N Items)"-Text im Namen, das wurde als unübersichtlich empfunden
-(Nutzer-Feedback). Quelle: entweder die tatsächlich geladene Anzahl
-(`len(items)`, überschreibt alles andere) oder — bei noch nicht geladenen
-Map-/Unique-Kindern — der API-Hinweis `metadata.items`, den GGG dort schon
-vor dem eigentlichen Laden mitschickt. Gruppen- UND Ordner-Knoten zeigen
-die Summe ihrer (bekannten) Kind-Anzahlen (`StashTree._refresh_ancestor_
-totals`, rekursiv nach oben durchgereicht, sobald eine Zahl sich ändert).
+Die **#-Spalte** trägt die Item-Anzahl. Zuvor stand die Zahl als
+"(N Items)" im Namen, was die Namensspalte unübersichtlich machte. Als
+Quelle dient entweder die tatsächlich geladene Anzahl (`len(items)`, die
+alles andere überschreibt) oder bei noch nicht geladenen Map- und
+Unique-Kindern der API-Hinweis `metadata.items`, den GGG bereits vor dem
+Laden mitschickt. Gruppen- und Ordner-Knoten zeigen die Summe ihrer
+bekannten Kind-Anzahlen (`StashTree._refresh_ancestor_totals`, rekursiv
+nach oben durchgereicht, sobald sich eine Zahl ändert).
 
 ### 4.8 Hintergrund-Auto-Refresh (`MainWindow._maybe_auto_refresh`)
 
-Ein `QTimer` im Main-Thread (alle `AUTO_REFRESH_INTERVAL_MS` = 40 s) lädt
-im Hintergrund pro Tick **bis zu zwei** Stash-Tabs neu — der Nutzer muss
-dafür nichts tun, alte Daten "verwesen" aber nicht auf unbestimmte Zeit
-(Nutzer-Feedback):
+Ein `QTimer` im Main-Thread lädt alle `AUTO_REFRESH_INTERVAL_MS` (40 s)
+im Hintergrund bis zu zwei Stash-Tabs neu, ohne Zutun des Nutzers:
 
 1. **Das gerade angezeigte Fach ODER der gerade angezeigte Charakter**
    (`MainWindow._current_stash_id` bzw. `_current_character_name`, beide
    schließen sich gegenseitig aus — siehe §4.13) — IMMER, unabhängig vom
    Alter (die 1-Tag-Schonfrist des Sweeps unten gilt hier nicht), damit
-   die aktuell geöffnete Ansicht "lebt" (Nutzer-Feedback). Ist die
+   die aktuell geöffnete Ansicht "lebt". Ist die
    Aggregat-/Alle-Tabs-Ansicht aktiv, sind beide `None` und dieser Schritt
    entfällt. Charaktere haben KEINEN eigenen Sweep (siehe §4.13) — nur
    das gerade offene Fach ODER der gerade offene Charakter wird hier
@@ -443,7 +407,7 @@ Da pro Tick jetzt bis zu zwei statt einem Job rausgeht, wurde
 `AUTO_REFRESH_INTERVAL_MS` verdoppelt (20 s → 40 s) — die
 Gesamt-Anfragerate ans Rate-Limit bleibt damit wie vorher, sonst würde ein
 Tick den Worker-Thread in `RateLimitManager.check_and_wait` in eine
-Warteschleife (Timeout) laufen lassen (Nutzer-Feedback).
+Warteschleife (Timeout) laufen lassen.
 
 **Auswahl (`_pick_auto_refresh_candidate`):**
 
@@ -451,7 +415,7 @@ Warteschleife (Timeout) laufen lassen (Nutzer-Feedback).
    **noch nie geladen wurden** ODER deren letzter Ladezeitpunkt
    **mindestens `AUTO_REFRESH_MIN_AGE` (1 Tag)** zurückliegt — jüngere,
    bereits bekannte Daten fasst der Hintergrund-Worker nicht an ("man weiß
-   ja, was man getan hat", Nutzer-Feedback). Noch nie geladene Tabs gelten
+   ja, was man getan hat"). Noch nie geladene Tabs gelten
    als "unendlich alt" (`MainWindow._NEVER_LOADED`) und sind IMMER
    Kandidaten — die 1-Tag-Schonfrist gilt nur für bereits bekannte Daten,
    bei einem leeren Tab gibt es nichts zu schonen. So füllt sich der
@@ -494,7 +458,7 @@ angezeigte Liga einsickern lassen.
 `MainWindow._update_auto_refresh_label`) zählt die in dieser Session
 still aktualisierten Tabs der aktuellen Liga gegen die Gesamtzahl der
 Tabs — der Nutzer kann so jederzeit prüfen, dass der Hintergrund-Refresher
-tatsächlich arbeitet (Nutzer-Feedback). Gezählt wird pro Fach nur der
+tatsächlich arbeitet. Gezählt wird pro Fach nur der
 **erste** stille Ladevorgang (`_on_stash_items`/`_on_stash_children`
 prüfen, ob die `stash_id` bereits in `_last_loaded` steht, BEVOR sie den
 neuen Zeitstempel einträgt) — sonst würde das wiederholte Live-Halten des
@@ -512,7 +476,7 @@ FALLSTRICKE_UND_WORKAROUNDS.md #12).
 
 ### 4.9 Rohdaten-Mini-Viewer (`ui/raw_data_viewer.py`)
 
-Debug-/Inspektions-Werkzeug (Nutzer-Wunsch): Rechtsklick auf einen Stash-Tab
+Debug-/Inspektions-Werkzeug: Rechtsklick auf einen Stash-Tab
 im Baum → Kontextmenü "🔍 Rohdaten anzeigen" → ein eigenständiges,
 NICHT-modales Fenster (`RawDataViewer`, `Qt.WindowType.Window`) zeigt die
 Tab-Daten als eingerücktes JSON.
@@ -566,7 +530,7 @@ Die Items eines Unter-Tabs kommen ausschließlich vom
    `MainWindow._show_special_parent_aggregate()`: zeigt die Items ALLER
    bereits geladenen Unter-Fächer zusammen, mit dem Fach-Namen
    ("Map (Tier 1)") in der automatisch eingeblendeten Tab-Spalte
-   (Nutzer-Feedback); Statuszeile nennt "X Items aus N von M geladenen
+  ; Statuszeile nennt "X Items aus N von M geladenen
    Unter-Fächern". Kein API-Call — was fehlt, holt der Auto-Refresher
    oder ein Klick aufs jeweilige Fach.
 
@@ -577,7 +541,7 @@ Wechsel, "Aktualisieren") die bereits entdeckten Kinder wieder verwerfen —
 geladene Liste, bevor sie den alten Baum ersetzt.
 
 **Sektions-Gruppierung im Baum (nur Anzeige):** Ein Map-Stash kann 100+
-Fächer haben — flach war das "uferlos" (Nutzer-Feedback). Der `StashTree`
+Fächer haben — flach war das "uferlos". Der `StashTree`
 gruppiert Map-Fächer deshalb nach `metadata.map.section` unter synthetische
 Zwischenknoten: "Tier 1"–"Tier 16" (numerisch sortiert!), dann
 "Unique Maps", dann "Special Maps" — jeweils mit Summen-Item-Zahl in der
@@ -630,9 +594,9 @@ Gleichstände (z. B. mehrere "-inf" ohne iLvl, oder mehrere gleichnamige
 Items) zusätzlich über die Zeilennummer im Quellmodell auf — sonst würde
 ein Filter-Toggle (Typ-Checkbox, Spalten-Filter) zuvor ausgeblendete,
 gleichwertige Items ans Ende werfen statt an ihre alte Position
-zurückzuholen (Nutzer-Feedback, FALLSTRICKE #18).
+zurückzuholen (FALLSTRICKE #18).
 
-**Spalten-Filter (Excel-artig, Nutzer-Feedback "20% Quality, iLvl <45"):**
+**Spalten-Filter (Excel-artig):**
 Header-Rechtsklick zeigt oben ein Eingabefeld für die angeklickte Spalte
 (`QWidgetAction`), Enter übernimmt. Ausdrücke: `>=20`, `<45`, `=Text`,
 `!=…`, sonst Teilstring; numerisch wird verglichen, sobald Operand UND
@@ -641,7 +605,7 @@ Zelle eine Zahl hergeben. Aktive Filter markieren den Header mit 🔍
 und mit dem globalen Suchfeld, und die Statuszeile nennt Treffer/Gesamt.
 Bewusst NICHT persistiert (wie in Excel: Filter sind Arbeitszustand).
 
-**Liga-weite Suche (Nutzer-Feedback "fächerübergreifend"):** Tippen ins
+**Liga-weite Suche:** Tippen ins
 Suchfeld schaltet die Tabelle auf ALLE gecachten Items der aktuellen Liga
 um (Tab-Spalte = Herkunfts-Fach), Leeren des Felds kehrt zur vorher
 gewählten Ansicht zurück (`_current_stash_id` als Rückkehrziel; Baum-Klick
@@ -649,28 +613,29 @@ während der Suche beendet sie ebenfalls). Liga-Wechsel zieht eine aktive
 Suche auf die neue Liga um. Eingrenzen auf ein Fach: Baum-Klick oder
 Spalten-Filter auf der Tab-Spalte. Ein eingebauter Clear-Button
 (`setClearButtonEnabled`) leert das Feld per Klick auf das "x" am rechten
-Rand. Seit Nutzer-Feedback ("bei der '\*'-Suche sollte auch über sämtliche
-Inventar-Items gesucht werden") liefert `_league_wide_items()` (§4.13)
-zusätzlich Ausrüstung + Inventar aller bereits geladenen Charaktere DIESER
-Liga mit — Quelle dann "Charaktername: Slot" statt Fach-Name, Position/
-Baum-Hervorhebung entfallen (kein Truhenfach beteiligt). Betrifft
-gleichermaßen "Alle Tabs laden" (`_show_aggregate`), da beide dieselbe
-Aggregations-Funktion nutzen.
+Rand. `_league_wide_items()` (§4.13) liefert zusätzlich Ausrüstung und
+Inventar aller bereits geladenen Charaktere derselben Liga mit; als
+Herkunft steht dann "Charaktername: Slot" statt eines Fach-Namens,
+Position und Baum-Hervorhebung entfallen mangels Truhenfach. Das gilt
+gleichermaßen für "Alle Tabs laden" (`_show_aggregate`), da beide
+dieselbe Aggregationsfunktion nutzen.
 
-Die globale Suche durchsucht Name/Typ/Tab/Mods **und Properties**
-(Nutzer-Feedback: "nach Quantity gesucht, nur Chisel gefunden" — Map-
-Attribute wie Item Quantity/Rarity/Pack Size/Map Drop Chance stecken NICHT
-in `explicitMods`, sondern als eigene `properties`-Einträge, z. B.
-`{"name": "Item Quantity", "values": [["+23%", 1]]}`; ohne deren Text im
-Such-Haystack waren betroffene Maps nie über die Suche auffindbar).
-**"\*" als Suchtext zeigt bewusst ALLES** — gedacht für den
-Komplett-Export einer ganzen Truhe/Liga über den bestehenden CSV-Export
-(`_visible_rows` exportiert ohnehin die aktuell sichtbaren/gefilterten
-Zeilen). Technischer Haken: `QSortFilterProxyModel.setFilterFixedString`
-escaped den Text intern für die interne Regex (`"*"` → `"\*"`), das
-zurückgelesene `filterRegularExpression().pattern()` wäre also NIE der
-Rohtext — `ItemFilterProxy` überschreibt `setFilterFixedString` deshalb,
-um sich den unescapten Suchtext selbst zu merken.
+Die globale Suche durchsucht Name, Typ, Tab, Mods **und Properties**.
+Letzteres ist notwendig, weil Map-Attribute wie Item Quantity, Item
+Rarity, Pack Size und Map Drop Chance nicht in `explicitMods` stehen,
+sondern als eigene `properties`-Einträge
+(`{"name": "Item Quantity", "values": [["+23%", 1]]}`). Ohne deren Text
+im durchsuchten Bereich waren betroffene Maps über die Suche nicht
+auffindbar.
+
+**`*` als Suchtext zeigt alles an**, gedacht für den Komplett-Export
+einer Truhe oder Liga über den CSV-Export (`_visible_rows` exportiert
+ohnehin die aktuell sichtbaren Zeilen). Technischer Haken:
+`QSortFilterProxyModel.setFilterFixedString` escaped den Text intern für
+die Regex (`"*"` wird zu `"\*"`), das zurückgelesene
+`filterRegularExpression().pattern()` ist also nie der Rohtext.
+`ItemFilterProxy` überschreibt `setFilterFixedString` deshalb und merkt
+sich den unescapten Suchtext selbst.
 
 **Lazy-Icon-Loading:** Aggregat-Ansichten (Suche, "Alle Tabs",
 Spezial-Eltern) rufen `set_items(…, request_icons=False)` auf — Icons
@@ -679,71 +644,65 @@ werden erst angefordert, wenn Qt die Zeile tatsächlich malt
 ebenso viele Icon-Jobs in die sequenzielle Worker-Queue schieben und
 manuelle Klicks minutenlang hinter CDN-Fetches einreihen.
 
-**Position-Spalte ("#3 (4, 7)", Nutzer-Feedback: "mehrere gleichnamige
-Truhenfächer, z. B. Heist"):** Der Tab-NAME allein unterscheidet mehrere
-gleichnamige Fächer nicht — die Position-Spalte zeigt zusätzlich die
-1-basierte Position des Herkunfts-Tabs ("#3") sowie die Gitter-Koordinate
-des Items darin (API-Felder `x`/`y` am Item, bisher ungenutzt trotz
-`extra="allow"`). **NICHT** `StashTab.index` als Tab-Nummer verwenden —
-Nutzer-Korrektur: der `index` bezieht sich auf die Position INNERHALB DER
-LIGA, in der ein Tab ursprünglich angelegt wurde; beim Liga-Ende wandern
-Fächer nach Standard und behalten dabei ihren alten `index`, mehrere
-Fächer in Standard tragen also denselben Wert (FALLSTRICKE #21).
-`MainWindow._tab_positions()` berechnet die Tab-Nummer stattdessen aus der
-tatsächlichen, aktuellen Reihenfolge der API-Antwort (Position in
-`_leaf_stashes`, 1-basiert durchnummeriert) — das ist die einzige
-verlässliche Quelle, weil sie nicht von Liga-Historie kontaminiert ist.
-Anders als die Tab-Spalte NICHT automatisch verwaltet — sie bleibt auch im
-Einzelfach sichtbar (dort zeigt sie die Koordinate innerhalb des gerade
-geöffneten Tabs) und ist ganz normal über das Header-Menü aus-/einblendbar.
-Die Tab-Nummer wird an jeder `set_items()`-Aufrufstelle separat mitgegeben
-(`ItemTableModel` führt dafür `_tab_indices` parallel zu `_sources`,
-bereits 1-basiert) — MainWindows `_league_wide_items()` liefert sie für
-Aggregat-/Suchansichten, `_show_items()`/`_show_special_parent_aggregate()`
-je für Einzelfach bzw. Spezial-Tab-Kinder, jeweils über `_tab_positions()`.
-Sortierung über `NUMERIC_SORT_ROLE` per eigenem Tupel-Schlüssel
-`(Tab-Nr., x, y)` (Nutzer-Feedback: "#10" sortierte alphabetisch VOR
-"#2") — unbekannte Werte als "-inf", konsistent mit den übrigen
-Zahlenspalten.
+**Position-Spalte ("#3 (4, 7)").** Der Tab-Name allein unterscheidet
+gleichnamige Fächer nicht, wie sie in der Praxis häufig vorkommen (etwa
+mehrere Heist-Fächer). Die Position-Spalte zeigt deshalb zusätzlich die
+1-basierte Position des Herkunfts-Tabs sowie die Gitter-Koordinate des
+Items darin (`x`/`y` am Item).
 
-**Baum-Hervorhebung bei Zeilenauswahl (Nutzer-Feedback, v. a. relevant bei
-`*`):** `ItemTableModel` führt zusätzlich `_stash_ids` parallel zu
-`_sources`/`_tab_indices` (an denselben Aufrufstellen mitgegeben —
-`_show_items`, `_show_special_parent_aggregate`, `_league_wide_items`).
-`MainWindow._on_row_selected` ruft darüber `StashTree.highlight_stash
-(stash_id)` auf: klappt die nötigen Eltern-Ordner auf, setzt den Baum-
-Fokus auf den Knoten und scrollt ihn ins Bild. Kritischer Punkt (Nutzer-
-Feedback: "aufpassen, dass dadurch nicht automatisch die Suche geändert
-wird") — `highlight_stash` nutzt bewusst `QTreeWidget.setCurrentItem`,
-NICHT einen simulierten Klick: `itemClicked` (das Signal, an das
-`stash_selected` gekoppelt ist) feuert laut Qt nur bei echten
-Mausklicks, nicht bei programmatischen Selektionsänderungen — die
-liga-weite Suche/Aggregat-Ansicht in der Item-Tabelle bleibt dadurch
-garantiert unangetastet.
+`StashTab.index` ist als Tab-Nummer **nicht** geeignet: Der Wert bezieht
+sich auf die Position innerhalb der Liga, in der ein Tab ursprünglich
+angelegt wurde. Beim Liga-Ende wandern Fächer nach Standard und behalten
+ihren alten `index`, sodass dort mehrere Fächer denselben Wert tragen
+(FALLSTRICKE #21). `MainWindow._tab_positions()` leitet die Nummer
+stattdessen aus der aktuellen Reihenfolge der API-Antwort ab (Position in
+`_leaf_stashes`, 1-basiert). Nur diese ist frei von Liga-Historie.
 
-**Typ-Filter (8 Checkboxen neben dem Liga-Feld, `MainWindow.TYPE_FILTER_ENTRIES`,
-Nutzer-Feedback — ursprünglich "Rarity-Filter" mit nur 4 Checkboxen, dann um
-Gem/Currency/Divination Card sowie eine Sammel-Kategorie erweitert und
-entsprechend umbenannt):** Normal/Magic/Rare/Unique/Gem/Currency/Div Card
-(frameType 0–6) plus **"Sonstige"** (`theme.OTHER_TYPE = -1`, Pink) für
-alles ohne eigene Kategorie — Quest, Prophecy, Relic, unbekannte
-frameTypes (`item_table._type_key()` mappt jeden frameType auf sich selbst
-oder auf `OTHER_TYPE`). Bewusst ohne Textlabel ("wären zu lang"),
-stattdessen ist die Rand-/Füllfarbe der Checkbox selbst die Typ-Farbe
-(`theme.RARITY_COLORS`, Pink aus `theme.TYPE_FILTER_COLOR` für "Sonstige"),
-der Name steckt nur im Tooltip. Alle acht sind standardmäßig angehakt.
-Abwählen versteckt NUR diese eine Kategorie
-(`ItemFilterProxy.set_type_visible`), UND-verknüpft mit Text-/Spalten-Filtern.
+Anders als die Tab-Spalte verwaltet die Anwendung diese Spalte nicht
+selbst: Sie bleibt auch im Einzelfach sichtbar, wo sie die Koordinate
+innerhalb des geöffneten Tabs zeigt, und lässt sich über das Header-Menü
+ein- und ausblenden. Die Tab-Nummer wird an jeder `set_items()`-Aufrufstelle
+mitgegeben; `ItemTableModel` führt dafür `_tab_indices` parallel zu
+`_sources`. Sortiert wird über `NUMERIC_SORT_ROLE` mit dem Tupel-Schlüssel
+`(Tab-Nr., x, y)`, unbekannte Werte als `-inf`. Ohne diesen Schlüssel
+sortierte die Spalte alphabetisch, "#10" landete also vor "#2".
 
-### 4.12 Offline-Modus: GGG-Wartung/kein Netz überbrücken
+**Baum-Hervorhebung bei Zeilenauswahl.** `ItemTableModel` führt
+zusätzlich `_stash_ids` parallel zu `_sources` und `_tab_indices`.
+`MainWindow._on_row_selected` ruft damit `StashTree.highlight_stash(stash_id)`
+auf, was die nötigen Eltern-Ordner aufklappt, den Fokus auf den Knoten
+setzt und ihn ins Bild scrollt. Besonders nützlich ist das in der
+`*`-Ansicht, wo Items aus vielen Fächern gemischt erscheinen.
 
-Nutzer-Feedback vom Patchday/Liga-Start: "pathofexile.com is currently
-down for maintenance" — die App war zu dem Zeitpunkt faktisch unbenutzbar,
-obwohl der Datei-Cache (`data_cache.json`) längst Stash-Daten von vorher
-enthielt. Ursache: Das Liga-Dropdown wurde ausschließlich vom LIVE-Signal
-`leagues_loaded` befüllt; ohne Netzwerk kam dieses Signal nie an, also
-blieb das Dropdown leer — der Cache war zwar da, aber unerreichbar, weil
-kein UI-Pfad zu ihm führte.
+Entscheidend dabei: `highlight_stash` verwendet `QTreeWidget.setCurrentItem`
+statt eines simulierten Klicks. Qt löst `itemClicked` (das Signal, an dem
+`stash_selected` hängt) ausschließlich bei echten Mausklicks aus, nicht
+bei programmatischen Selektionsänderungen. Die laufende Suche oder
+Aggregat-Ansicht in der Item-Tabelle bleibt dadurch unverändert.
+
+**Typ-Filter** (8 Checkboxen neben dem Liga-Feld,
+`MainWindow.TYPE_FILTER_ENTRIES`; ursprünglich ein "Rarity-Filter" mit
+vier Checkboxen, später um Gem, Currency, Divination Card und eine
+Sammel-Kategorie erweitert): Normal/Magic/Rare/Unique/Gem/Currency/Div Card
+(frameType 0–6) sowie **"Sonstige"** (`theme.OTHER_TYPE = -1`, pink) für
+alles ohne eigene Kategorie, also Quest, Prophecy, Relic und unbekannte
+frameTypes (`item_table._type_key()` bildet jeden frameType auf sich
+selbst oder auf `OTHER_TYPE` ab). Die Checkboxen tragen keine Textlabel,
+da die Typnamen dafür zu lang wären; stattdessen ist die Rand- und
+Füllfarbe der Checkbox die Typ-Farbe (`theme.RARITY_COLORS`, für
+"Sonstige" `theme.TYPE_FILTER_COLOR`), der Name steht im Tooltip. Alle
+acht sind standardmäßig aktiv. Abwählen blendet ausschließlich die
+betreffende Kategorie aus (`ItemFilterProxy.set_type_visible`),
+UND-verknüpft mit Text- und Spalten-Filtern.
+
+### 4.12 Offline-Modus
+
+Fällt die GGG-API aus, etwa an einem Patchday, war die Anwendung früher
+praktisch unbenutzbar, obwohl der Datei-Cache (`data_cache.json`) längst
+Stash-Daten enthielt. Ursache war, dass das Liga-Dropdown ausschließlich
+über das Live-Signal `leagues_loaded` befüllt wurde. Ohne Netzwerk traf
+dieses Signal nie ein, das Dropdown blieb leer, und ohne ausgewählte Liga
+führte kein UI-Pfad zu den vorhandenen Cache-Daten.
 
 **Erkennung (`api_worker._is_connectivity_issue`):** Unterscheidet
 "wir sind offline" von echten Anwendungsfehlern, damit z. B. ein simpler
@@ -831,10 +790,10 @@ kein automatisches Neuladen. `_on_character_items` prüft
 eintreffendes Ergebnis eines inzwischen abgewählten Charakters nur noch
 gecacht, aber nicht mehr angezeigt wird.
 
-**Frisch halten — zwei Wege, wie bei Stash-Tabs** (Nutzer-Rückfrage: "ich
-bin mir nicht sicher, wie oft GGG das Inventar aktualisiert" — die
-Antwort darauf ist unbekannt/nicht verifizierbar, also macht die App
-ihre EIGENE Aktualität stattdessen selbst kontrollierbar):
+**Aktuell halten: zwei Wege, analog zu den Stash-Tabs.** Wie oft GGG das
+Charakter-Inventar serverseitig aktualisiert, ist nicht dokumentiert und
+ließ sich nicht verlässlich ermitteln. Die Anwendung macht deshalb
+stattdessen ihre eigene Aktualität kontrollierbar:
 
 1. **Automatisch, nur der gerade angezeigte Charakter:** Ist
    `_current_character_name` gesetzt, nimmt `_maybe_auto_refresh` (§4.8)
@@ -896,16 +855,16 @@ Rechtsklick-Kontextmenü über der Toolbar an, mit dem sich diese komplett
 ausblenden lässt (`setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)`
 am Fenster deaktiviert es). Ohne Menüleiste gäbe es dann keinen Weg mehr
 zurück — Login, Refresh, Liga-Wahl, Typ-Filter und Suche wären komplett
-verschwunden (Nutzer-Feedback: aus Versehen ausgelöst).
+verschwunden.
 
 **Elemente & Verhalten:**
 
 | Bereich | Widget | Verhalten |
 |---|---|---|
-| Navigation: Charaktere | `CharacterList` (`QListWidget`) | Bewusst KEIN Tree — Charaktere haben keine Unterstruktur (Nutzer-Feedback: spart eine Ebene samt Auf-/Zuklapp-Klick). Flach, absteigend nach Level, liga-gefiltert (`MainWindow._apply_character_league_filter`, siehe §5.1). Höhe begrenzt (`setMaximumHeight`), damit der Stash-Baum den meisten Platz bekommt. |
-| Navigation: Stash | `StashTree` (`QTreeWidget`), 3 Spalten, **Header sichtbar** | Kein umschließender "Stash"-Wurzelknoten mehr — die Tabs SIND die Top-Level-Einträge (spart eine weitere Ebene). Ordner rekursiv (children), Map-Fächer zusätzlich nach Sektion gruppiert (§4.10). Namensspalte per `QHeaderView.ResizeMode.Interactive` (NICHT `Stretch` — Stretch-Spalten lassen sich in Qt nicht per Maus verbreitern, das war ein echter Bug) mit großzügiger Startbreite, per Header-Rand manuell nachziehbar. Tab-Farbe aus API als kleines Icon-Quadrat VOR dem Namen, bewusst NICHT als Textfarbe (manche API-Farben sind auf dunklem Grund sonst unlesbar). Klick auf Tab → `FetchStashItems`-Job, sofern nicht bereits im Cache. Spalte 2 (**#**) zeigt die Item-Anzahl (Nutzer-Feedback: eigene Spalte statt "(N Items)"-Text im Namen; Details §4.7.1). Spalte 3 zeigt GENAU EINEN von DREI sich gegenseitig ausschließenden Zuständen (§4.7.1, §4.12): **⬇**-Text, solange nie geladen; ein **⟳-Button mit Alters-Beschriftung** (exakte Uhrzeit "⟳ 14:32:46" bei heute geladenen Daten, sonst "⟳ vor 3d") sobald mindestens einmal geladen — Klick lädt genau diesen Tab bewusst AM Cache vorbei neu (`stash_refresh_requested`-Signal); oder **📴** statt ⟳, solange GGG nicht erreichbar ist (Offline-Modus, §4.12) — derselbe Button, nur die Beschriftung ändert sich, ein Klick versucht trotzdem ein Neuladen. Rechtsklick öffnet ein Kontextmenü mit "🔍 Rohdaten anzeigen" (`raw_data_requested`-Signal, §4.9) — öffnet/aktualisiert den nicht-modalen Rohdaten-Mini-Viewer. |
+| Navigation: Charaktere | `CharacterList` (`QListWidget`) | Bewusst KEIN Tree — Charaktere haben keine Unterstruktur (spart eine Ebene samt Auf- und Zuklapp-Klick). Flach, absteigend nach Level, liga-gefiltert (`MainWindow._apply_character_league_filter`, siehe §5.1). Höhe begrenzt (`setMaximumHeight`), damit der Stash-Baum den meisten Platz bekommt. |
+| Navigation: Stash | `StashTree` (`QTreeWidget`), 3 Spalten, **Header sichtbar** | Kein umschließender "Stash"-Wurzelknoten mehr — die Tabs SIND die Top-Level-Einträge (spart eine weitere Ebene). Ordner rekursiv (children), Map-Fächer zusätzlich nach Sektion gruppiert (§4.10). Namensspalte per `QHeaderView.ResizeMode.Interactive` (NICHT `Stretch` — Stretch-Spalten lassen sich in Qt nicht per Maus verbreitern, das war ein echter Bug) mit großzügiger Startbreite, per Header-Rand manuell nachziehbar. Tab-Farbe aus API als kleines Icon-Quadrat VOR dem Namen, bewusst NICHT als Textfarbe (manche API-Farben sind auf dunklem Grund sonst unlesbar). Klick auf Tab → `FetchStashItems`-Job, sofern nicht bereits im Cache. Spalte 2 (**#**) zeigt die Item-Anzahl (eigene Spalte statt "(N Items)"-Text im Namen; Details §4.7.1). Spalte 3 zeigt GENAU EINEN von DREI sich gegenseitig ausschließenden Zuständen (§4.7.1, §4.12): **⬇**-Text, solange nie geladen; ein **⟳-Button mit Alters-Beschriftung** (exakte Uhrzeit "⟳ 14:32:46" bei heute geladenen Daten, sonst "⟳ vor 3d") sobald mindestens einmal geladen — Klick lädt genau diesen Tab bewusst AM Cache vorbei neu (`stash_refresh_requested`-Signal); oder **📴** statt ⟳, solange GGG nicht erreichbar ist (Offline-Modus, §4.12) — derselbe Button, nur die Beschriftung ändert sich, ein Klick versucht trotzdem ein Neuladen. Rechtsklick öffnet ein Kontextmenü mit "🔍 Rohdaten anzeigen" (`raw_data_requested`-Signal, §4.9) — öffnet/aktualisiert den nicht-modalen Rohdaten-Mini-Viewer. |
 | Typ-Filter (Toolbar, neben Liga) | 8× `QCheckBox` ohne Text | Normal/Magic/Rare/Unique/Gem/Currency/Div Card + "Sonstige" (§4.11) — Farbe des Käschchens = Typ-Farbe (Pink für "Sonstige"), Name nur im Tooltip. Alle acht standardmäßig an; Abwählen blendet nur diese eine Kategorie aus der Item-Tabelle aus. |
-| Item-Tabelle rechts oben | `QTableView` + `QSortFilterProxyModel` | Spalten: Icon, Tab, **Position** ("#3 (4, 7)" — Tab-Index + Item-Koordinate, §4.11, unterscheidet gleichnamige Fächer), Name, Typ, Level, Quality, Stack, iLvl, **Anf.Lvl, Str, Dex, Int** (benötigter Level/Attribute aus dem `requirements`-Array der API, §4.11), **Mods** (explicitMods, v. a. Map-Modifikatoren; Tooltip zeilenweise). Klick auf Spaltenkopf sortiert — **numerisch** über `NUMERIC_SORT_ROLE` (echte Zahlen statt "113" < "56"-Stringvergleich, "–" ganz unten). Das Suchfeld sucht **fächerübergreifend über die ganze Liga**, durchsucht auch Item-Properties (z. B. "Item Quantity"), hat einen eingebauten Clear-Button, und zeigt bei `*` bewusst ALLES an — für den Komplett-Export einer Truhe/Liga (§4.11); zusätzlich je Spalte ein **Excel-artiger Filter-Ausdruck** (`>=20`, `<45`, `=Text`, Teilstring) über das Header-Rechtsklick-Menü, aktive Filter tragen 🔍 im Header. **Spalten per Rechtsklick auf den Header an-/abwählbar** (Nutzer-Feedback), Wahl persistiert in `%LOCALAPPDATA%/PoE-VIEW2/ui-settings.ini` (INI statt Registry — Datei-Ansatz, LabVIEW-portierbar); "Typ" ist default AUS (Rarity steckt bereits in der Namensfarbe). Die **Tab-Spalte wird automatisch verwaltet** und ist nicht im Menü: AUS bei Einzelfach-Auswahl (redundant), AN in Aggregat-Ansichten ("Alle Tabs", Spezial-Tab-Elternknoten, liga-weite Suche) — dort trägt sie die Fach-Herkunft ("Map (Tier 1)"). |
+| Item-Tabelle rechts oben | `QTableView` + `QSortFilterProxyModel` | Spalten: Icon, Tab, **Position** ("#3 (4, 7)", Tab-Nummer plus Item-Koordinate, §4.11, unterscheidet gleichnamige Fächer), Name, Typ, Level, Quality, Stack, iLvl, **Anf.Lvl, Str, Dex, Int** (aus dem `requirements`-Array, §4.11) und **Mods** (explicitMods, überwiegend Map-Modifikatoren, Tooltip zeilenweise). Klick auf den Spaltenkopf sortiert numerisch über `NUMERIC_SORT_ROLE`, also nach echten Zahlen statt nach Strings; Zeilen ohne Wert ("–") landen unten. Das Suchfeld sucht fächerübergreifend über die ganze Liga und schließt Item-Properties wie "Item Quantity" ein; ein eingebauter Clear-Button leert es, `*` zeigt alles an (gedacht für den Komplett-Export, §4.11). Je Spalte lässt sich über das Header-Rechtsklick-Menü zusätzlich ein Filter-Ausdruck setzen (`>=20`, `<45`, `=Text`, Teilstring), aktive Filter markiert ein 🔍 im Header. Sichtbare Spalten sind per Rechtsklick wählbar und werden in `%LOCALAPPDATA%/PoE-VIEW2/ui-settings.ini` gespeichert; "Typ" ist standardmäßig aus, da die Rarity bereits die Namensfarbe bestimmt. Die Tab-Spalte verwaltet die Anwendung selbst und blendet sie nicht ins Menü ein: aus bei Einzelfach-Auswahl, an in Aggregat-Ansichten ("Alle Tabs", Spezial-Tab-Elternknoten, liga-weite Suche), wo sie die Herkunft trägt ("Map (Tier 1)"). |
 | Item-Detail rechts unten | eigenes Widget | Großes Icon, Name in Rarity-Farbe (frameType), Properties, Mods. Aktualisiert bei Zeilenauswahl. |
 | Rate-Limit-Dashboard | `QProgressBar` pro Regel + Status-LED + Countdown | Wird ausschließlich über das Signal `rate_limit_changed` gefüttert. Farbe: grün < 60 %, gelb < 90 %, rot ab 90 %/Wartephase. Countdown zeigt verbleibende Wartezeit. *Intention: Der User soll immer sehen, WARUM die App gerade wartet.* |
 | Statusbar | `QStatusBar` + `QProgressBar` (busy) | Login-Status, laufender Job, permanenter GGG-Disclaimer. Die `QProgressBar` läuft mit `setRange(0, 0)` im "busy"-Modus (Qt animiert das eingebaut, kein eigener Timer nötig). Sichtbarkeit hängt am eigenen `busy_changed`-Signal des Workers (`True` rund um jeden Job), NICHT am `status`-Text — siehe §4.5.1 zur Begründung. Ein permanentes **Offline-Banner** ("📴 Offline — GGG nicht erreichbar, zeige zwischengespeicherte Daten", §4.12) erscheint bei Konnektivitätsproblemen — als eigenes Label, damit die nächste "Lade …"-Statusmeldung es nicht überschreibt. |
@@ -936,17 +895,17 @@ gruppiert — stattdessen filtert `MainWindow._apply_character_league_filter`
 lokal auf `char.league == aktuelle Liga`, gesteuert vom selben Dropdown, das
 auch die Stash-Tabs bestimmt. Ein Wechsel zwischen Ligen ist bei Items/Stash
 ohnehin nicht möglich; die Vereinheitlichung spart eine Baum-Ebene und macht
-Charaktere/Stash konsistent liga-scoped (Nutzer-Feedback 2026-07-09).
+Charaktere/Stash konsistent liga-scoped.
 
 **Sortierung/Gliederung des Liga-Dropdowns
-(`MainWindow._rebuild_league_combo`, Nutzer-Feedback):** Gültige (Live-)
+(`MainWindow._rebuild_league_combo`):** Gültige (Live-)
 Ligen stehen oben, abgelaufene — nur noch im Datei-Cache vorhandene, von
 GGG nicht mehr gelistete — Ligen darunter, per einer nicht-anwählbaren
 Überschrift-Zeile ("── Beendete Ligen (nur Cache, kein Online-Zugriff) ──",
 `_ARCHIVED_HEADER`, per `QStandardItem.setEnabled(False)` deaktiviert)
 abgetrennt — bewusst KEIN blanker `insertSeparator`, damit für den Nutzer
 explizit sichtbar ist, WARUM diese Ligen unten stehen ("als Offline-Liga
-anhängen", Nutzer-Feedback), nicht nur eine positionelle Trennung.
+anhängen"), nicht nur eine positionelle Trennung.
 Innerhalb der gültigen Ligen sortiert `_sort_by_content` die mit
 tatsächlichem Spielstand (mindestens ein Charakter ODER bereits geladene
 Items in dieser Liga) nach vorn: GGG legt pro Account automatisch leere
@@ -961,7 +920,7 @@ leerem Vorwert. Vor der ersten Live-Antwort (`live_leagues=None`,
 Offline-Start §4.12) gilt der GESAMTE Cache als "oben", ohne Abtrennung —
 wir wissen zu diesem Zeitpunkt noch nicht, was inzwischen abgelaufen ist.
 
-**Archivierte Ligen: kein Online-Zugriff mehr (Nutzer-Feedback, Liga-Start
+**Archivierte Ligen: kein Online-Zugriff mehr (Liga-Start
 — die alte temporäre Liga ist beendet).** `MainWindow._live_leagues`
 merkt sich die letzte `/account/leagues`-Antwort als Set;
 `_current_league_is_archived()` prüft, ob die GERADE angezeigte Liga
@@ -991,9 +950,9 @@ Bedingungen mit ODER) — der Refresh-Button bleibt klickbar, aber
 **Rarity-Farben** (frameType → Textfarbe im Detail/Namen, `theme.RARITY_COLORS`):
 0 normal (weiß), 1 magic (blau), 2 rare (gelb), 3 unique (orange), 4 gem
 (grün-türkis), 5 currency (gold), 6 divination card (blau-cyan), 9 relic
-(grün). Gem/Divination Card bewusst mit deutlichem Hue-Abstand (Nutzer-Feedback:
-die ursprünglichen Töne #3fb8ae/#0ebac5 waren nebeneinander kaum zu
-unterscheiden) — Gem zieht Richtung Grün, Divination Card Richtung Blau.
+(grün). Gem und Divination Card haben einen deutlichen Hue-Abstand: Gem
+zieht Richtung Grün, Divination Card Richtung Blau. Die ursprünglichen
+Töne #3fb8ae und #0ebac5 waren nebeneinander kaum zu unterscheiden.
 
 ---
 
@@ -1006,8 +965,9 @@ unterscheiden) — Gem zieht Richtung Grün, Divination Card Richtung Blau.
 - **Netzwerkfehler:** Job schlägt fehl → `error`-Signal → nicht-modale
   Statusmeldung; kein automatischer Endlos-Retry.
 - **Logging:** `logging`-Modul, Datei in `%LOCALAPPDATA%/PoE-VIEW2/logs/`.
-  Alle Requests mit Policy-Headern loggen (Debug-Level) — Gold wert bei
-  Rate-Limit-Analysen und später als Referenz für die LabVIEW-Portierung.
+  Alle Requests werden mit ihren Policy-Headern protokolliert. Diese
+  Logdatei ist die wichtigste Grundlage für Rate-Limit-Analysen und hat
+  bereits mehrfach Fehlerursachen aufgedeckt (FALLSTRICKE #28, #30).
 
 ## 7. Security & Open Source
 
@@ -1035,25 +995,19 @@ Wer PoE-VIEW2 forkt und selbst verteilt, sollte `POE_CONTACT_EMAIL` per
 `.env` auf die eigene Adresse setzen — sonst landen GGG-Rückfragen zur
 fremden Distribution beim ursprünglichen Autor.
 
-## 8. Roadmap / Meilensteine
+## 8. Entwicklungsstand
 
-| # | Meilenstein | Inhalt | Definition of Done |
-|---|---|---|---|
-| M0 | Gerüst | Projektstruktur, config, Logging, leeres MainWindow | ✅ erledigt |
-| M1 | Auth | OAuth2 PKCE, Callback-Server, TokenStore | ✅ erledigt |
-| M2 | Rate-Limiter | Manager + Header-Parsing + Unit-Tests (Fixtures!) | ✅ erledigt |
-| M3 | Daten | Client-Endpunkte + pydantic-Modelle + Worker | ✅ erledigt |
-| M4 | UI-Basis | Tree, Tabelle, Dashboard verdrahtet | ✅ erledigt |
-| M5 | Politur | Icons+Cache, Item-Detail, Filter/Sortierung, Disclaimer | ✅ erledigt |
+Die ursprünglich geplanten Meilensteine (Grundgerüst, Authentifizierung,
+Rate-Limiter, Datenschicht, UI, Politur) sind abgeschlossen. Seither sind
+zahlreiche Funktionen hinzugekommen, die nicht Teil der ersten Planung
+waren: Offline-Modus, Charakter-Ausrüstung, Typ- und Spalten-Filter,
+liga-weite Suche, Auto-Refresh und die Behandlung archivierter Ligen.
 
-*Empfohlene Reihenfolge-Intention: Der Rate-Limiter (M2) kommt VOR den ersten
-massenhaften API-Calls (M3+) — dieselbe Lektion wie im LabVIEW-Projekt.*
+Der aktuelle Stand lässt sich über den [CHANGELOG](../CHANGELOG.md) und
+die Git-Historie nachvollziehen; die technischen Hintergründe einzelner
+Entscheidungen stehen in
+[FALLSTRICKE_UND_WORKAROUNDS.md](../FALLSTRICKE_UND_WORKAROUNDS.md).
 
-Diese ursprüngliche Roadmap ist seit Längerem komplett abgearbeitet — die
-App ist im täglichen Gebrauch (siehe README, Abschnitt "Status"). Danach
-kamen deutlich mehr Features hinzu, als hier je geplant waren (Offline-
-Modus, Charakter-Ausrüstung, Typ-Filter, Spalten-Filter, liga-weite
-Suche, Auto-Refresh, archivierte Ligen, …) — die laufende, ungeplante
-Weiterentwicklung ist am besten über die Git-Historie und
-FALLSTRICKE_UND_WORKAROUNDS.md nachvollziehbar, nicht über eine feste
-Meilenstein-Liste.
+Eine Reihenfolge-Empfehlung aus der Anfangszeit gilt weiterhin: Der
+Rate-Limiter muss stehen, bevor die ersten umfangreichen API-Abfragen
+laufen.

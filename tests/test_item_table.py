@@ -35,7 +35,7 @@ def test_name_column_unaffected_by_tab_column_insertion(qapp) -> None:
 
 
 def test_mods_column_joins_explicit_mods(qapp) -> None:
-    """Nutzer-Feedback: gerade bei Maps sind die Modifikatoren interessant."""
+    """gerade bei Maps sind die Modifikatoren interessant."""
     model = ItemTableModel()
     map_item = make_item("Beach Map", mods=["Monsters deal 90% extra Damage as Fire",
                                             "Players are Cursed with Vulnerability"])
@@ -64,7 +64,7 @@ def test_filter_matches_explicit_mods(qapp) -> None:
 
 
 def test_filter_matches_property_text(qapp) -> None:
-    """Nutzer-Feedback: Suche nach "Quantity" fand nur die Chisel (Mod-Text),
+    """Suche nach "Quantity" fand nur die Chisel (Mod-Text),
     nicht die Maps selbst — deren Quantity/Rarity/Drop Chance stecken als
     PROPERTY (nicht als explicitMods), z. B. {"name": "Item Quantity",
     "values": [["+23%", 1]]}. Reale Struktur, Cache-Analyse 2026-07-10."""
@@ -84,8 +84,8 @@ def test_filter_matches_property_text(qapp) -> None:
 
 
 def test_wildcard_asterisk_shows_everything(qapp) -> None:
-    """"*" im Suchfeld zeigt bewusst ALLES — für den Komplett-Export einer
-    ganzen Truhe (Nutzer-Feedback). Ohne Sonderbehandlung würde "*" als
+    """"*" im Suchfeld zeigt bewusst alles — für den Komplett-Export einer
+    ganzen Truhe. Ohne Sonderbehandlung würde "*" als
     escapter Regex-Text ("\\*") ankommen und NICHTS treffen."""
     model = ItemTableModel()
     model.set_items([make_item("Chaos Orb"), make_item("Beach Map")], ["A", "B"])
@@ -131,7 +131,7 @@ def test_requirement_columns_show_values(qapp) -> None:
 
 
 def test_numeric_sort_role_orders_numbers_not_strings(qapp) -> None:
-    """Regression: "113" sortierte als String VOR "56" — der Proxy sortiert
+    """Regression: "113" sortierte als String vor "56" — der Proxy sortiert
     jetzt über NUMERIC_SORT_ROLE (echte Zahlen, "–" ganz nach unten)."""
     from poe_view.ui.item_table import COLUMNS, NUMERIC_SORT_ROLE, ItemTableModel
     model = ItemTableModel()
@@ -150,7 +150,7 @@ def test_numeric_sort_role_orders_numbers_not_strings(qapp) -> None:
     assert shown == ["–", "56", "113"]
 
 
-# --- Spalten-Filter-Ausdrücke (Excel-artig, Nutzer-Feedback) --------------- #
+# --- Spalten-Filter-Ausdrücke (Excel-artig) --------------- #
 
 def test_expression_matches_variants() -> None:
     from poe_view.ui.item_table import _expression_matches
@@ -213,7 +213,7 @@ def test_lazy_icons_requested_on_paint_not_on_set(qapp) -> None:
     assert requested == ["https://cdn/x.png"]  # und nur genau einmal
 
 
-# --- Typ-Filter-Checkboxen (Nutzer-Feedback) ------------------------------- #
+# --- Typ-Filter-Checkboxen ------------------------------- #
 
 def test_type_filter_hides_unchecked_frame_types(qapp) -> None:
     model = ItemTableModel()
@@ -234,7 +234,7 @@ def test_type_filter_hides_unchecked_frame_types(qapp) -> None:
 
 
 def test_type_filter_covers_gem_currency_divination_card(qapp) -> None:
-    """Nutzer-Feedback: Currency, Gems und Div Cards haben jetzt eigene
+    """Currency, Gems und Div Cards haben jetzt eigene
     Checkboxen (frameType 5/4/6) statt immer sichtbar zu bleiben."""
     model = ItemTableModel()
     model.set_items([
@@ -288,7 +288,7 @@ def test_type_filter_combines_with_text_search(qapp) -> None:
     assert proxy.rowCount() == 1
 
 
-# --- Stabile Sortierung bei Filter-Toggle (Nutzer-Feedback) ---------------- #
+# --- Stabile Sortierung bei Filter-Toggle ---------------- #
 
 def test_reactivating_filter_restores_original_order_on_ties(qapp) -> None:
     """Regression: "Nach dem Deaktivieren und Reaktivieren der Suchfilter
@@ -339,12 +339,12 @@ def test_duplicate_names_keep_source_order_after_filter_toggle(qapp) -> None:
     assert order == [0, 1, 2]
 
 
-# --- Position-Spalte: Tab-Index + Koordinaten (Nutzer-Feedback) ------------ #
+# --- Position-Spalte: Tab-Index + Koordinaten ------------ #
 
 def test_position_column_shows_tab_index_and_coordinates(qapp) -> None:
-    """Nutzer-Feedback: mehrere gleichnamige Fächer (z. B. "Heist") lassen
+    """mehrere gleichnamige Fächer (z. B. "Heist") lassen
     sich über den Namen allein nicht unterscheiden — Tab-Position (bereits
-    1-basiert von MainWindow._tab_positions übergeben, NICHT StashTab.index,
+    1-basiert von MainWindow._tab_positions übergeben, nicht StashTab.index,
     siehe FALLSTRICKE #21) + Item-Koordinate innerhalb des Fachs schon."""
     from poe_view.ui.item_table import POSITION_COL, ItemTableModel
     model = ItemTableModel()
@@ -376,7 +376,7 @@ def test_position_column_shows_tab_index_without_coordinates(qapp) -> None:
 
 
 def test_position_column_sorts_numerically_not_alphabetically(qapp) -> None:
-    """Nutzer-Feedback: "#10" landete alphabetisch VOR "#2" — die Spalte
+    """"#10" landete alphabetisch vor "#2" — die Spalte
     muss numerisch nach Tab-Nr. (dann x, y) sortieren."""
     from PySide6.QtWidgets import QTableView
     from poe_view.ui.item_table import POSITION_COL, ItemTableModel

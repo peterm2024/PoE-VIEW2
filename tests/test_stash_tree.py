@@ -32,7 +32,7 @@ def test_set_stashes_builds_recursive_tree_without_wrapper_root(qapp) -> None:
 
 
 def test_set_stashes_marks_unloaded_tabs_with_download_marker_only(qapp) -> None:
-    """Unloaded Tab: nur der ⬇-Text, KEIN Refresh-Button (Nutzer-Feedback: nur eine Spalte)."""
+    """Unloaded Tab: nur der ⬇-Text, kein Refresh-Button (nur eine Spalte)."""
     data = [{"id": "root1", "name": "#", "type": "QuadStash", "metadata": {}}]
     stashes = [StashTab.model_validate(d) for d in data]
     tree = StashTree()
@@ -67,13 +67,13 @@ def test_mark_loaded_replaces_download_marker_with_refresh_button(qapp) -> None:
 
     node = tree._stash_nodes["root1"]
     assert node.text(_COL_STATUS) == ""
-    # Exakte Uhrzeit statt "heute" (Nutzer-Feedback: sonst unsichtbar, OB der
+    # Exakte Uhrzeit statt "heute" (sonst unsichtbar, ob der
     # Auto-Refresh innerhalb desselben Tages tatsächlich gegriffen hat).
     assert tree.itemWidget(node, _COL_STATUS).text() == f"⟳ {now.astimezone().strftime('%H:%M:%S')}"
 
 
 def test_mark_loaded_updates_item_count_column(qapp) -> None:
-    """Nutzer-Feedback: Item-Anzahl in eigene Spalte statt "(N Items)" im Namen."""
+    """Item-Anzahl in eigene Spalte statt "(N Items)" im Namen."""
     data = [{"id": "root1", "name": "Currency 1", "type": "QuadStash", "metadata": {}}]
     stashes = [StashTab.model_validate(d) for d in data]
     tree = StashTree()
@@ -101,7 +101,7 @@ def test_refresh_button_click_emits_signal(qapp) -> None:
 
 
 def test_format_age() -> None:
-    """Regression (Nutzer-Feedback): "heute" allein verschleierte, ob ein
+    """Regression: "heute" allein verschleierte, ob ein
     Fach innerhalb desselben Tages tatsächlich neu geladen wurde — jetzt
     die exakte (lokale) Uhrzeit statt eines pauschalen "heute"."""
     now = datetime(2026, 7, 9, 15, 30, 0, tzinfo=timezone.utc)
@@ -113,7 +113,7 @@ def test_format_age() -> None:
 
 
 def test_header_is_visible(qapp) -> None:
-    """Kopfzeile sichtbar — sonst keine manuelle Spaltenbreite (Nutzer-Feedback)."""
+    """Kopfzeile sichtbar — sonst keine manuelle Spaltenbreite."""
     tree = StashTree()
     assert not tree.isHeaderHidden()
     assert tree.headerItem().text(_COL_NAME) == "Name"
@@ -121,7 +121,7 @@ def test_header_is_visible(qapp) -> None:
 
 
 def test_name_column_is_interactive_not_stretch(qapp) -> None:
-    """Stretch-Spalten lassen sich in Qt nicht per Maus verbreitern (Nutzer-Feedback)."""
+    """Stretch-Spalten lassen sich in Qt nicht per Maus verbreitern."""
     from PySide6.QtWidgets import QHeaderView
     tree = StashTree()
     assert tree.header().sectionResizeMode(_COL_NAME) == QHeaderView.ResizeMode.Interactive
@@ -177,12 +177,12 @@ def test_context_menu_does_nothing_for_folder_node(qapp, monkeypatch) -> None:
         raise AssertionError("QMenu darf für Ordner-Knoten nie erzeugt werden")
     monkeypatch.setattr(stash_tree_module, "QMenu", _exploding_menu)
 
-    tree._on_context_menu(pos)  # darf NICHT auf _exploding_menu treffen
+    tree._on_context_menu(pos)  # darf nicht auf _exploding_menu treffen
 
 
 def _map_leaf(child_id: str, section: str, name: str, index: int = 0,
               items: int = 1) -> StashTab:
-    """Kind-Fach in der ECHTEN Struktur (Nutzer-Rohdaten 2026-07-09)."""
+    """Kind-Fach in der echten Struktur (Nutzer-Rohdaten 2026-07-09)."""
     return StashTab.model_validate({
         "id": child_id, "name": "1", "parent": "m1", "type": "MapStash",
         "metadata": {"items": items,
@@ -215,7 +215,7 @@ def test_set_children_inserts_subtabs_without_rebuilding_tree(qapp) -> None:
 
 
 def test_map_children_are_grouped_by_section_in_order(qapp) -> None:
-    """Nutzer-Feedback: 100+ flache Map-Fächer waren "uferlos" — Gruppierung
+    """100+ flache Map-Fächer waren "uferlos" — Gruppierung
     nach Tier (numerisch!), dann Unique Maps, dann Special Maps."""
     data = [{"id": "m1", "name": "Maps", "type": "MapStash", "metadata": {}}]
     tree = StashTree()
@@ -315,7 +315,7 @@ def test_tab_colour_is_icon_not_text_colour(qapp) -> None:
     assert not node.icon(_COL_NAME).isNull()
 
 
-# --- Offline-Markierung (Nutzer-Feedback: GGG-Wartung am Patchday) --------- #
+# --- Offline-Markierung (GGG-Wartung am Patchday) --------- #
 
 def test_set_offline_marks_loaded_tabs_leaves_unloaded_alone(qapp) -> None:
     data = [{"id": "loaded", "name": "Currency 1", "type": "CurrencyStash", "metadata": {}},
@@ -364,7 +364,7 @@ def test_set_offline_idempotent_noop_when_unchanged(qapp) -> None:
     assert button.text().startswith("⟳")
 
 
-# --- Baum-Hervorhebung bei Item-Auswahl (Nutzer-Feedback) ------------------ #
+# --- Baum-Hervorhebung bei Item-Auswahl ------------------ #
 
 def test_highlight_stash_selects_and_expands_ancestors(qapp) -> None:
     """Klick auf ein Item in einer Aggregat-/Suchansicht soll das
@@ -378,7 +378,7 @@ def test_highlight_stash_selects_and_expands_ancestors(qapp) -> None:
     tree = StashTree()
     tree.set_stashes(stashes)
     folder_node = tree.topLevelItem(0)
-    assert not folder_node.isExpanded()  # startet zugeklappt (Nutzer-Feedback anderswo)
+    assert not folder_node.isExpanded()  # startet zugeklappt
 
     tree.highlight_stash("child1")
 
@@ -387,7 +387,7 @@ def test_highlight_stash_selects_and_expands_ancestors(qapp) -> None:
 
 
 def test_highlight_stash_does_not_emit_stash_selected(qapp) -> None:
-    """Kritisch (Nutzer-Feedback): die Hervorhebung darf NICHT wie ein
+    """Kritisch: die Hervorhebung darf nicht wie ein
     echter Klick wirken — sonst würde sie die aktuelle Such-/Aggregat-
     Ansicht in der Item-Tabelle überschreiben."""
     data = [{"id": "root1", "name": "Currency 1", "type": "QuadStash", "metadata": {}}]

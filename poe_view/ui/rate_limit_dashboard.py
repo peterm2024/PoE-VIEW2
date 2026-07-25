@@ -1,7 +1,7 @@
 """Rate-Limit-Dashboard: ein Balken pro Regel, Status-LED, Warte-Countdown.
 
 Wird ausschließlich über das Signal ``rate_limit_changed`` gefüttert
-(≙ User Event der FGV an das Main-VI). Intention: Der User soll immer
+Der Nutzer soll immer
 sehen, WARUM die App gerade pausiert (docs/ARCHITEKTUR.md §5).
 """
 

@@ -1,21 +1,20 @@
-"""Rate-Limit-Manager — das Kernsystem (docs/ARCHITEKTUR.md §4.3).
+"""Rate-Limit-Manager (docs/ARCHITEKTUR.md §4.3).
 
-GGG bestraft zu schnelle Anfragen mit HTTP 429 und Temporär-Banns. Dieser
-Manager wird VOR jedem Request gefragt (``check_and_wait``) und NACH jedem
-Request mit den Response-Headern gefüttert (``update_from_headers``).
+GGG beantwortet zu schnelle Anfragen mit HTTP 429 und temporären Sperren.
+Dieser Manager wird vor jedem Request befragt (``check_and_wait``) und
+nach jedem Request mit den Response-Headern aktualisiert
+(``update_from_headers``).
 
-Header-Format (Quelle: LabVIEW-Projekt, dort lag auch der historische Bug):
+Header-Format:
   X-Rate-Limit-Policy:        Name der Policy (z. B. "backend-item-request-limit")
   X-Rate-Limit-Rules:         Liste der Regel-Gruppen (z. B. "Account,Ip")
   X-Rate-Limit-<Rule>:        Regeln     "Max:Fenster_s:Sperre_s[,…]"
   X-Rate-Limit-<Rule>-State:  Verbrauch  "Aktuell:Fenster_s:RestSperre_s[,…]"
 
-Die Zuordnung Regel ↔ State erfolgt über die FENSTERGRÖSSE (Feld 2), nicht
-über die Array-Position — genau das war der Mapping-Bug im LabVIEW-Original.
-
-LabVIEW-Äquivalent: FGV mit Cases "Check & Wait" / "Update"; der
-``status_callback`` entspricht dem User Event an das Main-VI.
-Threadsicherheit via Lock ≙ Nicht-Reentranz der FGV.
+Die Zuordnung von Regel zu Verbrauch erfolgt über die Fenstergröße
+(Feld 2), nicht über die Array-Position. Die Reihenfolge der Einträge ist
+zwischen beiden Headern nicht garantiert identisch, siehe
+FALLSTRICKE_UND_WORKAROUNDS.md #1.
 """
 
 from __future__ import annotations
@@ -28,7 +27,7 @@ from typing import Callable, Mapping
 
 log = logging.getLogger(__name__)
 
-# Sicherheitsmarge: warten, BEVOR das Limit ganz erreicht ist.
+# Sicherheitsmarge: warten, bevor das Limit vollständig erreicht ist.
 SAFETY_MARGIN = 1
 
 # callback(policy_name, rules_snapshot, wait_remaining_s)
@@ -37,7 +36,7 @@ StatusCallback = Callable[[str, list[dict], float], None]
 
 @dataclass
 class RateLimitRule:
-    """Eine Regel einer Policy (≙ ein Element des FGV-Cluster-Arrays)."""
+    """Eine einzelne Regel innerhalb einer Policy."""
 
     rule_group: str        # "Account" oder "Ip"
     max_hits: int          # Max Requests im Fenster
@@ -47,7 +46,7 @@ class RateLimitRule:
     active_lock_s: float = 0.0  # Rest-Sperre zum Zeitpunkt des letzten Updates
 
     def snapshot(self) -> dict:
-        """Anzeige-Daten für das UI-Dashboard (bewusst reine Python-Typen)."""
+        """Anzeige-Daten für das Dashboard, als reine Python-Typen."""
         return {
             "group": self.rule_group,
             "current": self.current,
@@ -59,7 +58,7 @@ class RateLimitRule:
 
 @dataclass
 class PolicyState:
-    """Zustand einer Policy (≙ Shift-Register-Inhalt der FGV)."""
+    """Aktueller Zustand einer Policy."""
 
     policy_name: str
     rules: dict[tuple[str, int], RateLimitRule] = field(default_factory=dict)
@@ -67,11 +66,11 @@ class PolicyState:
 
 
 class RateLimitManager:
-    """Zentrale, threadsichere Instanz — eine pro App (≙ FGV).
+    """Zentrale, threadsichere Instanz; eine pro Anwendung.
 
     Args:
         status_callback: wird bei jedem Update und im Warte-Countdown
-            aufgerufen. Qt-frei; der ApiWorker verdrahtet ihn mit einem Signal.
+            aufgerufen. Ohne Qt-Bezug; der ApiWorker verbindet ihn mit einem Signal.
         now: injizierbare Uhr für Tests (Default: ``time.monotonic``).
     """
 
@@ -90,8 +89,8 @@ class RateLimitManager:
     def check_and_wait(self, policy_name: str | None = None) -> float:
         """Blockiert, bis ein Request sicher möglich ist. Gibt Wartezeit zurück.
 
-        Muss im Worker-Thread laufen — ``time.sleep`` hier ist Absicht
-        (≙ "Wait (ms)" in der FGV); die UI läuft im Main-Thread weiter.
+        Muss im Worker-Thread laufen. Das ``time.sleep`` hier ist Absicht;
+        die UI läuft im Main-Thread unterdessen weiter.
         """
         name = policy_name or self._last_policy
         total_wait = 0.0
@@ -128,8 +127,8 @@ class RateLimitManager:
         if wait > 0:
             return wait
         if elapsed > 0:
-            # Fenster abgelaufen → lokale Zähler zurücksetzen; der nächste
-            # Response-Header liefert ohnehin den echten Stand.
+            # Fenster abgelaufen: lokale Zähler zurücksetzen. Der nächste
+            # Response-Header liefert ohnehin den maßgeblichen Stand.
             for rule in state.rules.values():
                 if elapsed >= rule.window_s:
                     rule.current = 0
@@ -137,7 +136,7 @@ class RateLimitManager:
         return 0.0
 
     def _countdown(self, policy_name: str, wait: float) -> None:
-        """In 1-s-Schritten schlafen und dem UI den Countdown melden."""
+        """In Sekundenschritten schlafen und den Countdown melden."""
         remaining = wait
         while remaining > 0:
             self._emit(policy_name, remaining)
@@ -167,7 +166,8 @@ class RateLimitManager:
 
     def _parse_group(self, state: PolicyState, group: str,
                      rules_str: str, state_str: str) -> None:
-        """Regel- und State-String einer Gruppe parsen und ÜBER DAS FENSTER matchen."""
+        """Regel- und State-String einer Gruppe parsen, Zuordnung über die
+        Fenstergröße (siehe Modul-Docstring)."""
         # State zuerst indexieren: Fenstergröße → (aktuell, restsperre)
         usage_by_window: dict[int, tuple[int, float]] = {}
         for part in filter(None, (p.strip() for p in state_str.split(","))):
@@ -186,11 +186,11 @@ class RateLimitManager:
     # ------------------------------------------------------------------ #
 
     def headroom_fraction(self) -> float:
-        """Wie viel Luft ist über ALLE bekannten Policies hinweg noch frei (1.0 = alles frei)?
+        """Wie viel Luft ist über alle bekannten Policies hinweg noch frei (1.0 = alles frei)?
 
         Konservativ: das Minimum über alle Regeln, nicht nur die zuletzt
         benutzte Policy — genutzt vom Hintergrund-Auto-Refresher, damit der
-        genug manuelles Budget für den Nutzer übrig lässt (Nutzer-Feedback).
+        genug manuelles Budget für den Nutzer übrig lässt.
         """
         with self._lock:
             fractions = []

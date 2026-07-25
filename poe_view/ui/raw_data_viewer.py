@@ -1,13 +1,12 @@
 """Mini-Viewer für die Rohdaten eines Stash-Tabs (Rechtsklick im Baum, Doku §5).
 
-Ein eigenständiges, NICHT-modales Fenster (``Qt.WindowType.Window``) — läuft
+Ein eigenständiges, nicht-modales Fenster (``Qt.WindowType.Window``) — läuft
 parallel zum Hauptfenster weiter und wird von ``MainWindow._update_raw_viewer``
-bei jedem Tab-Wechsel aktualisiert (Nutzer-Feedback: "sollte sich auch beim
+bei jedem Tab-Wechsel aktualisiert ("sollte sich auch beim
 Durchwechseln der Stash-Tabs aktualisieren"). Zeigt exakt die Felder, die die
 GGG-API für den Tab liefert — dank ``extra="allow"`` in den pydantic-Modellen
 (api/models.py) verlustfrei, auch unbekannte/zukünftige API-Felder.
 
-LabVIEW-Äquivalent: ein zweites Frontpanel (z. B. per "Open FP" auf ein
 Anzeige-VI geöffnet), das per User Event vom Hauptpanel aus aktualisiert wird.
 """
 

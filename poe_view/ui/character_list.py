@@ -1,7 +1,7 @@
 """Charakterliste links oben (docs/ARCHITEKTUR.md §5) — bewusst kein Tree.
 
 Charaktere haben keine Unterstruktur, ein flacher QListWidget spart eine
-Baum-Ebene und die zugehörigen Auf-/Zuklapp-Klicks (Nutzer-Feedback).
+Baum-Ebene und die zugehörigen Auf-/Zuklapp-Klicks.
 """
 
 from __future__ import annotations
@@ -40,7 +40,7 @@ class CharacterList(QListWidget):
         """Analog StashTree._on_context_menu: manuelles Neuladen, da es (anders
         als bei Stash-Tabs) keinen Auto-Refresh-Sweep für Charaktere gibt —
         das aktuell angezeigte Inventar hält sich selbst aktuell, alle
-        anderen brauchen einen expliziten Weg (Nutzer-Feedback)."""
+        anderen brauchen einen expliziten Weg."""
         item = self.itemAt(pos)
         if item is None:
             return

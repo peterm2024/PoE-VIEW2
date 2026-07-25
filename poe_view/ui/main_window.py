@@ -3,7 +3,6 @@
 Alle Slots hier laufen im Main-Thread (Qt queued connections aus dem Worker).
 Die UI löst API-Arbeit ausschließlich über ``worker.submit(Job)`` aus.
 
-LabVIEW-Äquivalent: das Main-VI mit Event-Struktur (User Events + UI-Events).
 """
 
 from __future__ import annotations
@@ -44,18 +43,18 @@ log = logging.getLogger(__name__)
 
 
 class MainWindow(QMainWindow):
-    # Hintergrund-Auto-Refresh (Nutzer-Feedback): nie jünger als 1 Tag anfassen
+    # Hintergrund-Auto-Refresh: nie jünger als 1 Tag anfassen
     # (dafür reicht der manuelle Refresh völlig), und dem Nutzer immer mind.
     # die Hälfte des Rate-Limit-Budgets für manuelle Klicks übrig lassen.
     # Pro Tick können jetzt BIS ZU ZWEI Jobs rausgehen (das gerade angezeigte
-    # Fach + der normale Sweep-Kandidat, Nutzer-Feedback) — Intervall verdoppelt,
+    # Fach + der normale Sweep-Kandidat) — Intervall verdoppelt,
     # damit die Gesamt-Anfragerate ans Rate-Limit gegenüber vorher gleich bleibt
     # und wir nicht in dessen Sperre (Timeout) laufen.
     AUTO_REFRESH_INTERVAL_MS = 40_000
     AUTO_REFRESH_MIN_AGE = timedelta(days=1)
     AUTO_REFRESH_MIN_HEADROOM = 0.5
 
-    # Typ-Filter-Checkboxen (Nutzer-Feedback): die vier PoE-Rarities, dazu
+    # Typ-Filter-Checkboxen: die vier PoE-Rarities, dazu
     # Gem/Currency/Divination Card, und "Sonstige" (OTHER_TYPE) für den
     # Rest (Quest, Prophecy, Relic, Unbekanntes).
     TYPE_FILTER_ENTRIES = (
@@ -73,7 +72,7 @@ class MainWindow(QMainWindow):
         self._stash_trees: dict[str, list[StashTab]] = {}      # Liga → Baumstruktur
         self._items: dict[str, dict[str, list[Item]]] = {}     # Liga → {stash_id: Items}
         self._last_loaded: dict[str, dict[str, str]] = {}      # Liga → {stash_id: ISO-Zeitstempel}
-        self._leaf_stashes: list[StashTab] = []                # abgeflacht, NUR aktuelle Liga
+        self._leaf_stashes: list[StashTab] = []                # abgeflacht, nur aktuelle Liga
         self._all_characters: list[Character] = []             # ligenübergreifend, ungefiltert
         self._current_league: str = ""
         self._current_tab_name: str = ""
@@ -87,25 +86,25 @@ class MainWindow(QMainWindow):
         self._worker_busy = False
         # Startwert True: der bestehende `_current_league`-Guard blockiert den
         # Auto-Refresh ohnehin, bis eine Liga aktiv ist (was einen
-        # erfolgreichen Login voraussetzt) — dieses Flag greift NUR für den
+        # erfolgreichen Login voraussetzt) — dieses Flag greift nur für den
         # Fall, dass der Token MITTEN in der Session abläuft (`login_required`
         # setzt es dann auf False, `logged_in` wieder auf True).
         self._logged_in = True
         self._auto_refresh_counts: dict[str, int] = {}  # Liga → auto-aktualisierte Tabs (Session)
         self._raw_data_viewer: RawDataViewer | None = None
-        self._offline = False  # GGG nicht erreichbar (Nutzer-Feedback: Wartung am Patchday)
+        self._offline = False  # GGG nicht erreichbar (Wartung am Patchday)
         self._live_leagues: set[str] | None = None  # letzte /account/leagues-Antwort; None = noch unbekannt
         self._restore_cached_data()
 
         self.worker = ApiWorker()
-        # BootstrapJob MUSS als ERSTER Job in der Queue landen — VOR jedem
+        # BootstrapJob muss als ERSTER Job in der Queue landen — vor jedem
         # Job, den `_build_ui()` (z. B. über `_populate_cached_leagues()` →
         # `_on_league_changed`) synchron mit-auslöst. Sonst würde ein
-        # ungeloggter FetchStashListJob VOR dem Bootstrap laufen, mit einem
+        # ungeloggter FetchStashListJob vor dem Bootstrap laufen, mit einem
         # HTTP-Client ohne gesetzten Token — GGG antwortet mit 401, unser
         # AuthError-Handler löscht daraufhin den (eigentlich gültigen!)
         # gespeicherten Token, und Bootstrap findet ihn dann schon gelöscht
-        # vor. Real beobachtet: Nutzer-Rückfrage "warum wird mein Token
+        # vor. Real beobachtet: Rückfrage "warum wird mein Token
         # zwischendurch invalid, sollte doch Stunden gültig sein" — der Token
         # war nie wirklich abgelaufen, wir haben ihn uns selbst zerstört
         # (FALLSTRICKE #30). `submit()` ist eine reine Queue-Operation und
@@ -156,9 +155,9 @@ class MainWindow(QMainWindow):
 
     def _build_ui(self) -> None:
         # QMainWindow bietet per Default ein Rechtsklick-Kontextmenü über der
-        # Toolbar an, mit dem sie sich komplett ausblenden lässt — OHNE Menü-
+        # Toolbar an, mit dem sie sich komplett ausblenden lässt — ohne Menü-
         # leiste gäbe es dann keinen Weg mehr zurück (Login, Refresh, Liga-
-        # Wahl, Suche — alles verschwunden). Nutzer-Feedback: aus Versehen
+        # Wahl, Suche — alles verschwunden). aus Versehen
         # passiert. Deaktiviert.
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)
         toolbar = QToolBar()
@@ -193,7 +192,7 @@ class MainWindow(QMainWindow):
         toolbar.addWidget(self._league_combo)
 
         toolbar.addWidget(QLabel("  Typ: "))
-        # 8 Checkboxen statt Namen (Nutzer-Feedback: Namen wären zu lang) —
+        # 8 Checkboxen statt Namen (Namen wären zu lang) —
         # die Farbe des Käschchens IST das Label, Tooltip trägt den Namen.
         # Die letzte ("Sonstige", Pink) fängt alles ohne eigene Kategorie
         # auf: Quest, Prophecy, Relic, unbekannte frameTypes (§4.11).
@@ -222,7 +221,7 @@ class MainWindow(QMainWindow):
 
         # Linke Seite: Charakterliste (flach) oben, Stash-Baum unten — je mit
         # eigener Überschrift statt eines gemeinsamen Wrapper-Baums (spart
-        # eine Ebene, Nutzer-Feedback).
+        # eine Ebene).
         left_panel = QWidget()
         left_layout = QVBoxLayout(left_panel)
         left_layout.setContentsMargins(0, 0, 0, 0)
@@ -266,7 +265,7 @@ class MainWindow(QMainWindow):
             self.table.setColumnWidth(COLUMNS.index(name), 58)
         self.table.setColumnWidth(MODS_COL, 320)
         self.table.selectionModel().currentRowChanged.connect(self._on_row_selected)
-        # Spalten per Rechtsklick auf den Header an-/abwählbar (Nutzer-Feedback);
+        # Spalten per Rechtsklick auf den Header an-/abwählbar;
         # die Wahl überlebt den Neustart (ui-settings.ini im APP_DATA_DIR).
         table_header = self.table.horizontalHeader()
         table_header.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -304,20 +303,20 @@ class MainWindow(QMainWindow):
         self._busy_indicator.setTextVisible(False)
         self._busy_indicator.hide()
         self.statusBar().addWidget(self._busy_indicator)
-        # Permanentes Offline-Banner (Nutzer-Feedback: GGG-Wartung am
+        # Permanentes Offline-Banner (GGG-Wartung am
         # Patchday/Liga-Start) — separat vom transienten _status_msg, damit
         # es nicht von der nächsten "Lade …"-Meldung überschrieben wird.
         self._offline_label = QLabel("")
         self._offline_label.setStyleSheet("color: #d9a441; font-weight: 600;")
         self.statusBar().addPermanentWidget(self._offline_label)
         # Sichtbarer Nachweis, dass der Hintergrund-Auto-Refresh arbeitet
-        # (Nutzer-Feedback: "Bist du dir sicher, dass das funktioniert?").
+        # ("Bist du dir sicher, dass das funktioniert?").
         self._auto_refresh_label = QLabel("")
         self.statusBar().addPermanentWidget(self._auto_refresh_label)
         self.statusBar().addPermanentWidget(QLabel(config.DISCLAIMER))
 
         # Liga-Dropdown SOFORT aus dem Cache befüllen — unabhängig vom
-        # Netzwerk nutzbar (Nutzer-Feedback: GGG-Wartung am Patchday). Muss
+        # Netzwerk nutzbar (GGG-Wartung am Patchday). Muss
         # als letztes hier stehen: braucht Tree/League-Combo bereits gebaut.
         self._populate_cached_leagues()
 
@@ -330,10 +329,10 @@ class MainWindow(QMainWindow):
         self._rebuild_league_combo(None)
 
     def _league_has_content(self, league: str) -> bool:
-        """Hat der Nutzer dort tatsächlich einen Spielstand (Charaktere ODER
+        """Hat der Nutzer dort tatsächlich einen Spielstand (Charaktere oder
         bereits geladene Items)? Grundlage der Dropdown-Sortierung — GGG legt
         pro Account automatisch leere Hardcore-/Ruthless-Varianten an, auch
-        wenn der Nutzer dort nie gespielt hat (Nutzer-Feedback: "Hardcore
+        wenn der Nutzer dort nie gespielt hat ("Hardcore
         zuerst, obwohl ich noch keinen Hardcore-Spielstand habe")."""
         if any(c.league == league for c in self._all_characters):
             return True
@@ -346,13 +345,13 @@ class MainWindow(QMainWindow):
 
     # Nicht-auswählbare "Überschrift" statt eines blanken Trennstrichs —
     # macht sichtbar explizit, WARUM die unteren Einträge getrennt sind
-    # (Nutzer-Feedback: "als Offline-Liga anhängen", nicht nur positionell
+    # ("als Offline-Liga anhängen", nicht nur positionell
     # trennen). Text bewusst so gewählt, dass er nie mit einem echten
     # Liga-Namen kollidiert.
     _ARCHIVED_HEADER = "── Beendete Ligen (nur Cache, kein Online-Zugriff) ──"
 
     def _rebuild_league_combo(self, live_leagues: list[str] | None) -> None:
-        """Baut das Liga-Dropdown neu auf (Nutzer-Feedback): aktuell gültige
+        """Baut das Liga-Dropdown neu auf: aktuell gültige
         Ligen oben (nach Spielstand sortiert, §_sort_by_content), abgelaufene
         — nur noch im Cache vorhandene — Ligen darunter, per nicht wählbarer
         Überschrift abgetrennt. ``live_leagues=None`` heißt "wissen wir noch
@@ -377,7 +376,7 @@ class MainWindow(QMainWindow):
             header_item.setEnabled(False)  # nur Überschrift, nicht anwählbar
         self._league_combo.addItems(bottom)
         # Auswahl möglichst über den Rebuild hinweg erhalten (leeres previous
-        # NICHT suchen — sonst würde findText("") zufällig etwas mit leerem
+        # nicht suchen — sonst würde findText("") zufällig etwas mit leerem
         # Text treffen).
         idx = self._league_combo.findText(previous) if previous else -1
         self._league_combo.setCurrentIndex(idx if idx >= 0 else 0)
@@ -388,17 +387,18 @@ class MainWindow(QMainWindow):
 
     def _current_league_is_archived(self) -> bool:
         """True, wenn die aktuelle Liga zwar im Cache existiert, aber nicht
-        mehr in der letzten Live-Antwort von /account/leagues auftaucht —
-        z. B. weil eine temporäre Liga beendet wurde (Nutzer-Feedback:
-        Liga-Start, "keinen Online-Zugriff mehr auf den alten Liga-Content").
-        ``None`` (noch nie eine Live-Antwort erhalten) gilt NICHT als
-        archiviert — sonst würde ein Offline-Start (§4.12) fälschlich jede
-        gecachte Liga als tot markieren."""
+        mehr in der letzten Live-Antwort von /account/leagues auftaucht,
+        etwa weil eine temporäre Liga beendet wurde. Auf deren Inhalte gibt
+        es dann keinen Online-Zugriff mehr.
+
+        ``None`` bedeutet, dass noch nie eine Live-Antwort eintraf, und gilt
+        nicht als archiviert. Sonst würde ein Offline-Start (§4.12)
+        fälschlich jede gecachte Liga als beendet markieren."""
         return self._live_leagues is not None and self._current_league not in self._live_leagues
 
     def _update_tree_offline_display(self) -> None:
         """Baum zeigt 📴 statt ⟳, wenn entweder GGG global nicht erreichbar
-        ist (§4.12) ODER die aktuell angezeigte Liga archiviert ist (Liga
+        ist (§4.12) oder die aktuell angezeigte Liga archiviert ist (Liga
         beendet, kein Online-Zugriff mehr) — für den Nutzer bedeutet beides
         dasselbe: "das hier ist garantiert nur Cache"."""
         self.tree.set_offline(self._offline or self._current_league_is_archived())
@@ -418,16 +418,15 @@ class MainWindow(QMainWindow):
     def _on_type_toggled(self, type_key: int, visible: bool) -> None:
         self.proxy.set_type_visible(type_key, visible)
 
-    # --- Spalten-Sichtbarkeit der Item-Tabelle (Nutzer-Feedback) --------- #
+    # --- Spalten-Sichtbarkeit der Item-Tabelle --------- #
 
     # "Typ" ist standardmäßig aus: die Rarity steckt bereits in der
     # Namensfarbe. Die Tab-Spalte wird automatisch verwaltet (aus bei
-    # Einzelfach, an bei Aggregat) und ist deshalb NICHT im Menü.
+    # Einzelfach, an bei Aggregat) und ist deshalb nicht im Menü.
     DEFAULT_HIDDEN_COLUMNS = frozenset({"Typ"})
 
     def _settings(self) -> QSettings:
-        """INI-Datei statt Registry — konsistent zum Datei-Cache-Ansatz und
-        1:1 nach LabVIEW portierbar (Config-File)."""
+        """INI-Datei statt Registry, konsistent zum Datei-Cache-Ansatz."""
         return QSettings(str(config.APP_DATA_DIR / "ui-settings.ini"),
                          QSettings.Format.IniFormat)
 
@@ -454,7 +453,7 @@ class MainWindow(QMainWindow):
         clicked_col = header.logicalIndexAt(pos)
         menu = QMenu(self.table)
         # Excel-artiger Spalten-Filter für die angeklickte Spalte
-        # (Nutzer-Feedback: "z. B. 20% Quality oder iLvl <45"). Übernahme
+        # ("z. B. 20% Quality oder iLvl <45"). Übernahme
         # mit Enter; aktive Filter tragen 🔍 im Spalten-Header.
         if clicked_col > ICON_COL:
             title = menu.addAction(f"Filter „{COLUMNS[clicked_col]}“ (Enter übernimmt):")
@@ -532,7 +531,7 @@ class MainWindow(QMainWindow):
         bereits als ungültig bekannten Token weiter gegen die API laufen —
         real beobachtet: mehrere Minuten lang HTTP 401 im Log, alle exakt
         AUTO_REFRESH_INTERVAL_MS auseinander, bis der Nutzer den Login-Button
-        von Hand bemerkt (Nutzer-Rückfrage "Automatik hat nicht hingehauen").
+        von Hand bemerkt (Rückfrage "Automatik hat nicht hingehauen").
         """
         self._logged_in = False
         self._login_action.setEnabled(True)
@@ -563,7 +562,7 @@ class MainWindow(QMainWindow):
         self._update_tree_offline_display()
         if self._current_league_is_archived():
             # Liga beendet (nicht mehr in /account/leagues) — kein Netzwerk-
-            # Versuch, der ohnehin nur scheitern kann (Nutzer-Feedback).
+            # Versuch, der ohnehin nur scheitern kann.
             self._status_msg.setText(
                 f"{league}: Liga beendet — zeige den zuletzt bekannten Stand "
                 "(kein Online-Zugriff mehr).")
@@ -575,7 +574,7 @@ class MainWindow(QMainWindow):
         """/character liefert ligenübergreifend; gefiltert wird lokal übers Dropdown.
 
         Kein eigener Liga-Level in der Liste (spart eine Ebene) — das
-        Liga-Dropdown steuert Charaktere UND Stash-Tabs gemeinsam, ein
+        Liga-Dropdown steuert Charaktere und Stash-Tabs gemeinsam, ein
         Wechsel zwischen Ligen ist bei Items/Stash ohnehin nicht möglich.
         """
         self._all_characters = characters
@@ -587,7 +586,7 @@ class MainWindow(QMainWindow):
         self.character_list.set_characters(filtered)
 
     def _activate_stash_tree(self, stashes: list[StashTab]) -> None:
-        """Baum rendern + abgeflachte Liste aktualisieren — für Live- UND Cache-Daten."""
+        """Baum rendern + abgeflachte Liste aktualisieren — für Live- und Cache-Daten."""
         last_loaded = self._last_loaded.get(self._current_league, {})
         item_counts = self._item_counts_for_current_league()
         self.tree.set_stashes(stashes, last_loaded=last_loaded, item_counts=item_counts)
@@ -602,7 +601,7 @@ class MainWindow(QMainWindow):
 
     def _on_stash_list(self, stashes: list[StashTab]) -> None:
         # Die Liga-LISTE der API kennt die Kinder von Spezial-Tabs (MapStash,
-        # UniqueStash) NICHT — ohne Merge gingen bereits entdeckte Unter-Tabs
+        # UniqueStash) nicht — ohne Merge gingen bereits entdeckte Unter-Tabs
         # bei jedem Listen-Refresh/Liga-Wechsel wieder verloren.
         old = self._stash_trees.get(self._current_league)
         if old:
@@ -641,9 +640,9 @@ class MainWindow(QMainWindow):
     def _flatten_stashes(stashes: list[StashTab]) -> list[StashTab]:
         """Rekursiv alle Nicht-Container-Tabs einsammeln (Reihenfolge wie im Baum).
 
-        Container = Ordner ODER Spezial-Tabs mit bereits entdeckten Kindern
+        Container = Ordner oder Spezial-Tabs mit bereits entdeckten Kindern
         (MapStash/UniqueStash) — bei denen sind die KINDER die ladbaren
-        Einheiten. Ein Spezial-Tab VOR seiner Entdeckung hat keine children
+        Einheiten. Ein Spezial-Tab vor seiner Entdeckung hat keine children
         und zählt als Leaf — sein erster Abruf liefert dann die Kinder.
         """
         flat: list[StashTab] = []
@@ -680,15 +679,14 @@ class MainWindow(QMainWindow):
             if stash.children:
                 # Struktur bekannt: alle bereits geladenen Unter-Fächer
                 # aggregiert anzeigen — mit Fach-Namen ("Map (Tier 1)") in
-                # der Tab-Spalte (Nutzer-Feedback).
+                # der Tab-Spalte.
                 self._show_special_parent_aggregate(stash, name)
                 return
-            # Spezial-Tab ohne bekannte Kinder: IMMER fetchen, den Item-Cache
+            # Spezial-Tab ohne bekannte Kinder: immer fetchen, den Item-Cache
             # bewusst ignorieren — ein alter "0 Items"-Eintrag (von vor dem
             # Spezial-Tab-Feature) wäre sonst ein permanenter Cache-Treffer,
-            # und die Kinder-Entdeckung fände nie statt (Nutzer-Befund:
-            # "musste erst manuell aktualisieren"). Außer die Liga ist
-            # archiviert — dann gibt es nichts mehr zu entdecken.
+            # und die Kinder-Entdeckung fände nie statt. Ausnahme ist eine
+            # archivierte Liga, dort gibt es nichts mehr zu entdecken.
             if self._archived_league_guard(
                     f"{name}: Liga beendet — Unter-Fächer nicht mehr abrufbar."):
                 return
@@ -738,8 +736,8 @@ class MainWindow(QMainWindow):
             self._update_auto_refresh_label()
         # Bei einem STILLEN Refresh die sichtbare Tabelle nur dann live
         # aktualisieren, wenn genau DIESES Fach gerade als Einzelansicht
-        # offen ist (Regression, Nutzer-Feedback: das Live-Halten des
-        # aktuellen Fachs aktualisierte bisher nur den Cache/Baum, NICHT
+        # offen ist (Regression, das Live-Halten des
+        # aktuellen Fachs aktualisierte bisher nur den Cache/Baum, nicht
         # die Tabelle — "lebt" war es also gar nicht). Bei einem
         # Sweep-Kandidaten (ein ANDERES Fach) oder während einer Aggregat-/
         # Such-Ansicht bleibt die Tabelle unangetastet, sonst würde ein
@@ -788,7 +786,7 @@ class MainWindow(QMainWindow):
 
     def _stamp_category(self, league: str, stash_id: str, items: list[Item]) -> str | None:
         """Namenlose Unique-Stash-Fächer nach dem ersten Item-Load taufen
-        (Nutzer-Feedback: "über die Kategorie gehen, z. B. Two Handed Axe,
+        ("über die Kategorie gehen, z. B. Two Handed Axe,
         Ring, Flask"). Die Kategorie wandert als synthetischer Schlüssel
         ``poeview_category`` in die Tab-Metadaten — landet damit im
         Datei-Cache und überlebt den Neustart. Rückgabe: neuer Anzeigename,
@@ -805,14 +803,15 @@ class MainWindow(QMainWindow):
         return tab.display_name
 
     def _tab_positions(self) -> dict[str, int]:
-        """1-basierte Position jedes Fachs in der Reihenfolge, in der die API
-        sie für die AKTUELLE Liga zurückliefert (`_leaf_stashes`) — Basis der
-        Position-Spalte (§4.11). NICHT ``StashTab.index`` nehmen: Fächer
-        wandern beim Liga-Ende nach Standard und behalten dabei ihren
-        ursprünglichen Index aus der (jetzt toten) alten Liga — mehrere
-        Fächer in Standard tragen so denselben Index (Nutzer-Feedback,
-        FALLSTRICKE #21). Die JSON-Reihenfolge selbst ist dagegen die
-        tatsächliche, aktuelle Position in der Truhen-Leiste."""
+        """1-basierte Position jedes Fachs in der Reihenfolge, in der die
+        API sie für die aktuelle Liga zurückliefert (``_leaf_stashes``).
+        Grundlage der Position-Spalte (§4.11).
+
+        ``StashTab.index`` ist dafür ungeeignet: Fächer wandern beim
+        Liga-Ende nach Standard und behalten ihren ursprünglichen Index aus
+        der alten Liga, sodass dort mehrere Fächer denselben Wert tragen
+        (FALLSTRICKE #21). Die Reihenfolge der API-Antwort entspricht
+        dagegen der tatsächlichen Position in der Truhen-Leiste."""
         return {stash.id: position for position, stash in enumerate(self._leaf_stashes, start=1)}
 
     def _show_items(self, stash_id: str, items: list[Item], name: str) -> None:
@@ -829,7 +828,7 @@ class MainWindow(QMainWindow):
     def _show_special_parent_aggregate(self, stash: StashTab, name: str) -> None:
         """Klick auf einen Spezial-Tab-Elternknoten (Map/Unique): Items ALLER
         bereits geladenen Unter-Fächer zusammen anzeigen; die Tab-Spalte trägt
-        den Fach-Namen ("Map (Tier 1)", Nutzer-Feedback)."""
+        den Fach-Namen ("Map (Tier 1)")."""
         self._showing_aggregate = True
         self._current_tab_name = name
         self._current_stash_id = stash.id  # Rückkehrziel nach liga-weiter Suche
@@ -904,7 +903,7 @@ class MainWindow(QMainWindow):
         self._show_aggregate()
 
     def _show_aggregate(self) -> None:
-        """Items aller bereits geladenen Tabs UND Charaktere dieser Liga
+        """Items aller bereits geladenen Tabs und Charaktere dieser Liga
         zusammen anzeigen (lokal filter-/exportierbar), siehe `_league_wide_items`."""
         self._showing_aggregate = True
         self._search_all_active = False
@@ -918,18 +917,18 @@ class MainWindow(QMainWindow):
         self._status_msg.setText(f"Alle Tabs: {len(items)} Items gesamt")
 
     def _league_wide_items(self) -> tuple[list[Item], list[str], list[int | None], list[str | None]]:
-        """Alle gecachten Items der aktuellen Liga + Herkunfts-Fachname,
-        Tab-Position (Positions-Spalte, unterscheidet gleichnamige Fächer —
-        1-basierter Platz in ``_leaf_stashes``, NICHT ``stash.index``,
-        §_tab_positions) und Tab-ID (Baum-Hervorhebung bei Zeilenauswahl,
-        Nutzer-Feedback) je Item.
+        """Alle gecachten Items der aktuellen Liga, je Item ergänzt um
+        Herkunfts-Fachname, Tab-Position und Tab-ID.
 
-        Enthält seit Nutzer-Feedback ("bei der '*'-Suche sollte auch über
-        sämtliche Inventar-Items gesucht werden") zusätzlich Ausrüstung +
-        Inventar aller Charaktere DIESER Liga, sofern bereits einmal
-        geladen (§4.13) — Quelle dafür ist "Charaktername: Slot" statt
-        eines Fach-Namens; Position/Tab-ID bleiben `None` (kein Truhenfach
-        beteiligt, keine Baum-Hervorhebung möglich)."""
+        Die Tab-Position stammt aus ``_tab_positions`` (1-basierter Platz in
+        ``_leaf_stashes``, nicht ``stash.index``) und unterscheidet
+        gleichnamige Fächer. Die Tab-ID dient der Baum-Hervorhebung bei
+        Zeilenauswahl.
+
+        Zusätzlich enthalten sind Ausrüstung und Inventar aller Charaktere
+        derselben Liga, sofern bereits geladen (§4.13). Als Herkunft steht
+        dort "Charaktername: Slot" statt eines Fach-Namens; Position und
+        Tab-ID bleiben ``None``, da kein Truhenfach beteiligt ist."""
         league_items = self._items.get(self._current_league, {})
         items: list[Item] = []
         sources: list[str] = []
@@ -955,10 +954,10 @@ class MainWindow(QMainWindow):
             stash_ids.extend([None] * len(cached))
         return items, sources, tab_indices, stash_ids
 
-    # --- Fächerübergreifende Suche (Nutzer-Feedback) --------------------- #
+    # --- Fächerübergreifende Suche --------------------- #
 
     def _on_filter_text_changed(self, text: str) -> None:
-        """Tippen sucht liga-weit über ALLE bereits geladenen Fächer; Leeren
+        """Tippen sucht liga-weit über alle bereits geladenen Fächer; Leeren
         des Felds kehrt zur vorher gewählten Ansicht zurück. Eingrenzen auf
         ein Fach geht weiterhin: Baum-Klick oder Spalten-Filter auf "Tab"."""
         if text and not self._search_all_active:
@@ -1009,7 +1008,7 @@ class MainWindow(QMainWindow):
         """Dateiname-Vorschlag: Liga + (aktiver Filtertext, sonst Tab-/Aggregat-Name).
 
         Die Liga gehört immer mit rein — Items sind nie liga-übergreifend
-        gültig, das soll auch am Dateinamen erkennbar sein (Nutzer-Feedback).
+        gültig, das soll auch am Dateinamen erkennbar sein.
         """
         filter_text = self._filter_edit.text().strip()
         base = sanitize_filename(filter_text) if filter_text \
@@ -1083,10 +1082,10 @@ class MainWindow(QMainWindow):
         item = self.table_model.item_at(source_idx.row())
         if item:
             self.detail.show_item(item, self.table_model.pixmap_for(item))
-        # Herkunfts-Fach im Baum hervorheben (Nutzer-Feedback, v. a. bei "*"
+        # Herkunfts-Fach im Baum hervorheben (v. a. bei "*"
         # bzw. Aggregat-Ansichten mit mehreren Quell-Tabs) — highlight_stash
         # nutzt bewusst setCurrentItem statt eines Klick-Signals, damit die
-        # aktuelle Such-/Aggregat-Ansicht in der Item-Tabelle NICHT verändert
+        # aktuelle Such-/Aggregat-Ansicht in der Item-Tabelle nicht verändert
         # wird (kein stash_selected-Signal, siehe StashTree.highlight_stash).
         stash_id = self.table_model.stash_id_at(source_idx.row())
         if stash_id is not None:
@@ -1108,7 +1107,7 @@ class MainWindow(QMainWindow):
     def _on_offline_changed(self, offline: bool) -> None:
         """GGG nicht erreichbar (Wartung/kein Netz, §4.12) — permanentes
         Banner statt einer Fehlermeldung, die die nächste Statuszeile
-        wegwischt, UND Markierung im Baum, dass Fächer aus dem Cache kommen."""
+        wegwischt, und Markierung im Baum, dass Fächer aus dem Cache kommen."""
         self._offline = offline
         self._update_tree_offline_display()
         self._offline_label.setText(
@@ -1124,7 +1123,7 @@ class MainWindow(QMainWindow):
             self.worker.submit(FetchStashListJob(self._current_league))
         self.worker.submit(FetchCharactersJob())
 
-    # --- Rohdaten-Mini-Viewer (Rechtsklick im Baum, Nutzer-Feedback) ----- #
+    # --- Rohdaten-Mini-Viewer (Rechtsklick im Baum) ----- #
 
     def _on_raw_data_requested(self, stash_id: str, name: str) -> None:
         if self._raw_data_viewer is None:
@@ -1169,27 +1168,33 @@ class MainWindow(QMainWindow):
             return [MainWindow._strip_synthetic_keys(x) for x in obj]
         return obj
 
-    # --- Hintergrund-Auto-Refresh (Nutzer-Feedback) ---------------------- #
+    # --- Hintergrund-Auto-Refresh ---------------------- #
 
     def _maybe_auto_refresh(self) -> None:
-        """Läuft alle paar Sekunden per QTimer; lädt höchstens ZWEI Dinge neu —
-        das gerade angezeigte Fach ODER der gerade angezeigte Charakter
-        (immer, unabhängig vom Alter, damit die aktuelle Ansicht "lebt",
-        Nutzer-Feedback — beide schließen sich gegenseitig aus, siehe
-        `_current_stash_id`/`_current_character_name`) UND der normale
-        Sweep-Kandidat (füllt nach und nach den Rest der Truhe) — und nur,
-        wenn genug Rate-Limit-Budget für manuelle Klicks übrig bleibt
-        (Doku §4.8). Deshalb ist ``AUTO_REFRESH_INTERVAL_MS`` doppelt so groß
-        wie früher, als pro Tick nur ein Job rausging. Charaktere haben
-        KEINEN eigenen Sweep — anders als bei 391 Stash-Tabs ist die
-        Charakterliste klein genug, dass "irgendwann von selbst" keinen
-        Mehrwert hätte; nicht angezeigte Charaktere bleiben bis zum
-        nächsten Klick oder manuellen Refresh (Rechtsklick) unverändert."""
+        """Läuft per QTimer und lädt höchstens zwei Dinge neu:
+
+        1. Das gerade angezeigte Fach oder den gerade angezeigten
+           Charakter, unabhängig vom Alter der Daten, damit die offene
+           Ansicht aktuell bleibt. Beide schließen sich gegenseitig aus,
+           siehe ``_current_stash_id`` und ``_current_character_name``.
+        2. Den normalen Sweep-Kandidaten, der nach und nach den Rest der
+           Truhe füllt.
+
+        Beides nur, wenn genug Rate-Limit-Budget für manuelle Abfragen
+        übrig bleibt (§4.8). Da pro Tick bis zu zwei Jobs entstehen, ist
+        ``AUTO_REFRESH_INTERVAL_MS`` doppelt so groß wie zu der Zeit, als
+        nur ein Job je Tick abging.
+
+        Charaktere haben keinen eigenen Sweep. Anders als bei mehreren
+        hundert Stash-Tabs ist die Charakterliste klein genug, dass ein
+        automatischer Durchlauf keinen Mehrwert brächte; nicht angezeigte
+        Charaktere bleiben bis zum nächsten Klick oder einem manuellen
+        Refresh per Rechtsklick unverändert."""
         if not self._current_league or self._worker_busy or self._bulk_dialog is not None:
             return
         if not self._logged_in:
             # Token abgelaufen/ungültig (AuthError, z. B. mitten in der
-            # Session) — ohne diese Bremse würde JEDER Tick erneut mit dem
+            # Session) — ohne diese Bremse würde jeder Tick erneut mit dem
             # bereits als ungültig bekannten Token gegen die API laufen und
             # scheitern, real beobachtet über mehrere Minuten alle 40s in
             # Folge (siehe _on_login_required). Manuelle Klicks dürfen es
@@ -1229,11 +1234,11 @@ class MainWindow(QMainWindow):
     def _pick_auto_refresh_candidate(self) -> StashTab | None:
         """Ältester Tab der aktuellen Liga — inkl. noch nie geladener Tabs (⬇).
 
-        Noch nie geladene Tabs gelten als "unendlich alt" und werden IMMER
+        Noch nie geladene Tabs gelten als "unendlich alt" und werden immer
         als Kandidat betrachtet (die 1-Tag-Schonfrist gilt nur für bereits
         bekannte Daten — es gibt nichts zu schonen, wenn noch gar keine
         Daten da sind). So füllt sich der Stash über die Zeit von selbst,
-        ohne dass 391 Tabs einzeln angeklickt werden müssen (Nutzer-Feedback).
+        ohne dass 391 Tabs einzeln angeklickt werden müssen.
         Tabs, deren Name "Remove-only" enthält, werden nachrangig behandelt
         — nur falls es sonst keinen anderen Kandidaten gibt, kommen sie doch dran.
         """

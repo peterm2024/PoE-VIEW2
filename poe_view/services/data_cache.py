@@ -1,15 +1,10 @@
 """Persistenter Datei-Cache: Charaktere/Stash/Items überleben einen Neustart.
 
-Eine JSON-Datei statt einer Datenbank: Der Datenumfang (ein paar hundert
-Items, ein paar Dutzend Charaktere) rechtfertigt keine Datenbank, und JSON
-ist 1:1 nach LabVIEW portierbar (Flatten/Unflatten to JSON gibt es dort
-nativ). Struktur und Items werden getrennt gehalten (``stash_trees`` /
-``items_by_league``), weil die Stash-LISTE der API items grundsätzlich
-leer liefert — items kommen ausschließlich aus dem Einzel-Tab-Endpunkt.
-
-LabVIEW-Äquivalent: JSON-String via "Flatten to JSON" in eine Datei
-schreiben (bei jeder relevanten Änderung) und beim Start mit
-"Unflatten from JSON" wieder einlesen.
+Eine JSON-Datei statt einer Datenbank: Der Datenumfang von einigen
+hundert Items und einigen Dutzend Charakteren rechtfertigt keine.
+Struktur und Items werden getrennt gehalten (``stash_trees`` und
+``items_by_league``), weil die Stash-Liste der API grundsätzlich keine
+Items enthält; diese kommen ausschließlich vom Einzel-Tab-Endpunkt.
 """
 
 from __future__ import annotations
@@ -86,7 +81,7 @@ def load() -> CachedData | None:
             for league, stashes in payload["items_by_league"].items()
         }
         data.last_loaded = payload.get("last_loaded", {})
-        # .get() mit Default: Cache-Dateien von VOR diesem Feature kennen
+        # .get() mit Default: Cache-Dateien von vor diesem Feature kennen
         # diese Schlüssel noch nicht — sollen aber weiter ladbar bleiben.
         data.character_items = {
             name: [Item.model_validate(i) for i in items]
@@ -101,7 +96,7 @@ def load() -> CachedData | None:
 
 
 def _backfill_last_loaded(data: CachedData) -> None:
-    """Migration für Cache-Dateien von VOR dem last_loaded-Feature (FALLSTRICKE #12).
+    """Migration für Cache-Dateien von vor dem last_loaded-Feature (FALLSTRICKE #12).
 
     Tabs, deren Items im Cache liegen, aber keinen Zeitstempel haben, bekommen
     die mtime der Cache-Datei — die Daten sind höchstens so alt wie deren

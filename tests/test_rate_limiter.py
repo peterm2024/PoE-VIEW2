@@ -1,6 +1,6 @@
 """Tests für den RateLimitManager — das Kernsystem.
 
-Abgedeckt ist v. a. der historische LabVIEW-Bug: Regel und State müssen über
+Abgedeckt ist vor allem FALLSTRICKE #1: Regel und State müssen über
 die FENSTERGRÖSSE gematcht werden, nicht über die Array-Position.
 Die Uhr ist injizierbar (kein echtes Schlafen in den Tests).
 """
@@ -32,7 +32,7 @@ HEADERS = {
 
 def test_parse_matches_state_by_window() -> None:
     """Regel 15:15:60 muss den State 3:15:0 bekommen — auch wenn die
-    Reihenfolge der State-Einträge vertauscht ist (der LabVIEW-Bug)."""
+    Reihenfolge der State-Einträge vertauscht ist (FALLSTRICKE #1)."""
     clock = FakeClock()
     mgr = make_manager(clock)
     headers = dict(HEADERS)

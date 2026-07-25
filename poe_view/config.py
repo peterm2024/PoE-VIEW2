@@ -2,10 +2,7 @@
 
 Intention: Alles Installations-Spezifische (v. a. die Kontakt-E-Mail) kommt
 aus der lokalen `.env` und steht damit garantiert nicht im Repository.
-Alle konstanten OAuth-Werte stammen aus dem erprobten LabVIEW-Test-VI
-(docs/api-notes/labview-test-vi.md).
-
-LabVIEW-Äquivalent: Konfigurations-Cluster, beim Start aus externer Datei gelesen.
+Die konstanten OAuth-Werte sind in docs/api-notes/ggg-api.md dokumentiert.
 """
 
 from __future__ import annotations
@@ -22,7 +19,7 @@ if sys.platform == "win32":
     import winreg
 
 # In einer PyInstaller-.exe zeigt __file__ in den temporären Entpackungs-
-# ordner (sys._MEIPASS) — NICHT dorthin, wo die eigentliche .exe liegt und
+# ordner (sys._MEIPASS) — nicht dorthin, wo die eigentliche .exe liegt und
 # der Nutzer seine .env hinlegen würde. `sys.frozen` (von PyInstaller
 # gesetzt) erkennt diesen Fall; dann zählt das Verzeichnis der .exe selbst.
 if getattr(sys, "frozen", False):
@@ -39,7 +36,7 @@ CLIENT_ID = os.getenv("POE_CLIENT_ID", "poeview")
 # Feld die ANWENDUNG bzw. deren Betreiber, nicht den einzelnen Endnutzer —
 # GGGs eigenes Beispiel ist ebenfalls eine feste App-Adresse. Nutzer einer
 # fertigen .exe müssen deshalb nichts konfigurieren. Es ist ein eigens für
-# dieses Projekt angelegter Alias, KEINE private Adresse (siehe
+# dieses Projekt angelegter Alias, keine private Adresse (siehe
 # FALLSTRICKE_UND_WORKAROUNDS.md #3). Wer PoE-VIEW2 forkt und selbst
 # verteilt, sollte per .env die eigene Adresse setzen — dann landen
 # GGG-Rückfragen zur eigenen Distribution auch beim richtigen Empfänger.

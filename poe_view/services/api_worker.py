@@ -5,8 +5,6 @@ Absicht: so bleibt das Rate-Limiting deterministisch und trivial. Ergebnisse
 gehen ausschließlich per Qt-Signal zurück an den Main-Thread; die UI fasst
 den Client nie direkt an.
 
-LabVIEW-Äquivalent: die Consumer-Loop eines Queued Message Handlers;
-die Signale entsprechen User Events an das Main-VI.
 """
 
 from __future__ import annotations
@@ -49,7 +47,7 @@ def _is_connectivity_issue(exc: Exception) -> bool:
 
 
 # --------------------------- Job-Typen --------------------------------- #
-# ≙ Message-Cluster des QMH. Ein Job = ein Eintrag in der Queue.
+# Ein Job entspricht einem Eintrag in der Queue.
 
 @dataclass
 class BootstrapJob:
@@ -122,7 +120,7 @@ class _StopJob:
 class ApiWorker(QThread):
     """Arbeitet die Job-Queue ab, bis ``stop()`` gerufen wird."""
 
-    # Signale (≙ User Events). 'object' statt konkreter Typen, damit
+    # Signale. 'object' statt konkreter Typen, damit
     # pydantic-Modelle und Listen unverändert durchgereicht werden können.
     logged_in = Signal(str)                    # Profil-/Account-Name
     login_required = Signal(str)               # Grund (Anzeige im UI)
@@ -135,7 +133,7 @@ class ApiWorker(QThread):
     icon_loaded = Signal(str, object)          # url, bytes
     rate_limit_changed = Signal(str, object, float)  # policy, rules, wait_s
     job_error = Signal(str)                    # Fehlertext für die Statusbar
-    status = Signal(str)                       # Verlaufstext ("Lade …"), NICHT der Busy-Zustand
+    status = Signal(str)                       # Verlaufstext ("Lade …"), nicht der Busy-Zustand
     busy_changed = Signal(bool)                # True, solange irgendein Job läuft (für den UI-Spinner)
     bulk_progress = Signal(int, int, str)      # done, total, aktueller Tab-Name
     bulk_finished = Signal(int, int)           # success_count, total
@@ -199,7 +197,7 @@ class ApiWorker(QThread):
 
     def _dispatch(self, job) -> None:
         """Cases mit eigenem Abschlusstext (z. B. stash_items_loaded) emittieren
-        bewusst KEIN "Bereit" — Signale sind FIFO, es käme als Letztes an und
+        bewusst kein "Bereit" — Signale sind FIFO, es käme als Letztes an und
         würde die spezifischere Meldung sofort überschreiben."""
         match job:
             case BootstrapJob():

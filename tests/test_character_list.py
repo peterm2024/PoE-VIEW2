@@ -1,4 +1,4 @@
-"""Tests für die flache Charakterliste (kein Tree mehr, siehe Nutzer-Feedback)."""
+"""Tests für die flache Charakterliste."""
 
 from PySide6.QtGui import QAction
 
@@ -73,4 +73,4 @@ def test_context_menu_does_nothing_without_an_item_under_cursor(qapp, monkeypatc
     monkeypatch.setattr(character_list_module, "QMenu", _exploding_menu)
 
     from PySide6.QtCore import QPoint
-    widget._on_context_menu(QPoint(-1, -1))  # darf NICHT auf _exploding_menu treffen
+    widget._on_context_menu(QPoint(-1, -1))  # darf nicht auf _exploding_menu treffen
