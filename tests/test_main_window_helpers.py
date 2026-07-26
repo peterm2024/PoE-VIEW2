@@ -874,6 +874,143 @@ def test_refresh_mode_stash_prefers_non_empty_and_oldest_tab(qapp, monkeypatch) 
     win.worker.wait(5000)
 
 
+def _drive_stash_mode_pick(win: MainWindow, fake_now: list[float], submitted: list) -> str:
+    """Einen Pick auslösen und den realen Ladevorgang simulieren
+    (``_on_stash_items``), damit Alter/Füllstand für den nächsten Pick
+    korrekt fortgeschrieben werden — wie es der echte Worker täte."""
+    fake_now[0] += 10.0
+    win._refresh_mode_pending = False
+    win._drive_refresh_mode()
+    picked = submitted[-1].stash_id
+    win._on_stash_items("Standard", picked, "x", win._items["Standard"].get(picked, []), silent=True)
+    return picked
+
+
+def test_refresh_mode_stash_covers_the_next_empty_tab_after_a_full_round(qapp, monkeypatch) -> None:
+    """Peter: statt eines festen Pick-Verhältnisses (z. B. 'jeder 10.')
+    soll die Häufigkeit automatisch mit der Truhengröße skalieren — nach
+    einer vollständigen Runde durch alle aktuell GEFÜLLTEN Fächer hängt
+    sich genau ein Check für das nächste noch leere Fach an, danach
+    beginnt die Runde neu."""
+    win = MainWindow()
+    win._current_league = "Standard"
+    win._leaf_stashes = [_make_leaf("full_a", "Full A"), _make_leaf("full_b", "Full B"),
+                         _make_leaf("empty_c", "Empty C")]
+    win._items["Standard"] = {
+        "full_a": [Item.model_validate({"typeLine": "Chaos Orb", "frameType": 5})],
+        "full_b": [Item.model_validate({"typeLine": "Chaos Orb", "frameType": 5})],
+    }
+    submitted = []
+    monkeypatch.setattr(win.worker, "submit", lambda job: submitted.append(job))
+    monkeypatch.setattr(win.worker.rate_limiter, "steady_pace_interval_s", lambda *a, **k: 10.0)
+    fake_now = [1000.0]
+    monkeypatch.setattr("poe_view.ui.main_window.time.monotonic", lambda: fake_now[0])
+
+    win._on_refresh_mode_changed("Stash")  # Pick #1
+    first = submitted[-1].stash_id
+    win._on_stash_items("Standard", first, "x", win._items["Standard"][first], silent=True)
+    second = _drive_stash_mode_pick(win, fake_now, submitted)  # Pick #2
+
+    assert {first, second} == {"full_a", "full_b"}  # Runde: beide gefüllten zuerst, Reihenfolge egal
+
+    third = _drive_stash_mode_pick(win, fake_now, submitted)  # Pick #3: Runde fertig -> Coverage-Pick
+    assert third == "empty_c"
+
+    fourth = _drive_stash_mode_pick(win, fake_now, submitted)  # Pick #4: neue Runde beginnt normal
+    assert fourth in {"full_a", "full_b"}
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_stash_mode_coverage_pick_walks_empty_tabs_in_order_not_by_age(qapp, monkeypatch) -> None:
+    """Peter: der Coverage-Pick soll der Fächerreihenfolge nach gehen, nicht
+    nach Alter — sonst würde ein weiter vorne verschobenes Fach den Effekt
+    einer Neu-Sortierung im Spiel nicht spüren. Drei leere Fächer, alle
+    gleich alt (nie geladen): reines Alter könnte hier nicht entscheiden,
+    die Reihenfolge schon — der Rundlauf besucht alle drei nacheinander
+    (verschachtelt mit dem einen gefüllten Fach, da dessen Runde nur einen
+    Pick lang ist)."""
+    win = MainWindow()
+    win._current_league = "Standard"
+    win._leaf_stashes = [_make_leaf("full", "Full"),
+                         _make_leaf("empty_a", "Empty A"),
+                         _make_leaf("empty_b", "Empty B"),
+                         _make_leaf("empty_c", "Empty C")]
+    win._items["Standard"] = {"full": [Item.model_validate({"typeLine": "Chaos Orb", "frameType": 5})]}
+    submitted = []
+    monkeypatch.setattr(win.worker, "submit", lambda job: submitted.append(job))
+    monkeypatch.setattr(win.worker.rate_limiter, "steady_pace_interval_s", lambda *a, **k: 10.0)
+    fake_now = [1000.0]
+    monkeypatch.setattr("poe_view.ui.main_window.time.monotonic", lambda: fake_now[0])
+
+    win._on_refresh_mode_changed("Stash")  # Pick #1: "full"
+    win._on_stash_items("Standard", "full", "x", win._items["Standard"]["full"], silent=True)
+    picked = [_drive_stash_mode_pick(win, fake_now, submitted) for _ in range(5)]
+
+    covered = [p for p in picked if p != "full"]
+    assert covered == ["empty_a", "empty_b", "empty_c"]
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_stash_mode_coverage_pick_follows_a_tab_moved_forward_in_game(qapp, monkeypatch) -> None:
+    """Verschiebt der Nutzer im Spiel ein Fach weiter nach vorne, ändert
+    sich seine Position in ``_leaf_stashes`` beim nächsten Stash-Listen-
+    Refresh entsprechend — der Rundlauf-Cursor (ein reiner Listen-Index in
+    die aktuell leeren Fächer) folgt dieser neuen Reihenfolge und erreicht
+    das Fach dadurch früher, als es an seiner alten (hinteren) Position
+    dran gewesen wäre."""
+    win = MainWindow()
+    win._current_league = "Standard"
+    win._leaf_stashes = [_make_leaf("full", "Full"),
+                         _make_leaf("empty_a", "Empty A"),
+                         _make_leaf("empty_b", "Empty B"),
+                         _make_leaf("moved", "Moved Tab")]  # "moved" ganz hinten
+    win._items["Standard"] = {"full": [Item.model_validate({"typeLine": "Chaos Orb", "frameType": 5})]}
+    submitted = []
+    monkeypatch.setattr(win.worker, "submit", lambda job: submitted.append(job))
+    monkeypatch.setattr(win.worker.rate_limiter, "steady_pace_interval_s", lambda *a, **k: 10.0)
+    fake_now = [1000.0]
+    monkeypatch.setattr("poe_view.ui.main_window.time.monotonic", lambda: fake_now[0])
+
+    win._on_refresh_mode_changed("Stash")  # Pick #1: "full"
+    win._on_stash_items("Standard", "full", "x", win._items["Standard"]["full"], silent=True)
+
+    assert _drive_stash_mode_pick(win, fake_now, submitted) == "empty_a"  # 1. Coverage-Pick
+
+    # Nutzer verschiebt "moved" im Spiel an die zweite leere Position — ohne
+    # das würde es erst beim 3. statt beim 2. Coverage-Pick drankommen.
+    win._leaf_stashes = [_make_leaf("full", "Full"),
+                         _make_leaf("empty_a", "Empty A"),
+                         _make_leaf("moved", "Moved Tab"),
+                         _make_leaf("empty_b", "Empty B")]
+
+    assert _drive_stash_mode_pick(win, fake_now, submitted) == "full"   # Runde: erst wieder das gefüllte Fach
+    assert _drive_stash_mode_pick(win, fake_now, submitted) == "moved"  # früher dran dank neuer Position
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_stash_mode_round_state_resets_on_league_change(qapp, monkeypatch) -> None:
+    win = MainWindow()
+    win._current_league = "Standard"
+    win._leaf_stashes = [_make_leaf("t1", "Tab 1")]
+    monkeypatch.setattr(win.worker, "submit", lambda job: None)
+    win._on_refresh_mode_changed("Stash")
+    assert win._stash_mode_round_picks == 1  # t1 ist leer -> normaler Pick, hochgezählt
+
+    win._on_league_changed("Standard SSF")
+
+    assert win._stash_mode_round_picks == 0
+    assert win._stash_mode_coverage_cursor == 0
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
 def test_refresh_mode_stash_cycles_through_the_league_on_the_steady_pace(qapp, monkeypatch) -> None:
     win = MainWindow()
     win._current_league = "Standard"

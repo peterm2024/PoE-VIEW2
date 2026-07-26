@@ -68,6 +68,21 @@ class MainWindow(QMainWindow):
     # sonst je Klick einen Request auslösen und das Budget leerräumen.
     REFRESH_MODE_KICK_MIN_HEADROOM = 0.5
 
+    # Stash-Modus bevorzugt gefüllte Fächer (Items > 0) vor leeren — leere
+    # sind uninteressant und sollen den Takt nicht mit unnötigen Requests
+    # blockieren. Damit ein einmal als leer bekanntes Fach aber nicht für
+    # immer unbeachtet bleibt, hängt sich nach jeder vollständigen Runde
+    # durch alle AKTUELL gefüllten Fächer automatisch ein einziger
+    # zusätzlicher Check für das nächste noch leere Fach an
+    # (§_pick_stash_mode_candidate) — reihum nach Fächerreihenfolge, nicht
+    # nach Alter, damit ein im Spiel nach vorne verschobenes Fach auch hier
+    # schneller wieder drankommt. Bewusst kein fester Anteil (z. B. "jeder
+    # 10. Pick"): die Häufigkeit soll sich automatisch an die Truhengröße
+    # anpassen (bei 5 gefüllten Fächern alle 5 Picks eins, bei 80 gefüllten
+    # alle 80). Keine Sonderbehandlung mehr für bestimmte Positionen
+    # (z. B. "immer die vordersten 10") — das soll später über eine
+    # Favoriten-Markierung gelöst werden, nicht über einen festen Index.
+
     # Typ-Filter-Checkboxen: die vier PoE-Rarities, dazu
     # Gem/Currency/Divination Card, und "Sonstige" (OTHER_TYPE) für den
     # Rest (Quest, Prophecy, Relic, Unbekanntes).
@@ -118,6 +133,8 @@ class MainWindow(QMainWindow):
         # einem dazwischengefunkten Klick auf einen anderen Endpunkt)
         # überschrieben werden kann (§steady_pace_interval_s).
         self._refresh_mode_policy: str | None = None
+        self._stash_mode_round_picks = 0  # normale Picks seit dem letzten Coverage-Pick
+        self._stash_mode_coverage_cursor = 0  # Rundlauf-Index durch die leeren Fächer, §_pick_stash_mode_candidate
         self._raw_data_viewer: RawDataViewer | None = None
         self._offline = False  # GGG nicht erreichbar (Wartung am Patchday)
         self._live_leagues: set[str] | None = None  # letzte /account/leagues-Antwort; None = noch unbekannt
@@ -632,6 +649,8 @@ class MainWindow(QMainWindow):
         self._refresh_mode_pending = False
         self._refresh_mode_next_due = 0.0
         self._refresh_mode_policy = None
+        self._stash_mode_round_picks = 0
+        self._stash_mode_coverage_cursor = 0
         self._drive_refresh_mode()
 
     def _on_characters(self, characters: list[Character]) -> None:
@@ -650,11 +669,16 @@ class MainWindow(QMainWindow):
         self.character_list.set_characters(filtered)
 
     def _activate_stash_tree(self, stashes: list[StashTab]) -> None:
-        """Baum rendern + abgeflachte Liste aktualisieren — für Live- und Cache-Daten."""
+        """Baum rendern + abgeflachte Liste aktualisieren — für Live- und Cache-Daten.
+
+        ``_leaf_stashes`` MUSS vor dem Rendern aktualisiert werden, da
+        ``_tab_positions()`` (Positions-Spalte im Baum, §Peters
+        Rundlauf-Frage) direkt darauf aufbaut."""
+        self._leaf_stashes = self._flatten_stashes(stashes)
         last_loaded = self._last_loaded.get(self._current_league, {})
         item_counts = self._item_counts_for_current_league()
-        self.tree.set_stashes(stashes, last_loaded=last_loaded, item_counts=item_counts)
-        self._leaf_stashes = self._flatten_stashes(stashes)
+        self.tree.set_stashes(stashes, last_loaded=last_loaded, item_counts=item_counts,
+                              positions=self._tab_positions())
         self._update_auto_refresh_label()
 
     def _item_counts_for_current_league(self) -> dict[str, int]:
@@ -851,6 +875,10 @@ class MainWindow(QMainWindow):
             tab = self._find_stash(tree, stash_id)
             if tab is not None:
                 tab.children = children
+            # Vor dem Rendern aktualisieren — _tab_positions() (Positions-
+            # Spalte im Baum) baut direkt darauf auf und muss die neu
+            # entdeckten Kinder schon kennen.
+            self._leaf_stashes = self._flatten_stashes(tree)
         if silent:
             self._count_silent_refresh(league, stash_id)
         self._persist_cache()
@@ -859,14 +887,13 @@ class MainWindow(QMainWindow):
         league_loaded = self._last_loaded.get(league, {})
         item_counts = self._item_counts_for_current_league()
         self.tree.set_children(stash_id, children, last_loaded=league_loaded,
-                               item_counts=item_counts, expand=not silent)
+                               item_counts=item_counts, expand=not silent,
+                               positions=self._tab_positions())
         # Gesamtsumme über die Kinder (bekannte API-Hinweise + evtl. schon
         # geladene) auch am Eltern-Knoten zeigen.
         counts = [item_counts.get(c.id, c.metadata.get("items")) for c in children]
         total = sum(c or 0 for c in counts) if any(c is not None for c in counts) else None
         self.tree.mark_loaded(stash_id, league_loaded[stash_id], count=total)
-        if tree is not None:
-            self._leaf_stashes = self._flatten_stashes(tree)
         self._update_auto_refresh_label()
         if not silent:
             self._status_msg.setText(
@@ -1315,6 +1342,7 @@ class MainWindow(QMainWindow):
         Header mehr reinkommt, der sie sonst antreiben würde (Rückfrage
         "Policy-Statusleiste aktualisiert sich während der Pause nicht")."""
         self.dashboard.update_state(*self.worker.rate_limiter.snapshot())
+        self.tree.refresh_age_colors()
         # Sicherheitsnetz für Single/Stash: falls die Job-Kette (§_drive_
         # refresh_mode) je stockt — etwa weil ein Fehler den erwarteten
         # Erfolgs-Signal-Pfad übersprungen hat —, stößt der ohnehin
@@ -1383,15 +1411,36 @@ class MainWindow(QMainWindow):
 
     def _pick_stash_mode_candidate(self) -> StashTab | None:
         """Nächster Kandidat für den Stash-Modus: das am längsten nicht
-        aktualisierte Fach, gefüllte (Items > 0) vor leeren — leere Fächer
-        sind uninteressant und sollen den vollen Rate-Limit-Einsatz nicht
+        aktualisierte GEFÜLLTE Fach (Items > 0) — leere Fächer sind
+        uninteressant und sollen den Takt nicht mit unnötigen Requests
         blockieren. Läuft, weil der jeweils frisch geladene Kandidat danach
-        "jung" ist und erst wieder drankommt, wenn alle anderen einmal
-        durch waren, quasi endlos rundenweise durch die ganze Truhe."""
+        "jung" ist und erst wieder drankommt, wenn alle anderen gefüllten
+        einmal durch waren, quasi endlos rundenweise durch die gefüllten
+        Fächer.
+
+        Sobald eine solche Runde vollständig war (`_stash_mode_round_picks`
+        erreicht die Anzahl der aktuell gefüllten Fächer), hängt sich EIN
+        zusätzlicher Pick für das nächste noch leere Fach an, danach beginnt
+        die Zählung neu. Bewusst kein fester Anteil (z. B. "jeder 10.
+        Pick") — die Häufigkeit soll sich automatisch an die Truhengröße
+        anpassen. Der Rundlauf durch die leeren Fächer
+        (`_stash_mode_coverage_cursor`) folgt der FÄCHERREIHENFOLGE, nicht
+        dem Alter: verschiebt der Nutzer im Spiel ein Fach weiter nach
+        vorne, rückt es in `_leaf_stashes` ebenso weiter nach vorne und ist
+        dadurch beim Rundlauf schneller wieder dran."""
         if not self._leaf_stashes:
             return None
-        league_loaded = self._last_loaded.get(self._current_league, {})
         item_counts = self._item_counts_for_current_league()
+        non_empty = [s for s in self._leaf_stashes if item_counts.get(s.id)]
+        empty = [s for s in self._leaf_stashes if not item_counts.get(s.id)]
+
+        if non_empty and empty and self._stash_mode_round_picks >= len(non_empty):
+            candidate = empty[self._stash_mode_coverage_cursor % len(empty)]
+            self._stash_mode_coverage_cursor += 1
+            self._stash_mode_round_picks = 0
+            return candidate
+
+        league_loaded = self._last_loaded.get(self._current_league, {})
 
         def sort_key(stash: StashTab) -> tuple[bool, datetime]:
             is_empty = not item_counts.get(stash.id)
@@ -1399,6 +1448,7 @@ class MainWindow(QMainWindow):
             age = self._NEVER_LOADED if iso is None else datetime.fromisoformat(iso)
             return (is_empty, age)
 
+        self._stash_mode_round_picks += 1
         return min(self._leaf_stashes, key=sort_key)
 
     def _drive_refresh_mode(self) -> None:

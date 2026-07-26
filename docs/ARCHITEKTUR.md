@@ -372,7 +372,8 @@ Datenumfang von einigen hundert Items rechtfertigt keine.
 
 #### 4.7.1 Status-/Alters-Symbol UND Item-Anzahl je eine eigene Spalte
 
-`StashTree` hat drei Spalten: Name, **# (Item-Anzahl)** und Status.
+`StashTree` hat vier Spalten: Name, **# (Item-Anzahl)**, Status und
+**Pos.**
 
 Die Status-Spalte zeigt genau einen von zwei sich gegenseitig
 ausschließenden Zuständen: entweder "⬇" als reinen Text, solange der Tab
@@ -393,6 +394,47 @@ Unique-Kindern der API-Hinweis `metadata.items`, den GGG bereits vor dem
 Laden mitschickt. Gruppen- und Ordner-Knoten zeigen die Summe ihrer
 bekannten Kind-Anzahlen (`StashTree._refresh_ancestor_totals`, rekursiv
 nach oben durchgereicht, sobald sich eine Zahl ändert).
+
+Die **Pos.-Spalte** (2026-07-26) zeigt die 1-basierte Position eines Fachs
+in der echten Truhen-Reihenfolge — dieselbe, die `MainWindow._tab_positions()`
+liefert und die auch den Stash-Modus-Rundlauf antreibt
+(`_pick_stash_mode_candidate`). Peter fehlte ein Zeilenheader zum
+"Durchzählen der echten Truhenfächer", wie ihn `QTableView` (ItemList) mit
+seinem `verticalHeader()` hat — `QTreeView` kennt dieses Konzept nicht,
+die Pos.-Spalte ist das Äquivalent dafür. `MainWindow` übergibt die
+Positionen bei jedem Rendern (`set_stashes`, `set_children`) explizit
+mit — wichtig dabei: `_leaf_stashes` muss VOR dem Aufruf schon den neuen
+Stand tragen, sonst rechnet `_tab_positions()` noch mit der alten Liste.
+Nur echte Fächer bekommen eine Zahl; Ordner- und Gruppenknoten (kein
+eigener Truhenplatz) bleiben leer.
+
+#### 4.7.2 Namensspalte nach Datenalter abgeblendet
+
+Zusätzlich zum Alters-Text im Status-Button färbt `StashTree._apply_age_color`
+die Namensspalte jedes geladenen Fachs ein: unter 1 Stunde normale
+Textfarbe ("aktuell"), unter 3 Stunden leicht Richtung Hintergrund
+gemischt, älter deutlicher (`_blend`, Faktoren 0.35 / 0.6). Bewusst kein
+fest codierter Grauton (Peters ursprüngliche Idee war "Weiß/Hellgrau/
+Dunkelgrau") — stattdessen wird die tatsächliche Theme-Textfarbe
+(`QPalette.ColorRole.Text`) zur tatsächlichen Hintergrundfarbe
+(`QPalette.ColorRole.Base`) hin gemischt, damit es auf hellem wie dunklem
+Theme lesbar bleibt. Nie geladene Fächer sowie reine Ordner-/
+Gruppenknoten (kein Zeitstempel) bleiben unangetastet.
+
+Da das Alter auch ohne neue Daten weiterwandert, ruft
+`MainWindow._update_auto_refresh_countdown` (der ohnehin laufende
+Sekunden-Tick, §4.8) zusätzlich `StashTree.refresh_age_colors()` auf —
+kein eigener Timer nötig.
+
+Zusätzlich bekommt das zuletzt per `StashTree.mark_loaded()`
+aktualisierte Fach Türkis statt der normalen Alters-Farbe
+(`_mark_just_updated`) — sichtbar, welches Fach ein automatischer Sweep
+(Refresh-Modus Single/Stash, §4.8) gerade angefasst hat, ohne im
+40-Sekunden-Countdown danach suchen zu müssen. Es gibt immer höchstens
+eine Türkis-Markierung; ein weiterer `mark_loaded()`-Aufruf lässt sie zum
+neuen Fach wandern, das vorherige fällt auf seine reguläre Alters-Farbe
+zurück. `set_stashes()` (Liga-Wechsel/Neustart) setzt die Markierung
+zurück, da ein Fach aus der vorherigen Liga sonst irreführend wäre.
 
 ### 4.8 Hintergrund-Auto-Refresh (`MainWindow._maybe_auto_refresh`)
 
@@ -508,8 +550,23 @@ Toolbar ("Mode: Auto / Single / Stash", additiv neben dem normalen
   Charakter, `_pick_single_target`) aktuell, im Takt von
   `steady_pace_interval_s()`.
 - **Stash** — zyklisiert endlos durch die ganze Truhe der aktuellen Liga,
-  gefüllte Fächer vor leeren (`_pick_stash_mode_candidate`), im selben
-  Takt.
+  gefüllte Fächer (Items > 0) vor leeren (`_pick_stash_mode_candidate`), im
+  selben Takt. Sonst würde ein einmal als leer bekanntes Fach nie wieder
+  geprüft, selbst wenn es inzwischen gefüllt wurde: sobald eine
+  vollständige Runde durch alle AKTUELL gefüllten Fächer durch ist
+  (`_stash_mode_round_picks` erreicht deren Anzahl), hängt sich EIN
+  zusätzlicher Pick für das nächste noch leere Fach an, danach beginnt die
+  Zählung neu. Bewusst kein fester Anteil (z. B. "jeder 10. Pick") —
+  die Häufigkeit passt sich automatisch an die Truhengröße an (bei 5
+  gefüllten Fächern alle 5 Picks eins, bei 80 gefüllten alle 80). Der
+  Rundlauf durch die leeren Fächer (`_stash_mode_coverage_cursor`, ein
+  Listen-Index) folgt dabei der FÄCHERREIHENFOLGE, nicht dem Alter:
+  verschiebt der Nutzer im Spiel ein Fach weiter nach vorne, rückt es in
+  `_leaf_stashes` ebenso weiter nach vorne und ist dadurch schneller wieder
+  dran — mit Alter als Kriterium hätte diese Absicht keine Wirkung gehabt.
+  Keine Sonderbehandlung nach Position (z. B. "die vordersten 10 immer
+  frisch") — das soll später über eine Favoriten-Markierung gelöst werden,
+  nicht über einen festen Index (Peter: stört sich an starren Positionen).
 
 Single/Stash reservieren bewusst KEIN Budget für manuelle Klicks (anders
 als Auto) — der Nutzer hat den Modus bewusst gewählt, um den vollen Pool

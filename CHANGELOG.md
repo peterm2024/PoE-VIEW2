@@ -11,11 +11,24 @@ nach [SemVer](https://semver.org/lang/de/).
 - Refresh-Modus-Dropdown (Auto / Single / Stash) in der Toolbar: Single
   hält gezielt die aktuell gewählte Zeile aktuell, Stash zyklisiert durch
   die ganze Truhe — beide in einem gleichmäßigen, aus den echten
-  Rate-Limit-Regeln abgeleiteten Takt statt eines Bursts.
+  Rate-Limit-Regeln abgeleiteten Takt statt eines Bursts. Stash bevorzugt
+  gefüllte Fächer, hängt aber nach jeder vollständigen Runde durch diese
+  automatisch einen Check für das nächste noch leere Fach an (Häufigkeit
+  passt sich an die Truhengröße an) — reihum der Fächerreihenfolge nach,
+  sodass ein im Spiel nach vorne verschobenes Fach automatisch schneller
+  wieder drankommt.
 - Sichtbarer Countdown bis zum nächsten Auto-Refresh-Tick bzw. der Grund,
   warum er gerade pausiert (Rate-Limit, Token, archivierte Liga, …).
 - Stash-Baum: Name-Spalte skaliert automatisch mit dem Panel, Anzahl- und
   Status-Spalte bleiben dadurch immer sichtbar.
+- Stash-Baum: neue Pos.-Spalte zeigt die tatsächliche Position eines
+  Fachs in der Truhen-Reihenfolge (leer bei Ordnern/Gruppen) — ein
+  Zeilenheader-Äquivalent für Bäume, die (anders als die ItemList) keinen
+  eigenen vertikalen Header kennen.
+- Stash-Baum: Name-Spalte geladener Fächer wird nach Datenalter
+  abgeblendet (aktuell < 1h normal, < 3h leicht, älter deutlicher),
+  damit veraltete Fächer sofort auffallen. Das zuletzt aktualisierte Fach
+  ist zusätzlich türkis markiert, bis das nächste Fach an der Reihe ist.
 
 ### Geändert
 

@@ -4,7 +4,7 @@ Die Stash-Tabs sind direkt die Top-Level-Einträge des Baums; ein
 umschließender Wurzelknoten würde nur eine Ebene kosten. Die
 Charakterliste liegt separat in ``character_list.py``.
 
-Der Baum hat drei Spalten:
+Der Baum hat vier Spalten:
 
 * **Name** mit der Tab-Farbe als kleinem Farbquadrat davor. Die Farbe
   (``metadata.colour``, Hex ohne '#') dient bewusst nicht als Textfarbe,
@@ -19,6 +19,29 @@ Der Baum hat drei Spalten:
   mit Tagesangabe ("⟳ vor 3d"). Ist GGG nicht erreichbar
   (``set_offline``), wird aus dem ⟳ ein "📴"; die Daten stammen dann
   sicher aus dem Cache.
+* **Pos.** mit der 1-basierten Position des Fachs in der echten
+  Truhen-Reihenfolge, wie ``MainWindow._tab_positions()`` sie aus der
+  API-Antwort ableitet (dieselbe Quelle, die auch den Stash-Modus-Rundlauf
+  antreibt, §_pick_stash_mode_candidate in main_window.py). Peter fehlte
+  ein Zeilenheader zum "Durchzählen der echten Truhenfächer" — Qt kennt
+  das nur bei Tabellen, nicht bei Bäumen, daher diese Spalte als
+  Äquivalent. Nur echte Fächer bekommen eine Zahl; Ordner- und
+  Gruppenknoten (kein eigener Truhenplatz) bleiben leer.
+
+Die Namensspalte geladener Fächer wird zusätzlich nach Datenalter
+abgeblendet (aktuell < 1h in normaler Textfarbe, < 3h leicht, älter
+deutlicher Richtung Hintergrundfarbe gemischt — ``_apply_age_color``),
+damit veraltete Fächer im Baum sofort auffallen. Nie geladene Fächer und
+reine Ordner-/Gruppenknoten bleiben unangetastet. ``refresh_age_colors()``
+wird von ``MainWindow`` im ohnehin laufenden Sekunden-Tick aufgerufen,
+damit das Alter auch ohne neue Daten weiterwandert.
+
+Das zuletzt per ``mark_loaded()`` aktualisierte Fach bekommt statt der
+normalen Alters-Farbe Türkis (``_mark_just_updated``) — so ist bei
+automatischen Sweeps (Refresh-Modus Single/Stash) sofort sichtbar,
+welches Fach gerade dran war. Die Markierung wandert mit jedem weiteren
+``mark_loaded()``-Aufruf zum neuen Fach; das vorherige fällt zurück auf
+seine reguläre Alters-Farbe.
 
 Rechtsklick auf einen Tab öffnet ein Kontextmenü mit "Rohdaten anzeigen"
 (``raw_data_requested``), das den Viewer in ``ui/raw_data_viewer.py``
@@ -46,7 +69,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from PySide6.QtCore import QSize, Qt, Signal
-from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap
+from PySide6.QtGui import QBrush, QColor, QIcon, QPainter, QPalette, QPixmap
 from PySide6.QtWidgets import (QHeaderView, QMenu, QToolButton, QTreeWidget,
                                QTreeWidgetItem)
 
@@ -54,8 +77,21 @@ from poe_view.api.models import StashTab
 
 _DATA_ROLE = Qt.ItemDataRole.UserRole
 _LAST_LOADED_ROLE = Qt.ItemDataRole.UserRole + 1  # für set_offline(): Refresh-Button neu beschriften
-_COL_NAME, _COL_COUNT, _COL_STATUS = 0, 1, 2
+_COL_NAME, _COL_COUNT, _COL_STATUS, _COL_POSITION = 0, 1, 2, 3
 _UNLOADED_MARK = "⬇"
+_AGE_FRESH_H = 1    # < 1h: normale Textfarbe
+_AGE_RECENT_H = 3   # < 3h: leicht abgeblendet, sonst stärker abgeblendet
+
+
+def _blend(colour: QColor, towards: QColor, factor: float) -> QColor:
+    """Mischt ``colour`` zu ``factor`` Anteilen Richtung ``towards`` —
+    ergibt "gedimmt" statt eines festen Grautons, der auf hellem wie
+    dunklem Theme falsch aussähe."""
+    return QColor(
+        round(colour.red() * (1 - factor) + towards.red() * factor),
+        round(colour.green() * (1 - factor) + towards.green() * factor),
+        round(colour.blue() * (1 - factor) + towards.blue() * factor),
+    )
 
 
 def _colour_swatch(hex_colour: str, size: int = 12) -> QIcon:
@@ -148,8 +184,8 @@ class StashTree(QTreeWidget):
 
     def __init__(self) -> None:
         super().__init__()
-        self.setColumnCount(3)
-        self.setHeaderLabels(["Name", "#", ""])
+        self.setColumnCount(4)
+        self.setHeaderLabels(["Name", "#", "", "Pos."])
         self.setIconSize(QSize(12, 12))
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.customContextMenuRequested.connect(self._on_context_menu)
@@ -170,15 +206,21 @@ class StashTree(QTreeWidget):
         header.setSectionResizeMode(_COL_NAME, QHeaderView.ResizeMode.Stretch)
         header.setSectionResizeMode(_COL_COUNT, QHeaderView.ResizeMode.Fixed)
         header.setSectionResizeMode(_COL_STATUS, QHeaderView.ResizeMode.Fixed)
+        header.setSectionResizeMode(_COL_POSITION, QHeaderView.ResizeMode.Fixed)
         self.setColumnWidth(_COL_COUNT, 46)
         self.setColumnWidth(_COL_STATUS, 80)
+        self.setColumnWidth(_COL_POSITION, 40)
         self.headerItem().setTextAlignment(_COL_COUNT, Qt.AlignmentFlag.AlignRight)
+        self.headerItem().setTextAlignment(_COL_POSITION, Qt.AlignmentFlag.AlignRight)
         self.headerItem().setToolTip(_COL_COUNT, "Item count (known after the first load)")
         self.headerItem().setToolTip(
             _COL_STATUS, "⬇ = not loaded yet · ⟳ = reload (shows data age) · "
             "📴 = offline cache, GGG currently unreachable")
+        self.headerItem().setToolTip(
+            _COL_POSITION, "Position in the actual vault order (empty for folders/groups)")
         self._stash_nodes: dict[str, QTreeWidgetItem] = {}  # stash_id → Knoten
         self._offline = False  # GGG nicht erreichbar (MainWindow.set_offline)
+        self._last_updated_id: str | None = None  # zuletzt per mark_loaded aktualisiertes Fach
         self.itemClicked.connect(self._on_click)
 
     def set_offline(self, offline: bool) -> None:
@@ -196,32 +238,41 @@ class StashTree(QTreeWidget):
                 self._set_status(node, stash_id, last_loaded_iso)
 
     def set_stashes(self, stashes: list[StashTab], last_loaded: dict[str, str] | None = None,
-                    item_counts: dict[str, int] | None = None) -> None:
+                    item_counts: dict[str, int] | None = None,
+                    positions: dict[str, int] | None = None) -> None:
         """Zeigt den Stash-Baum an — startet zugeklappt (auch Unterordner).
 
         ``last_loaded`` bildet stash_id → ISO-Zeitstempel des letzten
         erfolgreichen Ladens ab (MainWindow._last_loaded). Fehlt der Eintrag,
         gilt der Tab als noch nie geladen. ``item_counts`` überschreibt den
         API-Hinweis (metadata.items) mit der tatsächlich geladenen Anzahl.
+        ``positions`` (MainWindow._tab_positions()) füllt die Pos.-Spalte.
         """
         self.clear()
         self._stash_nodes.clear()
+        self._last_updated_id = None  # neuer Baum (Liga-Wechsel/Neustart) — alte Markierung wäre irreführend
         last_loaded = last_loaded or {}
         overrides = item_counts or {}
+        positions = positions or {}
         for stash in stashes:
             self.addTopLevelItem(self._build_node(stash, overrides))
         # Status erst nach dem Einhängen setzen — setItemWidget wirkt nur
         # auf Items, die bereits Teil des Baums sind.
         for stash_id, node in self._stash_nodes.items():
             self._set_status(node, stash_id, last_loaded.get(stash_id))
+            self._set_position(node, positions.get(stash_id))
 
     def mark_loaded(self, stash_id: str, last_loaded_iso: str, count: int | None = None) -> None:
         """Nach einem erfolgreichen Ladevorgang: ⬇ durch Refresh-Button+Alter ersetzen
-        und — falls bekannt — die Item-Anzahl-Spalte (inkl. Eltern-Gruppensumme) aktualisieren."""
+        und — falls bekannt — die Item-Anzahl-Spalte (inkl. Eltern-Gruppensumme) aktualisieren.
+        Markiert dieses Fach zusätzlich als "gerade aktualisiert" (Türkis), damit bei
+        automatischen Sweeps (Single-/Stash-Modus, §MainWindow._drive_refresh_mode)
+        sichtbar ist, welches Fach zuletzt dran war — die vorherige Markierung wandert."""
         node = self._stash_nodes.get(stash_id)
         if node is None:
             return
         self._set_status(node, stash_id, last_loaded_iso)
+        self._mark_just_updated(stash_id)
         if count is not None:
             node.setText(_COL_COUNT, str(count))
             self._refresh_ancestor_totals(node)
@@ -236,7 +287,8 @@ class StashTree(QTreeWidget):
     def set_children(self, parent_id: str, children: list[StashTab],
                      last_loaded: dict[str, str] | None = None,
                      item_counts: dict[str, int] | None = None,
-                     expand: bool = True) -> None:
+                     expand: bool = True,
+                     positions: dict[str, int] | None = None) -> None:
         """Hängt die entdeckten Unter-Tabs eines Spezial-Tabs (MapStash, …) unter
         dessen Knoten — ohne den restlichen Baum neu aufzubauen (Aufklapp-Zustand
         und Scroll-Position bleiben erhalten)."""
@@ -245,6 +297,7 @@ class StashTree(QTreeWidget):
             return
         last_loaded = last_loaded or {}
         overrides = item_counts or {}
+        positions = positions or {}
         # Alte Kind-Knoten auch aus dem id→Knoten-Index entfernen (sonst
         # zeigen mark_loaded()-Aufrufe später auf tote Widget-Referenzen).
         # Rekursiv — mit Sektions-Gruppen liegen Fächer eine Ebene tiefer.
@@ -255,8 +308,12 @@ class StashTree(QTreeWidget):
             node = self._stash_nodes.get(child.id)
             if node is not None:
                 self._set_status(node, child.id, last_loaded.get(child.id))
+                self._set_position(node, positions.get(child.id))
         if expand:
             parent_node.setExpanded(True)
+
+    def _set_position(self, node: QTreeWidgetItem, position: int | None) -> None:
+        node.setText(_COL_POSITION, "" if position is None else str(position))
 
     def _drop_index_entries_below(self, node: QTreeWidgetItem) -> None:
         for i in range(node.childCount()):
@@ -326,9 +383,66 @@ class StashTree(QTreeWidget):
         self._attach_children(node, stash.children, overrides)
         return node
 
+    def _apply_age_color(self, node: QTreeWidgetItem, last_loaded_iso: str | None) -> None:
+        """Namensspalte nach Datenalter abblenden: aktuell (< 1h) bleibt in
+        normaler Textfarbe, bis 3h leicht, älter deutlicher Richtung
+        Hintergrund gemischt. Relativ zur echten Theme-Textfarbe statt fest
+        codierter Grautöne, damit es auf hellem wie dunklem Theme lesbar
+        bleibt. Nie geladene Fächer (kein Zeitstempel) bleiben unangetastet."""
+        if last_loaded_iso is None:
+            return
+        try:
+            loaded_at = datetime.fromisoformat(last_loaded_iso)
+        except ValueError:
+            return
+        age_h = (datetime.now(timezone.utc) - loaded_at).total_seconds() / 3600
+        text = self.palette().color(QPalette.ColorRole.Text)
+        base = self.palette().color(QPalette.ColorRole.Base)
+        if age_h < _AGE_FRESH_H:
+            colour = text
+        elif age_h < _AGE_RECENT_H:
+            colour = _blend(text, base, 0.35)
+        else:
+            colour = _blend(text, base, 0.6)
+        node.setForeground(_COL_NAME, QBrush(colour))
+
+    def _refresh_node_colour(self, node: QTreeWidgetItem, stash_id: str,
+                             last_loaded_iso: str | None) -> None:
+        """Türkis für das zuletzt per ``mark_loaded`` aktualisierte Fach,
+        sonst die normale Alters-Abblendung — eine Stelle für beide Regeln,
+        damit sie nie auseinanderlaufen (z. B. bei ``set_offline``)."""
+        if stash_id == self._last_updated_id:
+            node.setForeground(_COL_NAME, QBrush(QColor("turquoise")))
+            return
+        self._apply_age_color(node, last_loaded_iso)
+
+    def _mark_just_updated(self, stash_id: str) -> None:
+        """Wandert die Türkis-Markierung auf ``stash_id`` — das zuvor
+        markierte Fach fällt zurück auf seine normale Alters-Farbe (nach
+        einem echten Refresh ohnehin "aktuell", also meist ebenfalls hell,
+        aber ohne die Sonderfarbe)."""
+        previous = self._last_updated_id
+        self._last_updated_id = stash_id
+        if previous is not None and previous != stash_id:
+            prev_node = self._stash_nodes.get(previous)
+            if prev_node is not None:
+                self._apply_age_color(prev_node, prev_node.data(_COL_STATUS, _LAST_LOADED_ROLE))
+        node = self._stash_nodes.get(stash_id)
+        if node is not None:
+            self._refresh_node_colour(node, stash_id, node.data(_COL_STATUS, _LAST_LOADED_ROLE))
+
+    def refresh_age_colors(self) -> None:
+        """Regelmäßig (Sekunden-Tick in MainWindow) neu anwenden, damit ein
+        Fach von "aktuell" nach "älter" wandert, auch ohne dass sich sonst
+        etwas an ihm ändert. Die Türkis-Markierung (§_mark_just_updated)
+        bleibt davon unberührt, da ``_refresh_node_colour`` sie kennt."""
+        for stash_id, node in self._stash_nodes.items():
+            self._refresh_node_colour(node, stash_id, node.data(_COL_STATUS, _LAST_LOADED_ROLE))
+
     def _set_status(self, node: QTreeWidgetItem, stash_id: str,
                     last_loaded_iso: str | None) -> None:
         node.setData(_COL_STATUS, _LAST_LOADED_ROLE, last_loaded_iso)
+        self._refresh_node_colour(node, stash_id, last_loaded_iso)
         if last_loaded_iso is None:
             self.removeItemWidget(node, _COL_STATUS)
             node.setText(_COL_STATUS, _UNLOADED_MARK)

@@ -6,14 +6,14 @@ Die Charakterliste lebt separat, siehe test_character_list.py.
 from datetime import datetime, timedelta, timezone
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QAction
+from PySide6.QtGui import QAction, QColor, QPalette
 
 from poe_view.api.models import StashTab
 from poe_view.ui import stash_tree as stash_tree_module
 from poe_view.ui.stash_tree import StashTree, format_age
 
-# Spaltenindizes wie in stash_tree.py: Name, # (Item-Anzahl), Status
-_COL_NAME, _COL_COUNT, _COL_STATUS = 0, 1, 2
+# Spaltenindizes wie in stash_tree.py: Name, # (Item-Anzahl), Status, Pos.
+_COL_NAME, _COL_COUNT, _COL_STATUS, _COL_POSITION = 0, 1, 2, 3
 
 
 def test_set_stashes_builds_recursive_tree_without_wrapper_root(qapp) -> None:
@@ -118,18 +118,63 @@ def test_header_is_visible(qapp) -> None:
     assert not tree.isHeaderHidden()
     assert tree.headerItem().text(_COL_NAME) == "Name"
     assert tree.headerItem().text(_COL_COUNT) == "#"
+    assert tree.headerItem().text(_COL_POSITION) == "Pos."
 
 
 def test_name_column_stretches_count_and_status_stay_fixed(qapp) -> None:
     """Name füllt automatisch die verbleibende Breite (391-Tab-Cache mit
-    langen Namen machte manuelles Nachziehen unpraktikabel) — # und Status
-    bleiben dabei fest und damit immer sichtbar."""
+    langen Namen machte manuelles Nachziehen unpraktikabel) — #, Status und
+    Pos. bleiben dabei fest und damit immer sichtbar."""
     from PySide6.QtWidgets import QHeaderView
     tree = StashTree()
     header = tree.header()
     assert header.sectionResizeMode(_COL_NAME) == QHeaderView.ResizeMode.Stretch
     assert header.sectionResizeMode(_COL_COUNT) == QHeaderView.ResizeMode.Fixed
     assert header.sectionResizeMode(_COL_STATUS) == QHeaderView.ResizeMode.Fixed
+    assert header.sectionResizeMode(_COL_POSITION) == QHeaderView.ResizeMode.Fixed
+
+
+# --- Positions-Spalte (echte Truhen-Reihenfolge) ---------- #
+
+def test_set_stashes_fills_position_column_for_real_tabs_only(qapp) -> None:
+    """Peter fehlte ein Zeilenheader zum Durchzählen der echten Fächer —
+    Qt kennt das nur bei Tabellen, hier die Positions-Spalte als
+    Äquivalent. Nur echte Fächer bekommen eine Zahl, Ordner bleiben leer."""
+    data = [
+        {"id": "root1", "name": "#", "type": "QuadStash", "metadata": {}},
+        {"id": "folder1", "name": "Folder", "type": "Folder", "metadata": {"folder": True},
+         "children": [{"id": "child1", "name": "Sub", "type": "CurrencyStash", "metadata": {}}]},
+    ]
+    stashes = [StashTab.model_validate(d) for d in data]
+    tree = StashTree()
+    tree.set_stashes(stashes, positions={"root1": 1, "child1": 2})
+
+    assert tree._stash_nodes["root1"].text(_COL_POSITION) == "1"
+    assert tree._stash_nodes["child1"].text(_COL_POSITION) == "2"
+    folder_node = tree.topLevelItem(1)
+    assert folder_node.text(_COL_POSITION) == ""  # Ordner hat keinen eigenen Truhenplatz
+
+
+def test_set_stashes_without_positions_leaves_column_blank(qapp) -> None:
+    """Kein Absturz, wenn (noch) keine Positionsdaten vorliegen."""
+    data = [{"id": "root1", "name": "Currency 1", "type": "QuadStash", "metadata": {}}]
+    tree = StashTree()
+    tree.set_stashes([StashTab.model_validate(d) for d in data])
+
+    assert tree._stash_nodes["root1"].text(_COL_POSITION) == ""
+
+
+def test_set_children_fills_position_for_newly_discovered_children(qapp) -> None:
+    data = [{"id": "m1", "name": "Maps", "type": "MapStash", "metadata": {}}]
+    tree = StashTree()
+    tree.set_stashes([StashTab.model_validate(d) for d in data], positions={"m1": 1})
+
+    tree.set_children("m1", [_map_leaf("c1", "tier6", "Map (Tier 6)", items=8)],
+                      positions={"m1": 1, "c1": 2})
+
+    assert tree._stash_nodes["c1"].text(_COL_POSITION) == "2"
+    group_node = tree._stash_nodes["c1"].parent()
+    assert group_node.text(_COL_POSITION) == ""  # Gruppenknoten "Tier 6" hat keinen eigenen Platz
 
 
 class _FakeMenu:
@@ -411,3 +456,140 @@ def test_highlight_stash_unknown_id_is_noop(qapp) -> None:
     tree = StashTree()
     tree.set_stashes([])
     tree.highlight_stash("does-not-exist")  # darf nicht crashen
+
+
+# --- Einfärbung nach Datenalter -------------------------- #
+
+def _text_and_base(tree: StashTree) -> tuple:
+    return (tree.palette().color(QPalette.ColorRole.Text),
+            tree.palette().color(QPalette.ColorRole.Base))
+
+
+def _distance(a, b) -> int:
+    return abs(a.red() - b.red()) + abs(a.green() - b.green()) + abs(a.blue() - b.blue())
+
+
+def test_freshly_loaded_tab_keeps_normal_text_colour(qapp) -> None:
+    data = [{"id": "root1", "name": "Currency 1", "type": "QuadStash", "metadata": {}}]
+    tree = StashTree()
+    tree.set_stashes([StashTab.model_validate(d) for d in data],
+                     last_loaded={"root1": datetime.now(timezone.utc).isoformat()})
+    node = tree._stash_nodes["root1"]
+    text, _base = _text_and_base(tree)
+    assert node.foreground(_COL_NAME).color() == text
+
+
+def test_data_older_than_three_hours_is_dimmed_more_than_one_hour_old(qapp) -> None:
+    data = [{"id": "recent", "name": "Recent", "type": "CurrencyStash", "metadata": {}},
+            {"id": "old", "name": "Old", "type": "CurrencyStash", "metadata": {}}]
+    tree = StashTree()
+    now = datetime.now(timezone.utc)
+    tree.set_stashes([StashTab.model_validate(d) for d in data], last_loaded={
+        "recent": (now - timedelta(hours=2)).isoformat(),
+        "old": (now - timedelta(hours=5)).isoformat(),
+    })
+    text, base = _text_and_base(tree)
+    recent_colour = tree._stash_nodes["recent"].foreground(_COL_NAME).color()
+    old_colour = tree._stash_nodes["old"].foreground(_COL_NAME).color()
+    assert recent_colour != text  # sichtbar abgeblendet gegenüber "aktuell"
+    assert _distance(old_colour, base) < _distance(recent_colour, base)  # älter = näher am Hintergrund
+
+
+def test_never_loaded_and_group_nodes_keep_default_colour(qapp) -> None:
+    """Ordner-/Gruppenknoten und nie geladene Fächer bleiben unangetastet
+    (kein Alter, das man einfärben könnte)."""
+    data = [{"id": "m1", "name": "Maps", "type": "MapStash", "metadata": {}}]
+    tree = StashTree()
+    tree.set_stashes([StashTab.model_validate(d) for d in data])
+    tree.set_children("m1", [_map_leaf("c1", "tier6", "Map (Tier 6)", items=8)])
+
+    group_node = tree._stash_nodes["m1"].child(0)
+    assert group_node.foreground(_COL_NAME).style() == Qt.BrushStyle.NoBrush
+    never_loaded = tree._stash_nodes["c1"]
+    assert never_loaded.foreground(_COL_NAME).style() == Qt.BrushStyle.NoBrush
+
+
+def test_refresh_age_colors_advances_dimming_over_time(qapp) -> None:
+    """Hook für den Sekunden-Tick in MainWindow: ein Fach muss auch ohne
+    neue Daten von 'aktuell' auf 'älter' umgefärbt werden."""
+    data = [{"id": "root1", "name": "Currency 1", "type": "QuadStash", "metadata": {}}]
+    tree = StashTree()
+    tree.set_stashes([StashTab.model_validate(d) for d in data],
+                     last_loaded={"root1": datetime.now(timezone.utc).isoformat()})
+    node = tree._stash_nodes["root1"]
+    text, _base = _text_and_base(tree)
+    assert node.foreground(_COL_NAME).color() == text
+
+    stale = (datetime.now(timezone.utc) - timedelta(hours=4)).isoformat()
+    node.setData(_COL_STATUS, stash_tree_module._LAST_LOADED_ROLE, stale)
+    tree.refresh_age_colors()
+
+    assert node.foreground(_COL_NAME).color() != text
+
+
+# --- Türkis-Markierung des zuletzt aktualisierten Fachs --- #
+
+def test_mark_loaded_highlights_the_tab_turquoise(qapp) -> None:
+    data = [{"id": "root1", "name": "Currency 1", "type": "QuadStash", "metadata": {}}]
+    tree = StashTree()
+    tree.set_stashes([StashTab.model_validate(d) for d in data])
+
+    tree.mark_loaded("root1", datetime.now(timezone.utc).isoformat())
+
+    node = tree._stash_nodes["root1"]
+    assert node.foreground(_COL_NAME).color() == QColor("turquoise")
+
+
+def test_mark_loaded_moves_the_highlight_and_reverts_the_previous_tab(qapp) -> None:
+    """Peter: 'die zuletzt aktualisierte Zeile' — nur eine Türkis-Markierung
+    gleichzeitig, sie wandert zum jeweils neuesten Refresh."""
+    data = [{"id": "a", "name": "A", "type": "CurrencyStash", "metadata": {}},
+            {"id": "b", "name": "B", "type": "CurrencyStash", "metadata": {}}]
+    tree = StashTree()
+    tree.set_stashes([StashTab.model_validate(d) for d in data])
+
+    tree.mark_loaded("a", datetime.now(timezone.utc).isoformat())
+    tree.mark_loaded("b", datetime.now(timezone.utc).isoformat())
+
+    node_a = tree._stash_nodes["a"]
+    node_b = tree._stash_nodes["b"]
+    text, _base = _text_and_base(tree)
+    assert node_b.foreground(_COL_NAME).color() == QColor("turquoise")
+    assert node_a.foreground(_COL_NAME).color() == text  # zurück auf normale Alters-Farbe
+
+
+def test_refresh_age_colors_does_not_overwrite_the_turquoise_highlight(qapp) -> None:
+    data = [{"id": "root1", "name": "Currency 1", "type": "QuadStash", "metadata": {}}]
+    tree = StashTree()
+    tree.set_stashes([StashTab.model_validate(d) for d in data])
+    tree.mark_loaded("root1", datetime.now(timezone.utc).isoformat())
+
+    tree.refresh_age_colors()
+
+    assert tree._stash_nodes["root1"].foreground(_COL_NAME).color() == QColor("turquoise")
+
+
+def test_set_offline_preserves_the_turquoise_highlight(qapp) -> None:
+    data = [{"id": "root1", "name": "Currency 1", "type": "QuadStash", "metadata": {}}]
+    tree = StashTree()
+    tree.set_stashes([StashTab.model_validate(d) for d in data])
+    tree.mark_loaded("root1", datetime.now(timezone.utc).isoformat())
+
+    tree.set_offline(True)
+
+    assert tree._stash_nodes["root1"].foreground(_COL_NAME).color() == QColor("turquoise")
+
+
+def test_set_stashes_clears_a_stale_highlight_from_a_previous_tree(qapp) -> None:
+    """Liga-Wechsel/Neustart baut den Baum neu auf — eine alte
+    Türkis-Markierung aus der vorherigen Liga wäre irreführend."""
+    data = [{"id": "root1", "name": "Currency 1", "type": "QuadStash", "metadata": {}}]
+    tree = StashTree()
+    tree.set_stashes([StashTab.model_validate(d) for d in data])
+    tree.mark_loaded("root1", datetime.now(timezone.utc).isoformat())
+
+    tree.set_stashes([StashTab.model_validate(d) for d in data],
+                     last_loaded={"root1": datetime.now(timezone.utc).isoformat()})
+
+    text, _base = _text_and_base(tree)
+    assert tree._stash_nodes["root1"].foreground(_COL_NAME).color() == text
