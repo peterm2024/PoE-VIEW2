@@ -24,7 +24,7 @@ unterscheidet gleichnamige Fächer nicht (Nutzer hat z. B. mehrere
 normal toggle-/immer sichtbar, auch im Einzelfach nützlich (Koordinate
 innerhalb des GERADE angezeigten Tabs).
 
-Anf.Lvl/Str/Dex/Int kommen aus dem requirements-Array der GGG-API — die
+Req.Lvl/Str/Dex/Int kommen aus dem requirements-Array der GGG-API — die
 Daten waren dank ``extra="allow"`` längst im Cache, wurden nur nie gezeigt
 (eine externe Quelle wie PoEDB ist dafür nicht nötig).
 
@@ -61,13 +61,13 @@ _EXPLICIT_TYPES = frozenset({0, 1, 2, 3, 4, 5, 6})
 def _type_key(frame_type: int) -> int:
     return frame_type if frame_type in _EXPLICIT_TYPES else OTHER_TYPE
 
-COLUMNS = ("Icon", "Tab", "Position", "Name", "Typ", "Level", "Qual.", "Stack", "iLvl",
-           "Anf.Lvl", "Str", "Dex", "Int", "Mods")
+COLUMNS = ("Icon", "Tab", "Position", "Name", "Type", "Level", "Qual.", "Stack", "iLvl",
+           "Req.Lvl", "Str", "Dex", "Int", "Mods")
 ICON_COL = 0
 TAB_COL = 1
 POSITION_COL = 2       # Tab-Nr. + Gitter-Koordinate — unterscheidet gleichnamige Fächer
 _NAME_COL = 3
-_NUMERIC_FROM_COL = 5  # Level, Qual., Stack, iLvl, Anf.Lvl, Str, Dex, Int
+_NUMERIC_FROM_COL = 5  # Level, Qual., Stack, iLvl, Req.Lvl, Str, Dex, Int
 MODS_COL = 13          # Mods (v. a. Maps) — linksbündig, nicht numerisch
 # Spalten vor dem vorgerechneten _rows-Tupel (Icon, Tab, Position) — Offset
 # für den Zugriff _rows[row][col - _ROWS_OFFSET] in display_text().

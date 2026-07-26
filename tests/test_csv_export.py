@@ -26,7 +26,7 @@ def test_export_writes_semicolon_csv_with_bom(tmp_path) -> None:
     assert rows[0]["Name"] == "Awakened Multistrike Support"
     assert rows[0]["Level"] == "5"
     assert rows[0]["Quality"] == "+20%"
-    assert rows[0]["Corrupted"] == "ja"
+    assert rows[0]["Corrupted"] == "yes"
 
 
 def test_export_empty_list_writes_header_only(tmp_path) -> None:

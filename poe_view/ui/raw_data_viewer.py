@@ -22,7 +22,7 @@ from PySide6.QtWidgets import QDialog, QLabel, QPlainTextEdit, QVBoxLayout
 class RawDataViewer(QDialog):
     def __init__(self, parent=None) -> None:
         super().__init__(parent, Qt.WindowType.Window)
-        self.setWindowTitle("Rohdaten-Viewer")
+        self.setWindowTitle("Raw Data Viewer")
         self.resize(560, 640)
 
         self._title = QLabel("")

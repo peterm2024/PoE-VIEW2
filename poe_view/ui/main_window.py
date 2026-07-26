@@ -44,15 +44,21 @@ log = logging.getLogger(__name__)
 
 class MainWindow(QMainWindow):
     # Hintergrund-Auto-Refresh: nie jünger als 1 Tag anfassen
-    # (dafür reicht der manuelle Refresh völlig), und dem Nutzer immer mind.
-    # die Hälfte des Rate-Limit-Budgets für manuelle Klicks übrig lassen.
-    # Pro Tick können jetzt BIS ZU ZWEI Jobs rausgehen (das gerade angezeigte
-    # Fach + der normale Sweep-Kandidat) — Intervall verdoppelt,
-    # damit die Gesamt-Anfragerate ans Rate-Limit gegenüber vorher gleich bleibt
-    # und wir nicht in dessen Sperre (Timeout) laufen.
+    # (dafür reicht der manuelle Refresh völlig). Pro Tick können jetzt BIS
+    # ZU ZWEI Jobs rausgehen (das gerade angezeigte Fach + der normale
+    # Sweep-Kandidat) — Intervall verdoppelt, damit die Gesamt-Anfragerate
+    # ans Rate-Limit gegenüber vorher gleich bleibt und wir nicht in dessen
+    # Sperre (Timeout) laufen.
     AUTO_REFRESH_INTERVAL_MS = 40_000
     AUTO_REFRESH_MIN_AGE = timedelta(days=1)
-    AUTO_REFRESH_MIN_HEADROOM = 0.5
+    # Nur eine kleine Notreserve für manuelle Klicks halten, kein hartes
+    # 50/50-Splitting mehr (Peter: "sollte doch eigentlich permanent
+    # laufen — Manual-Refresh kann ich ja auch jederzeit machen"). Alle
+    # Jobs — auto wie manuell — laufen ohnehin durch dieselbe FIFO-Queue
+    # und werden vom Rate-Limiter gleich gedrosselt; die Reserve verhindert
+    # nur, dass ein manueller Klick ausgerechnet den letzten freien Request
+    # vor einer 429-Sperre wegschnappt.
+    AUTO_REFRESH_MIN_HEADROOM = 0.1
 
     # Typ-Filter-Checkboxen: die vier PoE-Rarities, dazu
     # Gem/Currency/Divination Card, und "Sonstige" (OTHER_TYPE) für den
@@ -60,7 +66,7 @@ class MainWindow(QMainWindow):
     TYPE_FILTER_ENTRIES = (
         (0, "Normal"), (1, "Magic"), (2, "Rare"), (3, "Unique"),
         (4, "Gem"), (5, "Currency"), (6, "Div Card"),
-        (OTHER_TYPE, "Sonstige"),
+        (OTHER_TYPE, "Other"),
     )
 
     def __init__(self) -> None:
@@ -91,6 +97,7 @@ class MainWindow(QMainWindow):
         # setzt es dann auf False, `logged_in` wieder auf True).
         self._logged_in = True
         self._auto_refresh_counts: dict[str, int] = {}  # Liga → auto-aktualisierte Tabs (Session)
+        self._auto_refresh_counted: dict[str, set[str]] = {}  # Liga → stash_ids (§_count_silent_refresh)
         self._raw_data_viewer: RawDataViewer | None = None
         self._offline = False  # GGG nicht erreichbar (Wartung am Patchday)
         self._live_leagues: set[str] | None = None  # letzte /account/leagues-Antwort; None = noch unbekannt
@@ -118,6 +125,18 @@ class MainWindow(QMainWindow):
         self._auto_refresh_timer.setInterval(self.AUTO_REFRESH_INTERVAL_MS)
         self._auto_refresh_timer.timeout.connect(self._maybe_auto_refresh)
         self._auto_refresh_timer.start()
+
+        # Sekündliches Ticken der Countdown-Anzeige — unabhängig vom
+        # Auto-Refresh-Timer selbst, der nur alle AUTO_REFRESH_INTERVAL_MS
+        # feuert. Peter: "ca. 5 Minuten gewartet ohne dass irgendwas
+        # passiert ist" — ohne sichtbaren Countdown ist von außen nicht zu
+        # unterscheiden, ob der Timer noch läuft oder der nächste Tick aus
+        # gutem Grund (Rate-Limit, Token abgelaufen, …) nichts tut.
+        self._countdown_timer = QTimer(self)
+        self._countdown_timer.setInterval(1000)
+        self._countdown_timer.timeout.connect(self._update_auto_refresh_countdown)
+        self._countdown_timer.start()
+        self._update_auto_refresh_countdown()
 
     # ------------------------------------------------------------------ #
 
@@ -164,34 +183,34 @@ class MainWindow(QMainWindow):
         toolbar.setMovable(False)
         self.addToolBar(toolbar)
 
-        self._login_action = QAction("🔑 Login", self)
+        self._login_action = QAction("🔑 Log in", self)
         self._login_action.triggered.connect(lambda: self.worker.submit(LoginJob()))
         toolbar.addAction(self._login_action)
 
-        self._refresh_action = QAction("⟳ Aktualisieren", self)
+        self._refresh_action = QAction("⟳ Refresh", self)
         self._refresh_action.triggered.connect(self._refresh)
         toolbar.addAction(self._refresh_action)
 
-        self._load_all_action = QAction("⇊ Alle Tabs laden", self)
+        self._load_all_action = QAction("⇊ Load All Tabs", self)
         self._load_all_action.setToolTip(
-            "Items aller Stash-Tabs der aktuellen Liga nacheinander laden "
-            "(kann je nach Tab-Anzahl und Rate-Limit länger dauern)")
+            "Load items from all stash tabs of the current league one by one "
+            "(can take a while depending on tab count and rate limit)")
         self._load_all_action.triggered.connect(self._load_all_items)
         toolbar.addAction(self._load_all_action)
 
-        self._export_action = QAction("💾 CSV exportieren", self)
-        self._export_action.setToolTip("Aktuell angezeigte (gefilterte) Items als CSV speichern")
+        self._export_action = QAction("💾 Export CSV", self)
+        self._export_action.setToolTip("Save the currently visible (filtered) items as CSV")
         self._export_action.triggered.connect(self._export_csv)
         toolbar.addAction(self._export_action)
 
         toolbar.addSeparator()
-        toolbar.addWidget(QLabel(" Liga: "))
+        toolbar.addWidget(QLabel(" League: "))
         self._league_combo = QComboBox()
         self._league_combo.setMinimumWidth(160)
         self._league_combo.currentTextChanged.connect(self._on_league_changed)
         toolbar.addWidget(self._league_combo)
 
-        toolbar.addWidget(QLabel("  Typ: "))
+        toolbar.addWidget(QLabel("  Type: "))
         # 8 Checkboxen statt Namen (Namen wären zu lang) —
         # die Farbe des Käschchens IST das Label, Tooltip trägt den Namen.
         # Die letzte ("Sonstige", Pink) fängt alles ohne eigene Kategorie
@@ -214,7 +233,7 @@ class MainWindow(QMainWindow):
         spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         toolbar.addWidget(spacer)
         self._filter_edit = QLineEdit()
-        self._filter_edit.setPlaceholderText("🔍 Suche über alle Fächer der Liga — * für alles")
+        self._filter_edit.setPlaceholderText("🔍 Search all tabs of the league — * for everything")
         self._filter_edit.setFixedWidth(260)
         self._filter_edit.setClearButtonEnabled(True)  # eingebautes "x" zum Leeren
         toolbar.addWidget(self._filter_edit)
@@ -227,7 +246,7 @@ class MainWindow(QMainWindow):
         left_layout.setContentsMargins(0, 0, 0, 0)
         left_layout.setSpacing(2)
 
-        char_label = QLabel("Charaktere")
+        char_label = QLabel("Characters")
         char_label.setStyleSheet("font-weight: 600; padding: 2px 4px;")
         self.character_list = CharacterList()
         self.character_list.character_selected.connect(self._on_character_selected)
@@ -261,7 +280,7 @@ class MainWindow(QMainWindow):
         self.table.setColumnWidth(0, 36)
         self.table.setColumnWidth(1, 110)
         self.table.setColumnWidth(POSITION_COL, 100)
-        for name in ("Anf.Lvl", "Str", "Dex", "Int"):  # schmale Zahlenspalten
+        for name in ("Req.Lvl", "Str", "Dex", "Int"):  # schmale Zahlenspalten
             self.table.setColumnWidth(COLUMNS.index(name), 58)
         self.table.setColumnWidth(MODS_COL, 320)
         self.table.selectionModel().currentRowChanged.connect(self._on_row_selected)
@@ -293,7 +312,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.dashboard)
         self.setCentralWidget(central)
 
-        self._status_msg = QLabel("Starte …")
+        self._status_msg = QLabel("Starting…")
         self.statusBar().addWidget(self._status_msg, stretch=1)
         # Range (0, 0) macht aus der QProgressBar einen "busy"-Indikator mit
         # eingebauter Lauf-Animation (kein eigener QTimer/keine Assets nötig).
@@ -313,6 +332,11 @@ class MainWindow(QMainWindow):
         # ("Bist du dir sicher, dass das funktioniert?").
         self._auto_refresh_label = QLabel("")
         self.statusBar().addPermanentWidget(self._auto_refresh_label)
+        # Countdown bis zum nächsten Auto-Refresh-Tick, bzw. der Grund, warum
+        # gerade keiner stattfindet (§ _auto_refresh_blocked_reason).
+        self._auto_refresh_countdown_label = QLabel("")
+        self._auto_refresh_countdown_label.setStyleSheet("color: #8a8478;")
+        self.statusBar().addPermanentWidget(self._auto_refresh_countdown_label)
         self.statusBar().addPermanentWidget(QLabel(config.DISCLAIMER))
 
         # Liga-Dropdown SOFORT aus dem Cache befüllen — unabhängig vom
@@ -348,7 +372,7 @@ class MainWindow(QMainWindow):
     # ("als Offline-Liga anhängen", nicht nur positionell
     # trennen). Text bewusst so gewählt, dass er nie mit einem echten
     # Liga-Namen kollidiert.
-    _ARCHIVED_HEADER = "── Beendete Ligen (nur Cache, kein Online-Zugriff) ──"
+    _ARCHIVED_HEADER = "── Ended leagues (cache only, no online access) ──"
 
     def _rebuild_league_combo(self, live_leagues: list[str] | None) -> None:
         """Baut das Liga-Dropdown neu auf: aktuell gültige
@@ -420,10 +444,10 @@ class MainWindow(QMainWindow):
 
     # --- Spalten-Sichtbarkeit der Item-Tabelle --------- #
 
-    # "Typ" ist standardmäßig aus: die Rarity steckt bereits in der
+    # "Type" ist standardmäßig aus: die Rarity steckt bereits in der
     # Namensfarbe. Die Tab-Spalte wird automatisch verwaltet (aus bei
     # Einzelfach, an bei Aggregat) und ist deshalb nicht im Menü.
-    DEFAULT_HIDDEN_COLUMNS = frozenset({"Typ"})
+    DEFAULT_HIDDEN_COLUMNS = frozenset({"Type"})
 
     def _settings(self) -> QSettings:
         """INI-Datei statt Registry, konsistent zum Datei-Cache-Ansatz."""
@@ -456,10 +480,10 @@ class MainWindow(QMainWindow):
         # ("z. B. 20% Quality oder iLvl <45"). Übernahme
         # mit Enter; aktive Filter tragen 🔍 im Spalten-Header.
         if clicked_col > ICON_COL:
-            title = menu.addAction(f"Filter „{COLUMNS[clicked_col]}“ (Enter übernimmt):")
+            title = menu.addAction(f"Filter \"{COLUMNS[clicked_col]}\" (Enter applies):")
             title.setEnabled(False)
             edit = QLineEdit(self.proxy.column_filter(clicked_col))
-            edit.setPlaceholderText("z. B. >=20, <45, =Text, Teilstring")
+            edit.setPlaceholderText("e.g. >=20, <45, =text, substring")
             edit.returnPressed.connect(
                 lambda c=clicked_col, e=edit, m=menu: (
                     self._apply_column_filter(c, e.text()), m.close()))
@@ -467,7 +491,7 @@ class MainWindow(QMainWindow):
             field.setDefaultWidget(edit)
             menu.addAction(field)
             if self.proxy.filtered_columns():
-                clear_action = menu.addAction("✕ Alle Spalten-Filter löschen")
+                clear_action = menu.addAction("✕ Clear All Column Filters")
                 clear_action.triggered.connect(self._clear_column_filters)
             menu.addSeparator()
         hidden = self._load_hidden_columns()
@@ -486,13 +510,13 @@ class MainWindow(QMainWindow):
         active = ", ".join(f"{COLUMNS[c]} {self.proxy.column_filter(c)}"
                            for c in sorted(self.proxy.filtered_columns()))
         self._status_msg.setText(
-            f"Spalten-Filter [{active}]: {shown} von {total} Items sichtbar"
-            if active else f"Spalten-Filter entfernt — {total} Items")
+            f"Column filter [{active}]: {shown} of {total} items visible"
+            if active else f"Column filter removed — {total} items")
 
     def _clear_column_filters(self) -> None:
         self.proxy.clear_column_filters()
         self._status_msg.setText(
-            f"Alle Spalten-Filter gelöscht — {self.table_model.rowCount()} Items")
+            f"All column filters cleared — {self.table_model.rowCount()} items")
 
     def _connect_worker(self) -> None:
         w = self.worker
@@ -535,7 +559,7 @@ class MainWindow(QMainWindow):
         """
         self._logged_in = False
         self._login_action.setEnabled(True)
-        self._login_action.setText("🔑 Login")
+        self._login_action.setText("🔑 Log in")
         self._status_msg.setText(reason)
 
     def _on_leagues(self, leagues: list[str]) -> None:
@@ -564,8 +588,8 @@ class MainWindow(QMainWindow):
             # Liga beendet (nicht mehr in /account/leagues) — kein Netzwerk-
             # Versuch, der ohnehin nur scheitern kann.
             self._status_msg.setText(
-                f"{league}: Liga beendet — zeige den zuletzt bekannten Stand "
-                "(kein Online-Zugriff mehr).")
+                f"{league}: league ended — showing the last known state "
+                "(no more online access).")
         else:
             # … und trotzdem im Hintergrund bestätigen/aktualisieren (wie bisher).
             self.worker.submit(FetchStashListJob(league))
@@ -688,7 +712,7 @@ class MainWindow(QMainWindow):
             # und die Kinder-Entdeckung fände nie statt. Ausnahme ist eine
             # archivierte Liga, dort gibt es nichts mehr zu entdecken.
             if self._archived_league_guard(
-                    f"{name}: Liga beendet — Unter-Fächer nicht mehr abrufbar."):
+                    f"{name}: league ended — sub-tabs no longer available."):
                 return
             self.worker.submit(FetchStashItemsJob(self._current_league, stash_id, name))
             return
@@ -698,7 +722,7 @@ class MainWindow(QMainWindow):
             self._show_items(stash_id, league_items[stash_id], name)
             return
         if self._archived_league_guard(
-                f"{name}: nie geladen — Liga beendet, jetzt nicht mehr abrufbar."):
+                f"{name}: never loaded — league ended, no longer available."):
             return
         self.worker.submit(FetchStashItemsJob(self._current_league, stash_id, name,
                                               parent_id=self._parent_id_of(stash_id)))
@@ -706,10 +730,30 @@ class MainWindow(QMainWindow):
     def _on_stash_refresh(self, stash_id: str, name: str) -> None:
         """Klick auf den Refresh-Button eines Tabs — bewusst AM Cache vorbei."""
         self._showing_aggregate = False
-        if self._archived_league_guard(f"{name}: Liga beendet — kein Refresh mehr möglich."):
+        if self._archived_league_guard(f"{name}: league ended — refresh no longer possible."):
             return
         self.worker.submit(FetchStashItemsJob(self._current_league, stash_id, name,
                                               parent_id=self._parent_id_of(stash_id)))
+
+    def _count_silent_refresh(self, league: str, stash_id: str) -> None:
+        """Zählt einen Tab für "X von Y Stash-Tabs aktualisiert" genau
+        einmal pro Session — unabhängig davon, ob er (auch aus einer
+        früheren Session/dem Datei-Cache) schon vorher geladen war.
+
+        Ein reiner ``already_loaded``-Check anhand von ``_last_loaded``
+        wäre hier falsch: Wer eine Liga schon einmal komplett heruntergeladen
+        hat, hat für JEDEN Tab ``already_loaded=True``, sobald der Cache
+        beim Start geladen ist — der Zähler bliebe dann für immer bei 0
+        stehen, obwohl der Sweep im Hintergrund längst reihum die ältesten
+        Tabs auffrischt (real beobachtet: "0 von 94" dauerhaft, obwohl der
+        Zeitstempel im Baum sich sichtbar aktualisiert). Das eigene
+        Session-Set verhindert stattdessen nur das ursprüngliche Problem
+        (FALLSTRICKE #27): das wiederholte Live-Halten des GERADE
+        angezeigten Fachs bei jedem Tick soll nicht mehrfach zählen."""
+        counted = self._auto_refresh_counted.setdefault(league, set())
+        if stash_id not in counted:
+            counted.add(stash_id)
+            self._auto_refresh_counts[league] = len(counted)
 
     def _on_stash_items(self, league: str, stash_id: str, name: str,
                         items: list[Item], silent: bool) -> None:
@@ -717,14 +761,10 @@ class MainWindow(QMainWindow):
         sonst würde ein spät eintreffender Hintergrund-Job die Daten der
         MOMENTAN aktiven Liga verfälschen, falls der Nutzer zwischenzeitlich
         die Liga gewechselt hat."""
-        already_loaded = stash_id in self._last_loaded.get(league, {})
         self._last_loaded.setdefault(league, {})[stash_id] = datetime.now(timezone.utc).isoformat()
         self._items.setdefault(league, {})[stash_id] = items
-        if silent and not already_loaded:
-            # Nur NEU geladene Fächer zählen für "X von Y Stash-Tabs" — sonst
-            # würde das wiederholte Live-Halten des gerade angezeigten Fachs
-            # (jeder Auto-Refresh-Tick) den Zähler weit über Y treiben.
-            self._auto_refresh_counts[league] = self._auto_refresh_counts.get(league, 0) + 1
+        if silent:
+            self._count_silent_refresh(league, stash_id)
         relabelled = self._stamp_category(league, stash_id, items)
         self._persist_cache()
         if league != self._current_league:
@@ -750,7 +790,6 @@ class MainWindow(QMainWindow):
         """Ein Spezial-Tab (MapStash/UniqueStash) hat statt Items Unter-Tabs
         geliefert — in Baumstruktur und Anzeige einhängen. Deren Items werden
         wie bei normalen Tabs erst per Klick (oder Auto-Refresh) geladen."""
-        already_loaded = stash_id in self._last_loaded.get(league, {})
         self._last_loaded.setdefault(league, {})[stash_id] = datetime.now(timezone.utc).isoformat()
         # Ein evtl. vorhandener alter Item-Eintrag des Eltern-Tabs ist Müll
         # (Spezial-Tabs haben nie eigene Items) — raus damit, sonst wäre der
@@ -761,8 +800,8 @@ class MainWindow(QMainWindow):
             tab = self._find_stash(tree, stash_id)
             if tab is not None:
                 tab.children = children
-        if silent and not already_loaded:  # siehe _on_stash_items: nicht über Y hinauszählen
-            self._auto_refresh_counts[league] = self._auto_refresh_counts.get(league, 0) + 1
+        if silent:
+            self._count_silent_refresh(league, stash_id)
         self._persist_cache()
         if league != self._current_league:
             return
@@ -780,8 +819,8 @@ class MainWindow(QMainWindow):
         self._update_auto_refresh_label()
         if not silent:
             self._status_msg.setText(
-                f"{name}: Spezial-Tab mit {len(children)} Unter-Tabs — "
-                "Items je Unter-Tab per Klick laden")
+                f"{name}: special tab with {len(children)} sub-tabs — "
+                "click a sub-tab to load its items")
             self._update_raw_viewer(stash_id, name)
 
     def _stamp_category(self, league: str, stash_id: str, items: list[Item]) -> str | None:
@@ -853,8 +892,8 @@ class MainWindow(QMainWindow):
         self.table_model.set_items(items, sources, tab_indices, stash_ids,
                                    request_icons=False)  # lazy
         self._status_msg.setText(
-            f"{name}: {len(items)} Items aus {loaded} von {len(stash.children)} "
-            "geladenen Unter-Fächern")
+            f"{name}: {len(items)} items from {loaded} of {len(stash.children)} "
+            "loaded sub-tabs")
         self._update_raw_viewer(stash.id, name)
 
     # --- Alle Tabs laden (Bulk) ----------------------------------------- #
@@ -864,15 +903,15 @@ class MainWindow(QMainWindow):
             return  # läuft schon
         if not self._leaf_stashes:
             QMessageBox.information(
-                self, "Alle Tabs laden",
-                "Keine Stash-Tabs geladen — bitte zuerst eine Liga wählen.")
+                self, "Load All Tabs",
+                "No stash tabs loaded — please select a league first.")
             return
         if self._current_league_is_archived():
             # Liga beendet — keiner der nicht gecachten Tabs ist noch
             # abrufbar, "Alle Tabs laden" kann nur den Cache zusammenfassen.
             self._show_aggregate()
             self._status_msg.setText(
-                "Liga beendet — zeige den zuletzt bekannten Stand aller geladenen Fächer.")
+                "League ended — showing the last known state of all loaded tabs.")
             return
         league_items = self._items.get(self._current_league, {})
         # Spezial-Tabs ohne entdeckte Kinder immer mitnehmen: ein evtl.
@@ -884,7 +923,7 @@ class MainWindow(QMainWindow):
             return
 
         self._bulk_dialog = QProgressDialog(
-            "Lade Stash-Tabs …", "Abbrechen", 0, len(to_fetch), self)
+            "Loading stash tabs…", "Cancel", 0, len(to_fetch), self)
         self._bulk_dialog.setWindowModality(Qt.WindowModality.WindowModal)
         self._bulk_dialog.setMinimumDuration(0)
         self._bulk_dialog.canceled.connect(self.worker.cancel_bulk)
@@ -892,14 +931,14 @@ class MainWindow(QMainWindow):
 
     def _on_bulk_progress(self, done: int, total: int, name: str) -> None:
         if self._bulk_dialog is not None:
-            self._bulk_dialog.setLabelText(f"Lade Stash-Tab {done}/{total}: {name}")
+            self._bulk_dialog.setLabelText(f"Loading stash tab {done}/{total}: {name}")
             self._bulk_dialog.setValue(done)
 
     def _on_bulk_finished(self, success: int, total: int) -> None:
         if self._bulk_dialog is not None:
             self._bulk_dialog.close()
             self._bulk_dialog = None
-        self._status_msg.setText(f"Alle Tabs geladen: {success}/{total} erfolgreich.")
+        self._status_msg.setText(f"All tabs loaded: {success}/{total} successful.")
         self._show_aggregate()
 
     def _show_aggregate(self) -> None:
@@ -907,14 +946,14 @@ class MainWindow(QMainWindow):
         zusammen anzeigen (lokal filter-/exportierbar), siehe `_league_wide_items`."""
         self._showing_aggregate = True
         self._search_all_active = False
-        self._current_tab_name = "Alle Tabs"
+        self._current_tab_name = "All Tabs"
         self._current_stash_id = None  # Rückkehr aus der Suche landet wieder hier
         self._current_character_name = None
         items, sources, tab_indices, stash_ids = self._league_wide_items()
         self.table.setColumnHidden(TAB_COL, False)  # Aggregat: Herkunft zeigen
         self.table_model.set_items(items, sources, tab_indices, stash_ids,
                                    request_icons=False)  # lazy
-        self._status_msg.setText(f"Alle Tabs: {len(items)} Items gesamt")
+        self._status_msg.setText(f"All Tabs: {len(items)} items total")
 
     def _league_wide_items(self) -> tuple[list[Item], list[str], list[int | None], list[str | None]]:
         """Alle gecachten Items der aktuellen Liga, je Item ergänzt um
@@ -977,8 +1016,8 @@ class MainWindow(QMainWindow):
         self.table_model.set_items(items, sources, tab_indices, stash_ids, request_icons=False)
         loaded = len({s for s in sources})
         self._status_msg.setText(
-            f"Suche über {loaded} geladene Fächer/Charaktere ({len(items)} Items) — "
-            "Feld leeren führt zurück zur Fach-Ansicht")
+            f"Searching {loaded} loaded tabs/characters ({len(items)} items) — "
+            "clear the field to return to the tab view")
 
     def _leave_search_all(self) -> None:
         self._search_all_active = False
@@ -994,15 +1033,15 @@ class MainWindow(QMainWindow):
     def _export_csv(self) -> None:
         rows = self._visible_rows()
         if not rows:
-            QMessageBox.information(self, "CSV-Export", "Keine Items zum Exportieren geladen.")
+            QMessageBox.information(self, "CSV Export", "No items loaded to export.")
             return
         default_path = str(config.downloads_dir() / self._default_export_filename())
         path, _ = QFileDialog.getSaveFileName(
-            self, "Items als CSV exportieren", default_path, "CSV-Dateien (*.csv)")
+            self, "Export Items as CSV", default_path, "CSV files (*.csv)")
         if not path:
             return
         count = export_items(path, rows)
-        self._status_msg.setText(f"{count} Items nach {path} exportiert.")
+        self._status_msg.setText(f"Exported {count} items to {path}.")
 
     def _default_export_filename(self) -> str:
         """Dateiname-Vorschlag: Liga + (aktiver Filtertext, sonst Tab-/Aggregat-Name).
@@ -1036,7 +1075,7 @@ class MainWindow(QMainWindow):
         if cached is not None:
             self._show_character_items(char.name, cached)
             return
-        self._status_msg.setText(f"Lade Ausrüstung: {char.name} …")
+        self._status_msg.setText(f"Loading equipment: {char.name}…")
         self.worker.submit(FetchCharacterItemsJob(char.name))
 
     def _on_character_refresh(self, char: Character) -> None:
@@ -1044,7 +1083,7 @@ class MainWindow(QMainWindow):
         `_on_stash_refresh`. Schaltet die Ansicht (wie beim Stash-Refresh
         auch) auf diesen Charakter um, sobald das Ergebnis eintrifft."""
         self._current_character_name = char.name
-        self._status_msg.setText(f"Lade Ausrüstung: {char.name} …")
+        self._status_msg.setText(f"Loading equipment: {char.name}…")
         self.worker.submit(FetchCharacterItemsJob(char.name))
 
     def _on_character_items(self, name: str, items: list[Item]) -> None:
@@ -1070,7 +1109,7 @@ class MainWindow(QMainWindow):
         self.table.setColumnHidden(TAB_COL, False)
         sources = [item.inventoryId or "?" for item in items]
         self.table_model.set_items(items, sources, [None] * len(items), [None] * len(items))
-        self._status_msg.setText(f"{name}: {len(items)} Items (Ausrüstung + Inventar)")
+        self._status_msg.setText(f"{name}: {len(items)} items (equipment + inventory)")
 
     def _on_icon(self, url: str, data: bytes) -> None:
         pixmap = QPixmap()
@@ -1101,7 +1140,7 @@ class MainWindow(QMainWindow):
         self._worker_busy = busy
 
     def _on_error(self, message: str) -> None:
-        self._status_msg.setText(f"Fehler: {message}")
+        self._status_msg.setText(f"Error: {message}")
         log.error("%s", message)
 
     def _on_offline_changed(self, offline: bool) -> None:
@@ -1111,7 +1150,7 @@ class MainWindow(QMainWindow):
         self._offline = offline
         self._update_tree_offline_display()
         self._offline_label.setText(
-            "📴 Offline — GGG nicht erreichbar, zeige zwischengespeicherte Daten"
+            "📴 Offline — GGG unreachable, showing cached data"
             if offline else "")
 
     def _refresh(self) -> None:
@@ -1170,6 +1209,53 @@ class MainWindow(QMainWindow):
 
     # --- Hintergrund-Auto-Refresh ---------------------- #
 
+    def _auto_refresh_blocked_reason(self) -> str | None:
+        """Grund, warum der nächste Tick nichts täte, oder ``None``, wenn er
+        normal laufen würde. Von ``_maybe_auto_refresh`` als Guard genutzt
+        und von ``_update_auto_refresh_countdown`` für die Statuszeile —
+        eine Quelle für beides, damit Countdown-Text und tatsächliches
+        Verhalten nie auseinanderlaufen."""
+        if not self._current_league:
+            return "no league selected"
+        if self._worker_busy or self._bulk_dialog is not None:
+            return "busy"
+        if not self._logged_in:
+            # Token abgelaufen/ungültig (AuthError, z. B. mitten in der
+            # Session) — ohne diese Bremse würde jeder Tick erneut mit dem
+            # bereits als ungültig bekannten Token gegen die API laufen und
+            # scheitern, real beobachtet über mehrere Minuten alle 40s in
+            # Folge (siehe _on_login_required). Manuelle Klicks dürfen es
+            # trotzdem versuchen — die zeigen ihr Ergebnis sofort sichtbar.
+            return "not logged in"
+        if self._current_league_is_archived():
+            return "league ended"  # jeder Versuch würde nur scheitern (oder Cache überschreiben)
+        if self.worker.rate_limiter.headroom_fraction() < self.AUTO_REFRESH_MIN_HEADROOM:
+            return "rate limit budget reserved for manual requests"
+        return None
+
+    def _update_auto_refresh_countdown(self) -> None:
+        """Sekündlich aktualisierte Anzeige neben dem Auto-Refresh-Zähler:
+        Countdown bis zum nächsten Tick, oder der Grund, warum der nächste
+        Tick nichts tun wird. ``remainingTime()`` fragt den echten
+        Timer-Zustand ab statt eine eigene Restzeit mitzuführen — bleibt so
+        auch nach einem Neustart der App/des Timers automatisch korrekt.
+
+        Aktualisiert nebenbei auch das Rate-Limit-Dashboard aus einem reinen
+        Snapshot (kein echter Request) — sonst friert die Anzeige während
+        einer Auto-Refresh-Pause ein, weil ohne Request auch kein neuer
+        Header mehr reinkommt, der sie sonst antreiben würde (Rückfrage
+        "Policy-Statusleiste aktualisiert sich während der Pause nicht")."""
+        self.dashboard.update_state(*self.worker.rate_limiter.snapshot())
+        if not self._current_league:
+            self._auto_refresh_countdown_label.setText("")
+            return
+        reason = self._auto_refresh_blocked_reason()
+        if reason is not None:
+            self._auto_refresh_countdown_label.setText(f"Auto-refresh paused ({reason})")
+            return
+        seconds = max(0, self._auto_refresh_timer.remainingTime() // 1000)
+        self._auto_refresh_countdown_label.setText(f"Next auto-refresh in {seconds}s")
+
     def _maybe_auto_refresh(self) -> None:
         """Läuft per QTimer und lädt höchstens zwei Dinge neu:
 
@@ -1190,19 +1276,7 @@ class MainWindow(QMainWindow):
         automatischer Durchlauf keinen Mehrwert brächte; nicht angezeigte
         Charaktere bleiben bis zum nächsten Klick oder einem manuellen
         Refresh per Rechtsklick unverändert."""
-        if not self._current_league or self._worker_busy or self._bulk_dialog is not None:
-            return
-        if not self._logged_in:
-            # Token abgelaufen/ungültig (AuthError, z. B. mitten in der
-            # Session) — ohne diese Bremse würde jeder Tick erneut mit dem
-            # bereits als ungültig bekannten Token gegen die API laufen und
-            # scheitern, real beobachtet über mehrere Minuten alle 40s in
-            # Folge (siehe _on_login_required). Manuelle Klicks dürfen es
-            # trotzdem versuchen — die zeigen ihr Ergebnis sofort sichtbar.
-            return
-        if self._current_league_is_archived():
-            return  # Liga beendet — jeder Versuch würde nur scheitern (oder Cache überschreiben)
-        if self.worker.rate_limiter.headroom_fraction() < self.AUTO_REFRESH_MIN_HEADROOM:
+        if self._auto_refresh_blocked_reason() is not None:
             return
         current_id = self._current_stash_id
         if current_id is not None:
@@ -1218,14 +1292,14 @@ class MainWindow(QMainWindow):
                 parent_id=candidate.parent, silent=True))
 
     def _update_auto_refresh_label(self) -> None:
-        """Zähler rechts in der Statusleiste: „Auto-Refresh: X von Y Stash-Tabs aktualisiert“."""
+        """Zähler rechts in der Statusleiste: „Auto-refresh: X of Y stash tabs updated“."""
         total = len(self._leaf_stashes)
         if not total:
             self._auto_refresh_label.setText("")
             return
         count = self._auto_refresh_counts.get(self._current_league, 0)
         self._auto_refresh_label.setText(
-            f"Auto-Refresh: {count} von {total} Stash-Tabs aktualisiert")
+            f"Auto-refresh: {count} of {total} stash tabs updated")
 
     # Noch nie geladene Tabs zählen als "unendlich alt" — sie kommen vor
     # jedem tatsächlich datierten Tab dran (siehe _pick_auto_refresh_candidate).

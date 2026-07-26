@@ -52,7 +52,7 @@ def test_set_stashes_shows_refresh_button_with_age_for_loaded_tabs(qapp) -> None
     assert node.text(_COL_STATUS) == ""
     button = tree.itemWidget(node, _COL_STATUS)
     assert button is not None
-    assert button.text() == "⟳ vor 3d"
+    assert button.text() == "⟳ 3d ago"
 
 
 def test_mark_loaded_replaces_download_marker_with_refresh_button(qapp) -> None:
@@ -108,8 +108,8 @@ def test_format_age() -> None:
     five_hours_ago = now - timedelta(hours=5)
     assert format_age(now.isoformat(), now=now) == now.astimezone().strftime("%H:%M:%S")
     assert format_age(five_hours_ago.isoformat(), now=now) == five_hours_ago.astimezone().strftime("%H:%M:%S")
-    assert format_age((now - timedelta(days=1)).isoformat(), now=now) == "vor 1d"
-    assert format_age((now - timedelta(days=12)).isoformat(), now=now) == "vor 12d"
+    assert format_age((now - timedelta(days=1)).isoformat(), now=now) == "1d ago"
+    assert format_age((now - timedelta(days=12)).isoformat(), now=now) == "12d ago"
 
 
 def test_header_is_visible(qapp) -> None:
@@ -120,11 +120,16 @@ def test_header_is_visible(qapp) -> None:
     assert tree.headerItem().text(_COL_COUNT) == "#"
 
 
-def test_name_column_is_interactive_not_stretch(qapp) -> None:
-    """Stretch-Spalten lassen sich in Qt nicht per Maus verbreitern."""
+def test_name_column_stretches_count_and_status_stay_fixed(qapp) -> None:
+    """Name füllt automatisch die verbleibende Breite (391-Tab-Cache mit
+    langen Namen machte manuelles Nachziehen unpraktikabel) — # und Status
+    bleiben dabei fest und damit immer sichtbar."""
     from PySide6.QtWidgets import QHeaderView
     tree = StashTree()
-    assert tree.header().sectionResizeMode(_COL_NAME) == QHeaderView.ResizeMode.Interactive
+    header = tree.header()
+    assert header.sectionResizeMode(_COL_NAME) == QHeaderView.ResizeMode.Stretch
+    assert header.sectionResizeMode(_COL_COUNT) == QHeaderView.ResizeMode.Fixed
+    assert header.sectionResizeMode(_COL_STATUS) == QHeaderView.ResizeMode.Fixed
 
 
 class _FakeMenu:
@@ -207,7 +212,7 @@ def test_set_children_inserts_subtabs_without_rebuilding_tree(qapp) -> None:
     group = parent_node.child(0)
     assert group.text(_COL_NAME) == "🗂 Tier 6"
     assert group.text(_COL_COUNT) == "8"
-    assert group.child(0).text(_COL_NAME) == "Fach 1"
+    assert group.child(0).text(_COL_NAME) == "Tab 1"
     assert group.child(0).text(_COL_COUNT) == "8"
     assert parent_node.isExpanded()
     assert tree._stash_nodes["c1"].text(_COL_STATUS) == "⬇"  # Kind noch nicht geladen
@@ -239,7 +244,7 @@ def test_map_children_are_grouped_by_section_in_order(qapp) -> None:
 
     tier16 = parent_node.child(1)
     assert [tier16.child(i).text(_COL_NAME) for i in range(tier16.childCount())] == \
-        ["Fach 1", "Fach 2"]
+        ["Tab 1", "Tab 2"]
     assert [tier16.child(i).text(_COL_COUNT) for i in range(tier16.childCount())] == \
         ["14", "5"]
     unique = parent_node.child(2)
@@ -328,8 +333,8 @@ def test_set_offline_marks_loaded_tabs_leaves_unloaded_alone(qapp) -> None:
     tree.set_offline(True)
 
     loaded_button = tree.itemWidget(tree._stash_nodes["loaded"], _COL_STATUS)
-    assert loaded_button.text() == "📴 vor 3d"
-    assert "Offline-Cache" in loaded_button.toolTip()
+    assert loaded_button.text() == "📴 3d ago"
+    assert "offline cache" in loaded_button.toolTip()
     # Nie geladener Tab bleibt unverändert — für ihn gibt es online wie
     # offline nichts anzuzeigen.
     never_node = tree._stash_nodes["never"]
@@ -348,7 +353,7 @@ def test_set_offline_false_restores_refresh_button(qapp) -> None:
     tree.set_offline(False)
 
     button = tree.itemWidget(tree._stash_nodes["loaded"], _COL_STATUS)
-    assert button.text() == "⟳ vor 3d"
+    assert button.text() == "⟳ 3d ago"
 
 
 def test_set_offline_idempotent_noop_when_unchanged(qapp) -> None:

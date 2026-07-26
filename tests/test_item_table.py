@@ -110,7 +110,7 @@ def test_empty_filter_still_shows_everything(qapp) -> None:
     assert proxy.rowCount() == 1
 
 
-# --- Anforderungs-Spalten (Anf.Lvl/Str/Dex/Int) + numerische Sortierung ---- #
+# --- Anforderungs-Spalten (Req.Lvl/Str/Dex/Int) + numerische Sortierung ---- #
 
 def make_weapon(name: str, level: str, dex: str) -> Item:
     return Item.model_validate({"typeLine": name, "requirements": [
@@ -123,7 +123,7 @@ def test_requirement_columns_show_values(qapp) -> None:
     from poe_view.ui.item_table import COLUMNS, ItemTableModel
     model = ItemTableModel()
     model.set_items([make_weapon("Gutting Knife", "56", "113"), make_item("Chaos Orb")])
-    req_col = COLUMNS.index("Anf.Lvl")
+    req_col = COLUMNS.index("Req.Lvl")
     dex_col = COLUMNS.index("Dex")
     assert model.data(model.index(0, req_col), Qt.ItemDataRole.DisplayRole) == "56"
     assert model.data(model.index(0, dex_col), Qt.ItemDataRole.DisplayRole) == "113"
@@ -139,7 +139,7 @@ def test_numeric_sort_role_orders_numbers_not_strings(qapp) -> None:
                      make_item("Chaos Orb")])
     proxy = ItemFilterProxy()
     proxy.setSourceModel(model)
-    req_col = COLUMNS.index("Anf.Lvl")
+    req_col = COLUMNS.index("Req.Lvl")
 
     assert model.data(model.index(0, req_col), NUMERIC_SORT_ROLE) == 113.0
     assert model.data(model.index(2, req_col), NUMERIC_SORT_ROLE) == float("-inf")
@@ -169,18 +169,18 @@ def test_column_filter_reduces_rows_and_marks_header(qapp) -> None:
     model.set_items([make_weapon("A", "56", "1"), make_weapon("B", "70", "1")])
     proxy = ItemFilterProxy()
     proxy.setSourceModel(model)
-    req_col = COLUMNS.index("Anf.Lvl")
+    req_col = COLUMNS.index("Req.Lvl")
 
     proxy.set_column_filter(req_col, "<60")
     assert proxy.rowCount() == 1
     assert proxy.data(proxy.index(0, 3), Qt.ItemDataRole.DisplayRole) == "A"
     assert proxy.headerData(req_col, Qt.Orientation.Horizontal,
-                            Qt.ItemDataRole.DisplayRole) == "Anf.Lvl 🔍"
+                            Qt.ItemDataRole.DisplayRole) == "Req.Lvl 🔍"
 
     proxy.clear_column_filters()
     assert proxy.rowCount() == 2
     assert proxy.headerData(req_col, Qt.Orientation.Horizontal,
-                            Qt.ItemDataRole.DisplayRole) == "Anf.Lvl"
+                            Qt.ItemDataRole.DisplayRole) == "Req.Lvl"
 
 
 def test_column_filter_and_global_filter_combine(qapp) -> None:
@@ -191,7 +191,7 @@ def test_column_filter_and_global_filter_combine(qapp) -> None:
     proxy = ItemFilterProxy()
     proxy.setSourceModel(model)
     proxy.setFilterFixedString("knife")
-    proxy.set_column_filter(COLUMNS.index("Anf.Lvl"), ">=50")
+    proxy.set_column_filter(COLUMNS.index("Req.Lvl"), ">=50")
     assert proxy.rowCount() == 1
 
 

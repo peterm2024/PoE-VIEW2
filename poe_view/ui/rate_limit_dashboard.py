@@ -47,8 +47,8 @@ class RateLimitDashboard(QFrame):
             bar.hide(); label.hide()
 
         if wait_s > 0:
-            self._set_led(DASH_BAD, "WARTE")
-            self._wait.setText(f"Warte: {wait_s:.0f} s")
+            self._set_led(DASH_BAD, "WAITING")
+            self._wait.setText(f"Waiting: {wait_s:.0f} s")
         else:
             colour = DASH_WARN if worst >= 0.6 else DASH_OK
             self._set_led(colour, "OK")

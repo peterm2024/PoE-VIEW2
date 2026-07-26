@@ -44,6 +44,6 @@ def export_items(path: str, rows: list[tuple[str, Item]]) -> int:
                 "Quality": gem_quality(item) or "",
                 "StackSize": item.stackSize or "",
                 "ItemLevel": item.ilvl or "",
-                "Corrupted": "ja" if item.corrupted else "",
+                "Corrupted": "yes" if item.corrupted else "",
             })
     return len(rows)

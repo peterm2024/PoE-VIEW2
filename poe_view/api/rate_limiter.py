@@ -111,10 +111,27 @@ class RateLimitManager:
         self._emit(name, 0.0)
         return total_wait
 
+    def _decay_expired_rules(self, state: PolicyState) -> None:
+        """Setzt Regeln zurück, deren Fenster seit dem letzten Header-Update
+        vollständig abgelaufen ist — ohne auf den nächsten echten Request zu
+        warten. Sonst bliebe z. B. ``headroom_fraction()`` während einer
+        Auto-Refresh-Pause für immer auf dem letzten (veralteten) Stand
+        stehen: ohne Request kommt auch kein neuer Header mehr rein, der
+        Zähler würde sich sonst nie mehr von selbst erholen (Rückfrage
+        "Policy-Statusleiste aktualisiert sich während der Pause nicht")."""
+        elapsed = self._now() - state.last_update
+        if elapsed <= 0:
+            return
+        for rule in state.rules.values():
+            if elapsed >= rule.window_s:
+                rule.current = 0
+                rule.active_lock_s = 0.0
+
     def _required_wait(self, policy_name: str) -> float:
         state = self._policies.get(policy_name)
         if state is None:
             return 0.0
+        self._decay_expired_rules(state)
         now = self._now()
         elapsed = now - state.last_update
         wait = 0.0
@@ -124,16 +141,7 @@ class RateLimitManager:
             elif rule.current >= rule.max_hits - SAFETY_MARGIN:
                 # Konservativ: volles Fenster seit letztem Update abwarten.
                 wait = max(wait, rule.window_s - elapsed)
-        if wait > 0:
-            return wait
-        if elapsed > 0:
-            # Fenster abgelaufen: lokale Zähler zurücksetzen. Der nächste
-            # Response-Header liefert ohnehin den maßgeblichen Stand.
-            for rule in state.rules.values():
-                if elapsed >= rule.window_s:
-                    rule.current = 0
-                    rule.active_lock_s = 0.0
-        return 0.0
+        return wait
 
     def _countdown(self, policy_name: str, wait: float) -> None:
         """In Sekundenschritten schlafen und den Countdown melden."""
@@ -190,17 +198,36 @@ class RateLimitManager:
 
         Konservativ: das Minimum über alle Regeln, nicht nur die zuletzt
         benutzte Policy — genutzt vom Hintergrund-Auto-Refresher, damit der
-        genug manuelles Budget für den Nutzer übrig lässt.
+        etwas Budget für manuelle Klicks übrig lässt. Zerfällt abgelaufene
+        Fenster vorher lokal (§_decay_expired_rules), sonst könnte eine
+        Auto-Refresh-Pause sich selbst aufrechterhalten: pausiert → kein
+        Request mehr → kein Header-Update mehr → Zähler bleibt für immer
+        auf dem alten (veralteten) Stand stehen.
         """
         with self._lock:
             fractions = []
             for state in self._policies.values():
+                self._decay_expired_rules(state)
                 for rule in state.rules.values():
                     if rule.active_lock_s > 0:
                         return 0.0
                     if rule.max_hits > 0:
                         fractions.append((rule.max_hits - rule.current) / rule.max_hits)
             return min(fractions) if fractions else 1.0
+
+    def snapshot(self) -> tuple[str, list[dict], float]:
+        """Aktueller Anzeige-Stand der zuletzt benutzten Policy, ohne dafür
+        einen echten Request auszulösen — fürs periodische UI-Polling
+        (MainWindow-Sekundentimer), damit das Rate-Limit-Dashboard auch
+        während einer Auto-Refresh-Pause sichtbar mitläuft statt
+        einzufrieren, bis der nächste echte Request neue Header liefert."""
+        with self._lock:
+            state = self._policies.get(self._last_policy)
+            if state is None:
+                return self._last_policy, [], 0.0
+            self._decay_expired_rules(state)
+            wait = max((r.active_lock_s for r in state.rules.values()), default=0.0)
+            return self._last_policy, [r.snapshot() for r in state.rules.values()], wait
 
     def register_penalty(self, retry_after_s: float, policy_name: str | None = None) -> None:
         """HTTP 429 trotz Vorsicht: Sperre aus Retry-After übernehmen."""

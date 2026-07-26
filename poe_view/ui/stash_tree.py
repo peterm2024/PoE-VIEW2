@@ -87,7 +87,7 @@ def format_age(last_loaded_iso: str, *, now: datetime | None = None) -> str:
     days = (now_dt - loaded_at).days
     if days <= 0:
         return loaded_at.astimezone().strftime("%H:%M:%S")
-    return f"vor {days}d"
+    return f"{days}d ago"
 
 
 def _map_info(stash: StashTab) -> dict:
@@ -137,7 +137,7 @@ def grouped_leaf_label(child: StashTab) -> str:
     info = _map_info(child)
     section = str(info.get("section") or "")
     if section.startswith("tier"):
-        return f"Fach {int(info.get('index') or 0) + 1}"
+        return f"Tab {int(info.get('index') or 0) + 1}"
     return str(info.get("name") or child.display_name)
 
 
@@ -155,20 +155,28 @@ class StashTree(QTreeWidget):
         self.customContextMenuRequested.connect(self._on_context_menu)
         header = self.header()
         header.setStretchLastSection(False)
-        # Interactive statt Stretch: Stretch-Spalten sind in Qt nicht per
-        # Maus verbreiterbar (das war der Bug hinter "Spalten lassen sich
-        # nicht verbreitern"). Initialbreite grob großzügig gewählt.
-        header.setSectionResizeMode(_COL_NAME, QHeaderView.ResizeMode.Interactive)
+        # Name als Stretch-Spalte: füllt automatisch die verbleibende Breite
+        # und schrumpft/wächst mit dem Panel — # und Status bleiben dadurch
+        # immer sichtbar, ohne dass Name manuell verkleinert werden muss
+        # (Peter: 391 echte Allflame-Tabs, teils mit langen Namen wie
+        # "Caer Blaidd, Wolfpack's Den (Remove-only)", machten das nötig).
+        # Kehrseite: Stretch-Spalten lassen sich in Qt nicht per Maus
+        # verbreitern — hier gewollt, das manuelle Nachziehen soll ja
+        # gerade entfallen. Zu breite Labels werden von Qt automatisch mit
+        # "…" gekürzt; der volle Name steht im Tooltip (§_build_node).
+        # # und Status sind auf reale Extremwerte aus einem 391-Tab-Cache
+        # bemessen: # bis 5-stellig ("19133" bei Ordner-Summen), Status auf
+        # den breitesten Fall "📴 14:32:46" (Offline + exakte Uhrzeit).
+        header.setSectionResizeMode(_COL_NAME, QHeaderView.ResizeMode.Stretch)
         header.setSectionResizeMode(_COL_COUNT, QHeaderView.ResizeMode.Fixed)
         header.setSectionResizeMode(_COL_STATUS, QHeaderView.ResizeMode.Fixed)
-        self.setColumnWidth(_COL_NAME, 220)
-        self.setColumnWidth(_COL_COUNT, 42)
-        self.setColumnWidth(_COL_STATUS, 74)
+        self.setColumnWidth(_COL_COUNT, 46)
+        self.setColumnWidth(_COL_STATUS, 80)
         self.headerItem().setTextAlignment(_COL_COUNT, Qt.AlignmentFlag.AlignRight)
-        self.headerItem().setToolTip(_COL_COUNT, "Anzahl Items (bekannt nach dem ersten Laden)")
+        self.headerItem().setToolTip(_COL_COUNT, "Item count (known after the first load)")
         self.headerItem().setToolTip(
-            _COL_STATUS, "⬇ = noch nicht geladen · ⟳ = neu laden (zeigt Alter der Daten) · "
-            "📴 = Offline-Cache, GGG gerade nicht erreichbar")
+            _COL_STATUS, "⬇ = not loaded yet · ⟳ = reload (shows data age) · "
+            "📴 = offline cache, GGG currently unreachable")
         self._stash_nodes: dict[str, QTreeWidgetItem] = {}  # stash_id → Knoten
         self._offline = False  # GGG nicht erreichbar (MainWindow.set_offline)
         self.itemClicked.connect(self._on_click)
@@ -292,6 +300,7 @@ class StashTree(QTreeWidget):
             return
         for group_label, members in grouped:
             group_node = QTreeWidgetItem([f"🗂 {group_label}"])
+            group_node.setToolTip(_COL_NAME, group_label)
             counts = [self._leaf_count(m, overrides) for m in members]
             if any(c is not None for c in counts):
                 group_node.setText(_COL_COUNT, str(sum(c or 0 for c in counts)))
@@ -303,7 +312,9 @@ class StashTree(QTreeWidget):
                     label: str | None = None) -> QTreeWidgetItem:
         """Rekursiv: Ordner enthalten children (beliebig tief)."""
         prefix = "📁 " if stash.is_folder else ""
-        node = QTreeWidgetItem([f"{prefix}{label or stash.display_name}"])
+        name = label or stash.display_name
+        node = QTreeWidgetItem([f"{prefix}{name}"])
+        node.setToolTip(_COL_NAME, name)  # voller Name, falls die Stretch-Spalte ihn kürzt
         if not stash.is_folder:
             node.setData(0, _DATA_ROLE, stash)
             self._stash_nodes[stash.id] = node
@@ -321,7 +332,7 @@ class StashTree(QTreeWidget):
         if last_loaded_iso is None:
             self.removeItemWidget(node, _COL_STATUS)
             node.setText(_COL_STATUS, _UNLOADED_MARK)
-            node.setToolTip(_COL_STATUS, "Noch nicht geladen")
+            node.setToolTip(_COL_STATUS, "Not loaded yet")
             return
         name: str = node.data(0, _DATA_ROLE).display_name
         age = format_age(last_loaded_iso)
@@ -331,11 +342,11 @@ class StashTree(QTreeWidget):
         if self._offline:
             button.setText(f"📴 {age}")
             button.setToolTip(
-                f"'{name}': Offline-Cache (zuletzt aktualisiert: {age}) — "
-                "Klick versucht trotzdem ein Neuladen")
+                f"'{name}': offline cache (last updated: {age}) — "
+                "clicking still attempts a reload")
         else:
             button.setText(f"⟳ {age}")
-            button.setToolTip(f"'{name}' neu laden")
+            button.setToolTip(f"Reload '{name}'")
         button.clicked.connect(lambda: self.stash_refresh_requested.emit(stash_id, name))
         self.setItemWidget(node, _COL_STATUS, button)
 
@@ -369,6 +380,6 @@ class StashTree(QTreeWidget):
         if stash is None:
             return  # Ordner-Knoten haben keine eigenen Rohdaten
         menu = QMenu(self)
-        action = menu.addAction("🔍 Rohdaten anzeigen")
+        action = menu.addAction("🔍 View Raw Data")
         action.triggered.connect(lambda: self.raw_data_requested.emit(stash.id, stash.display_name))
         menu.exec(self.viewport().mapToGlobal(pos))

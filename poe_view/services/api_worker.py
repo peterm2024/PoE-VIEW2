@@ -27,8 +27,8 @@ from poe_view.services import icon_cache, token_store
 
 log = logging.getLogger(__name__)
 
-OFFLINE_MESSAGE = ("GGG-API nicht erreichbar (Wartung oder kein Netz) — "
-                   "zeige zwischengespeicherte Daten.")
+OFFLINE_MESSAGE = ("GGG API unreachable (maintenance or no network) — "
+                   "showing cached data.")
 
 
 def _is_connectivity_issue(exc: Exception) -> bool:
@@ -206,35 +206,35 @@ class ApiWorker(QThread):
                 self._login()
             case LogoutJob():
                 token_store.delete_token()
-                self.login_required.emit("Abgemeldet.")
+                self.login_required.emit("Logged out.")
             case FetchLeaguesJob():
-                self.status.emit("Lade Ligen …")
+                self.status.emit("Loading leagues…")
                 self.leagues_loaded.emit(self.client.get_leagues())
-                self.status.emit("Bereit")
+                self.status.emit("Ready")
             case FetchCharactersJob():
-                self.status.emit("Lade Charaktere …")
+                self.status.emit("Loading characters…")
                 self.characters_loaded.emit(self.client.get_characters())
-                self.status.emit("Bereit")
+                self.status.emit("Ready")
             case FetchStashListJob(league=league):
-                self.status.emit(f"Lade Stash-Liste ({league}) …")
+                self.status.emit(f"Loading stash list ({league})…")
                 self.stash_list_loaded.emit(self.client.get_stashes(league))
-                self.status.emit("Bereit")
+                self.status.emit("Ready")
             case FetchStashItemsJob(league=league, stash_id=sid, stash_name=name,
                                     parent_id=parent_id, silent=silent):
                 if not silent:
-                    self.status.emit(f"Lade Items: {name} …")
+                    self.status.emit(f"Loading items: {name}…")
                 stash = self.client.get_stash(league, sid, parent_id)
                 self._emit_stash_result(league, sid, name, stash, silent)
             case FetchCharacterItemsJob(name=name, silent=silent):
                 if not silent:
-                    self.status.emit(f"Lade Ausrüstung: {name} …")
+                    self.status.emit(f"Loading equipment: {name}…")
                 self.character_items_loaded.emit(name, self.client.get_character_items(name))
                 if not silent:
-                    self.status.emit("Bereit")
+                    self.status.emit("Ready")
             case FetchIconJob(url=url):
                 self._fetch_icon(url)
             case FetchAllItemsJob(league=league, stashes=stashes):
-                self.status.emit(f"Lade alle Tabs ({league}) …")
+                self.status.emit(f"Loading all tabs ({league})…")
                 self._fetch_all_items(league, stashes)
 
     # ------------------------------------------------------------------ #
@@ -242,13 +242,13 @@ class ApiWorker(QThread):
     def _bootstrap(self) -> None:
         token = token_store.load_token()
         if not token_store.is_valid(token):
-            self.login_required.emit("Kein gültiges Token — bitte einloggen.")
+            self.login_required.emit("No valid token — please log in.")
             return
         self.client.set_token(token["access_token"])
         self._after_auth()
 
     def _login(self) -> None:
-        self.status.emit("Warte auf Login im Browser …")
+        self.status.emit("Waiting for login in the browser…")
         token = oauth.run_login_flow()
         token_store.save_token(token)
         self.client.set_token(token["access_token"])

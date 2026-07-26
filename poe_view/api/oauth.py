@@ -24,18 +24,18 @@ from poe_view import config
 
 log = logging.getLogger(__name__)
 
-_SUCCESS_HTML = """<!doctype html><html lang="de"><meta charset="utf-8">
+_SUCCESS_HTML = """<!doctype html><html lang="en"><meta charset="utf-8">
 <title>PoE-VIEW2</title>
 <body style="font-family:Segoe UI,sans-serif;background:#1a1712;color:#d6cfbf;
              display:grid;place-items:center;height:100vh;margin:0">
 <div style="text-align:center">
-<h1 style="color:#c8a959">Erfolg!</h1>
-<p>PoE-VIEW2 hat den Code empfangen. Du kannst dieses Fenster jetzt schließen.</p>
+<h1 style="color:#c8a959">Success!</h1>
+<p>PoE-VIEW2 received the code. You can close this window now.</p>
 </div></body></html>"""
 
-_ERROR_HTML = """<!doctype html><html lang="de"><meta charset="utf-8">
+_ERROR_HTML = """<!doctype html><html lang="en"><meta charset="utf-8">
 <title>PoE-VIEW2</title><body style="font-family:Segoe UI,sans-serif">
-<h1>Login fehlgeschlagen</h1><p>{reason}</p></body></html>"""
+<h1>Login failed</h1><p>{reason}</p></body></html>"""
 
 
 class OAuthError(Exception):
@@ -54,7 +54,7 @@ class _CallbackHandler(BaseHTTPRequestHandler):
             return
         type(self).query = parse_qs(parsed.query)
         ok = "code" in type(self).query
-        body = _SUCCESS_HTML if ok else _ERROR_HTML.format(reason="Kein Code erhalten.")
+        body = _SUCCESS_HTML if ok else _ERROR_HTML.format(reason="No code received.")
         data = body.encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -111,16 +111,16 @@ def run_login_flow(timeout_s: float = 300.0) -> dict:
     try:
         while not _CallbackHandler.query:
             if time.monotonic() > deadline:
-                raise OAuthError("Zeitüberschreitung: kein Login innerhalb des Zeitfensters.")
+                raise OAuthError("Timeout: no login within the time window.")
             server.handle_request()
     finally:
         threading.Thread(target=server.server_close, daemon=True).start()
 
     query = _CallbackHandler.query
     if query.get("state", [""])[0] != state:
-        raise OAuthError("State-Mismatch im Callback — Login abgebrochen (CSRF-Schutz).")
+        raise OAuthError("State mismatch in callback — login aborted (CSRF protection).")
     if "code" not in query:
-        raise OAuthError(f"Kein Authorization-Code erhalten: {query}")
+        raise OAuthError(f"No authorization code received: {query}")
 
     return _exchange_code(query["code"][0], verifier)
 
@@ -138,7 +138,7 @@ def _exchange_code(code: str, verifier: str) -> dict:
     headers = {"User-Agent": config.user_agent()}
     resp = httpx.post(config.TOKEN_URL, data=data, headers=headers, timeout=30.0)
     if resp.status_code != 200:
-        raise OAuthError(f"Token-Tausch fehlgeschlagen (HTTP {resp.status_code}): {resp.text[:300]}")
+        raise OAuthError(f"Token exchange failed (HTTP {resp.status_code}): {resp.text[:300]}")
     token = resp.json()
     token["obtained_at"] = time.time()
     return token

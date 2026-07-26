@@ -19,7 +19,7 @@ class ItemDetail(QFrame):
         self._icon = QLabel()
         self._icon.setFixedSize(64, 64)
         self._icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._name = QLabel("Kein Item ausgewählt")
+        self._name = QLabel("No item selected")
         self._name.setStyleSheet("font-weight: 600; font-size: 13px;")
         self._props = QLabel("")
         self._props.setWordWrap(True)

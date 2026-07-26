@@ -46,6 +46,6 @@ class CharacterList(QListWidget):
             return
         char: Character = item.data(_DATA_ROLE)
         menu = QMenu(self)
-        action = menu.addAction("⟳ Aktualisieren")
+        action = menu.addAction("⟳ Refresh")
         action.triggered.connect(lambda: self.character_refresh_requested.emit(char))
         menu.exec(self.viewport().mapToGlobal(pos))

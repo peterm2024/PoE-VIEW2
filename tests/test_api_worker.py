@@ -23,7 +23,7 @@ def test_stash_items_dispatch_does_not_emit_bereit_after_result(qapp, monkeypatc
 
     worker._dispatch(FetchStashItemsJob("Standard", "t1", "Currency 1"))
 
-    assert emitted == ["Lade Items: Currency 1 …"]  # kein "Bereit" danach
+    assert emitted == ["Loading items: Currency 1…"]  # kein "Bereit" danach
     worker.client.close()
 
 
@@ -37,7 +37,7 @@ def test_leagues_dispatch_emits_bereit_after_result(qapp, monkeypatch) -> None:
 
     worker._dispatch(FetchLeaguesJob())
 
-    assert emitted == ["Lade Ligen …", "Bereit"]
+    assert emitted == ["Loading leagues…", "Ready"]
     worker.client.close()
 
 
@@ -53,7 +53,7 @@ def test_character_items_dispatch_emits_name_and_items(qapp, monkeypatch) -> Non
 
     worker._dispatch(FetchCharacterItemsJob("WitchOfPeter"))
 
-    assert emitted == ["Lade Ausrüstung: WitchOfPeter …", "Bereit"]
+    assert emitted == ["Loading equipment: WitchOfPeter…", "Ready"]
     assert results == [("WitchOfPeter", [item])]
     worker.client.close()
 
@@ -239,7 +239,7 @@ def test_connectivity_error_emits_friendly_message_for_manual_job(qapp, monkeypa
     worker.run()
 
     assert offline_events == [True]
-    assert len(errors) == 1 and "nicht erreichbar" in errors[0]
+    assert len(errors) == 1 and "unreachable" in errors[0]
     worker.client.close()
 
 

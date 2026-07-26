@@ -136,3 +136,47 @@ def test_headroom_fraction_is_0_when_locked() -> None:
     headers["X-Rate-Limit-Account-State"] = "15:15:42,7:300:0"  # aktive Sperre
     mgr.update_from_headers(headers)
     assert mgr.headroom_fraction() == 0.0
+
+
+def test_headroom_fraction_recovers_after_window_elapses_without_a_new_request() -> None:
+    """Regression: ohne diesen Selbst-Zerfall würde eine Auto-Refresh-Pause
+    sich für immer selbst aufrechterhalten — pausiert heißt kein Request
+    mehr, kein Request heißt kein neuer Header, der den Zähler auffrischt."""
+    clock = FakeClock()
+    mgr = make_manager(clock)
+    headers = dict(HEADERS)
+    headers["X-Rate-Limit-Account-State"] = "14:15:0,7:300:0"  # 15s-Fenster fast voll
+    mgr.update_from_headers(headers)
+    assert mgr.headroom_fraction() < 0.1
+
+    clock.t += 20.0  # 15s-Fenster komplett abgelaufen, aber kein Request in der Zwischenzeit
+    # jetzt bestimmt das noch laufende 300s-Fenster (7/90 belegt) das Minimum
+    assert mgr.headroom_fraction() == pytest.approx((90 - 7) / 90)
+
+
+def test_snapshot_reflects_last_known_state_without_a_request() -> None:
+    clock = FakeClock()
+    mgr = make_manager(clock)
+    mgr.update_from_headers(HEADERS)
+    policy, rules, wait = mgr.snapshot()
+    assert policy == "stash-request-limit"
+    assert {r["window_s"] for r in rules} == {15, 300}
+    assert wait == 0.0
+
+
+def test_snapshot_decays_expired_window_like_headroom_fraction() -> None:
+    clock = FakeClock()
+    mgr = make_manager(clock)
+    headers = dict(HEADERS)
+    headers["X-Rate-Limit-Account-State"] = "14:15:0,7:300:0"
+    mgr.update_from_headers(headers)
+
+    clock.t += 20.0  # 15s-Fenster abgelaufen
+    _policy, rules, _wait = mgr.snapshot()
+    rule_15 = next(r for r in rules if r["window_s"] == 15)
+    assert rule_15["current"] == 0
+
+
+def test_snapshot_before_any_policy_is_known() -> None:
+    mgr = make_manager(FakeClock())
+    assert mgr.snapshot() == ("", [], 0.0)

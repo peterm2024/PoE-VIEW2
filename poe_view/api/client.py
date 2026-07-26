@@ -70,9 +70,9 @@ class PoeApiClient:
             self.rate_limiter.update_from_headers(resp.headers)
 
         if resp.status_code == 401:
-            raise AuthError("Nicht autorisiert — Token abgelaufen oder fehlend.")
+            raise AuthError("Not authorized — token expired or missing.")
         if resp.status_code >= 400:
-            raise ApiError(resp.status_code, f"HTTP {resp.status_code} für {path}: {resp.text[:200]}")
+            raise ApiError(resp.status_code, f"HTTP {resp.status_code} for {path}: {resp.text[:200]}")
         return resp.json()
 
     # ------------------------------------------------------------------ #

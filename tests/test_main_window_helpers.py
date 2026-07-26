@@ -487,14 +487,35 @@ def test_auto_refresh_counter_label_counts_silent_loads(qapp) -> None:
     win._current_league = "Standard"
     win._leaf_stashes = [_make_leaf("t1", "Tab 1"), _make_leaf("t2", "Tab 2")]
     win._update_auto_refresh_label()
-    assert win._auto_refresh_label.text() == "Auto-Refresh: 0 von 2 Stash-Tabs aktualisiert"
+    assert win._auto_refresh_label.text() == "Auto-refresh: 0 of 2 stash tabs updated"
 
     win._on_stash_items("Standard", "t1", "Tab 1", [], silent=True)
-    assert win._auto_refresh_label.text() == "Auto-Refresh: 1 von 2 Stash-Tabs aktualisiert"
+    assert win._auto_refresh_label.text() == "Auto-refresh: 1 of 2 stash tabs updated"
 
     # Manuelle (nicht-silente) Ladevorgänge zählen nicht als Auto-Refresh.
     win._on_stash_items("Standard", "t2", "Tab 2", [], silent=False)
-    assert win._auto_refresh_label.text() == "Auto-Refresh: 1 von 2 Stash-Tabs aktualisiert"
+    assert win._auto_refresh_label.text() == "Auto-refresh: 1 of 2 stash tabs updated"
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_auto_refresh_counter_counts_tabs_already_loaded_from_a_previous_session(qapp) -> None:
+    """Regression: "0 von 94" blieb dauerhaft stehen, obwohl der Sweep im
+    Hintergrund longst die ältesten Tabs auffrischte — weil eine bereits
+    komplett heruntergeladene Liga für JEDEN Tab schon vor dem ersten
+    Silent-Refresh dieser Session ``already_loaded=True`` hatte (Datei-Cache
+    einer früheren Session). Der Zähler muss trotzdem pro Session hochlaufen."""
+    win = MainWindow()
+    win._current_league = "Standard"
+    win._leaf_stashes = [_make_leaf("t1", "Tab 1"), _make_leaf("t2", "Tab 2")]
+    # Simuliert einen zuvor aus dem Datei-Cache geladenen Stand: t1 ist
+    # bereits Wochen alt bekannt, ohne dass diese Session je selbst geladen hätte.
+    win._last_loaded["Standard"] = {"t1": "2026-01-01T00:00:00+00:00"}
+
+    win._on_stash_items("Standard", "t1", "Tab 1", [], silent=True)
+
+    assert win._auto_refresh_label.text() == "Auto-refresh: 1 of 2 stash tabs updated"
 
     win.worker.stop()
     win.worker.wait(5000)
@@ -524,7 +545,7 @@ def test_maybe_auto_refresh_skips_when_worker_busy_or_low_headroom(qapp, monkeyp
     assert submitted == []
 
     win._worker_busy = False
-    monkeypatch.setattr(win.worker.rate_limiter, "headroom_fraction", lambda: 0.1)
+    monkeypatch.setattr(win.worker.rate_limiter, "headroom_fraction", lambda: 0.05)
     win._maybe_auto_refresh()
     assert submitted == []
 
@@ -533,6 +554,64 @@ def test_maybe_auto_refresh_skips_when_worker_busy_or_low_headroom(qapp, monkeyp
     assert len(submitted) == 1
     assert submitted[0].stash_id == "t1"
     assert submitted[0].silent is True
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_auto_refresh_countdown_shows_seconds_when_not_blocked(qapp, monkeypatch) -> None:
+    win = MainWindow()
+    win._current_league = "Standard"
+    monkeypatch.setattr(win.worker.rate_limiter, "headroom_fraction", lambda: 1.0)
+
+    win._update_auto_refresh_countdown()
+
+    assert win._auto_refresh_blocked_reason() is None
+    assert "Next auto-refresh in" in win._auto_refresh_countdown_label.text()
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_auto_refresh_countdown_shows_reason_when_blocked(qapp, monkeypatch) -> None:
+    win = MainWindow()
+    win._current_league = "Standard"
+    monkeypatch.setattr(win.worker.rate_limiter, "headroom_fraction", lambda: 0.05)
+
+    win._update_auto_refresh_countdown()
+
+    assert win._auto_refresh_blocked_reason() == "rate limit budget reserved for manual requests"
+    assert "Auto-refresh paused" in win._auto_refresh_countdown_label.text()
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_countdown_tick_refreshes_dashboard_from_snapshot(qapp, monkeypatch) -> None:
+    """Regression: ohne dieses Polling friert das Dashboard während einer
+    Auto-Refresh-Pause ein, weil ohne Request kein neuer Header mehr
+    reinkommt (Rückfrage 'Policy-Statusleiste aktualisiert sich nicht')."""
+    win = MainWindow()
+    monkeypatch.setattr(
+        win.worker.rate_limiter, "snapshot",
+        lambda: ("stash-request-limit",
+                 [{"current": 3, "max": 15, "window_s": 10, "locked": False}], 0.0))
+
+    win._update_auto_refresh_countdown()
+
+    assert "stash-request-limit" in win.dashboard._policy.text()
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_auto_refresh_countdown_blank_without_league(qapp) -> None:
+    win = MainWindow()
+    win._current_league = ""
+
+    win._update_auto_refresh_countdown()
+
+    assert win._auto_refresh_countdown_label.text() == ""
 
     win.worker.stop()
     win.worker.wait(5000)
@@ -891,7 +970,7 @@ def test_special_tab_click_with_known_children_aggregates_without_fetch(qapp, mo
     win._on_stash_selected("m1", "M")
 
     assert submitted == []
-    assert "0 von 1" in win._status_msg.text()
+    assert "0 of 1" in win._status_msg.text()
 
     win.worker.stop()
     win.worker.wait(5000)
@@ -943,7 +1022,7 @@ def test_typ_column_hidden_by_default_mods_visible(qapp) -> None:
     Mods-Spalte (Map-Modifikatoren) sichtbar."""
     from poe_view.ui.item_table import COLUMNS
     win = MainWindow()
-    assert win.table.isColumnHidden(COLUMNS.index("Typ"))
+    assert win.table.isColumnHidden(COLUMNS.index("Type"))
     assert not win.table.isColumnHidden(COLUMNS.index("Mods"))
     assert not win.table.isColumnHidden(COLUMNS.index("Name"))
 
@@ -954,15 +1033,15 @@ def test_typ_column_hidden_by_default_mods_visible(qapp) -> None:
 def test_column_toggle_persists_across_restart(qapp) -> None:
     from poe_view.ui.item_table import COLUMNS
     win = MainWindow()
-    win._toggle_column("Typ")   # einblenden
+    win._toggle_column("Type")   # einblenden
     win._toggle_column("Mods")  # ausblenden
-    assert not win.table.isColumnHidden(COLUMNS.index("Typ"))
+    assert not win.table.isColumnHidden(COLUMNS.index("Type"))
     assert win.table.isColumnHidden(COLUMNS.index("Mods"))
     win.worker.stop()
     win.worker.wait(5000)
 
     win2 = MainWindow()  # "Neustart": liest ui-settings.ini (im Test: tmp_path)
-    assert not win2.table.isColumnHidden(COLUMNS.index("Typ"))
+    assert not win2.table.isColumnHidden(COLUMNS.index("Type"))
     assert win2.table.isColumnHidden(COLUMNS.index("Mods"))
 
     win2.worker.stop()
@@ -1013,7 +1092,7 @@ def test_special_parent_click_aggregates_loaded_children(qapp) -> None:
     assert win.table_model.source_at(0) == "Map (Tier 6)"
     assert not win.table.isColumnHidden(TAB_COL)
     assert win._showing_aggregate  # einzelne Kind-Loads kapern die Ansicht nicht
-    assert "1 Items aus 1 von 2" in win._status_msg.text()
+    assert "1 items from 1 of 2" in win._status_msg.text()
 
     win.worker.stop()
     win.worker.wait(5000)
@@ -1210,18 +1289,18 @@ def test_apply_column_filter_updates_status_and_header(qapp) -> None:
     from poe_view.ui.item_table import COLUMNS
     win = MainWindow()
     win.table_model.set_items([_weapon("A", "56"), _weapon("B", "70")])
-    req_col = COLUMNS.index("Anf.Lvl")
+    req_col = COLUMNS.index("Req.Lvl")
 
     win._apply_column_filter(req_col, "<60")
     assert win.proxy.rowCount() == 1
-    assert "1 von 2" in win._status_msg.text()
-    assert "Anf.Lvl <60" in win._status_msg.text()
+    assert "1 of 2" in win._status_msg.text()
+    assert "Req.Lvl <60" in win._status_msg.text()
     assert win.proxy.headerData(req_col, Qt.Orientation.Horizontal,
-                                Qt.ItemDataRole.DisplayRole) == "Anf.Lvl 🔍"
+                                Qt.ItemDataRole.DisplayRole) == "Req.Lvl 🔍"
 
     win._apply_column_filter(req_col, "")
     assert win.proxy.rowCount() == 2
-    assert "entfernt" in win._status_msg.text()
+    assert "removed" in win._status_msg.text()
 
     win.worker.stop()
     win.worker.wait(5000)
@@ -1231,7 +1310,7 @@ def test_clear_column_filters_resets_all(qapp) -> None:
     from poe_view.ui.item_table import COLUMNS
     win = MainWindow()
     win.table_model.set_items([_weapon("A", "56"), _weapon("B", "70")])
-    win._apply_column_filter(COLUMNS.index("Anf.Lvl"), ">=60")
+    win._apply_column_filter(COLUMNS.index("Req.Lvl"), ">=60")
     win._apply_column_filter(COLUMNS.index("Name"), "A")
     assert win.proxy.rowCount() == 0
 
@@ -1637,7 +1716,7 @@ def test_league_changed_skips_network_for_archived_league(qapp, monkeypatch) -> 
     win._on_league_changed("Legacy League")
 
     assert submitted == []
-    assert "beendet" in win._status_msg.text()
+    assert "ended" in win._status_msg.text()
     assert win._current_league == "Legacy League"  # trotzdem aktiviert (zeigt Cache)
 
     win.worker.stop()
@@ -1676,7 +1755,7 @@ def test_stash_selected_archived_league_cache_miss_shows_message_no_fetch(qapp, 
     win._on_stash_selected("t1", "Currency 1")
 
     assert submitted == []
-    assert "beendet" in win._status_msg.text()
+    assert "ended" in win._status_msg.text()
 
     win.worker.stop()
     win.worker.wait(5000)
@@ -1692,7 +1771,7 @@ def test_stash_refresh_archived_league_no_fetch(qapp, monkeypatch) -> None:
     win._on_stash_refresh("t1", "Currency 1")
 
     assert submitted == []
-    assert "beendet" in win._status_msg.text()
+    assert "ended" in win._status_msg.text()
 
     win.worker.stop()
     win.worker.wait(5000)
@@ -1731,7 +1810,7 @@ def test_load_all_items_archived_league_shows_aggregate_without_fetch(qapp, monk
 
     assert submitted == []
     assert win.table_model.rowCount() == 1  # Aggregat trotzdem gezeigt
-    assert "beendet" in win._status_msg.text()
+    assert "ended" in win._status_msg.text()
 
     win.worker.stop()
     win.worker.wait(5000)
