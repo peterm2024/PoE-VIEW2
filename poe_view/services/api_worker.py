@@ -129,7 +129,7 @@ class ApiWorker(QThread):
     stash_list_loaded = Signal(object)         # list[StashTab]
     stash_items_loaded = Signal(str, str, str, object, bool)  # league, stash_id, name, list[Item], silent
     stash_children_loaded = Signal(str, str, str, object, bool)  # league, stash_id, name, list[StashTab], silent
-    character_items_loaded = Signal(str, object)  # Charaktername, list[Item]
+    character_items_loaded = Signal(str, object, bool)  # Charaktername, list[Item], silent
     icon_loaded = Signal(str, object)          # url, bytes
     rate_limit_changed = Signal(str, object, float)  # policy, rules, wait_s
     job_error = Signal(str)                    # Fehlertext für die Statusbar
@@ -228,7 +228,7 @@ class ApiWorker(QThread):
             case FetchCharacterItemsJob(name=name, silent=silent):
                 if not silent:
                     self.status.emit(f"Loading equipment: {name}…")
-                self.character_items_loaded.emit(name, self.client.get_character_items(name))
+                self.character_items_loaded.emit(name, self.client.get_character_items(name), silent)
                 if not silent:
                     self.status.emit("Ready")
             case FetchIconJob(url=url):

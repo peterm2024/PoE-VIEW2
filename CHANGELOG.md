@@ -6,6 +6,32 @@ nach [SemVer](https://semver.org/lang/de/).
 
 ## [Unveröffentlicht]
 
+### Hinzugefügt
+
+- Refresh-Modus-Dropdown (Auto / Single / Stash) in der Toolbar: Single
+  hält gezielt die aktuell gewählte Zeile aktuell, Stash zyklisiert durch
+  die ganze Truhe — beide in einem gleichmäßigen, aus den echten
+  Rate-Limit-Regeln abgeleiteten Takt statt eines Bursts.
+- Sichtbarer Countdown bis zum nächsten Auto-Refresh-Tick bzw. der Grund,
+  warum er gerade pausiert (Rate-Limit, Token, archivierte Liga, …).
+- Stash-Baum: Name-Spalte skaliert automatisch mit dem Panel, Anzahl- und
+  Status-Spalte bleiben dadurch immer sichtbar.
+
+### Geändert
+
+- Oberfläche und README vollständig auf Englisch umgestellt (internationale
+  Zielgruppe). Code-Kommentare und interne Doku bleiben Deutsch.
+- Auto-Refresh reserviert nur noch 10 % statt 50 % des Rate-Limit-Budgets
+  für manuelle Klicks.
+
+### Behoben
+
+- Rate-Limit-Dashboard und der Auto-Refresh-Zähler ("X von Y Stash-Tabs")
+  konnten dauerhaft veraltet bzw. bei 0 hängen bleiben, obwohl im
+  Hintergrund weiter aktualisiert wurde.
+- Der gleichmäßige Refresh-Takt konnte kurzzeitig mit der Rate-Limit-Policy
+  eines fremden Endpunkts statt der eigenen rechnen.
+
 ## [0.1.0] - 2026-07-25
 
 Erste veröffentlichte Version.

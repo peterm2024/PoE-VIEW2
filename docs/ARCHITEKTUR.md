@@ -224,6 +224,24 @@ Zuordnung von Regel zu Verbrauch eine bekannte Fehlerquelle ist:
   verbindet diesen Callback mit dem Qt-Signal
   `rate_limit_changed(policy, rules, wait_remaining_s)`, das wiederum das
   Dashboard speist. So bleibt der Manager selbst frei von Qt-Abhängigkeiten.
+- `headroom_fraction()` — wie viel Budget ist über alle bekannten Policies
+  hinweg noch frei (Minimum, konservativ)? Genutzt vom Auto-Refresh-Guard
+  und vom Sofort-Kick bei Auswahlwechsel im Single-/Stash-Modus.
+- `steady_pace_interval_s(policy_name=None)` — empfohlener Mindestabstand
+  zwischen Requests für einen gleichmäßigen Dauerbetrieb (Single-/Stash-
+  Refresh-Modus, §4.8): die knappste Regel der angegebenen (oder sonst
+  zuletzt benutzten) Policy, geteilt auf ihr Fenster. Bewusst NICHT über
+  alle Policies gemittelt — GGG vergibt pro Endpunkt-Art eine eigene
+  Policy, siehe FALLSTRICKE #33.
+- `snapshot()` — aktueller Anzeige-Stand ohne Seiteneffekt auf einen
+  echten Request, fürs periodische UI-Polling (siehe unten).
+- `_decay_expired_rules(state)` — setzt abgelaufene Fenster lokal zurück,
+  auch OHNE dass ein neuer Request das anstößt. Wird von `check_and_wait`,
+  `headroom_fraction` und `snapshot` gleichermaßen genutzt — sonst könnte
+  eine Auto-Refresh-Pause sich über veraltete Zähler selbst
+  aufrechterhalten (FALLSTRICKE #32). Der 1-Sekunden-UI-Timer in
+  `MainWindow` ruft `snapshot()` bei jedem Tick ab, damit das Dashboard
+  auch ohne laufende Requests sichtbar mitläuft.
 
 ### 4.4 Datenmodelle (`api/models.py`)
 
@@ -431,9 +449,12 @@ Warteschleife (Timeout) laufen lassen.
 **Budget-Schutz:** Vor jedem Auto-Refresh-Versuch prüft
 `RateLimitManager.headroom_fraction()` (Minimum der "noch frei"-Anteile
 über alle bekannten Policies/Regeln), ob mindestens
-`AUTO_REFRESH_MIN_HEADROOM` (50 %) des Rate-Limit-Fensters frei sind —
-sonst wird der Tick übersprungen. So bleibt dem Nutzer immer genug Budget
-für eigene, manuelle Refreshs übrig. Zusätzlich pausiert der Auto-Refresher
+`AUTO_REFRESH_MIN_HEADROOM` (10 %) des Rate-Limit-Fensters frei sind —
+sonst wird der Tick übersprungen. Nur eine kleine Notreserve, kein
+50/50-Splitting: Auto- und manuelle Jobs laufen ohnehin durch dieselbe
+FIFO-Queue und werden vom Rate-Limiter gleich gedrosselt, die Reserve
+verhindert lediglich, dass ein manueller Klick ausgerechnet den letzten
+freien Request vor einer 429-Sperre wegschnappt. Zusätzlich pausiert der Auto-Refresher
 komplett, während der Worker gerade mit etwas anderem beschäftigt ist
 (`_worker_busy`) oder ein Bulk-Load ("Alle Tabs laden") läuft — und
 solange `MainWindow._logged_in` `False` ist (FALLSTRICKE #28: ein mitten
@@ -454,16 +475,62 @@ Hintergrund-Job Daten einer inzwischen verlassenen Liga in die aktuell
 angezeigte Liga einsickern lassen.
 
 **Sichtbarer Nachweis:** Ein permanentes Label rechts in der Statusleiste
-("Auto-Refresh: X von Y Stash-Tabs aktualisiert",
+("Auto-refresh: X of Y stash tabs updated",
 `MainWindow._update_auto_refresh_label`) zählt die in dieser Session
 still aktualisierten Tabs der aktuellen Liga gegen die Gesamtzahl der
 Tabs — der Nutzer kann so jederzeit prüfen, dass der Hintergrund-Refresher
-tatsächlich arbeitet. Gezählt wird pro Fach nur der
-**erste** stille Ladevorgang (`_on_stash_items`/`_on_stash_children`
-prüfen, ob die `stash_id` bereits in `_last_loaded` steht, BEVOR sie den
-neuen Zeitstempel einträgt) — sonst würde das wiederholte Live-Halten des
-gerade angezeigten Fachs (Punkt 1 oben, jeder Tick) den Zähler weit über
-die Gesamtzahl Y hinaustreiben.
+tatsächlich arbeitet. Gezählt wird pro Fach nur der **erste** stille
+Ladevorgang DIESER SESSION (`_count_silent_refresh` führt ein eigenes,
+NICHT persistiertes Session-Set `_auto_refresh_counted` je Liga) — bewusst
+nicht anhand von `_last_loaded` (das überlebt Neustarts über den
+Datei-Cache): Bei einer bereits vollständig heruntergeladenen Liga wäre
+`already_loaded` für jeden Tab von Anfang an wahr, der Zähler bliebe dann
+für immer bei 0 stehen, obwohl der Sweep sichtbar weiterläuft
+(FALLSTRICKE #31).
+
+**Sekündliche Countdown-Anzeige** (`MainWindow._update_auto_refresh_countdown`,
+per `QTimer` unabhängig vom 40s-Auto-Refresh-Takt) zeigt zusätzlich
+entweder "Next auto-refresh in Xs" (`_auto_refresh_timer.remainingTime()`)
+oder den Grund, warum der nächste Tick nichts täte
+(`_auto_refresh_blocked_reason()` — no league, busy, not logged in, league
+ended, rate limit budget) — Countdown-Text und tatsächliches Verhalten
+teilen sich dieselbe Guard-Methode, damit sie nie auseinanderlaufen.
+Derselbe Timer-Tick ruft auch `RateLimitManager.snapshot()` ab und füttert
+damit das Rate-Limit-Dashboard, unabhängig von echten Requests (siehe
+§4.3, FALLSTRICKE #32).
+
+**Refresh-Modus (`MainWindow._drive_refresh_mode`):** Ein Dropdown in der
+Toolbar ("Mode: Auto / Single / Stash", additiv neben dem normalen
+"Refresh"-Button) schaltet zwischen drei Strategien um:
+
+- **Auto** — das oben beschriebene Verhalten (Standard).
+- **Single** — hält ausschließlich die aktuell gewählte Zeile (Fach oder
+  Charakter, `_pick_single_target`) aktuell, im Takt von
+  `steady_pace_interval_s()`.
+- **Stash** — zyklisiert endlos durch die ganze Truhe der aktuellen Liga,
+  gefüllte Fächer vor leeren (`_pick_stash_mode_candidate`), im selben
+  Takt.
+
+Single/Stash reservieren bewusst KEIN Budget für manuelle Klicks (anders
+als Auto) — der Nutzer hat den Modus bewusst gewählt, um den vollen Pool
+für genau dieses Ziel einzusetzen. Beide takten GLEICHMÄSSIG statt in
+einem Burst, ausgelöst vom selben 1-Sekunden-Timer wie der Countdown
+(`_refresh_mode_next_due`, ein `time.monotonic()`-Zeitstempel) — ein
+Burst-dann-Warten hätte denselben Gesamtdurchsatz, sähe aber minutenlang
+aus wie "nichts passiert" (für einen einmaligen Sofort-Burst gibt es
+bereits "Load All Tabs"). Der Takt selbst kommt aus
+`RateLimitManager.steady_pace_interval_s(self._refresh_mode_policy)` —
+`_refresh_mode_policy` ist der beim EIGENEN letzten Job gemerkte
+Policy-Name, nicht der globale `rate_limiter.last_policy`, der von jedem
+beliebigen (auch fremden) Request überschrieben werden kann
+(FALLSTRICKE #33).
+
+Ein bewusster Auswahlwechsel bei einem Cache-Treffer überspringt den
+laufenden Takt einmalig (`_kick_refresh_mode_after_selection`), aber nur,
+solange `headroom_fraction()` noch mindestens
+`REFRESH_MODE_KICK_MIN_HEADROOM` (50 %) frei ist — sonst würde schnelles
+Durchklicken durch viele Fächer ebenso viele Sofort-Requests auslösen und
+den gleichmäßigen Takt aushebeln.
 
 **Migration von Bestandsdaten:** Cache-Dateien von vor dem
 `last_loaded`-Feature enthalten keine Zeitstempel — ohne Gegenmaßnahme

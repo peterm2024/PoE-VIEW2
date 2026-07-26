@@ -30,6 +30,10 @@ log = logging.getLogger(__name__)
 # Sicherheitsmarge: warten, bevor das Limit vollständig erreicht ist.
 SAFETY_MARGIN = 1
 
+# Fallback-Takt für steady_pace_interval_s(), solange noch keine echte
+# Policy bekannt ist (vor dem ersten Request dieser Session).
+DEFAULT_PACING_INTERVAL_S = 20.0
+
 # callback(policy_name, rules_snapshot, wait_remaining_s)
 StatusCallback = Callable[[str, list[dict], float], None]
 
@@ -81,6 +85,16 @@ class RateLimitManager:
         self._callback = status_callback
         self._now = now or time.monotonic
         self._last_policy: str = ""
+
+    @property
+    def last_policy(self) -> str:
+        """Name der zuletzt benutzten Policy — für Aufrufer, die sich den
+        Namen zum Zeitpunkt EINES bestimmten (eigenen) Requests merken
+        wollen, statt sich später auf den dann evtl. längst durch einen
+        ANDEREN, dazwischengefunkten Request überschriebenen globalen
+        Stand zu verlassen (siehe ``steady_pace_interval_s``)."""
+        with self._lock:
+            return self._last_policy
 
     # ------------------------------------------------------------------ #
     # "Check & Wait" — vor jedem Request                                  #
@@ -214,6 +228,42 @@ class RateLimitManager:
                     if rule.max_hits > 0:
                         fractions.append((rule.max_hits - rule.current) / rule.max_hits)
             return min(fractions) if fractions else 1.0
+
+    def steady_pace_interval_s(self, policy_name: str | None = None) -> float:
+        """Empfohlener Mindestabstand zwischen Requests für einen
+        gleichmäßigen Dauerbetrieb (Single-/Stash-Refresh-Modus, §
+        MainWindow._drive_refresh_mode) — die knappste Regel der
+        angegebenen (oder sonst zuletzt benutzten) Policy, geteilt auf ihr
+        Fenster, damit sie im Dauerbetrieb nie anschlägt.
+
+        ``policy_name`` explizit übergeben, wenn der Aufrufer sich den
+        Policy-Namen zum Zeitpunkt SEINES EIGENEN letzten Requests gemerkt
+        hat (empfohlen!) — sonst wird ``_last_policy`` verwendet, der
+        GLOBALE, von jedem beliebigen Request überschreibbare Stand. Real
+        beobachtet: GGG vergibt pro Endpunkt-Art eine eigene Policy, sogar
+        für Charakter-Liste (``character-list-request-limit``) und
+        Einzelcharakter (``character-request-limit``) getrennt. Verließ
+        sich der Single-Modus auf den globalen ``_last_policy``, konnte
+        ein dazwischengefunkter Klick auf einen ANDEREN Endpunkt (z. B.
+        der normale "Refresh"-Button, der die Charakterliste lädt) dessen
+        Policy kurzzeitig einmischen und den Takt verfälschen (35s statt
+        der erwarteten ~10s).
+
+        Bei z. B. "30 Treffer pro 300s" ergibt das rund 300/29 ≈ 10.3s
+        zwischen zwei Requests (SAFETY_MARGIN abgezogen). Ohne bekannte
+        Policy (vor dem ersten Request dieser Session) gilt ein
+        konservativer Default."""
+        with self._lock:
+            state = self._policies.get(policy_name or self._last_policy)
+            if state is None:
+                return DEFAULT_PACING_INTERVAL_S
+            self._decay_expired_rules(state)
+            intervals = []
+            for rule in state.rules.values():
+                usable = rule.max_hits - SAFETY_MARGIN
+                if usable > 0:
+                    intervals.append(rule.window_s / usable)
+            return max(intervals) if intervals else DEFAULT_PACING_INTERVAL_S
 
     def snapshot(self) -> tuple[str, list[dict], float]:
         """Aktueller Anzeige-Stand der zuletzt benutzten Policy, ohne dafür

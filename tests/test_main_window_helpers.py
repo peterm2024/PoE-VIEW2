@@ -5,6 +5,8 @@ CSV-Dateiname-Vorschlag (Filtertext bzw. Tab-/Aggregat-Name).
 
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 from poe_view.api.models import Character, Item, StashTab
 from poe_view.ui.main_window import MainWindow
 
@@ -294,7 +296,7 @@ def test_on_character_items_caches_and_shows_slot_as_source(qapp) -> None:
     win._current_character_name = "WitchOfPeter"
     weapon = Item.model_validate({"typeLine": "Sword", "frameType": 2, "inventoryId": "Weapon"})
 
-    win._on_character_items("WitchOfPeter", [weapon])
+    win._on_character_items("WitchOfPeter", [weapon], False)
 
     assert win._character_items["WitchOfPeter"] == [weapon]
     assert win.table_model.rowCount() == 1
@@ -313,7 +315,7 @@ def test_on_character_items_ignores_late_result_for_deselected_character(qapp) -
     win._current_character_name = "OtherCharacter"
     item = Item.model_validate({"typeLine": "Chaos Orb", "frameType": 5})
 
-    win._on_character_items("WitchOfPeter", [item])
+    win._on_character_items("WitchOfPeter", [item], False)
 
     assert win._character_items["WitchOfPeter"] == [item]  # gecacht …
     assert win.table_model.rowCount() == 0  # … aber nicht angezeigt
@@ -612,6 +614,362 @@ def test_auto_refresh_countdown_blank_without_league(qapp) -> None:
     win._update_auto_refresh_countdown()
 
     assert win._auto_refresh_countdown_label.text() == ""
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_refresh_mode_single_targets_currently_selected_stash_tab(qapp, monkeypatch) -> None:
+    win = MainWindow()
+    win._current_league = "Standard"
+    win._current_stash_id = "t1"
+    win._current_tab_name = "Tab 1"
+    submitted = []
+    monkeypatch.setattr(win.worker, "submit", lambda job: submitted.append(job))
+
+    win._on_refresh_mode_changed("Single")
+
+    assert len(submitted) == 1
+    assert submitted[0].stash_id == "t1"
+    assert submitted[0].silent is True
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_refresh_mode_single_targets_currently_selected_character(qapp, monkeypatch) -> None:
+    win = MainWindow()
+    win._current_league = "Standard"
+    win._current_character_name = "WitchOfPeter"
+    submitted = []
+    monkeypatch.setattr(win.worker, "submit", lambda job: submitted.append(job))
+
+    win._on_refresh_mode_changed("Single")
+
+    assert len(submitted) == 1
+    assert submitted[0].name == "WitchOfPeter"
+    assert submitted[0].silent is True
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_refresh_mode_single_does_not_resubmit_while_a_job_is_pending(qapp, monkeypatch) -> None:
+    win = MainWindow()
+    win._current_league = "Standard"
+    win._current_stash_id = "t1"
+    win._current_tab_name = "Tab 1"
+    submitted = []
+    monkeypatch.setattr(win.worker, "submit", lambda job: submitted.append(job))
+
+    win._on_refresh_mode_changed("Single")
+    win._drive_refresh_mode()  # zweiter Versuch, solange der erste noch "läuft"
+
+    assert len(submitted) == 1
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_refresh_mode_single_waits_for_the_steady_pace_interval(qapp, monkeypatch) -> None:
+    """Nach Abschluss eines Jobs wird NICHT sofort der nächste nachgeschoben
+    (das war die ursprüngliche Fehleinschätzung) — Single taktet gleichmäßig
+    im Rhythmus von ``steady_pace_interval_s()``, kein Burst."""
+    win = MainWindow()
+    win._current_league = "Standard"
+    win._current_stash_id = "t1"
+    win._current_tab_name = "Tab 1"
+    submitted = []
+    monkeypatch.setattr(win.worker, "submit", lambda job: submitted.append(job))
+    monkeypatch.setattr(win.worker.rate_limiter, "steady_pace_interval_s", lambda *a, **k: 20.0)
+    fake_now = [1000.0]
+    monkeypatch.setattr("poe_view.ui.main_window.time.monotonic", lambda: fake_now[0])
+
+    win._on_refresh_mode_changed("Single")
+    assert len(submitted) == 1
+
+    win._on_stash_items("Standard", "t1", "Tab 1", [], silent=True)
+    assert len(submitted) == 1  # noch nicht fällig
+
+    fake_now[0] += 19.0
+    win._drive_refresh_mode()
+    assert len(submitted) == 1  # immer noch nicht
+
+    fake_now[0] += 1.5  # jetzt sind die vollen 20s um
+    win._drive_refresh_mode()
+    assert len(submitted) == 2
+    assert submitted[1].stash_id == "t1"
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_refresh_mode_pace_is_immune_to_an_interleaved_unrelated_policy(qapp) -> None:
+    """Regression: real beobachtet 35s statt der erwarteten ~10s, weil ein
+    dazwischengefunkter Request an einen ANDEREN Endpunkt (hier simuliert:
+    die Charakterliste, ausgelöst z. B. durch den normalen Refresh-Button)
+    den globalen ``rate_limiter._last_policy`` kurzzeitig überschrieb.
+    Der Single-Modus muss sich stattdessen die Policy SEINES EIGENEN
+    letzten Requests merken (``_refresh_mode_policy``)."""
+    win = MainWindow()
+    win._current_league = "Standard"
+    win._current_character_name = "WitchOfPeter"
+
+    # Eigener Request des Single-Modus: lockere Policy, ~10.3s Takt.
+    win.worker.rate_limiter.update_from_headers({
+        "X-Rate-Limit-Policy": "character-request-limit",
+        "X-Rate-Limit-Rules": "Account",
+        "X-Rate-Limit-Account": "30:300:1800",
+        "X-Rate-Limit-Account-State": "0:300:0",
+    })
+    win._on_character_items("WitchOfPeter", [], silent=True)
+    assert win._refresh_mode_policy == "character-request-limit"
+
+    # Dazwischengefunkter, unabhängiger Request an einen anderen Endpunkt
+    # (z. B. der normale "Refresh"-Button, der die Charakterliste lädt) —
+    # überschreibt den GLOBALEN _last_policy mit einer viel strengeren Policy.
+    win.worker.rate_limiter.update_from_headers({
+        "X-Rate-Limit-Policy": "character-list-request-limit",
+        "X-Rate-Limit-Rules": "Account",
+        "X-Rate-Limit-Account": "5:300:1800",
+        "X-Rate-Limit-Account-State": "0:300:0",
+    })
+    assert win.worker.rate_limiter.last_policy == "character-list-request-limit"
+
+    # Der Single-Modus-Takt darf sich davon nicht beirren lassen.
+    interval = win.worker.rate_limiter.steady_pace_interval_s(win._refresh_mode_policy)
+    assert interval == pytest.approx(300 / 29, abs=0.01)
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def _single_mode_win_midtick(qapp, monkeypatch, headroom: float):
+    """MainWindow im Single-Modus, mitten in einem laufenden 75s-Takt, mit
+    einem bereits gecachten Fach "t1" — der Aufbau, bei dem ein
+    Auswahlwechsel bisher bis zu einen vollen Takt lang alte Daten zeigte."""
+    win = MainWindow()
+    win._current_league = "Standard"
+    win._items["Standard"] = {"t1": []}  # Cache-Treffer → kein regulärer Fetch
+    submitted = []
+    monkeypatch.setattr(win.worker, "submit", lambda job: submitted.append(job))
+    monkeypatch.setattr(win.worker.rate_limiter, "steady_pace_interval_s", lambda *a, **k: 75.0)
+    monkeypatch.setattr(win.worker.rate_limiter, "headroom_fraction", lambda: headroom)
+    fake_now = [1000.0]
+    monkeypatch.setattr("poe_view.ui.main_window.time.monotonic", lambda: fake_now[0])
+    win._refresh_mode = "single"
+    win._refresh_mode_next_due = fake_now[0] + 75.0  # mitten im Takt
+    return win, submitted
+
+
+def test_selection_change_kicks_refresh_mode_when_headroom_allows(qapp, monkeypatch) -> None:
+    """Ein bewusster Auswahlwechsel soll sofort laden statt den Rest des
+    Takts (hier 75s) alte Cache-Daten zu zeigen."""
+    win, submitted = _single_mode_win_midtick(qapp, monkeypatch, headroom=1.0)
+
+    win._on_stash_selected("t1", "Tab 1")
+
+    assert len(submitted) == 1
+    assert submitted[0].stash_id == "t1"
+    assert submitted[0].silent is True
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_selection_change_respects_the_pace_when_headroom_is_low(qapp, monkeypatch) -> None:
+    """Gegenprobe: bei knappem Budget bleibt es beim regulären Takt — sonst
+    würde schnelles Durchklicken je Klick einen Request auslösen."""
+    win, submitted = _single_mode_win_midtick(qapp, monkeypatch, headroom=0.2)
+
+    win._on_stash_selected("t1", "Tab 1")
+
+    assert submitted == []
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_selection_change_is_a_no_op_in_auto_mode(qapp, monkeypatch) -> None:
+    win, submitted = _single_mode_win_midtick(qapp, monkeypatch, headroom=1.0)
+    win._refresh_mode = "auto"
+
+    win._on_stash_selected("t1", "Tab 1")
+
+    assert submitted == []
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_selection_change_on_cache_miss_does_not_double_fetch(qapp, monkeypatch) -> None:
+    """Bei einem Cache-Miss ist über den normalen Auswahl-Pfad ohnehin schon
+    ein (nicht-stiller) Fetch unterwegs — der Kick darf keinen zweiten
+    Request obendrauf setzen."""
+    win, submitted = _single_mode_win_midtick(qapp, monkeypatch, headroom=1.0)
+
+    win._on_stash_selected("uncached", "Tab X")
+
+    assert len(submitted) == 1
+    assert submitted[0].silent is False
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_selection_change_kicks_refresh_mode_for_characters_too(qapp, monkeypatch) -> None:
+    win, submitted = _single_mode_win_midtick(qapp, monkeypatch, headroom=1.0)
+    win._character_items["WitchOfPeter"] = []  # Cache-Treffer
+
+    win._on_character_selected(
+        Character.model_validate({"name": "WitchOfPeter", "class": "Occultist",
+                                  "level": 90, "league": "Standard"}))
+
+    assert len(submitted) == 1
+    assert submitted[0].name == "WitchOfPeter"
+    assert submitted[0].silent is True
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_refresh_mode_single_ignores_rate_limit_headroom(qapp, monkeypatch) -> None:
+    """Single/Stash nutzen bewusst den vollen Rate-Limit-Pool — anders als
+    Auto reservieren sie nichts für manuelle Klicks."""
+    win = MainWindow()
+    win._current_league = "Standard"
+    win._current_stash_id = "t1"
+    win._current_tab_name = "Tab 1"
+    submitted = []
+    monkeypatch.setattr(win.worker, "submit", lambda job: submitted.append(job))
+    monkeypatch.setattr(win.worker.rate_limiter, "headroom_fraction", lambda: 0.0)
+
+    win._on_refresh_mode_changed("Single")
+
+    assert len(submitted) == 1
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_refresh_mode_stash_prefers_non_empty_and_oldest_tab(qapp, monkeypatch) -> None:
+    win = MainWindow()
+    win._current_league = "Standard"
+    win._leaf_stashes = [_make_leaf("empty", "Empty"), _make_leaf("full", "Full")]
+    now = datetime.now(timezone.utc)
+    win._last_loaded["Standard"] = {
+        "empty": (now - timedelta(days=10)).isoformat(),  # älter, aber leer
+        "full": (now - timedelta(days=1)).isoformat(),
+    }
+    win._items["Standard"] = {"full": [Item.model_validate({"typeLine": "Chaos Orb", "frameType": 5})]}
+    submitted = []
+    monkeypatch.setattr(win.worker, "submit", lambda job: submitted.append(job))
+
+    win._on_refresh_mode_changed("Stash")
+
+    assert len(submitted) == 1
+    assert submitted[0].stash_id == "full"  # gefüllt schlägt älter-aber-leer
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_refresh_mode_stash_cycles_through_the_league_on_the_steady_pace(qapp, monkeypatch) -> None:
+    win = MainWindow()
+    win._current_league = "Standard"
+    win._leaf_stashes = [_make_leaf("t1", "Tab 1"), _make_leaf("t2", "Tab 2")]
+    submitted = []
+    monkeypatch.setattr(win.worker, "submit", lambda job: submitted.append(job))
+    monkeypatch.setattr(win.worker.rate_limiter, "steady_pace_interval_s", lambda *a, **k: 10.0)
+    fake_now = [1000.0]
+    monkeypatch.setattr("poe_view.ui.main_window.time.monotonic", lambda: fake_now[0])
+
+    win._on_refresh_mode_changed("Stash")
+    assert len(submitted) == 1
+    first = submitted[0].stash_id
+
+    win._on_stash_items("Standard", first, "x", [], silent=True)
+    assert len(submitted) == 1  # noch nicht fällig, kein Burst
+
+    fake_now[0] += 10.0
+    win._drive_refresh_mode()
+
+    assert len(submitted) == 2
+    assert submitted[1].stash_id != first  # der andere, noch ältere Tab kommt jetzt dran
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_refresh_mode_auto_is_a_no_op_for_drive_refresh_mode(qapp, monkeypatch) -> None:
+    win = MainWindow()
+    win._current_league = "Standard"
+    win._current_stash_id = "t1"
+    submitted = []
+    monkeypatch.setattr(win.worker, "submit", lambda job: submitted.append(job))
+
+    win._drive_refresh_mode()  # Modus ist per Default "auto"
+
+    assert submitted == []
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_maybe_auto_refresh_skips_entirely_while_single_mode_active(qapp, monkeypatch) -> None:
+    win = MainWindow()
+    win._current_league = "Standard"
+    win._leaf_stashes = [_make_leaf("t1", "Tab 1")]
+    win._last_loaded["Standard"] = {"t1": (datetime.now(timezone.utc) - timedelta(days=5)).isoformat()}
+    win._refresh_mode = "single"
+    submitted = []
+    monkeypatch.setattr(win.worker, "submit", lambda job: submitted.append(job))
+    monkeypatch.setattr(win.worker.rate_limiter, "headroom_fraction", lambda: 1.0)
+
+    win._maybe_auto_refresh()
+
+    assert submitted == []  # der 40s-Takt darf im Single-Modus nichts eigenes tun
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_error_resumes_refresh_mode_chain_on_the_next_due_tick(qapp, monkeypatch) -> None:
+    """Ein gescheiterter Job darf die Single-/Stash-Kette nicht stillschweigend
+    für den Rest der Session stoppen (der Erfolgs-Signal-Pfad wird ja
+    übersprungen) — sie muss aber trotzdem den Takt einhalten, nicht sofort
+    erneut versuchen."""
+    win = MainWindow()
+    win._current_league = "Standard"
+    win._current_stash_id = "t1"
+    win._current_tab_name = "Tab 1"
+    submitted = []
+    monkeypatch.setattr(win.worker, "submit", lambda job: submitted.append(job))
+    monkeypatch.setattr(win.worker.rate_limiter, "steady_pace_interval_s", lambda *a, **k: 20.0)
+    fake_now = [1000.0]
+    monkeypatch.setattr("poe_view.ui.main_window.time.monotonic", lambda: fake_now[0])
+    win._on_refresh_mode_changed("Single")
+    assert len(submitted) == 1
+
+    win._on_error("FetchStashItemsJob: boom")
+    assert len(submitted) == 1  # kein sofortiger Retry
+
+    fake_now[0] += 20.0
+    win._drive_refresh_mode()
+    assert len(submitted) == 2
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_refresh_mode_countdown_label_shows_active_mode(qapp) -> None:
+    win = MainWindow()
+    win._current_league = "Standard"
+    win._refresh_mode_combo.setCurrentText("Single")
+
+    win._update_auto_refresh_countdown()
+
+    assert "Single" in win._auto_refresh_countdown_label.text()
 
     win.worker.stop()
     win.worker.wait(5000)

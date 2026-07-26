@@ -8,6 +8,7 @@ Die UI löst API-Arbeit ausschließlich über ``worker.submit(Job)`` aus.
 from __future__ import annotations
 
 import logging
+import time
 from datetime import datetime, timedelta, timezone
 
 from PySide6.QtCore import QSettings, Qt, QTimer
@@ -60,6 +61,13 @@ class MainWindow(QMainWindow):
     # vor einer 429-Sperre wegschnappt.
     AUTO_REFRESH_MIN_HEADROOM = 0.1
 
+    # Ein bewusster Auswahlwechsel im Single-/Stash-Modus soll sofort
+    # reagieren statt bis zu einen vollen Takt zu warten — aber nur, solange
+    # noch mindestens die Hälfte des Budgets frei ist. Sonst bliebe der
+    # Takt wirkungslos: schnelles Durchklicken durch viele Fächer würde
+    # sonst je Klick einen Request auslösen und das Budget leerräumen.
+    REFRESH_MODE_KICK_MIN_HEADROOM = 0.5
+
     # Typ-Filter-Checkboxen: die vier PoE-Rarities, dazu
     # Gem/Currency/Divination Card, und "Sonstige" (OTHER_TYPE) für den
     # Rest (Quest, Prophecy, Relic, Unbekanntes).
@@ -98,6 +106,18 @@ class MainWindow(QMainWindow):
         self._logged_in = True
         self._auto_refresh_counts: dict[str, int] = {}  # Liga → auto-aktualisierte Tabs (Session)
         self._auto_refresh_counted: dict[str, set[str]] = {}  # Liga → stash_ids (§_count_silent_refresh)
+        # Refresh-Modus: "auto" (Standard) | "single" | "stash" — siehe
+        # _drive_refresh_mode. Nicht persistiert, startet nach jedem
+        # Neustart bewusst wieder bei "auto" (keine Überraschung durch
+        # volles Tempo direkt nach dem Programmstart).
+        self._refresh_mode = "auto"
+        self._refresh_mode_pending = False  # schon ein eigener Job in der Queue?
+        self._refresh_mode_next_due = 0.0  # time.monotonic()-Zeitpunkt des nächsten Takts
+        # Policy-Name des ZULETZT VOM MODUS SELBST gesehenen Requests — nicht
+        # der globale rate_limiter._last_policy, der von JEDEM Request (auch
+        # einem dazwischengefunkten Klick auf einen anderen Endpunkt)
+        # überschrieben werden kann (§steady_pace_interval_s).
+        self._refresh_mode_policy: str | None = None
         self._raw_data_viewer: RawDataViewer | None = None
         self._offline = False  # GGG nicht erreichbar (Wartung am Patchday)
         self._live_leagues: set[str] | None = None  # letzte /account/leagues-Antwort; None = noch unbekannt
@@ -190,6 +210,20 @@ class MainWindow(QMainWindow):
         self._refresh_action = QAction("⟳ Refresh", self)
         self._refresh_action.triggered.connect(self._refresh)
         toolbar.addAction(self._refresh_action)
+
+        toolbar.addWidget(QLabel(" Mode: "))
+        self._refresh_mode_combo = QComboBox()
+        self._refresh_mode_combo.addItems(["Auto", "Single", "Stash"])
+        self._refresh_mode_combo.setToolTip(
+            "Auto: keeps the open tab/character live, sweeps the rest of the "
+            "stash in the background (default, reserves budget for manual clicks).\n"
+            "Single: refreshes just the currently selected tab or character "
+            "on a steady clock, as tight as the rate limit allows.\n"
+            "Stash: cycles through the whole stash on that same steady clock, "
+            "non-empty tabs first. For an immediate one-off pass, use "
+            "\"Load All Tabs\" instead.")
+        self._refresh_mode_combo.currentTextChanged.connect(self._on_refresh_mode_changed)
+        toolbar.addWidget(self._refresh_mode_combo)
 
         self._load_all_action = QAction("⇊ Load All Tabs", self)
         self._load_all_action.setToolTip(
@@ -593,6 +627,12 @@ class MainWindow(QMainWindow):
         else:
             # … und trotzdem im Hintergrund bestätigen/aktualisieren (wie bisher).
             self.worker.submit(FetchStashListJob(league))
+        # Stash-Modus soll sofort auf die neue Liga umsteigen statt den
+        # Rest-Takt der vorherigen Liga abzuwarten.
+        self._refresh_mode_pending = False
+        self._refresh_mode_next_due = 0.0
+        self._refresh_mode_policy = None
+        self._drive_refresh_mode()
 
     def _on_characters(self, characters: list[Character]) -> None:
         """/character liefert ligenübergreifend; gefiltert wird lokal übers Dropdown.
@@ -720,6 +760,9 @@ class MainWindow(QMainWindow):
         if stash_id in league_items:
             # Speicher-/Datei-Cache: kein erneuter API-Call (Doku §5)
             self._show_items(stash_id, league_items[stash_id], name)
+            # … im Single-/Stash-Modus aber trotzdem zeitnah auffrischen,
+            # statt bis zu einen vollen Takt alte Daten zu zeigen.
+            self._kick_refresh_mode_after_selection()
             return
         if self._archived_league_guard(
                 f"{name}: never loaded — league ended, no longer available."):
@@ -754,6 +797,14 @@ class MainWindow(QMainWindow):
         if stash_id not in counted:
             counted.add(stash_id)
             self._auto_refresh_counts[league] = len(counted)
+        # Treibt die Single-/Stash-Modus-Kette weiter (§_drive_refresh_mode);
+        # im "auto"-Modus ein No-Op. Policy-Name JETZT festhalten, nicht erst
+        # in _drive_refresh_mode auslesen — sonst könnte ein dazwischen-
+        # gefunkter anderer Request (z. B. der normale Refresh-Button) den
+        # globalen Stand vorher schon wieder überschrieben haben.
+        self._refresh_mode_pending = False
+        self._refresh_mode_policy = self.worker.rate_limiter.last_policy
+        self._drive_refresh_mode()
 
     def _on_stash_items(self, league: str, stash_id: str, name: str,
                         items: list[Item], silent: bool) -> None:
@@ -1074,6 +1125,9 @@ class MainWindow(QMainWindow):
         cached = self._character_items.get(char.name)
         if cached is not None:
             self._show_character_items(char.name, cached)
+            # … im Single-Modus trotzdem zeitnah auffrischen (analog
+            # `_on_stash_selected`), statt einen vollen Takt abzuwarten.
+            self._kick_refresh_mode_after_selection()
             return
         self._status_msg.setText(f"Loading equipment: {char.name}…")
         self.worker.submit(FetchCharacterItemsJob(char.name))
@@ -1086,7 +1140,7 @@ class MainWindow(QMainWindow):
         self._status_msg.setText(f"Loading equipment: {char.name}…")
         self.worker.submit(FetchCharacterItemsJob(char.name))
 
-    def _on_character_items(self, name: str, items: list[Item]) -> None:
+    def _on_character_items(self, name: str, items: list[Item], silent: bool) -> None:
         """``name`` kommt aus dem Signal, nicht aus der Auswahl — sonst könnte
         ein spät eintreffender Job Daten eines inzwischen abgewählten
         Charakters in die aktuelle Ansicht einsickern lassen (analog
@@ -1094,6 +1148,13 @@ class MainWindow(QMainWindow):
         self._character_items[name] = items
         self._character_items_loaded[name] = datetime.now(timezone.utc).isoformat()
         self._persist_cache()
+        if silent:
+            # Treibt die Single-Modus-Kette weiter (§_drive_refresh_mode);
+            # im "auto"-Modus ein No-Op. Policy-Name jetzt festhalten, siehe
+            # Kommentar in _count_silent_refresh.
+            self._refresh_mode_pending = False
+            self._refresh_mode_policy = self.worker.rate_limiter.last_policy
+            self._drive_refresh_mode()
         if name != self._current_character_name:
             return
         self._show_character_items(name, items)
@@ -1142,6 +1203,14 @@ class MainWindow(QMainWindow):
     def _on_error(self, message: str) -> None:
         self._status_msg.setText(f"Error: {message}")
         log.error("%s", message)
+        # Ein gescheiterter Job überspringt den Erfolgs-Signal-Pfad, über
+        # den die Single-/Stash-Modus-Kette sich sonst selbst weitertreibt
+        # (§_drive_refresh_mode) — ohne diesen Reset könnte ein einzelner
+        # Fehler (z. B. ein transienter Netzwerk-Hänger) die Kette für den
+        # Rest der Session stillschweigend stoppen. Im "auto"-Modus ein No-Op.
+        if self._refresh_mode != "auto":
+            self._refresh_mode_pending = False
+            self._drive_refresh_mode()
 
     def _on_offline_changed(self, offline: bool) -> None:
         """GGG nicht erreichbar (Wartung/kein Netz, §4.12) — permanentes
@@ -1246,8 +1315,19 @@ class MainWindow(QMainWindow):
         Header mehr reinkommt, der sie sonst antreiben würde (Rückfrage
         "Policy-Statusleiste aktualisiert sich während der Pause nicht")."""
         self.dashboard.update_state(*self.worker.rate_limiter.snapshot())
+        # Sicherheitsnetz für Single/Stash: falls die Job-Kette (§_drive_
+        # refresh_mode) je stockt — etwa weil ein Fehler den erwarteten
+        # Erfolgs-Signal-Pfad übersprungen hat —, stößt der ohnehin
+        # laufende Sekunden-Timer sie spätestens hier wieder an.
+        self._drive_refresh_mode()
         if not self._current_league:
             self._auto_refresh_countdown_label.setText("")
+            return
+        if self._refresh_mode != "auto":
+            seconds = max(0, round(self._refresh_mode_next_due - time.monotonic()))
+            self._auto_refresh_countdown_label.setText(
+                f"Refresh mode: {self._refresh_mode_combo.currentText()} — "
+                f"next update in {seconds}s")
             return
         reason = self._auto_refresh_blocked_reason()
         if reason is not None:
@@ -1255,6 +1335,130 @@ class MainWindow(QMainWindow):
             return
         seconds = max(0, self._auto_refresh_timer.remainingTime() // 1000)
         self._auto_refresh_countdown_label.setText(f"Next auto-refresh in {seconds}s")
+
+    def _on_refresh_mode_changed(self, mode: str) -> None:
+        self._refresh_mode = mode.lower()
+        self._refresh_mode_pending = False
+        self._refresh_mode_next_due = 0.0  # sofort beim Umschalten aktualisieren, nicht erst nach einem Takt
+        self._refresh_mode_policy = None
+        self._drive_refresh_mode()
+
+    def _kick_refresh_mode_after_selection(self) -> None:
+        """Nach einem bewussten Auswahlwechsel im Single-/Stash-Modus den
+        laufenden Takt einmalig überspringen, damit die neue Zeile sofort
+        frisch geladen wird statt bis zu einen vollen Takt (bei knapper
+        Policy auch mal über eine Minute) alte Cache-Daten zu zeigen.
+
+        Der Takt-Zähler ist bewusst GLOBAL und wird sonst nie bei
+        Auswahländerungen zurückgesetzt: das Rate-Limit zählt Requests,
+        nicht Ziele. Ein bedingungsloser Reset würde schnelles Durchklicken
+        durch viele Fächer in ebenso viele Sofort-Requests übersetzen und
+        das Budget leerräumen. Deshalb greift die Abkürzung nur, solange
+        noch reichlich Luft ist (§REFRESH_MODE_KICK_MIN_HEADROOM) — ein
+        einzelner bewusster Wechsel reagiert sofort, Klick-Salven laufen
+        nach ein paar Sprüngen wieder in den regulären Takt.
+
+        Nur für Cache-Treffer gedacht: bei einem Cache-Miss ist über den
+        normalen Auswahl-Pfad ohnehin schon ein (nicht-stiller) Fetch
+        unterwegs, ein zusätzlicher Sprung wäre ein doppelter Request.
+        """
+        if self._refresh_mode == "auto":
+            return
+        if self.worker.rate_limiter.headroom_fraction() < self.REFRESH_MODE_KICK_MIN_HEADROOM:
+            return
+        self._refresh_mode_next_due = 0.0
+        self._drive_refresh_mode()
+
+    def _pick_single_target(self) -> tuple[str, str, str | None] | None:
+        """Aktuell gewählte Zeile für den Single-Modus — Fach oder Charakter,
+        gegenseitig exklusiv wie überall sonst (``_current_stash_id`` /
+        ``_current_character_name``). Wird bei jedem Kettenglied neu
+        ausgewertet, folgt also automatisch, wenn der Nutzer währenddessen
+        eine andere Zeile auswählt."""
+        if self._current_stash_id is not None:
+            return ("stash", self._current_stash_id, self._parent_id_of(self._current_stash_id))
+        if self._current_character_name is not None:
+            return ("character", self._current_character_name, None)
+        return None
+
+    def _pick_stash_mode_candidate(self) -> StashTab | None:
+        """Nächster Kandidat für den Stash-Modus: das am längsten nicht
+        aktualisierte Fach, gefüllte (Items > 0) vor leeren — leere Fächer
+        sind uninteressant und sollen den vollen Rate-Limit-Einsatz nicht
+        blockieren. Läuft, weil der jeweils frisch geladene Kandidat danach
+        "jung" ist und erst wieder drankommt, wenn alle anderen einmal
+        durch waren, quasi endlos rundenweise durch die ganze Truhe."""
+        if not self._leaf_stashes:
+            return None
+        league_loaded = self._last_loaded.get(self._current_league, {})
+        item_counts = self._item_counts_for_current_league()
+
+        def sort_key(stash: StashTab) -> tuple[bool, datetime]:
+            is_empty = not item_counts.get(stash.id)
+            iso = league_loaded.get(stash.id)
+            age = self._NEVER_LOADED if iso is None else datetime.fromisoformat(iso)
+            return (is_empty, age)
+
+        return min(self._leaf_stashes, key=sort_key)
+
+    def _drive_refresh_mode(self) -> None:
+        """Hält Single-/Stash-Modus am Laufen: ein GLEICHMÄSSIGER Takt,
+        kein Burst — der Rate-Limit-Gesamtdurchsatz wäre bei beidem
+        identisch, aber ein Burst-dann-Warten sähe minutenlang aus wie
+        "nichts passiert" (genau das Problem, das wir für Auto schon
+        gefixt haben). Für einen einmaligen Sofort-Burst gibt es bereits
+        "Load All Tabs".
+
+        Takt kommt aus ``steady_pace_interval_s(self._refresh_mode_policy)``
+        — live aus den tatsächlich bekannten Rate-Limit-Regeln berechnet
+        (Peters Beobachtung: bei "30 Treffer/300s" wären das rund 10s), mit
+        einem konservativen Default, solange noch keine Regel bekannt ist.
+        ``_refresh_mode_policy`` ist bewusst der beim EIGENEN letzten Job
+        gemerkte Policy-Name, nicht der globale ``rate_limiter._last_policy``
+        — sonst hätte ein dazwischengefunkter Request an einen ANDEREN
+        Endpunkt (z. B. der normale "Refresh"-Button, der die Charakter-
+        LISTE lädt statt eines einzelnen Charakters) kurzzeitig dessen
+        Policy eingemischt und den Takt verfälscht (real beobachtet: 35s
+        statt der erwarteten ~10s). Ausgelöst wird dieser Timer-artige Takt
+        vom 1-Sekunden-Tick in ``_update_auto_refresh_countdown`` — kein
+        eigener QTimer nötig.
+
+        Anders als Auto (§_auto_refresh_blocked_reason) wird KEIN
+        Rate-Limit-Budget für manuelle Klicks reserviert — das ist hier
+        gewollt, der Nutzer hat den Modus bewusst gewählt, um den vollen
+        Pool für genau dieses Ziel einzusetzen."""
+        if self._refresh_mode == "auto":
+            return
+        if (self._refresh_mode_pending or not self._logged_in
+                or not self._current_league or self._current_league_is_archived()):
+            return
+        now = time.monotonic()
+        if now < self._refresh_mode_next_due:
+            return
+        if self._refresh_mode == "single":
+            target = self._pick_single_target()
+            if target is None:
+                return
+            kind, ident, parent_id = target
+            self._refresh_mode_pending = True
+            self._refresh_mode_next_due = now + self.worker.rate_limiter.steady_pace_interval_s(
+                self._refresh_mode_policy)
+            if kind == "stash":
+                self.worker.submit(FetchStashItemsJob(
+                    self._current_league, ident, self._current_tab_name,
+                    parent_id=parent_id, silent=True))
+            else:
+                self.worker.submit(FetchCharacterItemsJob(ident, silent=True))
+        elif self._refresh_mode == "stash":
+            candidate = self._pick_stash_mode_candidate()
+            if candidate is None:
+                return
+            self._refresh_mode_pending = True
+            self._refresh_mode_next_due = now + self.worker.rate_limiter.steady_pace_interval_s(
+                self._refresh_mode_policy)
+            self.worker.submit(FetchStashItemsJob(
+                self._current_league, candidate.id, candidate.display_name,
+                parent_id=candidate.parent, silent=True))
 
     def _maybe_auto_refresh(self) -> None:
         """Läuft per QTimer und lädt höchstens zwei Dinge neu:
@@ -1275,7 +1479,13 @@ class MainWindow(QMainWindow):
         hundert Stash-Tabs ist die Charakterliste klein genug, dass ein
         automatischer Durchlauf keinen Mehrwert brächte; nicht angezeigte
         Charaktere bleiben bis zum nächsten Klick oder einem manuellen
-        Refresh per Rechtsklick unverändert."""
+        Refresh per Rechtsklick unverändert.
+
+        Läuft nur im Modus "auto" — Single/Stash treiben sich über
+        ``_drive_refresh_mode`` selbst an, ausgelöst durch Job-Abschlüsse
+        statt durch diesen 40s-Takt (§_drive_refresh_mode)."""
+        if self._refresh_mode != "auto":
+            return
         if self._auto_refresh_blocked_reason() is not None:
             return
         current_id = self._current_stash_id

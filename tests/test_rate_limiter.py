@@ -180,3 +180,62 @@ def test_snapshot_decays_expired_window_like_headroom_fraction() -> None:
 def test_snapshot_before_any_policy_is_known() -> None:
     mgr = make_manager(FakeClock())
     assert mgr.snapshot() == ("", [], 0.0)
+
+
+def test_last_policy_reflects_the_most_recent_update() -> None:
+    mgr = make_manager(FakeClock())
+    assert mgr.last_policy == ""
+    mgr.update_from_headers(HEADERS)
+    assert mgr.last_policy == "stash-request-limit"
+
+
+def test_steady_pace_interval_uses_default_before_any_policy_is_known() -> None:
+    from poe_view.api.rate_limiter import DEFAULT_PACING_INTERVAL_S
+    mgr = make_manager(FakeClock())
+    assert mgr.steady_pace_interval_s() == DEFAULT_PACING_INTERVAL_S
+
+
+def test_steady_pace_interval_reflects_the_tightest_known_rule() -> None:
+    """15:15 → 15/14 ≈ 1.07s, 90:300 → 300/89 ≈ 3.37s — die 300s-Regel ist
+    hier die knappere und bestimmt den Takt (Maximum, nicht Minimum:
+    "wie eng darf getaktet werden" muss die strengste Regel respektieren)."""
+    mgr = make_manager(FakeClock())
+    mgr.update_from_headers(HEADERS)
+    assert mgr.steady_pace_interval_s() == pytest.approx(300 / 89, abs=0.01)
+
+
+def test_steady_pace_interval_matches_peters_30_per_300s_example() -> None:
+    """30 Treffer pro 300s, abzüglich Sicherheitsmarge 1 → 300/29 ≈ 10.3s."""
+    mgr = make_manager(FakeClock())
+    headers = dict(HEADERS)
+    headers["X-Rate-Limit-Account"] = "30:300:1800"
+    headers["X-Rate-Limit-Account-State"] = "0:300:0"
+    mgr.update_from_headers(headers)
+    assert mgr.steady_pace_interval_s() == pytest.approx(300 / 29, abs=0.01)
+
+
+def test_steady_pace_interval_ignores_unrelated_older_policies() -> None:
+    """Regression: real beobachtet 75s statt der erwarteten ~10s bei "30
+    Treffer/300s" — Ursache war eine strengere, aber für den AKTUELLEN Job
+    gar nicht zutreffende Policy aus einer früheren Anfrage-Art (Stash-
+    Browsing kurz vor dem Umschalten auf Single-Modus für einen
+    Charakter), die das Maximum über ALLE Policies dominierte. Nur die
+    ZULETZT benutzte Policy darf zählen, wie ``check_and_wait`` es auch
+    tatsächlich tut (kein Aufrufer übergibt je einen expliziten
+    Policy-Namen, siehe ``client.py._get``)."""
+    mgr = make_manager(FakeClock())
+    # Zuerst eine Stash-Anfrage mit einer STRENGEREN Policy (5/300s → 75s) …
+    mgr.update_from_headers({
+        "X-Rate-Limit-Policy": "stash-request-limit",
+        "X-Rate-Limit-Rules": "Account",
+        "X-Rate-Limit-Account": "5:300:1800",
+        "X-Rate-Limit-Account-State": "0:300:0",
+    })
+    # … dann eine Charakter-Anfrage mit einer LOCKEREREN Policy (30/300s → 10.3s).
+    mgr.update_from_headers({
+        "X-Rate-Limit-Policy": "account-character-limit",
+        "X-Rate-Limit-Rules": "Account",
+        "X-Rate-Limit-Account": "30:300:1800",
+        "X-Rate-Limit-Account-State": "0:300:0",
+    })
+    assert mgr.steady_pace_interval_s() == pytest.approx(300 / 29, abs=0.01)
