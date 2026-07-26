@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from poe_view.api.models import Character, Item, StashTab
+from poe_view.services.api_worker import FetchStashListJob
 from poe_view.ui.main_window import MainWindow
 
 NESTED = [
@@ -487,7 +488,8 @@ def test_auto_refresh_counter_label_counts_silent_loads(qapp) -> None:
     """sichtbarer Nachweis „X von Y Stash-Tabs aktualisiert“."""
     win = MainWindow()
     win._current_league = "Standard"
-    win._leaf_stashes = [_make_leaf("t1", "Tab 1"), _make_leaf("t2", "Tab 2")]
+    win._stash_trees["Standard"] = [_make_leaf("t1", "Tab 1"), _make_leaf("t2", "Tab 2")]
+    win._leaf_stashes = win._stash_trees["Standard"]
     win._update_auto_refresh_label()
     assert win._auto_refresh_label.text() == "Auto-refresh: 0 of 2 stash tabs updated"
 
@@ -502,6 +504,36 @@ def test_auto_refresh_counter_label_counts_silent_loads(qapp) -> None:
     win.worker.wait(5000)
 
 
+def test_auto_refresh_counter_counts_real_vault_slots_not_map_sections(qapp) -> None:
+    """Peter: "In der Statusanzeige steht noch '939 stash tabs updated'" —
+    derselbe Zähl-Fehler wie bei der Positions-Spalte (FALLSTRICKE #36),
+    nur an anderer Stelle: ``_leaf_stashes`` zählt jede Map-Sektion einzeln,
+    ein Map-Stash mit vielen Sektionen ist in der Truhen-Leiste aber EIN
+    Fach. "Y" muss die echte Fächer-Zahl sein, "X" muss dieselbe Einheit
+    zählen — zwei Sektionen DESSELBEN Map-Tabs dürfen nur EINMAL zählen."""
+    win = MainWindow()
+    win._current_league = "Standard"
+    map_stash = StashTab.model_validate({"id": "m1", "name": "Maps", "type": "MapStash",
+                                         "metadata": {}})
+    map_stash.children = [_map_child("c1", "m1", "Beach Map"), _map_child("c2", "m1", "Dune Map")]
+    win._stash_trees["Standard"] = [_make_leaf("t1", "Tab 1"), map_stash]
+    win._leaf_stashes = win._flatten_stashes(win._stash_trees["Standard"])  # 3 ladbare Einheiten
+
+    win._update_auto_refresh_label()
+    assert win._auto_refresh_label.text() == "Auto-refresh: 0 of 2 stash tabs updated"  # nicht "of 3"
+
+    win._on_stash_items("Standard", "c1", "x", [], silent=True)
+    assert win._auto_refresh_label.text() == "Auto-refresh: 1 of 2 stash tabs updated"
+
+    # Die zweite Sektion DESSELBEN Map-Tabs darf den Zähler nicht weiter
+    # hochtreiben — beide gehören zum selben Truhenplatz "m1".
+    win._on_stash_items("Standard", "c2", "x", [], silent=True)
+    assert win._auto_refresh_label.text() == "Auto-refresh: 1 of 2 stash tabs updated"
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
 def test_auto_refresh_counter_counts_tabs_already_loaded_from_a_previous_session(qapp) -> None:
     """Regression: "0 von 94" blieb dauerhaft stehen, obwohl der Sweep im
     Hintergrund longst die ältesten Tabs auffrischte — weil eine bereits
@@ -510,7 +542,8 @@ def test_auto_refresh_counter_counts_tabs_already_loaded_from_a_previous_session
     einer früheren Session). Der Zähler muss trotzdem pro Session hochlaufen."""
     win = MainWindow()
     win._current_league = "Standard"
-    win._leaf_stashes = [_make_leaf("t1", "Tab 1"), _make_leaf("t2", "Tab 2")]
+    win._stash_trees["Standard"] = [_make_leaf("t1", "Tab 1"), _make_leaf("t2", "Tab 2")]
+    win._leaf_stashes = win._stash_trees["Standard"]
     # Simuliert einen zuvor aus dem Datei-Cache geladenen Stand: t1 ist
     # bereits Wochen alt bekannt, ohne dass diese Session je selbst geladen hätte.
     win._last_loaded["Standard"] = {"t1": "2026-01-01T00:00:00+00:00"}
@@ -738,96 +771,119 @@ def test_refresh_mode_pace_is_immune_to_an_interleaved_unrelated_policy(qapp) ->
 
     # Der Single-Modus-Takt darf sich davon nicht beirren lassen.
     interval = win.worker.rate_limiter.steady_pace_interval_s(win._refresh_mode_policy)
-    assert interval == pytest.approx(300 / 29, abs=0.01)
+    assert interval == pytest.approx(300 / 28, abs=0.01)
 
     win.worker.stop()
     win.worker.wait(5000)
 
 
-def _single_mode_win_midtick(qapp, monkeypatch, headroom: float):
-    """MainWindow im Single-Modus, mitten in einem laufenden 75s-Takt, mit
-    einem bereits gecachten Fach "t1" — der Aufbau, bei dem ein
-    Auswahlwechsel bisher bis zu einen vollen Takt lang alte Daten zeigte."""
+def _stash_mode_win_midtick(qapp, monkeypatch):
+    """MainWindow im Stash-Modus, mitten in einem laufenden 75s-Takt, mit
+    bereits gecachten Fächern — der Aufbau, in dem ein Auswahlwechsel früher
+    einen Sofort-Request auslöste (und damit das Rate-Limit-Fenster über die
+    Schwelle trieb, FALLSTRICKE #34)."""
     win = MainWindow()
     win._current_league = "Standard"
-    win._items["Standard"] = {"t1": []}  # Cache-Treffer → kein regulärer Fetch
+    win._items["Standard"] = {"t1": [], "t2": []}  # Cache-Treffer → kein regulärer Fetch
+    win._leaf_stashes = [_make_leaf("t1", "Tab 1"), _make_leaf("t2", "Tab 2")]
     submitted = []
     monkeypatch.setattr(win.worker, "submit", lambda job: submitted.append(job))
     monkeypatch.setattr(win.worker.rate_limiter, "steady_pace_interval_s", lambda *a, **k: 75.0)
-    monkeypatch.setattr(win.worker.rate_limiter, "headroom_fraction", lambda: headroom)
     fake_now = [1000.0]
     monkeypatch.setattr("poe_view.ui.main_window.time.monotonic", lambda: fake_now[0])
-    win._refresh_mode = "single"
+    win._refresh_mode = "stash"
     win._refresh_mode_next_due = fake_now[0] + 75.0  # mitten im Takt
-    return win, submitted
+    return win, submitted, fake_now
 
 
-def test_selection_change_kicks_refresh_mode_when_headroom_allows(qapp, monkeypatch) -> None:
-    """Ein bewusster Auswahlwechsel soll sofort laden statt den Rest des
-    Takts (hier 75s) alte Cache-Daten zu zeigen."""
-    win, submitted = _single_mode_win_midtick(qapp, monkeypatch, headroom=1.0)
+def test_selection_change_does_not_fire_an_extra_request(qapp, monkeypatch) -> None:
+    """Peter: "wir sollten das wieder konservativer angehen" — ein Klick
+    darf den laufenden Takt NICHT überspringen. Früher feuerte er sofort und
+    schob damit einen Extra-Request ins 300s-Fenster (FALLSTRICKE #34)."""
+    win, submitted, _fake_now = _stash_mode_win_midtick(qapp, monkeypatch)
 
     win._on_stash_selected("t1", "Tab 1")
 
+    assert submitted == []
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_selection_change_makes_the_clicked_tab_the_next_pick(qapp, monkeypatch) -> None:
+    """Stattdessen drängelt sich das angeklickte Fach in der
+    Abarbeitungsliste nach vorn: beim nächsten regulären Takt ist es dran,
+    obwohl "t2" hier als älteres Fach sonst zuerst käme."""
+    win, submitted, fake_now = _stash_mode_win_midtick(qapp, monkeypatch)
+    now = datetime.now(timezone.utc)
+    win._last_loaded["Standard"] = {
+        "t1": now.isoformat(),                            # gerade erst geladen
+        "t2": (now - timedelta(days=5)).isoformat(),      # viel älter → sonst zuerst
+    }
+
+    win._on_stash_selected("t1", "Tab 1")
+    assert submitted == []            # noch kein Request, Takt läuft weiter
+
+    fake_now[0] += 75.0               # nächster regulärer Takt
+    win._drive_refresh_mode()
+
     assert len(submitted) == 1
-    assert submitted[0].stash_id == "t1"
+    assert submitted[0].stash_id == "t1"  # vorgedrängelt, trotz jüngeren Alters
     assert submitted[0].silent is True
 
     win.worker.stop()
     win.worker.wait(5000)
 
 
-def test_selection_change_respects_the_pace_when_headroom_is_low(qapp, monkeypatch) -> None:
-    """Gegenprobe: bei knappem Budget bleibt es beim regulären Takt — sonst
-    würde schnelles Durchklicken je Klick einen Request auslösen."""
-    win, submitted = _single_mode_win_midtick(qapp, monkeypatch, headroom=0.2)
+def test_selection_priority_applies_only_once(qapp, monkeypatch) -> None:
+    """Die Vormerkung ist einmalig — danach greift wieder die normale
+    Reihenfolge, sonst bliebe der Sweep an diesem einen Fach kleben."""
+    win, submitted, fake_now = _stash_mode_win_midtick(qapp, monkeypatch)
+    now = datetime.now(timezone.utc)
+    win._last_loaded["Standard"] = {
+        "t1": now.isoformat(),
+        "t2": (now - timedelta(days=5)).isoformat(),
+    }
 
     win._on_stash_selected("t1", "Tab 1")
+    fake_now[0] += 75.0
+    win._drive_refresh_mode()
+    assert submitted[-1].stash_id == "t1"
 
-    assert submitted == []
+    win._refresh_mode_pending = False
+    fake_now[0] += 75.0
+    win._drive_refresh_mode()
+
+    assert submitted[-1].stash_id == "t2"  # wieder das älteste Fach
 
     win.worker.stop()
     win.worker.wait(5000)
 
 
 def test_selection_change_is_a_no_op_in_auto_mode(qapp, monkeypatch) -> None:
-    win, submitted = _single_mode_win_midtick(qapp, monkeypatch, headroom=1.0)
+    win, submitted, _fake_now = _stash_mode_win_midtick(qapp, monkeypatch)
     win._refresh_mode = "auto"
 
     win._on_stash_selected("t1", "Tab 1")
 
     assert submitted == []
+    assert win._refresh_mode_priority_id is None
 
     win.worker.stop()
     win.worker.wait(5000)
 
 
-def test_selection_change_on_cache_miss_does_not_double_fetch(qapp, monkeypatch) -> None:
+def test_selection_change_on_cache_miss_does_not_prioritise(qapp, monkeypatch) -> None:
     """Bei einem Cache-Miss ist über den normalen Auswahl-Pfad ohnehin schon
-    ein (nicht-stiller) Fetch unterwegs — der Kick darf keinen zweiten
-    Request obendrauf setzen."""
-    win, submitted = _single_mode_win_midtick(qapp, monkeypatch, headroom=1.0)
+    ein (nicht-stiller) Fetch unterwegs — eine Vormerkung würde dasselbe Fach
+    gleich noch einmal laden."""
+    win, submitted, _fake_now = _stash_mode_win_midtick(qapp, monkeypatch)
 
     win._on_stash_selected("uncached", "Tab X")
 
     assert len(submitted) == 1
     assert submitted[0].silent is False
-
-    win.worker.stop()
-    win.worker.wait(5000)
-
-
-def test_selection_change_kicks_refresh_mode_for_characters_too(qapp, monkeypatch) -> None:
-    win, submitted = _single_mode_win_midtick(qapp, monkeypatch, headroom=1.0)
-    win._character_items["WitchOfPeter"] = []  # Cache-Treffer
-
-    win._on_character_selected(
-        Character.model_validate({"name": "WitchOfPeter", "class": "Occultist",
-                                  "level": 90, "league": "Standard"}))
-
-    assert len(submitted) == 1
-    assert submitted[0].name == "WitchOfPeter"
-    assert submitted[0].silent is True
+    assert win._refresh_mode_priority_id is None
 
     win.worker.stop()
     win.worker.wait(5000)
@@ -874,14 +930,20 @@ def test_refresh_mode_stash_prefers_non_empty_and_oldest_tab(qapp, monkeypatch) 
     win.worker.wait(5000)
 
 
-def _drive_stash_mode_pick(win: MainWindow, fake_now: list[float], submitted: list) -> str:
+def _drive_stash_mode_pick(win: MainWindow, fake_now: list[float], submitted: list) -> str | None:
     """Einen Pick auslösen und den realen Ladevorgang simulieren
-    (``_on_stash_items``), damit Alter/Füllstand für den nächsten Pick
-    korrekt fortgeschrieben werden — wie es der echte Worker täte."""
+    (``_on_stash_items`` bzw. ``_on_stash_list``), damit Alter/Füllstand
+    bzw. die Fach-Liste für den nächsten Pick korrekt fortgeschrieben
+    werden — wie es der echte Worker täte. Liefert die Fach-ID, oder
+    ``None`` bei einem Listen-Refresh (§_stash_mode_list_refresh_due)."""
     fake_now[0] += 10.0
     win._refresh_mode_pending = False
     win._drive_refresh_mode()
-    picked = submitted[-1].stash_id
+    job = submitted[-1]
+    if isinstance(job, FetchStashListJob):
+        win._on_stash_list(win._leaf_stashes, silent=True)
+        return None
+    picked = job.stash_id
     win._on_stash_items("Standard", picked, "x", win._items["Standard"].get(picked, []), silent=True)
     return picked
 
@@ -916,8 +978,11 @@ def test_refresh_mode_stash_covers_the_next_empty_tab_after_a_full_round(qapp, m
     third = _drive_stash_mode_pick(win, fake_now, submitted)  # Pick #3: Runde fertig -> Coverage-Pick
     assert third == "empty_c"
 
-    fourth = _drive_stash_mode_pick(win, fake_now, submitted)  # Pick #4: neue Runde beginnt normal
-    assert fourth in {"full_a", "full_b"}
+    fourth = _drive_stash_mode_pick(win, fake_now, submitted)  # Pick #4: zusätzlich die Fach-Liste auffrischen
+    assert fourth is None and isinstance(submitted[-1], FetchStashListJob)
+
+    fifth = _drive_stash_mode_pick(win, fake_now, submitted)  # Pick #5: neue Runde beginnt normal
+    assert fifth in {"full_a", "full_b"}
 
     win.worker.stop()
     win.worker.wait(5000)
@@ -946,9 +1011,13 @@ def test_stash_mode_coverage_pick_walks_empty_tabs_in_order_not_by_age(qapp, mon
 
     win._on_refresh_mode_changed("Stash")  # Pick #1: "full"
     win._on_stash_items("Standard", "full", "x", win._items["Standard"]["full"], silent=True)
-    picked = [_drive_stash_mode_pick(win, fake_now, submitted) for _ in range(5)]
+    # Jede Runde ist hier nur einen Pick lang (ein einziges gefülltes Fach) und
+    # erzeugt danach ZWEI Extra-Ticks: den Coverage-Pick und einen Listen-
+    # Refresh (§_stash_mode_list_refresh_due) — macht 3 Ticks je Runde,
+    # 9 also genug für alle drei leeren Fächer.
+    picked = [_drive_stash_mode_pick(win, fake_now, submitted) for _ in range(9)]
 
-    covered = [p for p in picked if p != "full"]
+    covered = [p for p in picked if p not in ("full", None)]
     assert covered == ["empty_a", "empty_b", "empty_c"]
 
     win.worker.stop()
@@ -956,12 +1025,11 @@ def test_stash_mode_coverage_pick_walks_empty_tabs_in_order_not_by_age(qapp, mon
 
 
 def test_stash_mode_coverage_pick_follows_a_tab_moved_forward_in_game(qapp, monkeypatch) -> None:
-    """Verschiebt der Nutzer im Spiel ein Fach weiter nach vorne, ändert
-    sich seine Position in ``_leaf_stashes`` beim nächsten Stash-Listen-
-    Refresh entsprechend — der Rundlauf-Cursor (ein reiner Listen-Index in
-    die aktuell leeren Fächer) folgt dieser neuen Reihenfolge und erreicht
-    das Fach dadurch früher, als es an seiner alten (hinteren) Position
-    dran gewesen wäre."""
+    """Verschiebt der Nutzer im Spiel ein Fach weiter nach vorne, liefert
+    der automatische Listen-Refresh (§_stash_mode_list_refresh_due) die
+    neue Reihenfolge — der Rundlauf-Cursor (ein reiner Listen-Index in die
+    aktuell leeren Fächer) folgt ihr und erreicht das Fach dadurch früher,
+    als es an seiner alten (hinteren) Position dran gewesen wäre."""
     win = MainWindow()
     win._current_league = "Standard"
     win._leaf_stashes = [_make_leaf("full", "Full"),
@@ -980,15 +1048,98 @@ def test_stash_mode_coverage_pick_follows_a_tab_moved_forward_in_game(qapp, monk
 
     assert _drive_stash_mode_pick(win, fake_now, submitted) == "empty_a"  # 1. Coverage-Pick
 
-    # Nutzer verschiebt "moved" im Spiel an die zweite leere Position — ohne
-    # das würde es erst beim 3. statt beim 2. Coverage-Pick drankommen.
-    win._leaf_stashes = [_make_leaf("full", "Full"),
-                         _make_leaf("empty_a", "Empty A"),
-                         _make_leaf("moved", "Moved Tab"),
-                         _make_leaf("empty_b", "Empty B")]
+    # Die Runde ist jetzt fertig -> der nächste Tick ist der automatische
+    # Listen-Refresh. Seine Antwort simuliert die im Spiel geänderte
+    # Reihenfolge: "moved" rückt an die zweite leere Position vor.
+    fake_now[0] += 10.0
+    win._refresh_mode_pending = False
+    win._drive_refresh_mode()
+    assert isinstance(submitted[-1], FetchStashListJob)
+    reordered = [_make_leaf("full", "Full"), _make_leaf("empty_a", "Empty A"),
+                _make_leaf("moved", "Moved Tab"), _make_leaf("empty_b", "Empty B")]
+    win._on_stash_list(reordered, silent=True)
 
     assert _drive_stash_mode_pick(win, fake_now, submitted) == "full"   # Runde: erst wieder das gefüllte Fach
     assert _drive_stash_mode_pick(win, fake_now, submitted) == "moved"  # früher dran dank neuer Position
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_stash_mode_schedules_a_silent_list_refresh_after_a_full_round(qapp, monkeypatch) -> None:
+    """Peter: "Bekommen wir das mit, wenn ich ein Truhenfach im Spiel
+    verschiebe?" — bisher nein, Auto-/Single-/Stash-Modus aktualisierten
+    nur Items, nie die Fach-LISTE selbst. Jetzt hängt sich nach jeder
+    vollständigen Runde zusätzlich ein stiller `FetchStashListJob` an."""
+    win = MainWindow()
+    win._current_league = "Standard"
+    win._leaf_stashes = [_make_leaf("t1", "Tab 1")]
+    win._items["Standard"] = {"t1": [Item.model_validate({"typeLine": "Chaos Orb", "frameType": 5})]}
+    submitted = []
+    monkeypatch.setattr(win.worker, "submit", lambda job: submitted.append(job))
+    monkeypatch.setattr(win.worker.rate_limiter, "steady_pace_interval_s", lambda *a, **k: 10.0)
+    fake_now = [1000.0]
+    monkeypatch.setattr("poe_view.ui.main_window.time.monotonic", lambda: fake_now[0])
+
+    win._on_refresh_mode_changed("Stash")  # Pick #1: "t1"
+    win._on_stash_items("Standard", "t1", "x", win._items["Standard"]["t1"], silent=True)
+
+    # Pick #2: die Runde (nur 1 Fach) ist damit schon nach Pick #1 voll —
+    # dieser Tick merkt sich "Liste beim nächsten Mal auffrischen" und pickt
+    # mangels leerer Fächer normal weiter (wieder "t1", das einzige Fach).
+    fake_now[0] += 10.0
+    win._refresh_mode_pending = False
+    win._drive_refresh_mode()
+    assert submitted[-1].stash_id == "t1"
+    win._on_stash_items("Standard", "t1", "x", win._items["Standard"]["t1"], silent=True)
+
+    # Pick #3: jetzt der geplante Listen-Refresh, VOR jedem weiteren Item-Pick.
+    fake_now[0] += 10.0
+    win._refresh_mode_pending = False
+    win._drive_refresh_mode()
+
+    assert submitted[-1] == FetchStashListJob("Standard", silent=True)
+    assert win._refresh_mode_pending is True  # Kette wartet auf die Antwort, kein Sofort-Retry
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_stash_mode_schedules_a_list_refresh_even_without_any_empty_tabs(qapp, monkeypatch) -> None:
+    """Auch eine Truhe ohne ein einziges leeres Fach braucht den Listen-
+    Refresh — sonst bliebe eine komplett bekannte, aber im Spiel
+    umsortierte Truhe für immer unentdeckt."""
+    win = MainWindow()
+    win._current_league = "Standard"
+    win._leaf_stashes = [_make_leaf("t1", "Tab 1"), _make_leaf("t2", "Tab 2")]
+    win._items["Standard"] = {
+        "t1": [Item.model_validate({"typeLine": "Chaos Orb", "frameType": 5})],
+        "t2": [Item.model_validate({"typeLine": "Chaos Orb", "frameType": 5})],
+    }
+    submitted = []
+    monkeypatch.setattr(win.worker, "submit", lambda job: submitted.append(job))
+    monkeypatch.setattr(win.worker.rate_limiter, "steady_pace_interval_s", lambda *a, **k: 10.0)
+    fake_now = [1000.0]
+    monkeypatch.setattr("poe_view.ui.main_window.time.monotonic", lambda: fake_now[0])
+
+    win._on_refresh_mode_changed("Stash")  # Pick #1
+    first = submitted[-1].stash_id
+    win._on_stash_items("Standard", first, "x", win._items["Standard"][first], silent=True)
+
+    second = _drive_stash_mode_pick(win, fake_now, submitted)  # Pick #2: Runde (2 Fächer) fertig
+    assert second is not None and second != first
+
+    # Pick #3: mangels leerer Fächer fällt die Runden-Grenze auf einen ganz
+    # normalen Pick zurück — merkt sich aber "Liste beim nächsten Mal auffrischen".
+    third = _drive_stash_mode_pick(win, fake_now, submitted)
+    assert third in {"t1", "t2"}
+
+    # Pick #4: jetzt der geplante Listen-Refresh, obwohl nichts leer ist.
+    fake_now[0] += 10.0
+    win._refresh_mode_pending = False
+    win._drive_refresh_mode()
+
+    assert isinstance(submitted[-1], FetchStashListJob)
 
     win.worker.stop()
     win.worker.wait(5000)
@@ -1002,10 +1153,12 @@ def test_stash_mode_round_state_resets_on_league_change(qapp, monkeypatch) -> No
     win._on_refresh_mode_changed("Stash")
     assert win._stash_mode_round_picks == 1  # t1 ist leer -> normaler Pick, hochgezählt
 
+    win._stash_mode_list_refresh_due = True  # simuliert: Runde war gerade fertig
     win._on_league_changed("Standard SSF")
 
     assert win._stash_mode_round_picks == 0
     assert win._stash_mode_coverage_cursor == 0
+    assert win._stash_mode_list_refresh_due is False  # sonst würde die neue Liga sofort erneut abgefragt
 
     win.worker.stop()
     win.worker.wait(5000)
@@ -1092,6 +1245,46 @@ def test_error_resumes_refresh_mode_chain_on_the_next_due_tick(qapp, monkeypatch
     assert len(submitted) == 1  # kein sofortiger Retry
 
     fake_now[0] += 20.0
+    win._drive_refresh_mode()
+    assert len(submitted) == 2
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_refresh_mode_paces_from_the_response_not_from_the_submit(qapp, monkeypatch) -> None:
+    """Regression (FALLSTRICKE #34): Blockiert der Rate-Limiter einen Job
+    minutenlang (``check_and_wait``), war eine beim ABSENDEN gesetzte
+    Fälligkeit beim Eintreffen der Antwort längst abgelaufen — der nächste
+    Pick feuerte sofort hinterher. Real beobachtet: nach einer 289s-Sperre
+    kamen zwei Requests im Abstand von 1.3s statt der ~11s Takt, die
+    dadurch erreichten 29 Treffer im 300s-Fenster lösten prompt die
+    nächste Sperre aus, und das wiederholte sich endlos."""
+    win = MainWindow()
+    win._current_league = "Standard"
+    win._leaf_stashes = [_make_leaf("t1", "Tab 1"), _make_leaf("t2", "Tab 2")]
+    submitted = []
+    monkeypatch.setattr(win.worker, "submit", lambda job: submitted.append(job))
+    monkeypatch.setattr(win.worker.rate_limiter, "steady_pace_interval_s", lambda *a, **k: 11.0)
+    fake_now = [1000.0]
+    monkeypatch.setattr("poe_view.ui.main_window.time.monotonic", lambda: fake_now[0])
+
+    win._on_refresh_mode_changed("Stash")
+    assert len(submitted) == 1
+    first = submitted[0].stash_id
+
+    # Der Worker hängt 289s im Rate-Limit-Wait, DANN erst kommt die Antwort.
+    fake_now[0] += 289.0
+    win._on_stash_items("Standard", first, "x", [], silent=True)
+
+    assert len(submitted) == 1, "kein Sofort-Nachschlag direkt nach der Sperre"
+
+    # Erst ein voller Takt NACH der Antwort darf der nächste Request raus.
+    fake_now[0] += 10.0
+    win._drive_refresh_mode()
+    assert len(submitted) == 1
+
+    fake_now[0] += 1.0
     win._drive_refresh_mode()
     assert len(submitted) == 2
 
@@ -1396,7 +1589,7 @@ def test_merge_known_children_survives_stash_list_refresh(qapp) -> None:
     # Frische Liste von der API: MapStash ohne children (wie die API sie liefert)
     fresh = [StashTab.model_validate({"id": "m1", "name": "Maps", "type": "MapStash",
                                        "metadata": {}})]
-    win._on_stash_list(fresh)
+    win._on_stash_list(fresh, silent=False)
 
     assert win._stash_trees["Standard"][0].children[0].id == "c1"
     assert [s.id for s in win._leaf_stashes] == ["c1"]
@@ -1505,6 +1698,38 @@ def test_load_all_includes_special_tabs_despite_cache_entry(qapp, monkeypatch) -
     # Normaler Tab t1 bleibt Cache-Treffer, der Spezial-Tab m1 wird trotzdem geholt
     assert len(submitted) == 1
     assert [s.id for s in submitted[0].stashes] == ["m1"]
+
+
+def test_load_all_items_starts_with_the_oldest_or_never_loaded_tab(qapp, monkeypatch) -> None:
+    """Peter: "sollte mit den ältesten bzw. noch nie geholten Stash-Tabs
+    loslegen" — bricht er über "Abbrechen" vorzeitig ab, sollen die
+    dringendsten Fächer schon durch sein, nicht die per Zufall der
+    Truhen-Reihenfolge nach vorne gerutschten."""
+    win = MainWindow()
+    win._current_league = "Standard"
+    stale_map = StashTab.model_validate({"id": "stale_map", "name": "M", "type": "MapStash",
+                                         "metadata": {}})
+    never_loaded = StashTab.model_validate({"id": "never", "name": "N",
+                                            "type": "CurrencyStash", "metadata": {}})
+    fresh_map = StashTab.model_validate({"id": "fresh_map", "name": "M2", "type": "MapStash",
+                                         "metadata": {}})
+    # Truhen-Reihenfolge bewusst NICHT nach Alter — die Sortierung muss sie umstellen.
+    win._stash_trees["Standard"] = [stale_map, never_loaded, fresh_map]
+    win._leaf_stashes = [stale_map, never_loaded, fresh_map]
+    win._items["Standard"] = {"stale_map": [], "fresh_map": []}  # beide Spezial-Tabs "im Cache"
+    now = datetime.now(timezone.utc)
+    win._last_loaded["Standard"] = {
+        "stale_map": (now - timedelta(days=10)).isoformat(),
+        "fresh_map": (now - timedelta(minutes=5)).isoformat(),
+        # "never" hat keinen last_loaded-Eintrag
+    }
+    submitted = []
+    monkeypatch.setattr(win.worker, "submit", lambda job: submitted.append(job))
+
+    win._load_all_items()
+
+    assert len(submitted) == 1
+    assert [s.id for s in submitted[0].stashes] == ["never", "stale_map", "fresh_map"]
 
     win.worker.stop()
     win.worker.wait(5000)
@@ -2050,7 +2275,7 @@ def test_position_column_uses_list_order_not_stash_index(qapp, monkeypatch) -> N
     Liga-Ende nach Standard und BEHALTEN ihren alten Index, mehrere Fächer
     tragen dort also denselben ``index``. Die Position-Spalte muss daher
     aus der tatsächlichen Reihenfolge der aktuellen API-Antwort kommen
-    (``_leaf_stashes``), nicht aus ``StashTab.index``. Test simuliert genau
+    (``_tab_positions``), nicht aus ``StashTab.index``. Test simuliert genau
     das: beide "Heist"-Tabs tragen index=1 (aus zwei toten Ligen migriert)."""
     from poe_view.ui.item_table import POSITION_COL
     win = MainWindow()
@@ -2079,7 +2304,7 @@ def test_position_column_uses_list_order_not_stash_index(qapp, monkeypatch) -> N
 
 def test_single_tab_view_shows_position_column(qapp) -> None:
     """Auch im Einzelfach kommt die Tab-Nr. aus der Listen-Position
-    (``_leaf_stashes``), nicht aus ``StashTab.index`` (hier bewusst auf
+    (``_tab_positions``), nicht aus ``StashTab.index`` (hier bewusst auf
     einen irreführenden Wert gesetzt, um das zu beweisen)."""
     win = MainWindow()
     win._current_league = "Standard"
@@ -2095,6 +2320,101 @@ def test_single_tab_view_shows_position_column(qapp) -> None:
 
     from poe_view.ui.item_table import POSITION_COL
     assert win.table_model.display_text(0, POSITION_COL) == "#2 (2, 9)"
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def _map_stash_with_sections(stash_id: str, name: str, n: int) -> StashTab:
+    """Map-Stash mit n Sektions-Unterfächern — in der Truhen-Leiste
+    trotzdem EIN einziges Fach."""
+    parent = StashTab.model_validate({"id": stash_id, "name": name, "type": "MapStash",
+                                      "metadata": {}})
+    parent.children = [
+        StashTab.model_validate({
+            "id": f"{stash_id}_c{i}", "name": "1", "parent": stash_id, "type": "MapStash",
+            "metadata": {"items": 1, "map": {"section": f"tier{i + 1}",
+                                             "name": f"Map (Tier {i + 1})", "index": i}}})
+        for i in range(n)
+    ]
+    return parent
+
+
+def test_tab_positions_count_special_tabs_as_a_single_vault_slot(qapp) -> None:
+    """Peter: "Unique und Map Stash-Tabs werden nicht mitgezählt".
+
+    Grundlage war ``_leaf_stashes``, das die ladbaren EINHEITEN beschreibt:
+    dort fällt der Map-/Unique-Eltern-Tab heraus und seine Sektionen sind
+    die Einträge. Daraus nummeriert bekam der eigentliche Truhen-Tab gar
+    keine Position, während jede Sektion eine verbrauchte und alles
+    Folgende verschob (real beobachtet: ein einzelner Map-Stash belegte die
+    Positionen 28–38). Gezählt werden muss, was in der Leiste einen Platz
+    belegt."""
+    win = MainWindow()
+    win._current_league = "Standard"
+    first = StashTab.model_validate({"id": "first", "name": "Currency",
+                                     "type": "CurrencyStash", "metadata": {}})
+    maps = _map_stash_with_sections("maps", "M", 11)
+    after = StashTab.model_validate({"id": "after", "name": "Essence",
+                                     "type": "EssenceStash", "metadata": {}})
+    win._stash_trees["Standard"] = [first, maps, after]
+    win._leaf_stashes = win._flatten_stashes(win._stash_trees["Standard"])
+
+    positions = win._tab_positions()
+
+    assert positions["maps"] == 2, "der Map-Stash selbst muss eine Position haben"
+    assert positions["after"] == 3, "die 11 Sektionen dürfen nichts verschieben"
+    # Items aus einer Sektion liegen im Truhenplatz des Eltern-Tabs.
+    assert positions["maps_c0"] == 2
+    assert positions["maps_c10"] == 2
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_tab_positions_number_special_tabs_inside_folders_too(qapp) -> None:
+    """Ordner belegen selbst keinen Platz (unverändert), die Fächer darin
+    schon — auch ein Spezial-Tab."""
+    win = MainWindow()
+    win._current_league = "Standard"
+    folder = StashTab.model_validate({"id": "f1", "name": "Map", "type": "Folder",
+                                      "metadata": {"folder": True}})
+    folder.children = [_map_stash_with_sections("maps", "M", 3)]
+    tail = StashTab.model_validate({"id": "tail", "name": "Currency",
+                                    "type": "CurrencyStash", "metadata": {}})
+    win._stash_trees["Standard"] = [folder, tail]
+    win._leaf_stashes = win._flatten_stashes(win._stash_trees["Standard"])
+
+    positions = win._tab_positions()
+
+    assert "f1" not in positions   # Ordner: kein eigener Truhenplatz
+    assert positions["maps"] == 1
+    assert positions["tail"] == 2
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_undiscovered_special_tab_keeps_its_position(qapp) -> None:
+    """Ein Spezial-Tab VOR dem ersten Abruf hat noch keine Kinder — er darf
+    dadurch weder seine Position verlieren noch eine zusätzliche belegen,
+    wenn die Kinder später eintreffen."""
+    win = MainWindow()
+    win._current_league = "Standard"
+    first = StashTab.model_validate({"id": "first", "name": "Currency",
+                                     "type": "CurrencyStash", "metadata": {}})
+    maps = StashTab.model_validate({"id": "maps", "name": "M", "type": "MapStash",
+                                    "metadata": {}})  # noch keine Kinder entdeckt
+    after = StashTab.model_validate({"id": "after", "name": "Essence",
+                                     "type": "EssenceStash", "metadata": {}})
+    win._stash_trees["Standard"] = [first, maps, after]
+
+    before = win._tab_positions()
+    maps.children = _map_stash_with_sections("maps", "M", 5).children  # Abruf liefert Kinder
+    after_discovery = win._tab_positions()
+
+    assert before["maps"] == 2 and before["after"] == 3
+    assert after_discovery["maps"] == 2 and after_discovery["after"] == 3
 
     win.worker.stop()
     win.worker.wait(5000)
@@ -2362,6 +2682,29 @@ def test_manual_refresh_skips_stash_list_for_archived_league(qapp, monkeypatch) 
     from poe_view.services.api_worker import FetchCharactersJob, FetchStashListJob
     assert not any(isinstance(j, FetchStashListJob) for j in submitted)
     assert any(isinstance(j, FetchCharactersJob) for j in submitted)
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_refresh_mode_pauses_while_load_all_tabs_runs(qapp, monkeypatch) -> None:
+    """"Load All Tabs" taktet sich selbst durch die ganze Truhe. Liefe der
+    Stash-Modus daneben weiter, verdoppelte sich die Anfragerate und beide
+    zusammen liefen in die 300s-Sperre, die jeder für sich vermeidet."""
+    win = MainWindow()
+    win._current_league = "Standard"
+    win._leaf_stashes = [_make_leaf("t1", "Tab 1")]
+    submitted = []
+    monkeypatch.setattr(win.worker, "submit", lambda job: submitted.append(job))
+    win._bulk_dialog = object()  # Bulk-Ladevorgang läuft
+
+    win._on_refresh_mode_changed("Stash")
+
+    assert submitted == []
+
+    win._bulk_dialog = None  # Bulk fertig -> Modus läuft wieder
+    win._drive_refresh_mode()
+    assert len(submitted) == 1
 
     win.worker.stop()
     win.worker.wait(5000)

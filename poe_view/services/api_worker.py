@@ -13,7 +13,8 @@ import json
 import logging
 import queue
 import threading
-from dataclasses import dataclass
+import time
+from dataclasses import dataclass, field
 
 import httpx
 from PySide6.QtCore import QThread, Signal
@@ -77,6 +78,7 @@ class FetchCharactersJob:
 @dataclass
 class FetchStashListJob:
     league: str
+    silent: bool = False  # True = Stash-Modus-Rundlauf, kein Status-/Anzeige-Update
 
 
 @dataclass
@@ -110,6 +112,10 @@ class FetchAllItemsJob:
 
     league: str
     stashes: list[StashTab]  # bereits rekursiv abgeflachte Nicht-Ordner-Tabs
+    # stash_id -> echter Truhenplatz (FALLSTRICKE #36): Map-/Unique-Sektionen
+    # teilen sich den Platz ihres Eltern-Tabs. Fehlt ein Eintrag (z. B. in
+    # Tests), zählt die stash_id selbst als eigener Platz.
+    positions: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass
@@ -126,7 +132,7 @@ class ApiWorker(QThread):
     login_required = Signal(str)               # Grund (Anzeige im UI)
     leagues_loaded = Signal(object)            # list[str]
     characters_loaded = Signal(object)         # list[Character]
-    stash_list_loaded = Signal(object)         # list[StashTab]
+    stash_list_loaded = Signal(object, bool)   # list[StashTab], silent
     stash_items_loaded = Signal(str, str, str, object, bool)  # league, stash_id, name, list[Item], silent
     stash_children_loaded = Signal(str, str, str, object, bool)  # league, stash_id, name, list[StashTab], silent
     character_items_loaded = Signal(str, object, bool)  # Charaktername, list[Item], silent
@@ -166,11 +172,19 @@ class ApiWorker(QThread):
             job = self._jobs.get()
             if isinstance(job, _StopJob):
                 break
+            if self._skip_unauthenticated(job):
+                continue
             self.busy_changed.emit(True)
             try:
                 self._dispatch(job)
             except AuthError as exc:
-                token_store.delete_token()
+                # Ein gespeichertes Token nur verwerfen, wenn wir es
+                # tatsächlich mitgeschickt haben — nur dann ist der 401 ein
+                # Urteil ÜBER dieses Token. Ohne gesetztes Token ist der 401
+                # selbstverschuldet; ein delete_token() würde dann ein evtl.
+                # völlig intaktes Token vernichten (FALLSTRICKE #35).
+                if self.client.has_token:
+                    token_store.delete_token()
                 self.login_required.emit(str(exc))
             except Exception as exc:  # noqa: BLE001 — Worker darf nie sterben
                 if _is_connectivity_issue(exc):
@@ -189,6 +203,28 @@ class ApiWorker(QThread):
             finally:
                 self.busy_changed.emit(False)
         self.client.close()
+
+    # Jobs, die ohne gültiges Token garantiert einen 401 kassieren. Bootstrap
+    # und Login stellen die Authentifizierung selbst her, Logout und der
+    # Icon-Download (CDN, ohne Auth-Header) brauchen sie nicht.
+    _NEEDS_AUTH = (FetchLeaguesJob, FetchCharactersJob, FetchStashListJob,
+                   FetchStashItemsJob, FetchCharacterItemsJob, FetchAllItemsJob)
+
+    def _skip_unauthenticated(self, job) -> bool:
+        """Verwirft Daten-Jobs, solange kein Token gesetzt ist.
+
+        Beim Programmstart landet der ``BootstrapJob`` zwar zuerst in der
+        Queue (FALLSTRICKE #30), aber die von ``_build_ui()`` mit
+        eingereihten Daten-Jobs laufen trotzdem — auch dann, wenn Bootstrap
+        gar kein gültiges Token gefunden hat. Sie gingen dadurch ohne
+        Authorization-Header raus und kassierten einen sicheren 401. Real
+        beobachtet: bei 42 von 58 Programmstarts genau ein solcher 401,
+        jeweils 0,7s nach dem Laden des Daten-Caches (FALLSTRICKE #35).
+        """
+        if not isinstance(job, self._NEEDS_AUTH) or self.client.has_token:
+            return False
+        log.info("%s übersprungen — noch nicht angemeldet.", type(job).__name__)
+        return True
 
     def _set_offline(self, offline: bool) -> None:
         if offline != self._offline:
@@ -215,10 +251,12 @@ class ApiWorker(QThread):
                 self.status.emit("Loading characters…")
                 self.characters_loaded.emit(self.client.get_characters())
                 self.status.emit("Ready")
-            case FetchStashListJob(league=league):
-                self.status.emit(f"Loading stash list ({league})…")
-                self.stash_list_loaded.emit(self.client.get_stashes(league))
-                self.status.emit("Ready")
+            case FetchStashListJob(league=league, silent=silent):
+                if not silent:
+                    self.status.emit(f"Loading stash list ({league})…")
+                self.stash_list_loaded.emit(self.client.get_stashes(league), silent)
+                if not silent:
+                    self.status.emit("Ready")
             case FetchStashItemsJob(league=league, stash_id=sid, stash_name=name,
                                     parent_id=parent_id, silent=silent):
                 if not silent:
@@ -233,15 +271,26 @@ class ApiWorker(QThread):
                     self.status.emit("Ready")
             case FetchIconJob(url=url):
                 self._fetch_icon(url)
-            case FetchAllItemsJob(league=league, stashes=stashes):
+            case FetchAllItemsJob(league=league, stashes=stashes, positions=positions):
                 self.status.emit(f"Loading all tabs ({league})…")
-                self._fetch_all_items(league, stashes)
+                self._fetch_all_items(league, stashes, positions)
 
     # ------------------------------------------------------------------ #
 
     def _bootstrap(self) -> None:
         token = token_store.load_token()
         if not token_store.is_valid(token):
+            # Grund mitprotokollieren (nie das Token selbst): "gar keins
+            # gespeichert" und "gespeichert, aber abgelaufen" haben völlig
+            # verschiedene Ursachen, und ohne diese Unterscheidung ließ sich
+            # nicht klären, warum ein Token zwischen zwei Starts verschwand
+            # (FALLSTRICKE #35).
+            if token is None:
+                log.info("Bootstrap: kein Token im Credential Manager.")
+            else:
+                age_h = (time.time() - float(token.get("obtained_at", 0))) / 3600
+                log.info("Bootstrap: Token verworfen — vor %.1f h geholt, "
+                         "expires_in=%s s.", age_h, token.get("expires_in"))
             self.login_required.emit("No valid token — please log in.")
             return
         self.client.set_token(token["access_token"])
@@ -282,23 +331,55 @@ class ApiWorker(QThread):
         else:
             self.stash_items_loaded.emit(league, stash_id, name, stash.items, silent)
 
-    def _fetch_all_items(self, league: str, stashes: list[StashTab]) -> None:
-        """Holt Items Tab für Tab; ein fehlschlagender Tab bricht die anderen nicht ab."""
+    def _fetch_all_items(self, league: str, stashes: list[StashTab],
+                         positions: dict[str, int]) -> None:
+        """Holt Items Tab für Tab; ein fehlschlagender Tab bricht die anderen nicht ab.
+
+        Läuft im GLEICHMÄSSIGEN Takt aus ``steady_pace_interval_s()`` — also
+        derselben Rate wie der Stash-Refresh-Modus (bei 30 Anfragen/300s rund
+        11s je Tab), nur einmal durch alle Fächer statt endlos. Ohne diese
+        Bremse feuerte die Schleife die Tabs so schnell wie möglich durch,
+        füllte damit binnen ~29 Tabs das Rate-Limit-Fenster und lief in die
+        300-Sekunden-Zwangspause (dieselbe Mechanik wie FALLSTRICKE #34).
+        Der Durchsatz ist dadurch nicht kleiner — nur gleichmäßig statt
+        "Sprint, dann fünf Minuten Stillstand", und der Fortschrittsbalken
+        läuft sichtbar weiter.
+
+        Gewartet wird über ``_cancel_bulk.wait(...)`` statt ``time.sleep``:
+        ein Klick auf "Abbrechen" greift dadurch sofort und muss nicht erst
+        den laufenden Takt aussitzen.
+
+        Fortschritt zählt echte Truhenplätze, nicht rohe Abrufe (FALLSTRICKE
+        #36): Map-/Unique-Sektionen laufen zwar über je einen eigenen Request,
+        teilen sich aber den Platz ihres Eltern-Tabs und dürfen die Anzeige
+        ("58/561" statt "58/391") nicht aufblähen.
+        """
         self._cancel_bulk.clear()
-        total = len(stashes)
-        success = 0
-        for done, stash in enumerate(stashes, start=1):
-            if self._cancel_bulk.is_set():
-                log.info("Bulk-Laden abgebrochen nach %d/%d Tabs", done - 1, total)
+        total = len({positions.get(s.id, s.id) for s in stashes})
+        done_slots: set[str | int] = set()
+        success_slots: set[str | int] = set()
+        policy: str | None = None
+        for i, stash in enumerate(stashes, start=1):
+            # Vor dem ERSTEN Tab nicht warten; danach je einen Takt — der
+            # Policy-Name stammt aus dem eigenen letzten Request, nicht aus
+            # dem globalen Stand (§steady_pace_interval_s, FALLSTRICKE #33).
+            cancelled = (self._cancel_bulk.wait(self.rate_limiter.steady_pace_interval_s(policy))
+                         if i > 1 else self._cancel_bulk.is_set())
+            if cancelled:
+                log.info("Bulk-Laden abgebrochen nach %d/%d Truhenplätzen",
+                         len(done_slots), total)
                 break
+            slot = positions.get(stash.id, stash.id)
             try:
                 fetched = self.client.get_stash(league, stash.id, stash.parent)
+                policy = self.rate_limiter.last_policy
                 self._emit_stash_result(league, stash.id, stash.name, fetched, silent=False)
-                success += 1
+                success_slots.add(slot)
             except Exception:
                 log.exception("Bulk-Laden: Tab %s fehlgeschlagen", stash.name)
-            self.bulk_progress.emit(done, total, stash.name)
-        self.bulk_finished.emit(success, total)
+            done_slots.add(slot)
+            self.bulk_progress.emit(len(done_slots), total, stash.name)
+        self.bulk_finished.emit(len(success_slots), total)
 
     def _on_rate_limit(self, policy: str, rules: list[dict], wait_s: float) -> None:
         """Läuft im Worker-Thread; Signal-Emission ist threadsicher (queued)."""

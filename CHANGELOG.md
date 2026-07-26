@@ -21,6 +21,8 @@ nach [SemVer](https://semver.org/lang/de/).
   warum er gerade pausiert (Rate-Limit, Token, archivierte Liga, …).
 - Stash-Baum: Name-Spalte skaliert automatisch mit dem Panel, Anzahl- und
   Status-Spalte bleiben dadurch immer sichtbar.
+- Stash-Baum: Kontextmenü bietet jetzt "Expand All"/"Collapse All" für
+  den ganzen Baum, unabhängig vom angeklickten Fach.
 - Stash-Baum: neue Pos.-Spalte zeigt die tatsächliche Position eines
   Fachs in der Truhen-Reihenfolge (leer bei Ordnern/Gruppen) — ein
   Zeilenheader-Äquivalent für Bäume, die (anders als die ItemList) keinen
@@ -29,6 +31,10 @@ nach [SemVer](https://semver.org/lang/de/).
   abgeblendet (aktuell < 1h normal, < 3h leicht, älter deutlicher),
   damit veraltete Fächer sofort auffallen. Das zuletzt aktualisierte Fach
   ist zusätzlich türkis markiert, bis das nächste Fach an der Reihe ist.
+- Der Stash-Modus lädt nach jeder vollständigen Runde durch die Truhe
+  zusätzlich einmal die Fach-**Liste** still nach — Umsortierungen, neue
+  oder entfernte Fächer im Spiel werden dadurch automatisch erkannt, ohne
+  auf einen manuellen Refresh oder Liga-Wechsel zu warten.
 
 ### Geändert
 
@@ -36,6 +42,13 @@ nach [SemVer](https://semver.org/lang/de/).
   Zielgruppe). Code-Kommentare und interne Doku bleiben Deutsch.
 - Auto-Refresh reserviert nur noch 10 % statt 50 % des Rate-Limit-Budgets
   für manuelle Klicks.
+- Ein Klick auf ein Fach im Single-/Stash-Modus löst keinen sofortigen
+  Extra-Request mehr aus, sondern stellt das Fach an den Anfang der
+  Abarbeitungsliste — es ist damit beim nächsten regulären Takt dran.
+  Das kostet ein paar Sekunden, hält die Anfragerate aber konstant.
+- "Load All Tabs" beginnt jetzt mit den ältesten bzw. noch nie geladenen
+  Fächern statt mit der zufälligen Truhen-Reihenfolge — bricht man vorzeitig
+  ab, sind die dringendsten Fächer schon durch.
 
 ### Behoben
 
@@ -44,6 +57,30 @@ nach [SemVer](https://semver.org/lang/de/).
   Hintergrund weiter aktualisiert wurde.
 - Der gleichmäßige Refresh-Takt konnte kurzzeitig mit der Rate-Limit-Policy
   eines fremden Endpunkts statt der eigenen rechnen.
+- Beim Programmstart lief ohne gültiges Token trotzdem eine Stash-Abfrage
+  los und scheiterte mit HTTP 401. Ein solcher selbstverschuldeter 401
+  verwarf zudem das gespeicherte Token, was einen erneuten Browser-Login
+  erzwingen konnte.
+- "Load All Tabs" lief nach rund 29 Fächern in die 300-Sekunden-
+  Zwangspause. Es lädt jetzt im gleichmäßigen Takt (~11s pro Fach) einmal
+  durch die ganze Truhe; der Refresh-Modus pausiert solange.
+- Map- und Unique-Stash-Tabs wurden bei der Positionsnummer übergangen:
+  sie selbst bekamen keine, während jede ihrer internen Sektionen eine
+  eigene verbrauchte und alle folgenden Fächer verschob (in einer echten
+  Truhe 923 statt 391 Positionen). Gezählt wird jetzt, was in der
+  Truhen-Leiste tatsächlich einen Platz belegt.
+- Derselbe Zähl-Fehler betraf auch den Auto-Refresh-Zähler in der
+  Statuszeile ("X of Y stash tabs updated") — Y zeigte die aufgeblähte
+  Zahl ladbarer Einheiten (939) statt der tatsächlichen Fächer-Anzahl.
+- Und ein drittes Mal denselben Fehler: der Fortschrittsbalken von
+  "Load All Tabs" zeigte z. B. "58/561" statt "58/391" — mehrere
+  Map-/Unique-Sektionen desselben Fachs zählten als mehrere Tabs statt
+  als einer.
+- Der Stash-Modus konnte sich in eine endlose Kette von 300-Sekunden-
+  Zwangspausen aufschaukeln: nach einer Pause feuerten zwei Requests
+  direkt hintereinander, was die nächste Pause auslöste. Der Takt zählt
+  jetzt ab dem Eintreffen der Antwort statt ab dem Absenden und hält
+  zusätzlich einen Request Sicherheitsabstand zur Sperrschwelle.
 
 ## [0.1.0] - 2026-07-25
 

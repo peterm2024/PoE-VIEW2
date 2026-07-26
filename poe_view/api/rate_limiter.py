@@ -249,10 +249,16 @@ class RateLimitManager:
         Policy kurzzeitig einmischen und den Takt verfälschen (35s statt
         der erwarteten ~10s).
 
-        Bei z. B. "30 Treffer pro 300s" ergibt das rund 300/29 ≈ 10.3s
-        zwischen zwei Requests (SAFETY_MARGIN abgezogen). Ohne bekannte
-        Policy (vor dem ersten Request dieser Session) gilt ein
-        konservativer Default."""
+        Der Takt muss STRIKT unter der Schwelle bleiben, ab der
+        ``_required_wait`` bremst (``current >= max_hits - SAFETY_MARGIN``) —
+        also höchstens ``max_hits - SAFETY_MARGIN - 1`` Treffer je Fenster.
+        Ein Takt von genau ``window / (max_hits - SAFETY_MARGIN)`` träfe die
+        Schwelle im Dauerbetrieb punktgenau und löste dadurch selbst die
+        Sperre aus, die er vermeiden soll: real beobachtet bei "30 pro 300s"
+        mit exakt 29 Treffern im Fenster und anschließend 289s Zwangspause
+        (FALLSTRICKE #34). Mit dem zusätzlichen Abzug bleibt bei 30/300s ein
+        Takt von 300/28 ≈ 10.7s. Ohne bekannte Policy (vor dem ersten Request
+        dieser Session) gilt ein konservativer Default."""
         with self._lock:
             state = self._policies.get(policy_name or self._last_policy)
             if state is None:
@@ -260,7 +266,7 @@ class RateLimitManager:
             self._decay_expired_rules(state)
             intervals = []
             for rule in state.rules.values():
-                usable = rule.max_hits - SAFETY_MARGIN
+                usable = rule.max_hits - SAFETY_MARGIN - 1
                 if usable > 0:
                     intervals.append(rule.window_s / usable)
             return max(intervals) if intervals else DEFAULT_PACING_INTERVAL_S

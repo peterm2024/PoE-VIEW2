@@ -61,6 +61,7 @@ def test_character_items_dispatch_emits_name_and_items(qapp, monkeypatch) -> Non
 def test_run_emits_busy_changed_around_each_job(qapp, monkeypatch) -> None:
     """run() direkt (synchron, kein echter QThread) aufgerufen — deterministisch testbar."""
     worker = ApiWorker()
+    worker.client.set_token("test")  # sonst überspringt run() Daten-Jobs (§_skip_unauthenticated)
     fake_stash = StashTab.model_validate({
         "id": "t1", "name": "Tab", "type": "CurrencyStash", "metadata": {}, "items": [],
     })
@@ -180,7 +181,7 @@ def test_silent_character_items_dispatch_emits_no_status(qapp, monkeypatch) -> N
 import httpx
 import pytest
 
-from poe_view.api.client import ApiError
+from poe_view.api.client import ApiError, AuthError
 from poe_view.services.api_worker import FetchStashItemsJob, _is_connectivity_issue
 
 
@@ -209,6 +210,7 @@ def test_connectivity_error_sets_offline_and_suppresses_status_for_silent_job(qa
     """Silent (Hintergrund-Auto-Refresh) darf bei anhaltender Wartung nicht
     alle paar Sekunden das Offline-Banner mit Fehlertext überschreiben."""
     worker = ApiWorker()
+    worker.client.set_token("test")  # sonst überspringt run() Daten-Jobs (§_skip_unauthenticated)
     monkeypatch.setattr(worker.client, "get_stash",
                         lambda league, sid, parent_id=None: (_ for _ in ()).throw(
                             httpx.ConnectError("kein Netz")))
@@ -227,6 +229,7 @@ def test_connectivity_error_sets_offline_and_suppresses_status_for_silent_job(qa
 
 def test_connectivity_error_emits_friendly_message_for_manual_job(qapp, monkeypatch) -> None:
     worker = ApiWorker()
+    worker.client.set_token("test")  # sonst überspringt run() Daten-Jobs (§_skip_unauthenticated)
     monkeypatch.setattr(worker.client, "get_stash",
                         lambda league, sid, parent_id=None: (_ for _ in ()).throw(
                             httpx.ConnectError("kein Netz")))
@@ -247,6 +250,7 @@ def test_offline_clears_after_a_successful_job(qapp, monkeypatch) -> None:
     """Selbstheilend: der nächste erfolgreiche Job (z. B. Retry per ⟳-Klick)
     beendet den Offline-Zustand wieder — kein manuelles Zurücksetzen nötig."""
     worker = ApiWorker()
+    worker.client.set_token("test")  # sonst überspringt run() Daten-Jobs (§_skip_unauthenticated)
     fake_stash = StashTab.model_validate({
         "id": "t1", "name": "Tab", "type": "CurrencyStash", "metadata": {}, "items": [],
     })
@@ -273,6 +277,7 @@ def test_offline_clears_after_a_successful_job(qapp, monkeypatch) -> None:
 
 def test_offline_state_change_not_re_emitted_for_repeated_failures(qapp, monkeypatch) -> None:
     worker = ApiWorker()
+    worker.client.set_token("test")  # sonst überspringt run() Daten-Jobs (§_skip_unauthenticated)
     monkeypatch.setattr(worker.client, "get_stash",
                         lambda league, sid, parent_id=None: (_ for _ in ()).throw(
                             httpx.ConnectError("kein Netz")))
@@ -285,4 +290,191 @@ def test_offline_state_change_not_re_emitted_for_repeated_failures(qapp, monkeyp
     worker.run()
 
     assert offline_events == [True]  # nur EIN Signal, nicht pro fehlgeschlagenem Job
+    worker.client.close()
+
+
+# --- Startup-401: Daten-Jobs ohne Token ------------------- #
+
+def test_data_jobs_are_skipped_while_no_token_is_set(qapp, monkeypatch) -> None:
+    """Regression (FALLSTRICKE #35): Beim Programmstart reiht `_build_ui()`
+    einen FetchStashListJob mit ein, noch bevor feststeht, ob überhaupt ein
+    gültiges Token existiert. Fand Bootstrap keines, ging dieser Job ohne
+    Authorization-Header raus und kassierte einen sicheren 401 — real bei 42
+    von 58 Programmstarts, jeweils 0,7s nach dem Laden des Daten-Caches."""
+    from poe_view.services.api_worker import FetchStashListJob
+    worker = ApiWorker()
+    assert not worker.client.has_token
+    calls = []
+    monkeypatch.setattr(worker.client, "get_stashes", lambda league: calls.append(league) or [])
+
+    worker.submit(FetchStashListJob("Allflame"))
+    worker.stop()
+    worker.run()
+
+    assert calls == [], "ohne Token darf gar kein Request rausgehen"
+    worker.client.close()
+
+
+def test_data_jobs_run_normally_once_a_token_is_set(qapp, monkeypatch) -> None:
+    """Gegenprobe: der Guard darf den Normalbetrieb nicht blockieren."""
+    from poe_view.services.api_worker import FetchStashListJob
+    worker = ApiWorker()
+    worker.client.set_token("test")
+    calls = []
+    monkeypatch.setattr(worker.client, "get_stashes", lambda league: calls.append(league) or [])
+
+    worker.submit(FetchStashListJob("Allflame"))
+    worker.stop()
+    worker.run()
+
+    assert calls == ["Allflame"]
+    worker.client.close()
+
+
+def test_a_401_without_a_token_does_not_delete_the_stored_token(qapp, monkeypatch) -> None:
+    """Ein 401 ohne gesetztes Token ist selbstverschuldet und sagt nichts
+    über das GESPEICHERTE Token aus — es darf dabei nicht gelöscht werden
+    (sonst zerstört ein Startup-401 ein völlig intaktes Token)."""
+    from poe_view.services import api_worker as api_worker_module
+    from poe_view.services.api_worker import FetchStashListJob
+    worker = ApiWorker()
+    deleted = []
+    monkeypatch.setattr(api_worker_module.token_store, "delete_token",
+                        lambda: deleted.append(True))
+    # Guard umgehen, um den reinen AuthError-Pfad zu prüfen:
+    monkeypatch.setattr(worker, "_skip_unauthenticated", lambda job: False)
+    monkeypatch.setattr(worker.client, "get_stashes",
+                        lambda league: (_ for _ in ()).throw(AuthError("401")))
+    required = []
+    worker.login_required.connect(required.append)
+
+    worker.submit(FetchStashListJob("Allflame"))
+    worker.stop()
+    worker.run()
+
+    assert deleted == [], "kein Token gesetzt -> nichts zu verwerfen"
+    assert len(required) == 1  # Login wird trotzdem angefordert
+    worker.client.close()
+
+
+def test_a_401_with_a_token_still_discards_it(qapp, monkeypatch) -> None:
+    """Gegenprobe: Wurde ein Token mitgeschickt und GGG lehnt es ab, ist es
+    tatsächlich unbrauchbar und muss weg (bisheriges Verhalten)."""
+    from poe_view.services import api_worker as api_worker_module
+    from poe_view.services.api_worker import FetchStashListJob
+    worker = ApiWorker()
+    worker.client.set_token("abgelaufen")
+    deleted = []
+    monkeypatch.setattr(api_worker_module.token_store, "delete_token",
+                        lambda: deleted.append(True))
+    monkeypatch.setattr(worker.client, "get_stashes",
+                        lambda league: (_ for _ in ()).throw(AuthError("401")))
+
+    worker.submit(FetchStashListJob("Allflame"))
+    worker.stop()
+    worker.run()
+
+    assert deleted == [True]
+    worker.client.close()
+
+
+# --- "Load All Tabs": gleichmäßiger Takt statt Burst ------ #
+
+def _bulk_worker(monkeypatch, n_tabs: int):
+    """Worker mit n gefakten Tabs; zeichnet die Wartezeiten zwischen den
+    Abrufen auf, ohne real zu schlafen."""
+    from poe_view.services.api_worker import FetchAllItemsJob
+    worker = ApiWorker()
+    worker.client.set_token("test")
+    stashes = [StashTab.model_validate(
+        {"id": f"t{i}", "name": f"Tab {i}", "type": "CurrencyStash", "metadata": {}})
+        for i in range(n_tabs)]
+    fetched = StashTab.model_validate(
+        {"id": "t", "name": "T", "type": "CurrencyStash", "metadata": {}, "items": []})
+    monkeypatch.setattr(worker.client, "get_stash",
+                        lambda league, sid, parent_id=None: fetched)
+    monkeypatch.setattr(worker.rate_limiter, "steady_pace_interval_s", lambda *a, **k: 11.0)
+    waits: list[float] = []
+    monkeypatch.setattr(worker._cancel_bulk, "wait",
+                        lambda timeout=None: waits.append(timeout) or False)
+    return worker, FetchAllItemsJob("Standard", stashes), waits
+
+
+def test_load_all_tabs_paces_every_tab_after_the_first(qapp, monkeypatch) -> None:
+    """Peter: "einfach dafür sorgen, dass alle Tabs einmal so schnell wie es
+    eben geht (ca. 11s pro Tab) geladen werden". Ohne Takt feuerte die
+    Schleife los, füllte binnen ~29 Tabs das Rate-Limit-Fenster und lief in
+    die 300s-Zwangspause (FALLSTRICKE #34)."""
+    worker, job, waits = _bulk_worker(monkeypatch, n_tabs=4)
+    done = []
+    worker.bulk_finished.connect(lambda ok, total: done.append((ok, total)))
+
+    worker._dispatch(job)
+
+    assert waits == [11.0, 11.0, 11.0]  # vor Tab 2,3,4 — nicht vor dem ersten
+    assert done == [(4, 4)]
+    worker.client.close()
+
+
+def test_load_all_tabs_cancel_takes_effect_during_the_pause(qapp, monkeypatch) -> None:
+    """Abbrechen darf nicht erst nach dem laufenden Takt greifen — deshalb
+    ``Event.wait(timeout)`` statt ``time.sleep``."""
+    from poe_view.services.api_worker import FetchAllItemsJob
+    worker = ApiWorker()
+    worker.client.set_token("test")
+    stashes = [StashTab.model_validate(
+        {"id": f"t{i}", "name": f"Tab {i}", "type": "CurrencyStash", "metadata": {}})
+        for i in range(5)]
+    fetched = StashTab.model_validate(
+        {"id": "t", "name": "T", "type": "CurrencyStash", "metadata": {}, "items": []})
+    monkeypatch.setattr(worker.client, "get_stash",
+                        lambda league, sid, parent_id=None: fetched)
+    monkeypatch.setattr(worker.rate_limiter, "steady_pace_interval_s", lambda *a, **k: 11.0)
+    # Erste Wartephase meldet sofort "abgebrochen" (wie ein Klick währenddessen).
+    monkeypatch.setattr(worker._cancel_bulk, "wait", lambda timeout=None: True)
+    done = []
+    worker.bulk_finished.connect(lambda ok, total: done.append((ok, total)))
+
+    worker._dispatch(FetchAllItemsJob("Standard", stashes))
+
+    assert done == [(1, 5)], "nur der erste Tab lief, dann sofortiger Abbruch"
+    worker.client.close()
+
+
+def test_load_all_tabs_counts_map_stash_sections_as_one_slot(qapp, monkeypatch) -> None:
+    """Regression FALLSTRICKE #36 (dritte Stelle): Peters echte Standard-Liga
+    zeigte "58/561" statt "58/391" — 561 war die Anzahl ladbarer Einheiten
+    (jede Map-/Unique-Sektion ein eigener Abruf), nicht echter Truhenplätze.
+    Drei Sektionen eines Map-Stashs teilen sich hier EINEN Platz (5)."""
+    from poe_view.services.api_worker import FetchAllItemsJob
+    worker = ApiWorker()
+    worker.client.set_token("test")
+    stashes = [
+        StashTab.model_validate({"id": "map-a", "name": "Map A", "parent": "map",
+                                 "type": "Standard", "metadata": {}}),
+        StashTab.model_validate({"id": "map-b", "name": "Map B", "parent": "map",
+                                 "type": "Standard", "metadata": {}}),
+        StashTab.model_validate({"id": "map-c", "name": "Map C", "parent": "map",
+                                 "type": "Standard", "metadata": {}}),
+        StashTab.model_validate({"id": "t1", "name": "Tab 1", "type": "CurrencyStash",
+                                 "metadata": {}}),
+    ]
+    positions = {"map-a": 5, "map-b": 5, "map-c": 5, "t1": 9}
+    fetched = StashTab.model_validate(
+        {"id": "t", "name": "T", "type": "CurrencyStash", "metadata": {}, "items": []})
+    monkeypatch.setattr(worker.client, "get_stash",
+                        lambda league, sid, parent_id=None: fetched)
+    monkeypatch.setattr(worker.rate_limiter, "steady_pace_interval_s", lambda *a, **k: 11.0)
+    monkeypatch.setattr(worker._cancel_bulk, "wait", lambda timeout=None: False)
+    progress: list[tuple[int, int]] = []
+    worker.bulk_progress.connect(lambda done, total, name: progress.append((done, total)))
+    done = []
+    worker.bulk_finished.connect(lambda ok, total: done.append((ok, total)))
+
+    worker._dispatch(FetchAllItemsJob("Standard", stashes, positions))
+
+    # 4 Abrufe, aber nur 2 echte Plätze (5 und 9) — der Fortschritt bleibt
+    # bei "1/2" stehen, solange noch Sektionen von Platz 5 offen sind.
+    assert progress == [(1, 2), (1, 2), (1, 2), (2, 2)]
+    assert done == [(2, 2)]
     worker.client.close()

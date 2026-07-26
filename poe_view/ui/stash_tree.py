@@ -43,9 +43,13 @@ welches Fach gerade dran war. Die Markierung wandert mit jedem weiteren
 ``mark_loaded()``-Aufruf zum neuen Fach; das vorherige fällt zurück auf
 seine reguläre Alters-Farbe.
 
-Rechtsklick auf einen Tab öffnet ein Kontextmenü mit "Rohdaten anzeigen"
-(``raw_data_requested``), das den Viewer in ``ui/raw_data_viewer.py``
-speist.
+Rechtsklick öffnet ein Kontextmenü: auf einem Fach zusätzlich "Rohdaten
+anzeigen" (``raw_data_requested``, speist den Viewer in
+``ui/raw_data_viewer.py``), überall (auch auf Ordnern oder im leeren
+Bereich) "Alle öffnen"/"Alle schließen" für den kompletten Baum
+(``expandAll``/``collapseAll``) — bei über 100 Fächern in tief
+verschachtelten Ordnern (Map-/Unique-Sektionen) sonst mühsames
+Knoten-für-Knoten-Aufklappen.
 
 ``highlight_stash(stash_id)`` hebt einen Knoten hervor, wenn in einer
 Aggregat- oder Suchansicht eine Zeile ausgewählt wird
@@ -487,13 +491,17 @@ class StashTree(QTreeWidget):
         self.scrollToItem(node)
 
     def _on_context_menu(self, pos) -> None:
+        """"Rohdaten anzeigen" nur für Fächer mit eigenen Daten (kein
+        Ordner-/Gruppenknoten); "Alle öffnen"/"Alle schließen" gilt für den
+        ganzen Baum und steht deshalb immer zur Verfügung, auch auf einem
+        Ordner oder im leeren Bereich unterhalb der letzten Zeile."""
         item = self.itemAt(pos)
-        if item is None:
-            return
-        stash: StashTab | None = item.data(0, _DATA_ROLE)
-        if stash is None:
-            return  # Ordner-Knoten haben keine eigenen Rohdaten
+        stash: StashTab | None = item.data(0, _DATA_ROLE) if item is not None else None
         menu = QMenu(self)
-        action = menu.addAction("🔍 View Raw Data")
-        action.triggered.connect(lambda: self.raw_data_requested.emit(stash.id, stash.display_name))
+        if stash is not None:
+            action = menu.addAction("🔍 View Raw Data")
+            action.triggered.connect(lambda: self.raw_data_requested.emit(stash.id, stash.display_name))
+            menu.addSeparator()
+        menu.addAction("▸ Expand All").triggered.connect(self.expandAll)
+        menu.addAction("▾ Collapse All").triggered.connect(self.collapseAll)
         menu.exec(self.viewport().mapToGlobal(pos))

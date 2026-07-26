@@ -182,19 +182,42 @@ class _FakeMenu:
     der in einer Offscreen-Testumgebung ewig auf einen (nie kommenden) Klick
     wartet. Statt (unzuverlässig) QMenu.exec zu monkeypatchen, ersetzen wir
     den kompletten Namen ``QMenu`` im Modul unter Test — echte QAction-Objekte
-    darunter, damit .triggered/.trigger() sich exakt wie im echten Code verhalten."""
+    darunter, damit .triggered/.trigger() sich exakt wie im echten Code verhalten.
+
+    ``exec()`` löst bewusst NICHTS automatisch aus (anders als eine frühere
+    Fassung): der Baum hat inzwischen mehrere Aktionen im selben Menü
+    (Rohdaten, Alle öffnen, Alle schließen) — ein pauschales "alle auslösen"
+    würde sie gegeneinander ausspielen (öffnen gefolgt von schließen landet
+    immer beim letzten). Tests triggern die gewünschte Aktion gezielt über
+    ``_FakeMenu.last.trigger(text)``, wie ein echter Klick auf GENAU einen
+    Menüpunkt."""
+
+    last: "_FakeMenu | None" = None
 
     def __init__(self, *args, **kwargs) -> None:
         self._actions: list[QAction] = []
+        _FakeMenu.last = self
 
     def addAction(self, text: str) -> QAction:
         action = QAction(text)
         self._actions.append(action)
         return action
 
+    def addSeparator(self) -> None:
+        pass
+
     def exec(self, *args, **kwargs) -> None:
+        pass
+
+    def texts(self) -> list[str]:
+        return [a.text() for a in self._actions]
+
+    def trigger(self, text: str) -> None:
         for action in self._actions:
-            action.trigger()
+            if action.text() == text:
+                action.trigger()
+                return
+        raise AssertionError(f"Keine Aktion mit Text {text!r} im Menü ({self.texts()})")
 
 
 def test_context_menu_emits_raw_data_requested_for_leaf(qapp, monkeypatch) -> None:
@@ -210,24 +233,54 @@ def test_context_menu_emits_raw_data_requested_for_leaf(qapp, monkeypatch) -> No
     tree.raw_data_requested.connect(lambda sid, name: received.append((sid, name)))
 
     tree._on_context_menu(pos)
+    _FakeMenu.last.trigger("🔍 View Raw Data")
 
     assert received == [("root1", "Currency 1")]
 
 
-def test_context_menu_does_nothing_for_folder_node(qapp, monkeypatch) -> None:
-    """Ordner haben keine eigenen Rohdaten — kein Menü, kein Signal."""
+def test_context_menu_omits_raw_data_for_folder_node(qapp, monkeypatch) -> None:
+    """Ordner haben keine eigenen Rohdaten — kein "Rohdaten anzeigen", aber
+    Alle öffnen/schließen gilt für den ganzen Baum und bleibt verfügbar."""
     data = [{"id": "folder1", "name": "Folder", "type": "Folder", "metadata": {"folder": True},
-             "children": []}]
+             "children": [{"id": "child1", "name": "Sub", "type": "CurrencyStash", "metadata": {}}]}]
     stashes = [StashTab.model_validate(d) for d in data]
     tree = StashTree()
     tree.set_stashes(stashes)
     pos = tree.visualItemRect(tree.topLevelItem(0)).center()
 
-    def _exploding_menu(*args, **kwargs):
-        raise AssertionError("QMenu darf für Ordner-Knoten nie erzeugt werden")
-    monkeypatch.setattr(stash_tree_module, "QMenu", _exploding_menu)
+    monkeypatch.setattr(stash_tree_module, "QMenu", _FakeMenu)
+    received = []
+    tree.raw_data_requested.connect(lambda sid, name: received.append((sid, name)))
 
-    tree._on_context_menu(pos)  # darf nicht auf _exploding_menu treffen
+    tree._on_context_menu(pos)
+
+    assert "🔍 View Raw Data" not in _FakeMenu.last.texts()
+    _FakeMenu.last.trigger("▸ Expand All")
+    assert received == []  # kein Rohdaten-Signal für den Ordner
+    assert tree.topLevelItem(0).isExpanded()  # "Alle öffnen" hat trotzdem gegriffen
+
+
+def test_context_menu_expand_and_collapse_all_available_everywhere(qapp, monkeypatch) -> None:
+    """"Alle öffnen"/"Alle schließen" steht auch im leeren Bereich zur
+    Verfügung (kein Fach unter dem Cursor) — es betrifft den ganzen Baum,
+    nicht eine einzelne Zeile."""
+    data = [{"id": "folder1", "name": "Folder", "type": "Folder", "metadata": {"folder": True},
+             "children": [{"id": "child1", "name": "Sub", "type": "CurrencyStash", "metadata": {}}]}]
+    tree = StashTree()
+    tree.set_stashes([StashTab.model_validate(d) for d in data])
+    assert not tree.topLevelItem(0).isExpanded()
+
+    monkeypatch.setattr(stash_tree_module, "QMenu", _FakeMenu)
+    empty_pos = tree.viewport().rect().bottomLeft()  # unterhalb der letzten Zeile
+
+    tree._on_context_menu(empty_pos)
+    assert "🔍 View Raw Data" not in _FakeMenu.last.texts()
+    _FakeMenu.last.trigger("▸ Expand All")
+    assert tree.topLevelItem(0).isExpanded()
+
+    tree._on_context_menu(empty_pos)
+    _FakeMenu.last.trigger("▾ Collapse All")
+    assert not tree.topLevelItem(0).isExpanded()
 
 
 def _map_leaf(child_id: str, section: str, name: str, index: int = 0,

@@ -7,7 +7,7 @@ Die Uhr ist injizierbar (kein echtes Schlafen in den Tests).
 
 import pytest
 
-from poe_view.api.rate_limiter import RateLimitManager
+from poe_view.api.rate_limiter import SAFETY_MARGIN, RateLimitManager
 
 
 class FakeClock:
@@ -196,22 +196,34 @@ def test_steady_pace_interval_uses_default_before_any_policy_is_known() -> None:
 
 
 def test_steady_pace_interval_reflects_the_tightest_known_rule() -> None:
-    """15:15 → 15/14 ≈ 1.07s, 90:300 → 300/89 ≈ 3.37s — die 300s-Regel ist
+    """15:15 → 15/13 ≈ 1.15s, 90:300 → 300/88 ≈ 3.41s — die 300s-Regel ist
     hier die knappere und bestimmt den Takt (Maximum, nicht Minimum:
     "wie eng darf getaktet werden" muss die strengste Regel respektieren)."""
     mgr = make_manager(FakeClock())
     mgr.update_from_headers(HEADERS)
-    assert mgr.steady_pace_interval_s() == pytest.approx(300 / 89, abs=0.01)
+    assert mgr.steady_pace_interval_s() == pytest.approx(300 / 88, abs=0.01)
 
 
-def test_steady_pace_interval_matches_peters_30_per_300s_example() -> None:
-    """30 Treffer pro 300s, abzüglich Sicherheitsmarge 1 → 300/29 ≈ 10.3s."""
+def test_steady_pace_interval_stays_strictly_below_the_throttle_threshold() -> None:
+    """30 Treffer pro 300s → 300/28 ≈ 10.7s, NICHT 300/29 ≈ 10.3s.
+
+    Regression (FALLSTRICKE #34): der Takt muss strikt unter der Schwelle
+    bleiben, ab der ``_required_wait`` bremst (``current >= max_hits -
+    SAFETY_MARGIN`` = 29). Ein Takt von 300/29 erzeugt im Dauerbetrieb exakt
+    29 Treffer je Fenster und löst damit genau die 300s-Sperre aus, die er
+    verhindern soll — real beobachtet, zweimal in Folge."""
     mgr = make_manager(FakeClock())
     headers = dict(HEADERS)
     headers["X-Rate-Limit-Account"] = "30:300:1800"
     headers["X-Rate-Limit-Account-State"] = "0:300:0"
     mgr.update_from_headers(headers)
-    assert mgr.steady_pace_interval_s() == pytest.approx(300 / 29, abs=0.01)
+
+    interval = mgr.steady_pace_interval_s()
+
+    assert interval == pytest.approx(300 / 28, abs=0.01)
+    # Kernaussage, unabhängig von der konkreten Formel: die Anzahl Requests,
+    # die dieser Takt in ein volles Fenster legt, bleibt unter der Schwelle.
+    assert 300 / interval < 30 - SAFETY_MARGIN
 
 
 def test_steady_pace_interval_ignores_unrelated_older_policies() -> None:
@@ -231,11 +243,11 @@ def test_steady_pace_interval_ignores_unrelated_older_policies() -> None:
         "X-Rate-Limit-Account": "5:300:1800",
         "X-Rate-Limit-Account-State": "0:300:0",
     })
-    # … dann eine Charakter-Anfrage mit einer LOCKEREREN Policy (30/300s → 10.3s).
+    # … dann eine Charakter-Anfrage mit einer LOCKEREREN Policy (30/300s → 10.7s).
     mgr.update_from_headers({
         "X-Rate-Limit-Policy": "account-character-limit",
         "X-Rate-Limit-Rules": "Account",
         "X-Rate-Limit-Account": "30:300:1800",
         "X-Rate-Limit-Account-State": "0:300:0",
     })
-    assert mgr.steady_pace_interval_s() == pytest.approx(300 / 29, abs=0.01)
+    assert mgr.steady_pace_interval_s() == pytest.approx(300 / 28, abs=0.01)

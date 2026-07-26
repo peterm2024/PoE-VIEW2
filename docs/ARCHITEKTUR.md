@@ -225,14 +225,17 @@ Zuordnung von Regel zu Verbrauch eine bekannte Fehlerquelle ist:
   `rate_limit_changed(policy, rules, wait_remaining_s)`, das wiederum das
   Dashboard speist. So bleibt der Manager selbst frei von Qt-Abhängigkeiten.
 - `headroom_fraction()` — wie viel Budget ist über alle bekannten Policies
-  hinweg noch frei (Minimum, konservativ)? Genutzt vom Auto-Refresh-Guard
-  und vom Sofort-Kick bei Auswahlwechsel im Single-/Stash-Modus.
+  hinweg noch frei (Minimum, konservativ)? Genutzt vom Auto-Refresh-Guard.
 - `steady_pace_interval_s(policy_name=None)` — empfohlener Mindestabstand
   zwischen Requests für einen gleichmäßigen Dauerbetrieb (Single-/Stash-
   Refresh-Modus, §4.8): die knappste Regel der angegebenen (oder sonst
   zuletzt benutzten) Policy, geteilt auf ihr Fenster. Bewusst NICHT über
   alle Policies gemittelt — GGG vergibt pro Endpunkt-Art eine eigene
-  Policy, siehe FALLSTRICKE #33.
+  Policy, siehe FALLSTRICKE #33. Der Nenner ist
+  `max_hits - SAFETY_MARGIN - 1`, also eins WENIGER als die Schwelle, ab
+  der `_required_wait` bremst: ein Takt, der die Schwelle exakt trifft,
+  löst im Dauerbetrieb genau die Sperre aus, die er verhindern soll
+  (FALLSTRICKE #34).
 - `snapshot()` — aktueller Anzeige-Stand ohne Seiteneffekt auf einen
   echten Request, fürs periodische UI-Polling (siehe unten).
 - `_decay_expired_rules(state)` — setzt abgelaufene Fenster lokal zurück,
@@ -290,6 +293,16 @@ Ein `QThread` mit Job-Queue:
   `icon_loaded(url, bytes)`, `error(job, message)`, `rate_limit_changed(...)`.
 - Icon-Downloads bekommen **niedrige Priorität** (eigene Queue oder
   Prioritäts-Queue): Erst Daten, dann Bilder.
+- **Daten-Jobs laufen nur mit gesetztem Token.** `_skip_unauthenticated()`
+  verwirft alles aus `_NEEDS_AUTH`, solange `client.has_token` False ist
+  (Bootstrap/Login stellen die Anmeldung selbst her, Logout und der
+  CDN-Icon-Download brauchen keine). Grund: `_build_ui()` reiht beim Start
+  einen `FetchStashListJob` mit ein, noch bevor feststeht, ob überhaupt
+  ein gültiges Token existiert — ohne diesen Guard ging der ohne
+  `Authorization`-Header raus und kassierte einen garantierten 401
+  (FALLSTRICKE #35). Passend dazu verwirft der `AuthError`-Handler das
+  gespeicherte Token nur, wenn es auch mitgeschickt wurde: ein 401 ohne
+  Token ist selbstverschuldet und sagt nichts über dessen Gültigkeit aus.
 
 #### 4.5.1 Status-Text vs. Busy-Zustand — zwei getrennte Signale
 
@@ -396,17 +409,27 @@ bekannten Kind-Anzahlen (`StashTree._refresh_ancestor_totals`, rekursiv
 nach oben durchgereicht, sobald sich eine Zahl ändert).
 
 Die **Pos.-Spalte** (2026-07-26) zeigt die 1-basierte Position eines Fachs
-in der echten Truhen-Reihenfolge — dieselbe, die `MainWindow._tab_positions()`
-liefert und die auch den Stash-Modus-Rundlauf antreibt
-(`_pick_stash_mode_candidate`). Peter fehlte ein Zeilenheader zum
+in der echten Truhen-Reihenfolge, geliefert von
+`MainWindow._tab_positions()`. Peter fehlte ein Zeilenheader zum
 "Durchzählen der echten Truhenfächer", wie ihn `QTableView` (ItemList) mit
 seinem `verticalHeader()` hat — `QTreeView` kennt dieses Konzept nicht,
 die Pos.-Spalte ist das Äquivalent dafür. `MainWindow` übergibt die
-Positionen bei jedem Rendern (`set_stashes`, `set_children`) explizit
-mit — wichtig dabei: `_leaf_stashes` muss VOR dem Aufruf schon den neuen
-Stand tragen, sonst rechnet `_tab_positions()` noch mit der alten Liste.
-Nur echte Fächer bekommen eine Zahl; Ordner- und Gruppenknoten (kein
-eigener Truhenplatz) bleiben leer.
+Positionen bei jedem Rendern (`set_stashes`, `set_children`) explizit mit;
+`_stash_trees` muss dabei schon den neuen Stand tragen. Ordner- und
+Gruppenknoten belegen keinen eigenen Truhenplatz und bleiben leer.
+
+**Gezählt wird die Truhen-Leiste, nicht `_leaf_stashes`.** Die beiden
+Listen beantworten verschiedene Fragen, und die Verwechslung war ein
+echter Fehler: `_leaf_stashes` sind die ladbaren EINHEITEN, dort fällt ein
+Map-/Unique-Eltern-Tab heraus (Container) und seine Sektionen sind die
+Einträge. Direkt daraus nummeriert bekamen genau diese Spezial-Tabs gar
+keine Position, während jede ihrer Sektionen eine verbrauchte und alle
+folgenden Fächer verschob. In Peters echtem Cache ergab das für Standard
+923 statt der tatsächlichen 391 Positionen — ein einziger Map-Stash belegte
+dort 271 davon. `_tab_positions()` läuft deshalb über `_stash_trees` und
+zählt, was in der Leiste einen Platz belegt; die Sektionen eines
+Spezial-Tabs erben dessen Nummer, damit auch Items aus ihnen den richtigen
+Truhenplatz anzeigen.
 
 #### 4.7.2 Namensspalte nach Datenalter abgeblendet
 
@@ -530,6 +553,19 @@ Datei-Cache): Bei einer bereits vollständig heruntergeladenen Liga wäre
 für immer bei 0 stehen, obwohl der Sweep sichtbar weiterläuft
 (FALLSTRICKE #31).
 
+**"Y" ist die Zahl echter Truhenplätze, nicht `len(_leaf_stashes)`.**
+`_leaf_stashes` beschreibt die ladbaren EINHEITEN (§4.7.1) — für Map-/
+Unique-Stashs zählt das jede Sektion einzeln, obwohl sie in der
+Truhen-Leiste EIN Fach sind. `_update_auto_refresh_label` zählt "Y"
+deshalb als `len(set(self._tab_positions().values()))` (eindeutige
+Truhenplätze), und `_count_silent_refresh` dedupliziert "X" über
+denselben Platz (`_tab_positions(league).get(stash_id, stash_id)`) statt
+über die rohe `stash_id` — sonst zählen zwei Sektionen desselben Map-Tabs
+als zwei aktualisierte "Tabs" (real beobachtet: "939" statt 391
+tatsächlicher Fächer, FALLSTRICKE #36). `_tab_positions()` akzeptiert dafür
+einen optionalen `league`-Parameter, da `_count_silent_refresh` mit der
+Liga AUS DEM SIGNAL rechnet, nicht zwangsläufig der aktiven (FALLSTRICKE #10).
+
 **Sekündliche Countdown-Anzeige** (`MainWindow._update_auto_refresh_countdown`,
 per `QTimer` unabhängig vom 40s-Auto-Refresh-Takt) zeigt zusätzlich
 entweder "Next auto-refresh in Xs" (`_auto_refresh_timer.remainingTime()`)
@@ -568,6 +604,22 @@ Toolbar ("Mode: Auto / Single / Stash", additiv neben dem normalen
   frisch") — das soll später über eine Favoriten-Markierung gelöst werden,
   nicht über einen festen Index (Peter: stört sich an starren Positionen).
 
+  Derselbe Rundenabschluss löst zusätzlich `_stash_mode_list_refresh_due`
+  aus: der nächste Tick lädt (`_drive_refresh_mode`) statt eines weiteren
+  Item-Picks einmalig die Fach-**Liste** still nach (`FetchStashListJob(...,
+  silent=True)`, ausgewertet in `_on_stash_list`). Grund: Auto/Single/Stash
+  aktualisieren sonst ausschließlich Items einzelner Fächer — verschiebt,
+  benennt oder entfernt der Nutzer ein Fach im Spiel, bliebe das unsichtbar,
+  bis er manuell auf "⟳ Refresh" klickt oder die Liga wechselt (Peters
+  Rückfrage "Bekommen wir das mit?"). Läuft auch dann mit, wenn gerade kein
+  einziges Fach leer ist — sonst bliebe eine komplett bekannte, aber
+  umsortierte Truhe für immer unentdeckt. Kein fester Zeit-Takt: derselbe
+  Rundenmechanismus wie beim Leer-Fach-Coverage-Pick, damit die Häufigkeit
+  ebenso mit der Truhengröße skaliert, und dieselbe Rate-Limit-Policy wie
+  Item-Abrufe (`stash-request-limit`, real bestätigt — anders als bei
+  Charakteren gibt es hier KEINE getrennte Listen-Policy), also derselbe
+  Budget-Topf.
+
 Single/Stash reservieren bewusst KEIN Budget für manuelle Klicks (anders
 als Auto) — der Nutzer hat den Modus bewusst gewählt, um den vollen Pool
 für genau dieses Ziel einzusetzen. Beide takten GLEICHMÄSSIG statt in
@@ -582,12 +634,27 @@ Policy-Name, nicht der globale `rate_limiter.last_policy`, der von jedem
 beliebigen (auch fremden) Request überschrieben werden kann
 (FALLSTRICKE #33).
 
-Ein bewusster Auswahlwechsel bei einem Cache-Treffer überspringt den
-laufenden Takt einmalig (`_kick_refresh_mode_after_selection`), aber nur,
-solange `headroom_fraction()` noch mindestens
-`REFRESH_MODE_KICK_MIN_HEADROOM` (50 %) frei ist — sonst würde schnelles
-Durchklicken durch viele Fächer ebenso viele Sofort-Requests auslösen und
-den gleichmäßigen Takt aushebeln.
+Die Fälligkeit des nächsten Takts setzt `_note_refresh_mode_job_done()`
+beim EINTREFFEN der Antwort, nicht `_drive_refresh_mode()` beim Absenden.
+Wartet der Rate-Limiter mitten im Job minutenlang (`check_and_wait`), wäre
+eine beim Absenden gesetzte Fälligkeit längst abgelaufen und der nächste
+Pick feuerte sofort hinterher — real hat sich daraus eine endlose Kette
+aus 300s-Sperren aufgeschaukelt (FALLSTRICKE #34). Derselbe Handler
+bedient alle drei Abschluss-Pfade (Fach, Charakter, Fehler), damit auch
+ein Fehlschlag keinen Sofort-Retry auslöst.
+
+Ein bewusster Auswahlwechsel bei einem Cache-Treffer löst KEINEN eigenen
+Request aus. Das angeklickte Fach wird stattdessen als nächstes Ziel
+vorgemerkt (`_prioritise_selection_in_refresh_mode` →
+`_refresh_mode_priority_id`, einmalig) und beim nächsten regulären Takt
+zuerst geladen. Eine frühere Fassung übersprang den Takt und lud sofort;
+das war ein Extra-Request neben dem gleichmäßigen Takt und hat mit dazu
+beigetragen, das Rate-Limit-Fenster auf die Sperrschwelle zu treiben
+(FALLSTRICKE #34). Der konservative Weg kostet bis zu einen Takt
+Wartezeit (~11s bei 30/300s), hält die Anfragerate dafür unabhängig vom
+Klickverhalten konstant. Für Charaktere braucht es gar keine Vormerkung:
+der Single-Modus zielt ohnehin immer auf die aktuelle Auswahl
+(`_pick_single_target`).
 
 **Migration von Bestandsdaten:** Cache-Dateien von vor dem
 `last_loaded`-Feature enthalten keine Zeitstempel — ohne Gegenmaßnahme
@@ -597,6 +664,17 @@ Fetch aus und würden daher nie einen Zeitstempel nachtragen).
 `data_cache._backfill_last_loaded()` vergibt beim Laden die mtime der
 Cache-Datei als konservativen Ersatz-Zeitstempel (siehe
 FALLSTRICKE_UND_WORKAROUNDS.md #12).
+
+#### 4.7.3 Kontextmenü: Alle öffnen/schließen
+
+Dasselbe Kontextmenü trägt zusätzlich "▸ Expand All"/"▾ Collapse All"
+(`StashTree._on_context_menu`, `QTreeWidget.expandAll`/`collapseAll`) —
+anders als "🔍 View Raw Data" nicht an ein bestimmtes Fach gebunden,
+sondern gilt für den ganzen Baum und steht deshalb IMMER zur Verfügung,
+auch bei Rechtsklick auf einen Ordner oder in den leeren Bereich
+unterhalb der letzten Zeile. Bei über 100 Fächern in tief verschachtelten
+Ordnern (Map-/Unique-Sektionen, §4.10) wäre Knoten-für-Knoten-Aufklappen
+sonst mühsam.
 
 ### 4.9 Rohdaten-Mini-Viewer (`ui/raw_data_viewer.py`)
 
@@ -779,8 +857,10 @@ sich auf die Position innerhalb der Liga, in der ein Tab ursprünglich
 angelegt wurde. Beim Liga-Ende wandern Fächer nach Standard und behalten
 ihren alten `index`, sodass dort mehrere Fächer denselben Wert tragen
 (FALLSTRICKE #21). `MainWindow._tab_positions()` leitet die Nummer
-stattdessen aus der aktuellen Reihenfolge der API-Antwort ab (Position in
-`_leaf_stashes`, 1-basiert). Nur diese ist frei von Liga-Historie.
+stattdessen aus der aktuellen Reihenfolge der API-Antwort ab (1-basierter
+Platz in der Truhen-Leiste, siehe §4.7.1). Nur diese ist frei von
+Liga-Historie. Items aus einer Map-/Unique-Sektion tragen dabei die Nummer
+ihres Eltern-Tabs — das ist der Truhenplatz, an dem sie physisch liegen.
 
 Anders als die Tab-Spalte verwaltet die Anwendung diese Spalte nicht
 selbst: Sie bleibt auch im Einzelfach sichtbar, wo sie die Koordinate
@@ -986,7 +1066,7 @@ verschwunden.
 | Bereich | Widget | Verhalten |
 |---|---|---|
 | Navigation: Charaktere | `CharacterList` (`QListWidget`) | Bewusst KEIN Tree — Charaktere haben keine Unterstruktur (spart eine Ebene samt Auf- und Zuklapp-Klick). Flach, absteigend nach Level, liga-gefiltert (`MainWindow._apply_character_league_filter`, siehe §5.1). Höhe begrenzt (`setMaximumHeight`), damit der Stash-Baum den meisten Platz bekommt. |
-| Navigation: Stash | `StashTree` (`QTreeWidget`), 3 Spalten, **Header sichtbar** | Kein umschließender "Stash"-Wurzelknoten mehr — die Tabs SIND die Top-Level-Einträge (spart eine weitere Ebene). Ordner rekursiv (children), Map-Fächer zusätzlich nach Sektion gruppiert (§4.10). Namensspalte per `QHeaderView.ResizeMode.Interactive` (NICHT `Stretch` — Stretch-Spalten lassen sich in Qt nicht per Maus verbreitern, das war ein echter Bug) mit großzügiger Startbreite, per Header-Rand manuell nachziehbar. Tab-Farbe aus API als kleines Icon-Quadrat VOR dem Namen, bewusst NICHT als Textfarbe (manche API-Farben sind auf dunklem Grund sonst unlesbar). Klick auf Tab → `FetchStashItems`-Job, sofern nicht bereits im Cache. Spalte 2 (**#**) zeigt die Item-Anzahl (eigene Spalte statt "(N Items)"-Text im Namen; Details §4.7.1). Spalte 3 zeigt GENAU EINEN von DREI sich gegenseitig ausschließenden Zuständen (§4.7.1, §4.12): **⬇**-Text, solange nie geladen; ein **⟳-Button mit Alters-Beschriftung** (exakte Uhrzeit "⟳ 14:32:46" bei heute geladenen Daten, sonst "⟳ vor 3d") sobald mindestens einmal geladen — Klick lädt genau diesen Tab bewusst AM Cache vorbei neu (`stash_refresh_requested`-Signal); oder **📴** statt ⟳, solange GGG nicht erreichbar ist (Offline-Modus, §4.12) — derselbe Button, nur die Beschriftung ändert sich, ein Klick versucht trotzdem ein Neuladen. Rechtsklick öffnet ein Kontextmenü mit "🔍 Rohdaten anzeigen" (`raw_data_requested`-Signal, §4.9) — öffnet/aktualisiert den nicht-modalen Rohdaten-Mini-Viewer. |
+| Navigation: Stash | `StashTree` (`QTreeWidget`), 3 Spalten, **Header sichtbar** | Kein umschließender "Stash"-Wurzelknoten mehr — die Tabs SIND die Top-Level-Einträge (spart eine weitere Ebene). Ordner rekursiv (children), Map-Fächer zusätzlich nach Sektion gruppiert (§4.10). Namensspalte per `QHeaderView.ResizeMode.Interactive` (NICHT `Stretch` — Stretch-Spalten lassen sich in Qt nicht per Maus verbreitern, das war ein echter Bug) mit großzügiger Startbreite, per Header-Rand manuell nachziehbar. Tab-Farbe aus API als kleines Icon-Quadrat VOR dem Namen, bewusst NICHT als Textfarbe (manche API-Farben sind auf dunklem Grund sonst unlesbar). Klick auf Tab → `FetchStashItems`-Job, sofern nicht bereits im Cache. Spalte 2 (**#**) zeigt die Item-Anzahl (eigene Spalte statt "(N Items)"-Text im Namen; Details §4.7.1). Spalte 3 zeigt GENAU EINEN von DREI sich gegenseitig ausschließenden Zuständen (§4.7.1, §4.12): **⬇**-Text, solange nie geladen; ein **⟳-Button mit Alters-Beschriftung** (exakte Uhrzeit "⟳ 14:32:46" bei heute geladenen Daten, sonst "⟳ vor 3d") sobald mindestens einmal geladen — Klick lädt genau diesen Tab bewusst AM Cache vorbei neu (`stash_refresh_requested`-Signal); oder **📴** statt ⟳, solange GGG nicht erreichbar ist (Offline-Modus, §4.12) — derselbe Button, nur die Beschriftung ändert sich, ein Klick versucht trotzdem ein Neuladen. Rechtsklick öffnet ein Kontextmenü mit "🔍 Rohdaten anzeigen" (`raw_data_requested`-Signal, §4.9) — öffnet/aktualisiert den nicht-modalen Rohdaten-Mini-Viewer — sowie "▸ Expand All"/"▾ Collapse All" für den ganzen Baum (§4.7.3), Letzteres unabhängig davon, worauf geklickt wurde. |
 | Typ-Filter (Toolbar, neben Liga) | 8× `QCheckBox` ohne Text | Normal/Magic/Rare/Unique/Gem/Currency/Div Card + "Sonstige" (§4.11) — Farbe des Käschchens = Typ-Farbe (Pink für "Sonstige"), Name nur im Tooltip. Alle acht standardmäßig an; Abwählen blendet nur diese eine Kategorie aus der Item-Tabelle aus. |
 | Item-Tabelle rechts oben | `QTableView` + `QSortFilterProxyModel` | Spalten: Icon, Tab, **Position** ("#3 (4, 7)", Tab-Nummer plus Item-Koordinate, §4.11, unterscheidet gleichnamige Fächer), Name, Typ, Level, Quality, Stack, iLvl, **Anf.Lvl, Str, Dex, Int** (aus dem `requirements`-Array, §4.11) und **Mods** (explicitMods, überwiegend Map-Modifikatoren, Tooltip zeilenweise). Klick auf den Spaltenkopf sortiert numerisch über `NUMERIC_SORT_ROLE`, also nach echten Zahlen statt nach Strings; Zeilen ohne Wert ("–") landen unten. Das Suchfeld sucht fächerübergreifend über die ganze Liga und schließt Item-Properties wie "Item Quantity" ein; ein eingebauter Clear-Button leert es, `*` zeigt alles an (gedacht für den Komplett-Export, §4.11). Je Spalte lässt sich über das Header-Rechtsklick-Menü zusätzlich ein Filter-Ausdruck setzen (`>=20`, `<45`, `=Text`, Teilstring), aktive Filter markiert ein 🔍 im Header. Sichtbare Spalten sind per Rechtsklick wählbar und werden in `%LOCALAPPDATA%/PoE-VIEW2/ui-settings.ini` gespeichert; "Typ" ist standardmäßig aus, da die Rarity bereits die Namensfarbe bestimmt. Die Tab-Spalte verwaltet die Anwendung selbst und blendet sie nicht ins Menü ein: aus bei Einzelfach-Auswahl, an in Aggregat-Ansichten ("Alle Tabs", Spezial-Tab-Elternknoten, liga-weite Suche), wo sie die Herkunft trägt ("Map (Tier 1)"). |
 | Item-Detail rechts unten | eigenes Widget | Großes Icon, Name in Rarity-Farbe (frameType), Properties, Mods. Aktualisiert bei Zeilenauswahl. |
@@ -998,7 +1078,35 @@ Tabs laden" holt der `ApiWorker` (`FetchAllItemsJob`) die Items sämtlicher
 Nicht-Ordner-Tabs der aktuellen Liga sequenziell — jeder Tab durchläuft
 denselben Rate-Limit-Check wie eine Einzelabfrage, ein `QProgressDialog`
 zeigt Fortschritt (`bulk_progress`-Signal) und erlaubt Abbrechen nach dem
-aktuellen Tab (`ApiWorker.cancel_bulk()`). Nach Abschluss zeigt die
+aktuellen Tab (`ApiWorker.cancel_bulk()`). Die Reihenfolge (`_load_all_items`)
+stellt die ältesten bzw. noch nie geladenen Fächer nach vorne
+(`_last_loaded`, `_NEVER_LOADED`-Sentinel wie bei `_pick_stash_mode_candidate`)
+— bricht der Nutzer über "Abbrechen" vorzeitig ab, sind die dringendsten
+Fächer schon durch, nicht die per Zufall der Truhen-Reihenfolge nach vorne
+gerutschten.
+
+Zwischen zwei Tabs wartet die Schleife einen **gleichmäßigen Takt** aus
+`steady_pace_interval_s()` — dieselbe Rate wie der Stash-Refresh-Modus
+(§4.8, bei 30 Anfragen/300s rund 11s je Tab), nur einmal durch alle Fächer
+statt endlos. Ohne diese Bremse feuerte die Schleife die Tabs so schnell
+wie möglich durch, füllte binnen ~29 Tabs das Rate-Limit-Fenster und lief
+in die 300-Sekunden-Zwangspause (dieselbe Mechanik wie FALLSTRICKE #34).
+Der Durchsatz ist dadurch nicht geringer, nur gleichmäßig statt "Sprint,
+dann fünf Minuten Stillstand" — und der Fortschrittsbalken läuft sichtbar
+weiter. Gewartet wird über `_cancel_bulk.wait(...)` statt `time.sleep`,
+damit "Abbrechen" sofort greift und nicht erst den Takt aussitzen muss.
+Fortschritt (`QProgressDialog`-Maximum, `bulk_progress`/`bulk_finished`)
+zählt echte Truhenplätze, nicht rohe Abrufe (FALLSTRICKE #37): eine Map-/
+Unique-Sektion braucht zwar einen eigenen Request, teilt sich aber den
+Platz ihres Eltern-Tabs. `FetchAllItemsJob` bekommt dafür zusätzlich
+`positions` (`_tab_positions()`-Ergebnis) mit; `_fetch_all_items()`
+gruppiert Fortschritt und Gesamtzahl über `positions.get(stash.id,
+stash.id)` statt über die rohe Fach-ID — sonst zeigte der Dialog z. B.
+"58/561" (ladbare Einheiten) statt "58/391" (echte Fächer).
+
+Solange der Bulk-Dialog offen ist, pausiert der Refresh-Modus
+(`_drive_refresh_mode`) — sonst liefen beide Taktgeber parallel und
+verdoppelten die Anfragerate. Nach Abschluss zeigt die
 Item-Tabelle alle geladenen Tabs zusammen (`MainWindow._show_aggregate`) —
 dafür trägt jede Zeile in der neuen **Tab-Spalte** ihren Herkunfts-Tab, damit
 der Bezug beim Filtern/Sortieren über den gesamten Stash nicht verloren geht.

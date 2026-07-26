@@ -49,6 +49,13 @@ class PoeApiClient:
     def set_token(self, access_token: str) -> None:
         self._http.headers["Authorization"] = f"Bearer {access_token}"
 
+    @property
+    def has_token(self) -> bool:
+        """Ist überhaupt ein Token gesetzt? Ein 401 OHNE gesetztes Token sagt
+        nichts über die Gültigkeit des gespeicherten Tokens aus — er ist
+        selbstverschuldet (§ApiWorker.run)."""
+        return "Authorization" in self._http.headers
+
     def close(self) -> None:
         self._http.close()
 
@@ -70,6 +77,19 @@ class PoeApiClient:
             self.rate_limiter.update_from_headers(resp.headers)
 
         if resp.status_code == 401:
+            # Bislang loggten wir hier nur die feste Meldung — real
+            # beobachtet: 401 trifft über den Tag verteilt wiederholt
+            # NUR den Stash-Listen-Endpunkt (`GET /stash/{league}`), nie
+            # einzelne Fächer/Charaktere mit demselben Token, obwohl die
+            # weit häufiger laufen. Passt weder zu echtem Token-Ablauf
+            # (dann müssten auch die häufigen Aufrufe scheitern) noch zum
+            # bekannten Job-Reihenfolge-Bug (FALLSTRICKE #30, träfe nur den
+            # Start). Body/Header (keine Secrets — das sind GGGs
+            # ANTWORT-Header, nicht unser Authorization-Anfrage-Header)
+            # protokollieren, um beim nächsten Auftreten den echten Grund
+            # zu sehen statt weiter zu raten.
+            log.warning("401 von GGG bei %s — Antwort-Header: %s, Body: %.200s",
+                       path, dict(resp.headers), resp.text)
             raise AuthError("Not authorized — token expired or missing.")
         if resp.status_code >= 400:
             raise ApiError(resp.status_code, f"HTTP {resp.status_code} for {path}: {resp.text[:200]}")

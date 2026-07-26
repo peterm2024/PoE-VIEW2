@@ -61,13 +61,6 @@ class MainWindow(QMainWindow):
     # vor einer 429-Sperre wegschnappt.
     AUTO_REFRESH_MIN_HEADROOM = 0.1
 
-    # Ein bewusster Auswahlwechsel im Single-/Stash-Modus soll sofort
-    # reagieren statt bis zu einen vollen Takt zu warten — aber nur, solange
-    # noch mindestens die Hälfte des Budgets frei ist. Sonst bliebe der
-    # Takt wirkungslos: schnelles Durchklicken durch viele Fächer würde
-    # sonst je Klick einen Request auslösen und das Budget leerräumen.
-    REFRESH_MODE_KICK_MIN_HEADROOM = 0.5
-
     # Stash-Modus bevorzugt gefüllte Fächer (Items > 0) vor leeren — leere
     # sind uninteressant und sollen den Takt nicht mit unnötigen Requests
     # blockieren. Damit ein einmal als leer bekanntes Fach aber nicht für
@@ -120,7 +113,7 @@ class MainWindow(QMainWindow):
         # setzt es dann auf False, `logged_in` wieder auf True).
         self._logged_in = True
         self._auto_refresh_counts: dict[str, int] = {}  # Liga → auto-aktualisierte Tabs (Session)
-        self._auto_refresh_counted: dict[str, set[str]] = {}  # Liga → stash_ids (§_count_silent_refresh)
+        self._auto_refresh_counted: dict[str, set[str | int]] = {}  # Liga → Truhenplätze (§_count_silent_refresh)
         # Refresh-Modus: "auto" (Standard) | "single" | "stash" — siehe
         # _drive_refresh_mode. Nicht persistiert, startet nach jedem
         # Neustart bewusst wieder bei "auto" (keine Überraschung durch
@@ -135,6 +128,10 @@ class MainWindow(QMainWindow):
         self._refresh_mode_policy: str | None = None
         self._stash_mode_round_picks = 0  # normale Picks seit dem letzten Coverage-Pick
         self._stash_mode_coverage_cursor = 0  # Rundlauf-Index durch die leeren Fächer, §_pick_stash_mode_candidate
+        self._stash_mode_list_refresh_due = False  # nächster Tick lädt die Fach-LISTE neu, §_drive_refresh_mode
+        # Angeklicktes Fach, das im Stash-Modus als nächstes drankommen soll
+        # (§_prioritise_selection_in_refresh_mode) — vordrängeln statt sofort feuern.
+        self._refresh_mode_priority_id: str | None = None
         self._raw_data_viewer: RawDataViewer | None = None
         self._offline = False  # GGG nicht erreichbar (Wartung am Patchday)
         self._live_leagues: set[str] | None = None  # letzte /account/leagues-Antwort; None = noch unbekannt
@@ -651,6 +648,8 @@ class MainWindow(QMainWindow):
         self._refresh_mode_policy = None
         self._stash_mode_round_picks = 0
         self._stash_mode_coverage_cursor = 0
+        self._stash_mode_list_refresh_due = False
+        self._refresh_mode_priority_id = None  # Fach-IDs gelten nur innerhalb einer Liga
         self._drive_refresh_mode()
 
     def _on_characters(self, characters: list[Character]) -> None:
@@ -669,11 +668,10 @@ class MainWindow(QMainWindow):
         self.character_list.set_characters(filtered)
 
     def _activate_stash_tree(self, stashes: list[StashTab]) -> None:
-        """Baum rendern + abgeflachte Liste aktualisieren — für Live- und Cache-Daten.
-
-        ``_leaf_stashes`` MUSS vor dem Rendern aktualisiert werden, da
-        ``_tab_positions()`` (Positions-Spalte im Baum, §Peters
-        Rundlauf-Frage) direkt darauf aufbaut."""
+        """Baum rendern + abgeflachte Liste aktualisieren — für Live- und
+        Cache-Daten. Setzt voraus, dass ``stashes`` bereits unter der
+        aktuellen Liga in ``_stash_trees`` hängt: ``_tab_positions()`` für
+        die Pos.-Spalte liest von dort."""
         self._leaf_stashes = self._flatten_stashes(stashes)
         last_loaded = self._last_loaded.get(self._current_league, {})
         item_counts = self._item_counts_for_current_league()
@@ -687,7 +685,11 @@ class MainWindow(QMainWindow):
         return {sid: len(items)
                 for sid, items in self._items.get(self._current_league, {}).items()}
 
-    def _on_stash_list(self, stashes: list[StashTab]) -> None:
+    def _on_stash_list(self, stashes: list[StashTab], silent: bool) -> None:
+        """``silent=True`` kommt vom periodischen Listen-Refresh des
+        Stash-Modus (§_drive_refresh_mode) — deckt Umsortierungen/neue/
+        entfernte Fächer auf, die ein reiner Item-Sweep nie bemerken würde,
+        ohne den laufenden Sweep selbst zu unterbrechen."""
         # Die Liga-LISTE der API kennt die Kinder von Spezial-Tabs (MapStash,
         # UniqueStash) nicht — ohne Merge gingen bereits entdeckte Unter-Tabs
         # bei jedem Listen-Refresh/Liga-Wechsel wieder verloren.
@@ -699,6 +701,11 @@ class MainWindow(QMainWindow):
         if self._search_all_active:
             self._enter_search_all()  # Suchansicht auf die frische Liste umstellen
         self._persist_cache()
+        if silent:
+            # Policy-Name JETZT festhalten, siehe Kommentar in
+            # _count_silent_refresh.
+            self._refresh_mode_policy = self.worker.rate_limiter.last_policy
+            self._note_refresh_mode_job_done()
 
     @staticmethod
     def _merge_known_children(new_stashes: list[StashTab],
@@ -784,9 +791,9 @@ class MainWindow(QMainWindow):
         if stash_id in league_items:
             # Speicher-/Datei-Cache: kein erneuter API-Call (Doku §5)
             self._show_items(stash_id, league_items[stash_id], name)
-            # … im Single-/Stash-Modus aber trotzdem zeitnah auffrischen,
-            # statt bis zu einen vollen Takt alte Daten zu zeigen.
-            self._kick_refresh_mode_after_selection()
+            # … im Stash-Modus zusätzlich als nächstes Ziel vormerken, damit
+            # das angeklickte Fach als Erstes an die Reihe kommt.
+            self._prioritise_selection_in_refresh_mode(stash_id)
             return
         if self._archived_league_guard(
                 f"{name}: never loaded — league ended, no longer available."):
@@ -816,18 +823,41 @@ class MainWindow(QMainWindow):
         Zeitstempel im Baum sich sichtbar aktualisiert). Das eigene
         Session-Set verhindert stattdessen nur das ursprüngliche Problem
         (FALLSTRICKE #27): das wiederholte Live-Halten des GERADE
-        angezeigten Fachs bei jedem Tick soll nicht mehrfach zählen."""
+        angezeigten Fachs bei jedem Tick soll nicht mehrfach zählen.
+
+        Gezählt wird der echte Truhenplatz (`_tab_positions()`), nicht die
+        rohe `stash_id` — sonst zählt jede einzelne Map-/Unique-Sektion als
+        eigener "Tab" und "Y" wäre die aufgeblähte Zahl ladbarer Einheiten
+        statt der tatsächlichen Fächer-Anzahl (real beobachtet: "939" statt
+        391 echter Fächer in Standard, FALLSTRICKE #36 — derselbe
+        Zähl-Fehler wie bei der Positions-Spalte, nur an anderer Stelle)."""
+        slot = self._tab_positions(league).get(stash_id, stash_id)
         counted = self._auto_refresh_counted.setdefault(league, set())
-        if stash_id not in counted:
-            counted.add(stash_id)
+        if slot not in counted:
+            counted.add(slot)
             self._auto_refresh_counts[league] = len(counted)
-        # Treibt die Single-/Stash-Modus-Kette weiter (§_drive_refresh_mode);
-        # im "auto"-Modus ein No-Op. Policy-Name JETZT festhalten, nicht erst
-        # in _drive_refresh_mode auslesen — sonst könnte ein dazwischen-
-        # gefunkter anderer Request (z. B. der normale Refresh-Button) den
-        # globalen Stand vorher schon wieder überschrieben haben.
-        self._refresh_mode_pending = False
+        # Policy-Name JETZT festhalten, nicht erst in _drive_refresh_mode
+        # auslesen — sonst könnte ein dazwischengefunkter anderer Request
+        # (z. B. der normale Refresh-Button) den globalen Stand vorher
+        # schon wieder überschrieben haben.
         self._refresh_mode_policy = self.worker.rate_limiter.last_policy
+        self._note_refresh_mode_job_done()
+
+    def _note_refresh_mode_job_done(self) -> None:
+        """Ein eigener Job des Single-/Stash-Modus ist durch (Erfolg wie
+        Fehler): Kette freigeben und den nächsten Takt AB JETZT zählen.
+        Im "auto"-Modus ein No-Op, da ``_drive_refresh_mode`` dort nichts tut.
+
+        Der Takt läuft bewusst ab dem ENDE eines Requests, nicht ab seinem
+        Absenden. Wartet der Rate-Limiter mitten im Job minutenlang
+        (``check_and_wait``), wäre eine beim Absenden gesetzte Fälligkeit
+        längst abgelaufen — der nächste Pick feuerte dann sofort hinterher.
+        Genau das hat sich real hochgeschaukelt: 300s-Sperre → Doppel-Request
+        beim Wiederanlauf → dadurch erneut 29 Treffer im Fenster → wieder
+        Sperre, endlos (FALLSTRICKE #34)."""
+        self._refresh_mode_pending = False
+        self._refresh_mode_next_due = time.monotonic() + \
+            self.worker.rate_limiter.steady_pace_interval_s(self._refresh_mode_policy)
         self._drive_refresh_mode()
 
     def _on_stash_items(self, league: str, stash_id: str, name: str,
@@ -875,9 +905,10 @@ class MainWindow(QMainWindow):
             tab = self._find_stash(tree, stash_id)
             if tab is not None:
                 tab.children = children
-            # Vor dem Rendern aktualisieren — _tab_positions() (Positions-
-            # Spalte im Baum) baut direkt darauf auf und muss die neu
-            # entdeckten Kinder schon kennen.
+            # Erst NACH dem Anhängen der Kinder neu abflachen — die neu
+            # entdeckten Unter-Fächer sind ab jetzt die ladbaren Einheiten
+            # (Sweep, Bulk-Load). Die Pos.-Spalte hängt nicht hieran,
+            # sondern direkt am Baum (§_tab_positions).
             self._leaf_stashes = self._flatten_stashes(tree)
         if silent:
             self._count_silent_refresh(league, stash_id)
@@ -919,17 +950,55 @@ class MainWindow(QMainWindow):
         tab.metadata["poeview_category"] = category
         return tab.display_name
 
-    def _tab_positions(self) -> dict[str, int]:
+    def _tab_positions(self, league: str | None = None) -> dict[str, int]:
         """1-basierte Position jedes Fachs in der Reihenfolge, in der die
-        API sie für die aktuelle Liga zurückliefert (``_leaf_stashes``).
-        Grundlage der Position-Spalte (§4.11).
+        API sie für die angegebene (oder sonst die aktuelle) Liga
+        zurückliefert. Grundlage der Position-Spalte in der Item-Tabelle
+        (§4.11), der Pos.-Spalte im Stash-Baum (§4.7.1) und des
+        Auto-Refresh-Zählers (§_count_silent_refresh, §_update_auto_refresh_label).
+
+        Explizite ``league`` nötig, wenn der Aufrufer für eine ANDERE als
+        die gerade aktive Liga rechnet (z. B. ein spät eintreffender
+        Hintergrund-Job nach einem Liga-Wechsel) — sonst würde
+        ``self._current_league`` stillschweigend die falsche Truhe befragen.
 
         ``StashTab.index`` ist dafür ungeeignet: Fächer wandern beim
         Liga-Ende nach Standard und behalten ihren ursprünglichen Index aus
         der alten Liga, sodass dort mehrere Fächer denselben Wert tragen
         (FALLSTRICKE #21). Die Reihenfolge der API-Antwort entspricht
-        dagegen der tatsächlichen Position in der Truhen-Leiste."""
-        return {stash.id: position for position, stash in enumerate(self._leaf_stashes, start=1)}
+        dagegen der tatsächlichen Position in der Truhen-Leiste.
+
+        Gezählt wird, was in der Truhen-Leiste einen Platz belegt — NICHT
+        ``_leaf_stashes``, das die ladbaren EINHEITEN beschreibt und damit
+        eine andere Frage beantwortet. Der Unterschied betrifft die
+        Spezial-Tabs: ein Map-/Unique-Stash ist EIN Fach in der Leiste,
+        seine Sektionen liegen innerhalb dieses einen Platzes. In
+        ``_leaf_stashes`` ist es umgekehrt (der Eltern-Tab fällt raus,
+        die Kinder sind die ladbaren Einheiten) — direkt daraus
+        nummeriert, bekamen Map-/Unique-Tabs gar keine Position, während
+        ihre Sektionen je eine eigene verbrauchten und alle folgenden
+        Fächer verschoben (real: ein einzelner Map-Stash belegte die
+        Positionen 28–38). Die Sektionen erben deshalb hier die Nummer
+        ihres Eltern-Tabs, damit auch Items aus ihnen den richtigen
+        Truhenplatz anzeigen. Ordner belegen wie bisher keinen eigenen
+        Platz, sondern nur die Fächer darin.
+        """
+        positions: dict[str, int] = {}
+        counter = 0
+
+        def walk(nodes: list[StashTab]) -> None:
+            nonlocal counter
+            for stash in nodes:
+                if stash.is_folder:
+                    walk(stash.children)
+                    continue
+                counter += 1
+                positions[stash.id] = counter
+                for child in self._flatten_stashes(stash.children):
+                    positions[child.id] = counter
+
+        walk(self._stash_trees.get(league or self._current_league) or [])
+        return positions
 
     def _show_items(self, stash_id: str, items: list[Item], name: str) -> None:
         self._current_tab_name = name
@@ -996,16 +1065,30 @@ class MainWindow(QMainWindow):
         # vorhandener Item-Cache-Eintrag ist bei ihnen bedeutungslos (§4.10).
         to_fetch = [s for s in self._leaf_stashes
                     if s.id not in league_items or s.type in self.SPECIAL_TAB_TYPES]
+        # Älteste bzw. nie geladene Fächer zuerst — bricht der Nutzer über
+        # "Abbrechen" vorzeitig ab, sind es die dringendsten, die schon
+        # durch sind, nicht die per Zufall der Truhen-Reihenfolge nach
+        # vorne gerutschten.
+        league_loaded = self._last_loaded.get(self._current_league, {})
+        to_fetch.sort(key=lambda s: (self._NEVER_LOADED if s.id not in league_loaded
+                                     else datetime.fromisoformat(league_loaded[s.id])))
         if not to_fetch:
             self._show_aggregate()  # schon alles im Cache
             return
 
+        # Anzeige zählt echte Truhenplätze, nicht die rohen Abrufe: eine
+        # Map-/Unique-Sektion braucht zwar einen eigenen Request, teilt sich
+        # aber den Platz ihres Eltern-Tabs (FALLSTRICKE #36 — sonst z. B.
+        # "58/561" statt "58/391").
+        positions = self._tab_positions()
+        real_total = len({positions.get(s.id, s.id) for s in to_fetch})
+
         self._bulk_dialog = QProgressDialog(
-            "Loading stash tabs…", "Cancel", 0, len(to_fetch), self)
+            "Loading stash tabs…", "Cancel", 0, real_total, self)
         self._bulk_dialog.setWindowModality(Qt.WindowModality.WindowModal)
         self._bulk_dialog.setMinimumDuration(0)
         self._bulk_dialog.canceled.connect(self.worker.cancel_bulk)
-        self.worker.submit(FetchAllItemsJob(self._current_league, to_fetch))
+        self.worker.submit(FetchAllItemsJob(self._current_league, to_fetch, positions))
 
     def _on_bulk_progress(self, done: int, total: int, name: str) -> None:
         if self._bulk_dialog is not None:
@@ -1152,9 +1235,9 @@ class MainWindow(QMainWindow):
         cached = self._character_items.get(char.name)
         if cached is not None:
             self._show_character_items(char.name, cached)
-            # … im Single-Modus trotzdem zeitnah auffrischen (analog
-            # `_on_stash_selected`), statt einen vollen Takt abzuwarten.
-            self._kick_refresh_mode_after_selection()
+            # Keine Sonderbehandlung nötig: der Single-Modus zielt ohnehin
+            # immer auf die aktuelle Auswahl (§_pick_single_target), der
+            # neue Charakter ist also beim nächsten regulären Takt dran.
             return
         self._status_msg.setText(f"Loading equipment: {char.name}…")
         self.worker.submit(FetchCharacterItemsJob(char.name))
@@ -1176,12 +1259,10 @@ class MainWindow(QMainWindow):
         self._character_items_loaded[name] = datetime.now(timezone.utc).isoformat()
         self._persist_cache()
         if silent:
-            # Treibt die Single-Modus-Kette weiter (§_drive_refresh_mode);
-            # im "auto"-Modus ein No-Op. Policy-Name jetzt festhalten, siehe
-            # Kommentar in _count_silent_refresh.
-            self._refresh_mode_pending = False
+            # Policy-Name jetzt festhalten, siehe Kommentar in
+            # _count_silent_refresh.
             self._refresh_mode_policy = self.worker.rate_limiter.last_policy
-            self._drive_refresh_mode()
+            self._note_refresh_mode_job_done()
         if name != self._current_character_name:
             return
         self._show_character_items(name, items)
@@ -1235,9 +1316,10 @@ class MainWindow(QMainWindow):
         # (§_drive_refresh_mode) — ohne diesen Reset könnte ein einzelner
         # Fehler (z. B. ein transienter Netzwerk-Hänger) die Kette für den
         # Rest der Session stillschweigend stoppen. Im "auto"-Modus ein No-Op.
+        # Der Takt wird dabei mitgezählt wie bei Erfolg: ein Fehlschlag darf
+        # keinen Sofort-Retry auslösen, der das Rate-Limit-Budget verheizt.
         if self._refresh_mode != "auto":
-            self._refresh_mode_pending = False
-            self._drive_refresh_mode()
+            self._note_refresh_mode_job_done()
 
     def _on_offline_changed(self, offline: bool) -> None:
         """GGG nicht erreichbar (Wartung/kein Netz, §4.12) — permanentes
@@ -1369,33 +1451,28 @@ class MainWindow(QMainWindow):
         self._refresh_mode_pending = False
         self._refresh_mode_next_due = 0.0  # sofort beim Umschalten aktualisieren, nicht erst nach einem Takt
         self._refresh_mode_policy = None
+        self._refresh_mode_priority_id = None
         self._drive_refresh_mode()
 
-    def _kick_refresh_mode_after_selection(self) -> None:
-        """Nach einem bewussten Auswahlwechsel im Single-/Stash-Modus den
-        laufenden Takt einmalig überspringen, damit die neue Zeile sofort
-        frisch geladen wird statt bis zu einen vollen Takt (bei knapper
-        Policy auch mal über eine Minute) alte Cache-Daten zu zeigen.
+    def _prioritise_selection_in_refresh_mode(self, stash_id: str) -> None:
+        """Ein bewusst angeklicktes Fach kommt im Stash-Modus als NÄCHSTES
+        dran — es drängelt sich in der Abarbeitungsliste nach vorn, löst
+        aber keinen eigenen Request aus.
 
-        Der Takt-Zähler ist bewusst GLOBAL und wird sonst nie bei
-        Auswahländerungen zurückgesetzt: das Rate-Limit zählt Requests,
-        nicht Ziele. Ein bedingungsloser Reset würde schnelles Durchklicken
-        durch viele Fächer in ebenso viele Sofort-Requests übersetzen und
-        das Budget leerräumen. Deshalb greift die Abkürzung nur, solange
-        noch reichlich Luft ist (§REFRESH_MODE_KICK_MIN_HEADROOM) — ein
-        einzelner bewusster Wechsel reagiert sofort, Klick-Salven laufen
-        nach ein paar Sprüngen wieder in den regulären Takt.
+        Früher übersprang ein Klick den laufenden Takt und feuerte sofort
+        (``_kick_refresh_mode_after_selection``). Das war ein Extra-Request
+        neben dem gleichmäßigen Takt und hat real mit dazu beigetragen, das
+        300s-Fenster auf die Auslöseschwelle zu treiben (FALLSTRICKE #34).
+        Der konservative Weg kostet bis zu einen Takt Wartezeit (~11s bei
+        30/300s), hält die Anfragerate dafür aber unter allen Umständen
+        konstant — egal wie oft und schnell geklickt wird.
 
         Nur für Cache-Treffer gedacht: bei einem Cache-Miss ist über den
         normalen Auswahl-Pfad ohnehin schon ein (nicht-stiller) Fetch
-        unterwegs, ein zusätzlicher Sprung wäre ein doppelter Request.
+        unterwegs, eine Vormerkung wäre ein doppelter Request.
         """
-        if self._refresh_mode == "auto":
-            return
-        if self.worker.rate_limiter.headroom_fraction() < self.REFRESH_MODE_KICK_MIN_HEADROOM:
-            return
-        self._refresh_mode_next_due = 0.0
-        self._drive_refresh_mode()
+        if self._refresh_mode == "stash":
+            self._refresh_mode_priority_id = stash_id
 
     def _pick_single_target(self) -> tuple[str, str, str | None] | None:
         """Aktuell gewählte Zeile für den Single-Modus — Fach oder Charakter,
@@ -1419,26 +1496,43 @@ class MainWindow(QMainWindow):
         Fächer.
 
         Sobald eine solche Runde vollständig war (`_stash_mode_round_picks`
-        erreicht die Anzahl der aktuell gefüllten Fächer), hängt sich EIN
-        zusätzlicher Pick für das nächste noch leere Fach an, danach beginnt
-        die Zählung neu. Bewusst kein fester Anteil (z. B. "jeder 10.
-        Pick") — die Häufigkeit soll sich automatisch an die Truhengröße
-        anpassen. Der Rundlauf durch die leeren Fächer
+        erreicht die Anzahl der aktuell gefüllten Fächer), passiert ZWEIERLEI:
+        ein zusätzlicher Pick für das nächste noch leere Fach hängt sich an
+        (sofern eins existiert), UND `_stash_mode_list_refresh_due` wird für
+        den NÄCHSTEN Tick gesetzt — `_drive_refresh_mode` löst daraus einen
+        stillen `FetchStashListJob` aus, der Umsortierungen/neue/entfernte
+        Fächer aufdeckt, die ein reiner Item-Sweep nie bemerken würde. Danach
+        beginnt die Zählung neu. Bewusst kein fester Anteil (z. B. "jeder 10.
+        Pick") für beides — die Häufigkeit soll sich automatisch an die
+        Truhengröße anpassen. Der Rundlauf durch die leeren Fächer
         (`_stash_mode_coverage_cursor`) folgt der FÄCHERREIHENFOLGE, nicht
         dem Alter: verschiebt der Nutzer im Spiel ein Fach weiter nach
         vorne, rückt es in `_leaf_stashes` ebenso weiter nach vorne und ist
         dadurch beim Rundlauf schneller wieder dran."""
         if not self._leaf_stashes:
             return None
+        # Ein bewusst angeklicktes Fach drängelt sich einmalig nach vorn,
+        # ohne einen Extra-Request auszulösen (§_prioritise_selection_in_refresh_mode).
+        # Zählt als normaler Pick der laufenden Runde, damit die
+        # Leer-Fach-Abdeckung dadurch nicht ins Stocken gerät.
+        if self._refresh_mode_priority_id is not None:
+            priority_id, self._refresh_mode_priority_id = self._refresh_mode_priority_id, None
+            for stash in self._leaf_stashes:
+                if stash.id == priority_id:
+                    self._stash_mode_round_picks += 1
+                    return stash
         item_counts = self._item_counts_for_current_league()
         non_empty = [s for s in self._leaf_stashes if item_counts.get(s.id)]
         empty = [s for s in self._leaf_stashes if not item_counts.get(s.id)]
 
-        if non_empty and empty and self._stash_mode_round_picks >= len(non_empty):
-            candidate = empty[self._stash_mode_coverage_cursor % len(empty)]
-            self._stash_mode_coverage_cursor += 1
+        if non_empty and self._stash_mode_round_picks >= len(non_empty):
             self._stash_mode_round_picks = 0
-            return candidate
+            self._stash_mode_list_refresh_due = True
+            if empty:
+                candidate = empty[self._stash_mode_coverage_cursor % len(empty)]
+                self._stash_mode_coverage_cursor += 1
+                return candidate
+            # Keine leeren Fächer (alles bekannt gefüllt) -> normaler Pick unten.
 
         league_loaded = self._last_loaded.get(self._current_league, {})
 
@@ -1471,7 +1565,10 @@ class MainWindow(QMainWindow):
         Policy eingemischt und den Takt verfälscht (real beobachtet: 35s
         statt der erwarteten ~10s). Ausgelöst wird dieser Timer-artige Takt
         vom 1-Sekunden-Tick in ``_update_auto_refresh_countdown`` — kein
-        eigener QTimer nötig.
+        eigener QTimer nötig. Die Fälligkeit des nächsten Takts setzt nicht
+        diese Methode, sondern ``_note_refresh_mode_job_done`` beim Eintreffen
+        der Antwort — siehe dort, warum das nicht schon beim Absenden passieren
+        darf.
 
         Anders als Auto (§_auto_refresh_blocked_reason) wird KEIN
         Rate-Limit-Budget für manuelle Klicks reserviert — das ist hier
@@ -1482,6 +1579,12 @@ class MainWindow(QMainWindow):
         if (self._refresh_mode_pending or not self._logged_in
                 or not self._current_league or self._current_league_is_archived()):
             return
+        if self._bulk_dialog is not None:
+            # "Load All Tabs" taktet sich selbst durch die ganze Truhe
+            # (§ApiWorker._fetch_all_items). Liefe der Modus daneben weiter,
+            # verdoppelte sich die Anfragerate und beide zusammen liefen
+            # prompt in die 300s-Sperre, die jeder für sich vermeidet.
+            return
         now = time.monotonic()
         if now < self._refresh_mode_next_due:
             return
@@ -1491,8 +1594,6 @@ class MainWindow(QMainWindow):
                 return
             kind, ident, parent_id = target
             self._refresh_mode_pending = True
-            self._refresh_mode_next_due = now + self.worker.rate_limiter.steady_pace_interval_s(
-                self._refresh_mode_policy)
             if kind == "stash":
                 self.worker.submit(FetchStashItemsJob(
                     self._current_league, ident, self._current_tab_name,
@@ -1500,12 +1601,19 @@ class MainWindow(QMainWindow):
             else:
                 self.worker.submit(FetchCharacterItemsJob(ident, silent=True))
         elif self._refresh_mode == "stash":
+            if self._stash_mode_list_refresh_due:
+                # Eine Runde durch die gefüllten Fächer ist durch (§_pick_
+                # stash_mode_candidate) — jetzt einmalig die Fach-LISTE
+                # auffrischen statt eines weiteren Items-Picks, sonst würden
+                # Umsortierungen/neue/entfernte Fächer im Spiel nie sichtbar.
+                self._stash_mode_list_refresh_due = False
+                self._refresh_mode_pending = True
+                self.worker.submit(FetchStashListJob(self._current_league, silent=True))
+                return
             candidate = self._pick_stash_mode_candidate()
             if candidate is None:
                 return
             self._refresh_mode_pending = True
-            self._refresh_mode_next_due = now + self.worker.rate_limiter.steady_pace_interval_s(
-                self._refresh_mode_policy)
             self.worker.submit(FetchStashItemsJob(
                 self._current_league, candidate.id, candidate.display_name,
                 parent_id=candidate.parent, silent=True))
@@ -1552,8 +1660,14 @@ class MainWindow(QMainWindow):
                 parent_id=candidate.parent, silent=True))
 
     def _update_auto_refresh_label(self) -> None:
-        """Zähler rechts in der Statusleiste: „Auto-refresh: X of Y stash tabs updated“."""
-        total = len(self._leaf_stashes)
+        """Zähler rechts in der Statusleiste: „Auto-refresh: X of Y stash tabs updated“.
+
+        "Y" ist die Zahl echter Truhenplätze (eindeutige Werte aus
+        ``_tab_positions()``), NICHT ``len(self._leaf_stashes)`` — das zählt
+        jede Map-/Unique-Sektion einzeln und blähte "Y" real auf 939 statt
+        391 tatsächlicher Fächer auf (FALLSTRICKE #36). ``_count_silent_
+        refresh`` zählt "X" in derselben Einheit, sonst passt der Bruch nicht."""
+        total = len(set(self._tab_positions().values()))
         if not total:
             self._auto_refresh_label.setText("")
             return
