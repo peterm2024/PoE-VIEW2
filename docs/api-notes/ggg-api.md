@@ -125,6 +125,17 @@ zuverlässig gefüllt.
 
 - `metadata.colour` ist Hex **ohne** `#`-Präfix.
 - Kind-Tabs tragen ein `folder`-Feld mit der ID des Eltern-Ordners.
+- **Ordner-Inhalte kommen in der Praxis FLACH**, nicht wie oben verschachtelt:
+  jedes Mitglied steht als eigener Eintrag auf oberster Ebene, erkennbar nur
+  am gesetzten `folder`, während das `children`-Feld des Ordners leer bleibt.
+  In der echten Standard-Liga (2026-07) waren 121 der 165 Einträge der
+  obersten Ebene solche Ordner-Mitglieder. Beide Formen müssen unterstützt
+  werden, siehe `MainWindow._nest_folder_members` und FALLSTRICKE #38.
+- Der `index` eines Ordner-Mitglieds setzt die Zählung seines Ordners fort
+  (Ordner "Special" idx=11 → Mitglieder 12–24) und **überschneidet sich mit
+  denen anderer Ordner** ("M\*" idx=12 → Mitglieder 13–17). Ordnet man die
+  flache Liste nach `index`, landen fremde Ordner mitten in den Mitgliedern
+  eines anderen.
 - Beobachtete Typen: `Folder`, `QuadStash`, `CurrencyStash`, `MapStash`,
   `UniqueStash`, `GemStash`. Das Datenmodell hält `type` bewusst als
   freien String, nicht als Enum.

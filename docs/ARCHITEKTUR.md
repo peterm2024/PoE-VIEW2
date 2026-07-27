@@ -740,7 +740,26 @@ Die Items eines Unter-Tabs kommen ausschließlich vom
 Spezial-Tabs NICHT. Ohne Gegenmaßnahme würde jeder Listen-Refresh (Liga-
 Wechsel, "Aktualisieren") die bereits entdeckten Kinder wieder verwerfen —
 `MainWindow._merge_known_children()` überträgt sie deshalb in jede frisch
-geladene Liste, bevor sie den alten Baum ersetzt.
+geladene Liste, bevor sie den alten Baum ersetzt. Auf **Ordner** wird dabei
+nicht gepfropft (`elif not stash.is_folder`): die füllt `_nest_folder_members`
+aus der Liste selbst, ein leerer Ordner ist also echt leer — sonst kämen im
+Spiel herausgezogene Fächer wieder zurück.
+
+**Ordner kommen flach (§`_nest_folder_members`, FALLSTRICKE #38):** Anders als
+das Beispiel in `docs/api-notes/ggg-api.md` nahelegt, liefert GGG die Fächer
+eines Ordners nicht im `children`-Array des Ordners, sondern als eigene
+Einträge auf oberster Ebene, erkennbar allein am gesetzten `folder`-Feld
+(echte Standard-Liga: 121 von 165 Einträgen). Ohne Umformung stünden sie im
+Baum oben statt im Ordner und schöben sich zwischen die echten Fächer — die
+Reihenfolge wich dadurch sichtbar von der im Spiel ab. `_nest_folder_members()`
+hängt sie unter ihren Ordner und läuft an **beiden** Eintrittspunkten: in
+`_on_stash_list` vor dem Merge und beim Cache-Laden (`_load_cache`), damit
+bestehende Caches ohne Listen-Refresh geheilt werden. Kennt ein Ordner ein
+Mitglied bereits, ersetzt der frische Eintrag den alten und übernimmt dessen
+entdeckte Unter-Tabs — das beseitigt Dubletten, die vorher entstanden, wenn
+ein Ordner sowohl flach als auch gepfropft im Baum hing. Die Zählsemantik
+(§4.7.1, `_tab_positions()`) bleibt unberührt: jedes echte Fach behält genau
+eine Nummer, Ordner selbst bekommen keine.
 
 **Sektions-Gruppierung im Baum (nur Anzeige):** Ein Map-Stash kann 100+
 Fächer haben — flach war das "uferlos". Der `StashTree`

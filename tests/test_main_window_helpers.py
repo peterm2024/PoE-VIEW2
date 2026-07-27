@@ -1576,6 +1576,118 @@ def test_on_stash_children_shows_aggregate_count_on_parent_node(qapp) -> None:
     win.worker.wait(5000)
 
 
+# --- Ordner: flache API-Liste in echte Verschachtelung bringen (#38) ----- #
+
+def _folder(folder_id: str, name: str, index: int) -> StashTab:
+    return StashTab.model_validate({"id": folder_id, "name": name, "type": "Folder",
+                                     "index": index, "metadata": {"folder": True}})
+
+
+def _in_folder(stash_id: str, name: str, folder_id: str, index: int) -> StashTab:
+    return StashTab.model_validate({"id": stash_id, "name": name, "type": "CurrencyStash",
+                                     "index": index, "folder": folder_id, "metadata": {}})
+
+
+def test_folder_members_are_nested_under_their_folder(qapp) -> None:
+    """GGG liefert die Fächer flach; ein Fach im Ordner trägt nur ``folder``.
+
+    Die Mitglieder-Indizes setzen die Zählung ihres Ordners fort und
+    überschneiden sich zwischen Ordnern (echte Standard-Liga: Ordner "Special"
+    idx=11 mit Mitgliedern 12–24, Ordner "M*" idx=12 mit 13–17). In der nach
+    index sortierten API-Liste schiebt sich der zweite Ordner deshalb mitten
+    zwischen die Mitglieder des ersten — genau die Abweichung zur Reihenfolge
+    im Spiel (FALLSTRICKE #38)."""
+    flat = [
+        StashTab.model_validate({"id": "a", "name": "Erstes Fach", "index": 0,
+                                 "type": "CurrencyStash", "metadata": {}}),
+        _folder("dir1", "Ordner 1", 1),
+        _in_folder("f1", "Drin 1", "dir1", 2),
+        _folder("dir2", "Ordner 2", 2),        # gleicher index wie f1
+        _in_folder("f2", "Drin 2", "dir1", 3),
+        _in_folder("g1", "Drin A", "dir2", 3),
+        _in_folder("g2", "Drin B", "dir2", 4),
+    ]
+
+    top = MainWindow._nest_folder_members(flat)
+
+    assert [s.id for s in top] == ["a", "dir1", "dir2"]
+    assert [c.id for c in top[1].children] == ["f1", "f2"]
+    assert [c.id for c in top[2].children] == ["g1", "g2"]
+
+
+def test_folder_member_known_from_an_earlier_fetch_is_not_duplicated(qapp) -> None:
+    """In SSF Ruthless standen 47 Fächer doppelt im Baum: einmal flach oben,
+    einmal im Ordner, nachdem dieser abgerufen worden war. Der frische Eintrag
+    ersetzt den bekannten, entdeckte Unter-Tabs bleiben erhalten."""
+    folder = _folder("dir", "Ordner", 0)
+    known = _in_folder("f1", "Alter Name", "dir", 0)
+    known.children = [_map_child("c1", "f1", "Beach Map")]
+    folder.children = [known]
+    fresh = _in_folder("f1", "Neuer Name", "dir", 0)
+
+    top = MainWindow._nest_folder_members([folder, fresh])
+
+    assert [s.id for s in top] == ["dir"]
+    assert len(top[0].children) == 1, "kein zweiter Eintrag für dasselbe Fach"
+    assert top[0].children[0].name == "Neuer Name"
+    assert [c.id for c in top[0].children[0].children] == ["c1"]
+
+
+def test_folder_member_with_unknown_folder_id_stays_visible(qapp) -> None:
+    """Zeigt ``folder`` ins Leere, bleibt das Fach oben stehen — an der
+    falschen Stelle sichtbar ist besser als unsichtbar."""
+    orphan = _in_folder("f1", "Waise", "gibt-es-nicht", 0)
+
+    top = MainWindow._nest_folder_members([_folder("dir", "Ordner", 0), orphan])
+
+    assert [s.id for s in top] == ["dir", "f1"]
+
+
+def test_stash_list_refresh_does_not_resurrect_removed_folder_members(qapp) -> None:
+    """Ein Ordner wird jetzt aus der Liste selbst gefüllt — ein LEERER Ordner
+    ist damit echt leer. Ohne die is_folder-Ausnahme im Merge holte er sich
+    seine alten Mitglieder zurück, im Spiel gelöschte Fächer tauchten wieder auf."""
+    win = MainWindow()
+    win._current_league = "Standard"
+    old_folder = _folder("dir", "Ordner", 0)
+    old_folder.children = [_in_folder("f1", "Rausgezogen", "dir", 0)]
+    win._stash_trees["Standard"] = [old_folder]
+
+    # Frische Liste: Ordner noch da, aber ohne Mitglieder
+    win._on_stash_list([_folder("dir", "Ordner", 0)], silent=False)
+
+    assert win._stash_trees["Standard"][0].children == []
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_stash_list_nests_folders_end_to_end(qapp) -> None:
+    """Der ganze Weg: flache API-Liste rein, verschachtelter Baum raus —
+    inklusive Pos.-Spalte, die weiter jedes echte Fach zählt (Ordner selbst
+    bekommen keine Nummer)."""
+    win = MainWindow()
+    win._current_league = "Standard"
+    flat = [
+        StashTab.model_validate({"id": "a", "name": "Fach A", "index": 0,
+                                 "type": "CurrencyStash", "metadata": {}}),
+        _folder("dir", "Ordner", 1),
+        _in_folder("f1", "Drin 1", "dir", 0),
+        _in_folder("f2", "Drin 2", "dir", 1),
+    ]
+
+    win._on_stash_list(flat, silent=False)
+
+    tree = win._stash_trees["Standard"]
+    assert [s.id for s in tree] == ["a", "dir"]
+    assert [c.id for c in tree[1].children] == ["f1", "f2"]
+    assert win._tab_positions() == {"a": 1, "f1": 2, "f2": 3}
+    assert win.tree.topLevelItemCount() == 2
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
 def test_merge_known_children_survives_stash_list_refresh(qapp) -> None:
     """Die Liga-LISTE kennt Spezial-Tab-Kinder nicht — ohne Merge wären sie nach
     jedem Listen-Refresh/Liga-Wechsel wieder weg."""

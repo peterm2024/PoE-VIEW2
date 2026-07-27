@@ -185,7 +185,12 @@ class MainWindow(QMainWindow):
         if cached is None:
             return
         self._all_characters = cached.characters
-        self._stash_trees = cached.stash_trees
+        # Ältere Caches liegen noch flach vor (Ordner-Inhalte auf oberster
+        # Ebene, teils zusätzlich im Ordner) — beim Laden einmal aufräumen,
+        # sonst zeigt der Baum bis zum nächsten Listen-Refresh die alte,
+        # falsche Reihenfolge samt Dubletten (§_nest_folder_members).
+        self._stash_trees = {league: self._nest_folder_members(tree)
+                             for league, tree in cached.stash_trees.items()}
         self._items = cached.items_by_league
         self._last_loaded = cached.last_loaded
         self._character_items = cached.character_items
@@ -690,6 +695,10 @@ class MainWindow(QMainWindow):
         Stash-Modus (§_drive_refresh_mode) — deckt Umsortierungen/neue/
         entfernte Fächer auf, die ein reiner Item-Sweep nie bemerken würde,
         ohne den laufenden Sweep selbst zu unterbrechen."""
+        # Erst die flache Liste in die echte Ordner-Struktur bringen, dann
+        # mergen: so füllen sich die Ordner aus der Liste selbst und der Merge
+        # kümmert sich nur noch um Spezial-Tab-Kinder (§_nest_folder_members).
+        stashes = self._nest_folder_members(stashes)
         # Die Liga-LISTE der API kennt die Kinder von Spezial-Tabs (MapStash,
         # UniqueStash) nicht — ohne Merge gingen bereits entdeckte Unter-Tabs
         # bei jedem Listen-Refresh/Liga-Wechsel wieder verloren.
@@ -708,10 +717,55 @@ class MainWindow(QMainWindow):
             self._note_refresh_mode_job_done()
 
     @staticmethod
+    def _nest_folder_members(stashes: list[StashTab]) -> list[StashTab]:
+        """Ordner-Inhalte aus der flachen API-Liste unter ihren Ordner hängen.
+
+        GGG liefert die Fächer FLACH: ein Fach, das im Spiel in einem Ordner
+        liegt, kommt als ganz normaler Listeneintrag mit ``folder`` = ID des
+        Ordners. Dessen ``index`` setzt die Zählung des Ordners fort und
+        überschneidet sich mit der anderer Ordner — als Truhen-Position ist er
+        ohnehin unbrauchbar (FALLSTRICKE #21). Ohne diese Umformung landen die
+        Ordner-Inhalte auf der obersten Ebene und schieben sich zwischen die
+        echten Fächer; die Baum-Reihenfolge weicht dadurch von der im Spiel ab
+        und die Ordner bleiben leer (FALLSTRICKE #38).
+
+        Ein Mitglied, das der Ordner bereits kennt (aus einem früheren Abruf
+        grafted), wird ersetzt statt ein zweites Mal eingehängt — sonst stünde
+        dasselbe Fach zweimal im Baum. Bereits entdeckte Unter-Tabs des
+        alten Eintrags bleiben dabei erhalten.
+
+        Zeigt ``folder`` auf eine unbekannte ID, bleibt das Fach oben stehen:
+        besser an der falschen Stelle sichtbar als gar nicht.
+        """
+        folders = {s.id: s for s in stashes if s.is_folder}
+        if not folders:
+            return list(stashes)
+        top: list[StashTab] = []
+        for stash in stashes:
+            parent = folders.get(stash.folder) if stash.folder else None
+            if parent is None or parent is stash:
+                top.append(stash)
+                continue
+            for i, known in enumerate(parent.children):
+                if known.id == stash.id:
+                    if not stash.children and known.children:
+                        stash.children = known.children
+                    parent.children[i] = stash
+                    break
+            else:
+                parent.children.append(stash)
+        return top
+
+    @staticmethod
     def _merge_known_children(new_stashes: list[StashTab],
                               old_stashes: list[StashTab]) -> None:
         """Überträgt in früheren Abrufen entdeckte Spezial-Tab-Kinder in die
-        frisch geladene Stash-Liste (in-place)."""
+        frisch geladene Stash-Liste (in-place).
+
+        Läuft nach ``_nest_folder_members``, die Ordner also bereits aus der
+        Liste selbst gefüllt. Ein LEERER Ordner ist damit echt leer und darf
+        seine alten Mitglieder nicht zurückbekommen — sonst tauchten im Spiel
+        gelöschte oder herausgezogene Fächer wieder auf."""
         old_by_id: dict[str, StashTab] = {}
 
         def index(stashes: list[StashTab]) -> None:
@@ -723,7 +777,7 @@ class MainWindow(QMainWindow):
             for stash in stashes:
                 if stash.children:
                     graft(stash.children)  # Ordner: Kinder kommen aus der Liste selbst
-                else:
+                elif not stash.is_folder:
                     old = old_by_id.get(stash.id)
                     if old is not None and old.children:
                         stash.children = old.children

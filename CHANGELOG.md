@@ -72,6 +72,13 @@ nach [SemVer](https://semver.org/lang/de/).
 - Derselbe Zähl-Fehler betraf auch den Auto-Refresh-Zähler in der
   Statuszeile ("X of Y stash tabs updated") — Y zeigte die aufgeblähte
   Zahl ladbarer Einheiten (939) statt der tatsächlichen Fächer-Anzahl.
+- Die Reihenfolge im Stash-Baum wich sichtbar von der im Spiel ab: Fächer,
+  die im Spiel in einem Ordner liegen, standen auf der obersten Ebene und
+  schoben sich zwischen die echten Fächer, während die Ordner leer blieben
+  (in einer echten Truhe 165 statt 44 Einträge oben). Ordner-Inhalte hängen
+  jetzt in ihrem Ordner, auch ohne ihn vorher anzuklicken.
+- Nach dem Öffnen eines Ordners konnten dessen Fächer doppelt im Baum
+  stehen — einmal oben, einmal im Ordner (in einer Liga 47 Fächer).
 - Und ein drittes Mal denselben Fehler: der Fortschrittsbalken von
   "Load All Tabs" zeigte z. B. "58/561" statt "58/391" — mehrere
   Map-/Unique-Sektionen desselben Fachs zählten als mehrere Tabs statt
