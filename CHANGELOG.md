@@ -35,6 +35,14 @@ nach [SemVer](https://semver.org/lang/de/).
   zusätzlich einmal die Fach-**Liste** still nach — Umsortierungen, neue
   oder entfernte Fächer im Spiel werden dadurch automatisch erkannt, ohne
   auf einen manuellen Refresh oder Liga-Wechsel zu warten.
+- Typ-Filter-Symbole (Toolbar) reagieren jetzt auf drei Gesten statt nur
+  simplem An/Aus: ein Klick zeigt nur diesen einen Typ, Strg+Klick
+  schaltet gezielt einen weiteren Typ dazu oder wieder raus, und
+  Strg+Umschalt+Klick sowie Doppelklick zeigen wieder alle Typen.
+- Summe der Stack-Größe der gerade sichtbaren (gefilterten) Items in der
+  Statuszeile — reagiert live auf Suche, Spalten- und Typ-Filter. Erscheint
+  nur, wenn genau ein Item-Name sichtbar ist (sonst wäre die Summe über
+  verschiedene Item-Typen hinweg bedeutungslos).
 
 ### Geändert
 
@@ -49,6 +57,10 @@ nach [SemVer](https://semver.org/lang/de/).
 - "Load All Tabs" beginnt jetzt mit den ältesten bzw. noch nie geladenen
   Fächern statt mit der zufälligen Truhen-Reihenfolge — bricht man vorzeitig
   ab, sind die dringendsten Fächer schon durch.
+- Stash-Baum standardmäßig breiter (340 statt 260px), damit Name-, Anzahl-,
+  Status- und Pos.-Spalte ohne manuelles Nachziehen sichtbar sind;
+  Fensterbreite entsprechend erhöht, damit die Toolbar-Suche nicht hinter
+  "…" verschwindet.
 
 ### Behoben
 
@@ -88,6 +100,23 @@ nach [SemVer](https://semver.org/lang/de/).
   direkt hintereinander, was die nächste Pause auslöste. Der Takt zählt
   jetzt ab dem Eintreffen der Antwort statt ab dem Absenden und hält
   zusätzlich einen Request Sicherheitsabstand zur Sperrschwelle.
+- Die Suche fand Implicit-Mods nicht — nur explicitMods flossen in den
+  Suchindex ein, obwohl implicitMods im Datenmodell längst vorhanden war.
+- Die Suche filterte bei jedem Tastendruck sofort — bei einem liga-weiten
+  Aggregat mit mehreren zehntausend Items (z. B. "All Tabs" oder "*")
+  spürbar langsam. Der Zeilen-Filter läuft jetzt gedämpft (350ms nach dem
+  letzten Tastendruck).
+- Die neue Stack-Summen-Anzeige (siehe oben) konnte bei einer Suche über
+  ein liga-weites Aggregat mit stark verstreuten Treffern eine
+  Zwangspause von mehreren Minuten auslösen — pro betroffener Zeile lief
+  eine eigene Neuberechnung über die komplette sichtbare Menge statt
+  einmal pro Sucheingabe.
+- Bei sehr großen Ligen (deutlich mehr Fächer/Items als üblich) baute die
+  Suche beim ersten Tastendruck das komplette ungefilterte Aggregat auf,
+  bevor überhaupt gefiltert wurde — je nach Größe mehrere Sekunden
+  Verzögerung, die kein Dämpfer beheben konnte. Oberhalb von 50.000 Items
+  läuft die Suche jetzt "on demand": Sanduhr statt Live-Filterung, das
+  Ergebnis erscheint, sobald man kurz aufhört zu tippen.
 
 ## [0.1.0] - 2026-07-25
 

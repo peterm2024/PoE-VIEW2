@@ -63,6 +63,24 @@ def test_filter_matches_explicit_mods(qapp) -> None:
     assert proxy.data(proxy.index(0, 3), Qt.ItemDataRole.DisplayRole) == "Beach Map"
 
 
+def test_filter_matches_implicit_mods(qapp) -> None:
+    """Implicits fehlten bisher im Suchindex — nur explicitMods wurden
+    durchsucht, obwohl implicitMods im Datenmodell längst vorhanden ist."""
+    model = ItemTableModel()
+    ring_with_implicit = Item.model_validate({
+        "typeLine": "Sapphire Ring",
+        "implicitMods": ["+30% to Cold Resistance"],
+    })
+    model.set_items([ring_with_implicit, make_item("Topaz Ring")], ["Belt", "Belt"])
+    proxy = ItemFilterProxy()
+    proxy.setSourceModel(model)
+
+    proxy.setFilterFixedString("cold resistance")
+
+    assert proxy.rowCount() == 1
+    assert proxy.data(proxy.index(0, 3), Qt.ItemDataRole.DisplayRole) == "Sapphire Ring"
+
+
 def test_filter_matches_property_text(qapp) -> None:
     """Suche nach "Quantity" fand nur die Chisel (Mod-Text),
     nicht die Maps selbst — deren Quantity/Rarity/Drop Chance stecken als

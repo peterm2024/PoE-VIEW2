@@ -2023,6 +2023,169 @@ def test_auto_refresh_passes_parent_id_for_special_tab_children(qapp, monkeypatc
 
 # --- Fächerübergreifende Suche + Spalten-Filter ---------- #
 
+def test_search_filter_is_debounced_not_applied_immediately(qapp) -> None:
+    """Peter: bei ~20000 Items in "All Tabs" machte sofortiges Filtern bei
+    jedem Tastendruck die Suche langwierig. Der eigentliche Zeilen-Filter
+    läuft deshalb gedämpft (SEARCH_DEBOUNCE_MS) statt synchron mit jedem
+    textChanged. ``_search_all_active`` wird hier schon vorab gesetzt, damit
+    der Tastendruck nicht zusätzlich ``_enter_search_all()`` auslöst (das
+    würde die manuell gesetzten Items mit dem — hier leeren — Liga-Aggregat
+    überschreiben und ist nicht Gegenstand dieses Tests)."""
+    win = MainWindow()
+    win._search_all_active = True
+    win.table_model.set_items([
+        Item.model_validate({"typeLine": "Chaos Orb"}),
+        Item.model_validate({"typeLine": "Exalted Orb"}),
+    ])
+    assert win.proxy.rowCount() == 2
+
+    win._filter_edit.setText("chaos")
+
+    assert win.proxy.rowCount() == 2  # noch nicht angewendet
+    assert win._search_debounce.isActive()
+    win._apply_debounced_search_filter()
+    assert win.proxy.rowCount() == 1  # jetzt schon
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_search_debounce_uses_the_configured_interval(qapp) -> None:
+    win = MainWindow()
+
+    assert win._search_debounce.interval() == MainWindow.SEARCH_DEBOUNCE_MS
+    assert win._search_debounce.isSingleShot()
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+# --- "On demand"-Suche fuer sehr grosse Ligen (FALLSTRICKE #40) ---------- #
+
+def _setup_large_league(win, item_count: int) -> None:
+    win._current_league = "Standard"
+    t1 = _make_leaf("t1", "Currency 1")
+    win._stash_trees["Standard"] = [t1]
+    win._leaf_stashes = [t1]
+    win._items["Standard"] = {
+        "t1": [Item.model_validate({"typeLine": f"Item {i}"}) for i in range(item_count)]}
+
+
+def test_enter_search_all_switches_to_on_demand_above_the_limit(qapp, monkeypatch) -> None:
+    """Oberhalb LIVE_SEARCH_ITEM_LIMIT baut die Suche das komplette
+    ungefilterte Aggregat NICHT als Qt-Modell auf (kostet bei sehr großen
+    Ligen mehrere Sekunden, Peter 2026-07-28: "andere haben noch viel
+    größere Truhen") — nur zwischenspeichern und auf den Dämpfer warten."""
+    monkeypatch.setattr(MainWindow, "LIVE_SEARCH_ITEM_LIMIT", 3)
+    win = MainWindow()
+    _setup_large_league(win, 5)
+
+    win._filter_edit.setText("item")
+
+    assert win._large_search_items is not None
+    assert win.table_model.rowCount() == 0  # noch nicht befüllt
+    assert "5 items in this league" in win._status_msg.text()
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_below_the_limit_stays_in_live_mode(qapp, monkeypatch) -> None:
+    monkeypatch.setattr(MainWindow, "LIVE_SEARCH_ITEM_LIMIT", 10)
+    win = MainWindow()
+    _setup_large_league(win, 5)
+
+    win._filter_edit.setText("item")
+
+    assert win._large_search_items is None
+    assert win.table_model.rowCount() == 5  # sofort komplett befüllt, wie bisher
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_large_search_populates_only_matches_after_the_debounce(qapp, monkeypatch) -> None:
+    monkeypatch.setattr(MainWindow, "LIVE_SEARCH_ITEM_LIMIT", 3)
+    win = MainWindow()
+    win._current_league = "Standard"
+    t1 = _make_leaf("t1", "Currency 1")
+    win._stash_trees["Standard"] = [t1]
+    win._leaf_stashes = [t1]
+    win._items["Standard"] = {"t1": [
+        Item.model_validate({"typeLine": "Chaos Orb"}),
+        Item.model_validate({"typeLine": "Exalted Orb"}),
+        Item.model_validate({"typeLine": "Divine Orb"}),
+        Item.model_validate({"typeLine": "Regal Orb"}),
+    ]}
+
+    win._filter_edit.setText("chaos")
+    assert win.table_model.rowCount() == 0  # Dämpfer: noch nicht angewendet
+
+    win._apply_debounced_search_filter()
+
+    assert win.table_model.rowCount() == 1
+    assert win.table_model.item_at(0).typeLine == "Chaos Orb"
+    assert "1 of 4 items match" in win._status_msg.text()
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_large_search_wildcard_shows_everything(qapp, monkeypatch) -> None:
+    monkeypatch.setattr(MainWindow, "LIVE_SEARCH_ITEM_LIMIT", 3)
+    win = MainWindow()
+    _setup_large_league(win, 5)
+
+    win._filter_edit.setText("*")
+    win._apply_debounced_search_filter()
+
+    assert win.table_model.rowCount() == 5
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_large_search_shows_a_wait_cursor_while_filtering(qapp, monkeypatch) -> None:
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QApplication
+    monkeypatch.setattr(MainWindow, "LIVE_SEARCH_ITEM_LIMIT", 3)
+    win = MainWindow()
+    _setup_large_league(win, 5)
+
+    calls: list[tuple] = []
+    monkeypatch.setattr(QApplication, "setOverrideCursor",
+                        lambda shape: calls.append(("set", shape)))
+    monkeypatch.setattr(QApplication, "restoreOverrideCursor",
+                        lambda: calls.append(("restore",)))
+
+    win._filter_edit.setText("item")
+    win._apply_debounced_search_filter()
+
+    assert calls[0] == ("set", Qt.CursorShape.WaitCursor)
+    assert calls[-1] == ("restore",)
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_clearing_the_search_field_leaves_on_demand_mode(qapp, monkeypatch) -> None:
+    monkeypatch.setattr(MainWindow, "LIVE_SEARCH_ITEM_LIMIT", 3)
+    win = MainWindow()
+    _setup_large_league(win, 5)
+    monkeypatch.setattr(win.worker, "submit", lambda job: None)
+
+    win._filter_edit.setText("item")
+    assert win._large_search_items is not None
+
+    win._filter_edit.setText("")
+
+    assert win._large_search_items is None
+    assert not win._search_all_active
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
 def test_typing_in_search_switches_to_league_wide_view(qapp, monkeypatch) -> None:
     """Tippen sucht über alle geladenen Fächer der Liga; Leeren des Felds
     führt zurück zum vorher gewählten Fach — alles ohne API-Call."""
@@ -2044,6 +2207,7 @@ def test_typing_in_search_switches_to_league_wide_view(qapp, monkeypatch) -> Non
 
     win._filter_edit.setText("essence")          # tippen → liga-weite Ansicht
     assert win.table_model.rowCount() == 2       # Model hält alle Items der Liga
+    win._apply_debounced_search_filter()         # Zeilen-Filter läuft gedämpft, hier erzwungen
     assert win.proxy.rowCount() == 1             # Filter zeigt nur den Treffer
     assert win.proxy.data(win.proxy.index(0, 3),
                           Qt.ItemDataRole.DisplayRole) == "Deafening Essence of Greed"
@@ -2180,6 +2344,7 @@ def test_asterisk_search_shows_and_exports_entire_league(qapp, monkeypatch) -> N
     win._show_items("t1", win._items["Standard"]["t1"], "Currency 1")
 
     win._filter_edit.setText("*")
+    win._apply_debounced_search_filter()  # Zeilen-Filter läuft gedämpft, hier erzwungen
 
     assert win.proxy.rowCount() == 2  # alles, nicht nur der zuvor gewählte Tab
     rows = win._visible_rows()  # das nutzt der CSV-Export
@@ -2244,6 +2409,135 @@ def test_offline_changed_shows_banner_and_marks_tree(qapp) -> None:
     win.worker.wait(5000)
 
 
+# --- Stack-Summe in der Statuszeile ------------------------------- #
+
+def test_stack_sum_label_shows_total_of_same_named_stackable_items(qapp) -> None:
+    """Peters Wunsch: die Stack-Größe soll nicht mehr von Hand
+    zusammengezählt werden müssen. Ausrüstung ohne Stack-Größe (Headhunter)
+    zählt nicht als "Stack von 1" mit."""
+    win = MainWindow()
+    win.table_model.set_items([
+        Item.model_validate({"typeLine": "Chaos Orb", "stackSize": 14}),
+        Item.model_validate({"typeLine": "Chaos Orb", "stackSize": 3}),
+        Item.model_validate({"typeLine": "Headhunter"}),
+    ])
+
+    assert win._stack_sum_label.text() == "Stack total: 17"
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_stack_sum_label_hidden_when_nothing_stackable_is_visible(qapp) -> None:
+    """Kein "Stack total: 0" für reine Ausrüstungsansichten — die Zeile
+    verschwindet stattdessen ganz."""
+    win = MainWindow()
+    win.table_model.set_items([Item.model_validate({"typeLine": "Headhunter"})])
+
+    assert win._stack_sum_label.text() == ""
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_stack_sum_label_hidden_when_visible_items_have_different_names(qapp) -> None:
+    """Regression: "*" (zeig alles) lieferte "Stack total: 604.911" quer
+    über die ganze Liga — Chaos Orbs, Portal Scrolls, Divine Orbs usw. alle
+    in einer Zahl zusammengezählt, was nichts aussagt (Peter, 2026-07-28).
+    Die Summe ist nur sinnvoll, wenn genau EIN Item-Name sichtbar ist."""
+    win = MainWindow()
+    win.table_model.set_items([
+        Item.model_validate({"typeLine": "Chaos Orb", "stackSize": 14}),
+        Item.model_validate({"typeLine": "Exalted Orb", "stackSize": 3}),
+    ])
+
+    assert win._stack_sum_label.text() == ""
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_stack_sum_label_follows_the_search_filter(qapp) -> None:
+    """_update_stack_sum() hängt bewusst NICHT an rowsInserted/rowsRemoved
+    (FALLSTRICKE #39, zweiter Teil — das war O(n²)), sondern wird explizit
+    aus _apply_debounced_search_filter() aufgerufen. Der Weg über
+    _filter_edit + _apply_debounced_search_filter() statt eines direkten
+    proxy.setFilterFixedString()-Aufrufs prüft genau das."""
+    win = MainWindow()
+    win._search_all_active = True  # kein _enter_search_all()-Seiteneffekt hier
+    win.table_model.set_items([
+        Item.model_validate({"typeLine": "Chaos Orb", "stackSize": 14}),
+        Item.model_validate({"typeLine": "Exalted Orb", "stackSize": 3}),
+    ])
+    assert win._stack_sum_label.text() == ""  # gemischt, keine sinnvolle Summe
+
+    win._filter_edit.setText("chaos")
+    win._apply_debounced_search_filter()
+
+    assert win._stack_sum_label.text() == "Stack total: 14"
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_stack_sum_label_follows_the_type_filter(qapp) -> None:
+    win = MainWindow()
+    win.table_model.set_items([
+        Item.model_validate({"typeLine": "Chaos Orb", "stackSize": 14, "frameType": 5}),
+        Item.model_validate({"typeLine": "Chaos Orb", "stackSize": 3, "frameType": 5}),
+    ])
+    assert win._stack_sum_label.text() == "Stack total: 17"
+
+    win._type_checks[5].setChecked(False)  # Currency aus
+
+    assert win._stack_sum_label.text() == ""
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_stack_sum_label_uses_a_thousands_separator(qapp) -> None:
+    win = MainWindow()
+    win.table_model.set_items([Item.model_validate({"typeLine": "Chaos Orb", "stackSize": 12345})])
+
+    assert win._stack_sum_label.text() == "Stack total: 12,345"
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_search_filter_recomputes_stack_sum_exactly_once(qapp, monkeypatch) -> None:
+    """Regression FALLSTRICKE #39 (zweiter Teil): _update_stack_sum() hing
+    früher an rowsInserted/rowsRemoved des Proxys. Bei einer Textsuche über
+    ein Aggregat mit verstreuten Treffern feuert QSortFilterProxyModel
+    (sobald eine QTableView angehängt ist, wie hier immer) pro
+    zusammenhängendem Block versteckter/wieder sichtbarer Zeilen ein
+    EIGENES Signal — bei stark verstreuten Treffern waren das hunderte
+    Aufrufe, jeder mit einer erneuten O(sichtbare Zeilen)-Schleife:
+    zusammen O(n²), gemessen 9,5 Sekunden für 19704 Items bei nur EINEM
+    Tastendruck. _update_stack_sum() darf pro Suchänderung nur noch GENAU
+    EINMAL laufen — deshalb jetzt nur an modelReset gehängt und zusätzlich
+    explizit aus _apply_debounced_search_filter() aufgerufen."""
+    win = MainWindow()
+    win._search_all_active = True
+    # Jedes 7. Item passt — verstreut über die ganze Liste, erzeugt beim
+    # echten (ungepatchten) Proxy viele einzelne rowsRemoved-Blöcke.
+    items = [Item.model_validate({"typeLine": "Chaos Orb" if i % 7 == 0 else f"Item {i}"})
+            for i in range(500)]
+    win.table_model.set_items(items)
+
+    calls: list[None] = []
+    monkeypatch.setattr(win, "_update_stack_sum", lambda *a: calls.append(None))
+
+    win._filter_edit.setText("chaos")
+    win._apply_debounced_search_filter()
+
+    assert calls == [None]  # genau ein Aufruf, nicht einer pro versteckter Zeile
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
 # --- Typ-Filter-Checkboxen ------------------------------- #
 
 def test_type_checkboxes_exist_checked_by_default(qapp) -> None:
@@ -2269,6 +2563,110 @@ def test_toggling_type_checkbox_filters_table(qapp) -> None:
 
     win._type_checks[3].setChecked(True)
     assert win.proxy.rowCount() == 2
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_solo_type_filter_shows_only_the_chosen_type(qapp) -> None:
+    """Peters Wunsch: normaler Klick zeigt nur diesen einen Typ, ohne die
+    restlichen sieben einzeln abzuwählen."""
+    win = MainWindow()
+
+    win._solo_type_filter(3)  # Unique
+
+    assert [tk for tk, box in win._type_checks.items() if box.isChecked()] == [3]
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_reset_type_filters_checks_everything_again(qapp) -> None:
+    win = MainWindow()
+    win._solo_type_filter(3)
+
+    win._reset_type_filters()
+
+    assert all(box.isChecked() for box in win._type_checks.values())
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_click_on_type_checkbox_solos_it(qapp) -> None:
+    """Die eigentliche Maus-Geste, nicht nur der Handler direkt — stellt
+    sicher, dass _TypeFilterCheckBox einen modifierlosen Klick abfängt,
+    BEVOR QCheckBox ihn als normales Einzel-Umschalten verarbeitet."""
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+    win = MainWindow()
+
+    QTest.mouseClick(win._type_checks[3], Qt.MouseButton.LeftButton)
+
+    assert [tk for tk, box in win._type_checks.items() if box.isChecked()] == [3]
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_ctrl_click_on_type_checkbox_does_not_solo_or_reset(qapp) -> None:
+    """Strg+Klick (ohne Umschalt) muss an QCheckBox durchgereicht werden,
+    NICHT solo/reset auslösen — das native Einzel-Umschalten bleibt so
+    Peters Weg, zu einer eingeschränkten Ansicht einen weiteren Typ
+    hinzuzufügen oder wieder herauszunehmen. Ein echter End-to-End-Klick
+    per QTest.mouseClick ist hier absichtlich vermieden: selbst eine
+    nackte QCheckBox togglet im Offscreen-Testmodus nur nach explizitem
+    show()+Exposure zuverlässig — das ist Qt-Rendering-Infrastruktur, kein
+    Verhalten unseres Codes. Was unser Code leisten muss, ist nur das
+    korrekte DURCHREICHEN, und das prüft dieser Test direkt."""
+    from PySide6.QtCore import QPointF, Qt
+    from PySide6.QtGui import QMouseEvent
+    win = MainWindow()
+    box = win._type_checks[5]
+    solo_calls: list[bool] = []
+    reset_calls: list[bool] = []
+    box.solo_requested.connect(lambda: solo_calls.append(True))
+    box.reset_requested.connect(lambda: reset_calls.append(True))
+
+    event = QMouseEvent(QMouseEvent.Type.MouseButtonPress, QPointF(5, 5), QPointF(5, 5),
+                        Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton,
+                        Qt.KeyboardModifier.ControlModifier)
+    box.mousePressEvent(event)
+
+    assert solo_calls == []
+    assert reset_calls == []
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_ctrl_shift_click_on_type_checkbox_shows_all(qapp) -> None:
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+    win = MainWindow()
+    win._solo_type_filter(3)
+
+    QTest.mouseClick(win._type_checks[3], Qt.MouseButton.LeftButton,
+                     Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier)
+
+    assert all(box.isChecked() for box in win._type_checks.values())
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_double_click_on_type_checkbox_resets_all(qapp) -> None:
+    """Ohne die eigene mouseDoubleClickEvent-Behandlung würde Qt den
+    Doppelklick als zwei normale Klicks werten (Haken am Ende unverändert)
+    statt alle Typen zurückzusetzen."""
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+    win = MainWindow()
+    win._solo_type_filter(3)
+
+    QTest.mouseDClick(win._type_checks[5], Qt.MouseButton.LeftButton)
+
+    assert all(box.isChecked() for box in win._type_checks.values())
 
     win.worker.stop()
     win.worker.wait(5000)
@@ -2565,6 +2963,7 @@ def test_row_selection_highlights_tab_without_changing_search(qapp, monkeypatch)
     highlighted = []
 
     win._filter_edit.setText("*")
+    win._apply_debounced_search_filter()  # Zeilen-Filter läuft gedämpft, hier erzwungen
     assert win.proxy.rowCount() == 2
 
     # Zeile für "t2" (Essence) auswählen — _on_row_selected direkt aufgerufen,

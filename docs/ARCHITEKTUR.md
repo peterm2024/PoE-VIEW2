@@ -841,13 +841,104 @@ Position und Baum-Hervorhebung entfallen mangels Truhenfach. Das gilt
 gleichermaßen für "Alle Tabs laden" (`_show_aggregate`), da beide
 dieselbe Aggregationsfunktion nutzen.
 
-Die globale Suche durchsucht Name, Typ, Tab, Mods **und Properties**.
-Letzteres ist notwendig, weil Map-Attribute wie Item Quantity, Item
-Rarity, Pack Size und Map Drop Chance nicht in `explicitMods` stehen,
-sondern als eigene `properties`-Einträge
-(`{"name": "Item Quantity", "values": [["+23%", 1]]}`). Ohne deren Text
-im durchsuchten Bereich waren betroffene Maps über die Suche nicht
-auffindbar.
+Die globale Suche durchsucht Name, Typ, Tab, `explicitMods`,
+`implicitMods` **und Properties**. Properties sind notwendig, weil
+Map-Attribute wie Item Quantity, Item Rarity, Pack Size und Map Drop
+Chance nicht in `explicitMods` stehen, sondern als eigene
+`properties`-Einträge (`{"name": "Item Quantity", "values": [["+23%",
+1]]}`). Ohne deren Text im durchsuchten Bereich waren betroffene Maps
+über die Suche nicht auffindbar. `implicitMods` fehlte lange im
+Suchindex, obwohl im Datenmodell längst vorhanden — eine Suche nach
+einem Implicit (z. B. einem Ring-Widerstand) fand entsprechend nichts.
+
+**Zeilen-Filter läuft gedämpft, nicht bei jedem Tastendruck sofort**
+(`MainWindow._search_debounce`, `SEARCH_DEBOUNCE_MS = 350`, FALLSTRICKE
+#39). Bei liga-weiten Aggregaten mit mehreren zehntausend Items (Peter,
+2026-07-28: "All Tabs liefert mir 19704 Items") kostet
+`ItemFilterProxy.setFilterFixedString()` → `invalidateFilter()` →
+`filterAcceptsRow()` je Zeile spürbar Zeit — gemessen ~23-25ms pro
+kompletten Durchlauf über ~20.000 Zeilen, dominiert vom Python↔Qt-
+Aufruf-Overhead selbst, nicht vom String-Aufbau innerhalb der Zeile
+(Caching des Haystacks brachte im Benchmark keinen messbaren Unterschied,
+23 vs. 25ms). Bei jedem Tastendruck sofort angewendet, ruckelte das
+merklich. `_on_filter_text_changed()` startet deshalb nur noch einen
+Single-Shot-Timer neu (`QTimer.start()` auf einem bereits laufenden Timer
+setzt ihn zurück); erst nach 350ms Tipppause wendet
+`_apply_debounced_search_filter()` den Filter tatsächlich an. Das
+Umschalten in/aus dem Aggregat (`_enter_search_all`/`_leave_search_all`)
+bleibt bewusst SOFORT, da es ohnehin nur einmal pro Such-Session läuft,
+nicht pro Tastendruck.
+
+**Suchtext und Item-Haystack sind vorgerechnet, nicht pro Filterdurchlauf
+neu gebaut** (`ItemFilterProxy._search_text_lower`,
+`ItemTableModel._search_haystacks`/`_build_haystack()`). Bringt für den
+oben gemessenen Fall selbst kaum etwas (der Aufruf-Overhead dominiert),
+vermeidet aber unnötige Arbeit, wenn `invalidateFilter()` OHNE
+Textänderung läuft — z. B. beim Umschalten eines Typ-Filters während eine
+Suche aktiv ist.
+
+**Der Dämpfer allein reichte nicht — der eigentliche Showstopper war eine
+`O(n²)`-Falle in `_update_stack_sum()` (FALLSTRICKE #39, Problem 3).**
+Peters Rückmeldung nach dem Dämpfer: "Jeder Buchstabe führt zu sehr langen
+(Minutenlang) Pausen" — ein einziger Tastendruck reichte bereits. Ursache:
+`_stack_sum_label` (§4.7) hing zunächst zusätzlich an `layoutChanged`/
+`rowsInserted`/`rowsRemoved`. Mit angehängter `QTableView` (immer der
+Fall) emittiert `QSortFilterProxyModel` bei einer Filteränderung NICHT
+ein Signal, sondern eines PRO ZUSAMMENHÄNGENDEM BLOCK neu versteckter/
+sichtbarer Zeilen — bei einer Textsuche über ein Aggregat mit über die
+ganze Liste verstreuten Treffern (19704 Items, jede 50. passend) waren
+das 395 einzelne `rowsRemoved`-Aufrufe für EINEN Suchtext. Jeder rief
+`_update_stack_sum()` mit einer erneuten `O(sichtbare Zeilen)`-Schleife
+auf — zusammen `O(n²)`, gemessen 9,5 Sekunden für einen simulierten
+Tastendruck. Ein Benchmark OHNE angehängte `QTableView` (wie der erste
+Benchmark oben) findet diesen Bug nicht: ohne View feuern diese Signale
+gar nicht synchron.
+
+`_stack_sum_label` hängt seither NUR an `modelReset` (garantiert genau
+ein Signal pro `set_items()`-Aufruf, unabhängig von Zeilenzahl oder
+Streuung). Überall sonst, wo sich der Proxy-Filter ändert, ruft der
+jeweilige Aufrufer `_update_stack_sum()` stattdessen explizit und genau
+einmal auf: `_apply_debounced_search_filter()`, `_on_type_toggled()`,
+`_apply_column_filter()`, `_clear_column_filters()`. Derselbe
+19704-Items-Testfall lief danach in 29ms statt 9,5s. **Regel:** Ein
+Handler, der selbst über `proxy.rowCount()` iteriert, darf nie an
+`rowsInserted`/`rowsRemoved`/`layoutChanged` eines
+`QSortFilterProxyModel` hängen — nur `modelReset` feuert garantiert genau
+einmal pro Änderung.
+
+**"On demand" statt live oberhalb `LIVE_SEARCH_ITEM_LIMIT = 50_000`
+Items** (FALLSTRICKE #40). Auch mit gedämpftem, günstigem Filterdurchlauf
+bleibt ein Problem: `_enter_search_all()` baut beim ALLERERSTEN Zeichen im
+Suchfeld das komplette ungefilterte Liga-Aggregat als Qt-Modell auf, bevor
+überhaupt gefiltert wird — `ItemTableModel.set_items()` kostet dafür
+gemessen ~0,66s bei 19704 Items, ~1,76s bei 50.000, ~3,76s bei 100.000,
+~7,93s bei 200.000 (Peter, 2026-07-28: "andere haben noch viel größere
+Truhen"). Das skaliert linear mit der Item-Zahl, unabhängig vom
+Suchtext — ein Dämpfer allein kann das nicht beheben, weil schon der
+ERSTE Tastendruck den vollen Aufbau auslöst.
+
+Oberhalb der Schwelle wird das ungefilterte Aggregat deshalb NIE als
+Qt-Modell aufgebaut. `_enter_search_all()` speichert `items`/`sources`/
+`tab_indices`/`stash_ids` nur roh in `self._large_search_items`, leert die
+Tabelle und zeigt "X items in this league — keep typing…". Läuft der
+Dämpfer ab, übernimmt `_run_large_search()`: reine Python-Filterung direkt
+auf den zwischengespeicherten Listen (`ItemTableModel._build_haystack()`
+wiederverwendet, kein doppelter Code — kein Qt-Modell, kein
+Python↔Qt-Aufruf-Overhead pro Zeile), danach bekommen NUR die Treffer via
+`table_model.set_items()` eine Tabellenzeile. Während der Filterung zeigt
+`QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)` eine Sanduhr
+statt eines eigenen `QProgressDialog` — die Aktion ist kurz genug, dass
+ein Dialog überdimensioniert wäre. `proxy.setFilterFixedString("")`
+danach lässt Typ- und Spalten-Filter unverändert über die (jetzt kleine)
+Ergebnismenge laufen. `"*"` bleibt bewusst die Ausnahme: zeigt weiterhin
+buchstäblich alles, auch oberhalb der Schwelle — dafür nimmt der Klick
+einmalig den vollen Modell-Aufbau in Kauf, da explizit angefordert.
+
+Gemessen über den echten Code-Pfad, mehrere Läufe (der jeweils erste in
+einem frischen Prozess ist durch Pydantic-/Qt-Kaltstart langsamer, kein
+wiederkehrender Effekt): 50.000 Items ≈ 82ms, 100.000 ≈ 162ms, 200.000 ≈
+350ms im eingeschwungenen Zustand, bis zu ~800ms beim allerersten
+Suchlauf der Sitzung.
 
 **`*` als Suchtext zeigt alles an**, gedacht für den Komplett-Export
 einer Truhe oder Liga über den CSV-Export (`_visible_rows` exportiert
@@ -1086,11 +1177,11 @@ verschwunden.
 |---|---|---|
 | Navigation: Charaktere | `CharacterList` (`QListWidget`) | Bewusst KEIN Tree — Charaktere haben keine Unterstruktur (spart eine Ebene samt Auf- und Zuklapp-Klick). Flach, absteigend nach Level, liga-gefiltert (`MainWindow._apply_character_league_filter`, siehe §5.1). Höhe begrenzt (`setMaximumHeight`), damit der Stash-Baum den meisten Platz bekommt. |
 | Navigation: Stash | `StashTree` (`QTreeWidget`), 3 Spalten, **Header sichtbar** | Kein umschließender "Stash"-Wurzelknoten mehr — die Tabs SIND die Top-Level-Einträge (spart eine weitere Ebene). Ordner rekursiv (children), Map-Fächer zusätzlich nach Sektion gruppiert (§4.10). Namensspalte per `QHeaderView.ResizeMode.Interactive` (NICHT `Stretch` — Stretch-Spalten lassen sich in Qt nicht per Maus verbreitern, das war ein echter Bug) mit großzügiger Startbreite, per Header-Rand manuell nachziehbar. Tab-Farbe aus API als kleines Icon-Quadrat VOR dem Namen, bewusst NICHT als Textfarbe (manche API-Farben sind auf dunklem Grund sonst unlesbar). Klick auf Tab → `FetchStashItems`-Job, sofern nicht bereits im Cache. Spalte 2 (**#**) zeigt die Item-Anzahl (eigene Spalte statt "(N Items)"-Text im Namen; Details §4.7.1). Spalte 3 zeigt GENAU EINEN von DREI sich gegenseitig ausschließenden Zuständen (§4.7.1, §4.12): **⬇**-Text, solange nie geladen; ein **⟳-Button mit Alters-Beschriftung** (exakte Uhrzeit "⟳ 14:32:46" bei heute geladenen Daten, sonst "⟳ vor 3d") sobald mindestens einmal geladen — Klick lädt genau diesen Tab bewusst AM Cache vorbei neu (`stash_refresh_requested`-Signal); oder **📴** statt ⟳, solange GGG nicht erreichbar ist (Offline-Modus, §4.12) — derselbe Button, nur die Beschriftung ändert sich, ein Klick versucht trotzdem ein Neuladen. Rechtsklick öffnet ein Kontextmenü mit "🔍 Rohdaten anzeigen" (`raw_data_requested`-Signal, §4.9) — öffnet/aktualisiert den nicht-modalen Rohdaten-Mini-Viewer — sowie "▸ Expand All"/"▾ Collapse All" für den ganzen Baum (§4.7.3), Letzteres unabhängig davon, worauf geklickt wurde. |
-| Typ-Filter (Toolbar, neben Liga) | 8× `QCheckBox` ohne Text | Normal/Magic/Rare/Unique/Gem/Currency/Div Card + "Sonstige" (§4.11) — Farbe des Käschchens = Typ-Farbe (Pink für "Sonstige"), Name nur im Tooltip. Alle acht standardmäßig an; Abwählen blendet nur diese eine Kategorie aus der Item-Tabelle aus. |
+| Typ-Filter (Toolbar, neben Liga) | 8× `_TypeFilterCheckBox` (eigene `QCheckBox`-Unterklasse) | Normal/Magic/Rare/Unique/Gem/Currency/Div Card + "Sonstige" (§4.11) — Farbe des Käschchens = Typ-Farbe (Pink für "Sonstige"), Name nur im Tooltip. Alle acht standardmäßig an. Drei Gesten statt reinem An/Aus (Peter, 2026-07-28): ein modifierloser Klick zeigt NUR diesen Typ (`solo_requested`-Signal → `_solo_type_filter`) — der weitaus häufigere Wunsch als "nur diesen einen abwählen"; Strg+Klick bleibt das native `QCheckBox`-Einzel-Umschalten (dazu-/wegnehmen aus einer bereits eingeschränkten Ansicht, per `super().mousePressEvent()` durchgereicht); Strg+Umschalt+Klick oder Doppelklick setzen über `reset_requested` wieder alle Typen an. Ein normaler Doppelklick würde von Qt sonst als zwei Einzelklicks gewertet (Haken am Ende unverändert) — deshalb eigene `mouseDoubleClickEvent`-Behandlung. |
 | Item-Tabelle rechts oben | `QTableView` + `QSortFilterProxyModel` | Spalten: Icon, Tab, **Position** ("#3 (4, 7)", Tab-Nummer plus Item-Koordinate, §4.11, unterscheidet gleichnamige Fächer), Name, Typ, Level, Quality, Stack, iLvl, **Anf.Lvl, Str, Dex, Int** (aus dem `requirements`-Array, §4.11) und **Mods** (explicitMods, überwiegend Map-Modifikatoren, Tooltip zeilenweise). Klick auf den Spaltenkopf sortiert numerisch über `NUMERIC_SORT_ROLE`, also nach echten Zahlen statt nach Strings; Zeilen ohne Wert ("–") landen unten. Das Suchfeld sucht fächerübergreifend über die ganze Liga und schließt Item-Properties wie "Item Quantity" ein; ein eingebauter Clear-Button leert es, `*` zeigt alles an (gedacht für den Komplett-Export, §4.11). Je Spalte lässt sich über das Header-Rechtsklick-Menü zusätzlich ein Filter-Ausdruck setzen (`>=20`, `<45`, `=Text`, Teilstring), aktive Filter markiert ein 🔍 im Header. Sichtbare Spalten sind per Rechtsklick wählbar und werden in `%LOCALAPPDATA%/PoE-VIEW2/ui-settings.ini` gespeichert; "Typ" ist standardmäßig aus, da die Rarity bereits die Namensfarbe bestimmt. Die Tab-Spalte verwaltet die Anwendung selbst und blendet sie nicht ins Menü ein: aus bei Einzelfach-Auswahl, an in Aggregat-Ansichten ("Alle Tabs", Spezial-Tab-Elternknoten, liga-weite Suche), wo sie die Herkunft trägt ("Map (Tier 1)"). |
 | Item-Detail rechts unten | eigenes Widget | Großes Icon, Name in Rarity-Farbe (frameType), Properties, Mods. Aktualisiert bei Zeilenauswahl. |
 | Rate-Limit-Dashboard | `QProgressBar` pro Regel + Status-LED + Countdown | Wird ausschließlich über das Signal `rate_limit_changed` gefüttert. Farbe: grün < 60 %, gelb < 90 %, rot ab 90 %/Wartephase. Countdown zeigt verbleibende Wartezeit. *Intention: Der User soll immer sehen, WARUM die App gerade wartet.* |
-| Statusbar | `QStatusBar` + `QProgressBar` (busy) | Login-Status, laufender Job, permanenter GGG-Disclaimer. Die `QProgressBar` läuft mit `setRange(0, 0)` im "busy"-Modus (Qt animiert das eingebaut, kein eigener Timer nötig). Sichtbarkeit hängt am eigenen `busy_changed`-Signal des Workers (`True` rund um jeden Job), NICHT am `status`-Text — siehe §4.5.1 zur Begründung. Ein permanentes **Offline-Banner** ("📴 Offline — GGG nicht erreichbar, zeige zwischengespeicherte Daten", §4.12) erscheint bei Konnektivitätsproblemen — als eigenes Label, damit die nächste "Lade …"-Statusmeldung es nicht überschreibt. |
+| Statusbar | `QStatusBar` + `QProgressBar` (busy) | Login-Status, laufender Job, permanenter GGG-Disclaimer. Die `QProgressBar` läuft mit `setRange(0, 0)` im "busy"-Modus (Qt animiert das eingebaut, kein eigener Timer nötig). Sichtbarkeit hängt am eigenen `busy_changed`-Signal des Workers (`True` rund um jeden Job), NICHT am `status`-Text — siehe §4.5.1 zur Begründung. Ein permanentes **Offline-Banner** ("📴 Offline — GGG nicht erreichbar, zeige zwischengespeicherte Daten", §4.12) erscheint bei Konnektivitätsproblemen — als eigenes Label, damit die nächste "Lade …"-Statusmeldung es nicht überschreibt. Ein zweites permanentes Label (`_stack_sum_label`) zeigt die Summe der Stack-Größe über die aktuell sichtbaren (gefilterten) Zeilen ("Stack total: 12,345") — Items ohne Stack-Größe (Ausrüstung) zählen nicht mit. Erscheint NUR, wenn alle stapelbaren Treffer denselben `display_name` tragen (FALLSTRICKE #39): bei "*" oder einer ungefilterten Truhe mit mehreren Currency-Sorten wäre eine Summe über verschiedene Item-Typen hinweg bedeutungslos (Peter, 2026-07-28: "*" ergab "Stack total: 604.911" quer über die ganze Liga) — das Label bleibt dann leer, genau wie ohne jeden stapelbaren Treffer. Hängt an den Proxy-Signalen (`modelReset`, `layoutChanged`, `rowsInserted`/`-Removed`) statt in jeder einzelnen `_status_msg`-Stelle dupliziert zu werden — reagiert dadurch automatisch auf Suche, Spalten- und Typ-Filter sowie neu geladene Items. |
 
 **"Alle Tabs laden" (Bulk) und CSV-Export:** Über den Toolbar-Button "⇊ Alle
 Tabs laden" holt der `ApiWorker` (`FetchAllItemsJob`) die Items sämtlicher

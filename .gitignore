@@ -22,6 +22,7 @@ htmlcov/
 # IDE
 .vscode/
 .idea/
+.claude/
 
 # App-Daten (Caches, Logs — liegen normalerweise in %LOCALAPPDATA%)
 icon-cache/

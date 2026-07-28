@@ -94,6 +94,7 @@ class ItemTableModel(QAbstractTableModel):
         self._tab_indices: list[int | None] = []  # Tab-Position pro Item (Positions-Spalte)
         self._stash_ids: list[str | None] = []  # Herkunfts-Tab-ID (Baum-Hervorhebung)
         self._rows: list[tuple] = []          # vorgerechnete Anzeigewerte
+        self._search_haystacks: list[str] = []  # vorgerechnet, bereits klein geschrieben
         self._pixmaps: dict[str, QPixmap] = {}
         self._requested: set[str] = set()
         self._icon_requester = icon_requester
@@ -126,6 +127,13 @@ class ItemTableModel(QAbstractTableModel):
         self._tab_indices = tab_indices if tab_indices is not None else [None] * len(items)
         self._stash_ids = stash_ids if stash_ids is not None else [None] * len(items)
         self._rows = [self._precompute(item) for item in items]
+        # Einmal pro Ladevorgang statt bei JEDEM Tastendruck neu zusammengebaut
+        # (filterAcceptsRow lief vorher pro Zeile UND pro Tastendruck über
+        # mehrere f-Strings/joins/lower() — bei liga-weiten Aggregaten mit
+        # zehntausenden Items spürbar langsam, Peter 2026-07-28: "All Tabs
+        # liefert mir 19704 Items").
+        self._search_haystacks = [self._build_haystack(item, source)
+                                  for item, source in zip(items, self._sources)]
         self.endResetModel()
         if request_icons and self._icon_requester:
             for item in items:
@@ -149,11 +157,28 @@ class ItemTableModel(QAbstractTableModel):
                 req_attribute(item, "Int") or "–",
                 " · ".join(item.explicitMods))  # v. a. Map-Modifikatoren
 
+    @staticmethod
+    def _build_haystack(item: Item, source: str) -> str:
+        """Durchsuchter Text für die globale Suche, bereits klein geschrieben.
+
+        Properties (z. B. "Item Quantity: +23%") sind keine explicitMods —
+        ohne sie fände die Suche Maps mit Quantity/Rarity/Pack Size/Drop
+        Chance nie ("nach Quantity gesucht, nur Chisel gefunden" — die
+        Chisel-Beschreibung nennt "Item Quantity" im Mod-Text, die Maps
+        selbst tragen den Wert nur als Property)."""
+        prop_text = " ".join(f"{p.name} {p.display_value or ''}" for p in item.properties)
+        return (f"{item.display_name} {item.typeLine} {item.baseType} "
+               f"{item.rarity} {source} "
+               f"{' '.join(item.explicitMods)} {' '.join(item.implicitMods)} {prop_text}").lower()
+
     def item_at(self, row: int) -> Item | None:
         return self._items[row] if 0 <= row < len(self._items) else None
 
     def source_at(self, row: int) -> str:
         return self._sources[row] if 0 <= row < len(self._sources) else ""
+
+    def search_haystack_at(self, row: int) -> str:
+        return self._search_haystacks[row] if 0 <= row < len(self._search_haystacks) else ""
 
     def stash_id_at(self, row: int) -> str | None:
         return self._stash_ids[row] if 0 <= row < len(self._stash_ids) else None
@@ -289,6 +314,7 @@ class ItemFilterProxy(QSortFilterProxyModel):
         self.setSortRole(NUMERIC_SORT_ROLE)
         self._column_filters: dict[int, str] = {}
         self._search_text = ""
+        self._search_text_lower = ""
         self._hidden_types: set[int] = set()  # _type_key(frameType), per Checkbox abgewählt
 
     def lessThan(self, left: QModelIndex, right: QModelIndex) -> bool:  # noqa: N802 (Qt-API)
@@ -328,8 +354,11 @@ class ItemFilterProxy(QSortFilterProxyModel):
     def setFilterFixedString(self, text: str) -> None:  # noqa: N802 (Qt-API)
         """Rohtext selbst merken statt über das (regex-escapte!) Pattern von
         Qt zurückzulesen — sonst würde "*" als "\\*" ankommen und nie als
-        Wildcard erkannt werden."""
+        Wildcard erkannt werden. Klein geschrieben einmal HIER vorrechnen,
+        nicht in filterAcceptsRow — sonst liefe .lower() auf dem Suchtext
+        pro Zeile statt einmal pro Tastendruck."""
         self._search_text = text or ""
+        self._search_text_lower = self._search_text.strip().lower()
         super().setFilterFixedString(text)
 
     # --- Spalten-Filter -------------------------------------------------- #
@@ -387,13 +416,7 @@ class ItemFilterProxy(QSortFilterProxyModel):
             # Wildcard: gesamten (bereits geladenen) Inhalt zeigen — z. B. um
             # eine komplette Truhe/Liga in einem Rutsch als CSV zu exportieren.
             return True
-        # Properties (z. B. "Item Quantity: +23%") sind keine explicitMods —
-        # ohne sie fände die Suche Maps mit Quantity/Rarity/Pack Size/Drop
-        # Chance nie ("nach Quantity gesucht, nur Chisel
-        # gefunden" — die Chisel-Beschreibung nennt "Item Quantity" im Mod-
-        # Text, die Maps selbst tragen den Wert nur als Property).
-        prop_text = " ".join(f"{p.name} {p.display_value or ''}" for p in item.properties)
-        haystack = (f"{item.display_name} {item.typeLine} {item.baseType} "
-                   f"{item.rarity} {model.source_at(row)} "
-                   f"{' '.join(item.explicitMods)} {prop_text}")
-        return text.lower() in haystack.lower()
+        # Haystack ist bereits beim Laden vorgerechnet und klein geschrieben
+        # (ItemTableModel._build_haystack) — hier nur noch ein billiger
+        # Teilstring-Test, kein erneutes Zusammenbauen pro Zeile/Tastendruck.
+        return self._search_text_lower in model.search_haystack_at(row)

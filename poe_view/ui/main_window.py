@@ -11,13 +11,14 @@ import logging
 import time
 from datetime import datetime, timedelta, timezone
 
-from PySide6.QtCore import QSettings, Qt, QTimer
-from PySide6.QtGui import QAction, QPixmap
-from PySide6.QtWidgets import (QCheckBox, QComboBox, QFileDialog, QLabel,
-                               QLineEdit, QMainWindow, QMenu, QMessageBox,
-                               QProgressBar, QProgressDialog, QSizePolicy,
-                               QSplitter, QTableView, QToolBar, QVBoxLayout,
-                               QWidget, QWidgetAction)
+from PySide6.QtCore import QSettings, Qt, QTimer, Signal
+from PySide6.QtGui import QAction, QMouseEvent, QPixmap
+from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox,
+                               QFileDialog, QLabel, QLineEdit, QMainWindow,
+                               QMenu, QMessageBox, QProgressBar,
+                               QProgressDialog, QSizePolicy, QSplitter,
+                               QTableView, QToolBar, QVBoxLayout, QWidget,
+                               QWidgetAction)
 
 from poe_view import __version__, config
 from poe_view.api.models import Character, Item, StashTab, dominant_category
@@ -41,6 +42,45 @@ from poe_view.ui.stash_tree import StashTree
 from poe_view.ui.theme import OTHER_TYPE, RARITY_COLORS, TYPE_FILTER_COLOR
 
 log = logging.getLogger(__name__)
+
+
+class _TypeFilterCheckBox(QCheckBox):
+    """Checkbox für einen Item-Typ-Filter mit Zusatzgesten (Peter,
+    2026-07-28): ein normaler Klick isoliert diesen Typ (alle anderen aus)
+    — der weitaus häufigere Wunsch als "nur diesen einen abwählen". Wer
+    gezielt einen weiteren Typ zur aktuellen Ansicht hinzufügen oder wieder
+    herausnehmen will, hält dafür Strg — das ist das native
+    Einzel-Umschalten von QCheckBox, hier nur nicht mehr der Normalfall.
+    Strg+Umschalt+Klick sowie Doppelklick setzen wieder alle Typen an
+    (zwei Wege zum selben Ziel, beide leicht zu finden). Ohne die eigene
+    mouseDoubleClickEvent-Behandlung würde Qt einen Doppelklick als zwei
+    normale Klicks werten — der Haken wäre danach unverändert (zweimal
+    umgeschaltet) statt zurückgesetzt."""
+
+    solo_requested = Signal()
+    reset_requested = Signal()
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            mods = event.modifiers()
+            if mods & Qt.KeyboardModifier.ControlModifier:
+                if mods & Qt.KeyboardModifier.ShiftModifier:
+                    self.reset_requested.emit()
+                    event.accept()
+                    return
+                super().mousePressEvent(event)  # normales Einzel-Umschalten
+                return
+            self.solo_requested.emit()
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseDoubleClickEvent(self, event: QMouseEvent) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.reset_requested.emit()
+            event.accept()
+            return
+        super().mouseDoubleClickEvent(event)
 
 
 class MainWindow(QMainWindow):
@@ -85,10 +125,25 @@ class MainWindow(QMainWindow):
         (OTHER_TYPE, "Other"),
     )
 
+    # Pause zwischen letztem Tastendruck im Suchfeld und dem tatsächlichen
+    # Zeilen-Filter — siehe Kommentar bei self._search_debounce.
+    SEARCH_DEBOUNCE_MS = 350
+
+    # Ab dieser Item-Anzahl im Liga-Aggregat schaltet die Suche von "live"
+    # auf "on demand" um (§_enter_search_all, FALLSTRICKE #40): das
+    # komplette ungefilterte Aggregat als Qt-Modell aufzubauen kostet ab
+    # hier spürbar (gemessen ~8s bei 200.000 Items) — Peter hat mit 19704
+    # Items noch deutlich Luft darunter.
+    LIVE_SEARCH_ITEM_LIMIT = 50_000
+
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle(f"PoE-VIEW2 v{__version__}")
-        self.resize(1100, 700)
+        # Unter ~1186px klappt die Toolbar zusammen und versteckt das
+        # Suchfeld hinter "…" — mit der 340px-Baumbreite (statt 260px) reicht
+        # 1180px nicht mehr aus (Peter, 2026-07-28). 1200px als Puffer, nicht
+        # exakt an der gemessenen Schwelle.
+        self.resize(1200, 700)
 
         self._account_name: str = ""
         self._stash_trees: dict[str, list[StashTab]] = {}      # Liga → Baumstruktur
@@ -101,6 +156,12 @@ class MainWindow(QMainWindow):
         self._bulk_dialog: QProgressDialog | None = None
         self._showing_aggregate = False
         self._search_all_active = False        # Suchfeld → liga-weite Ansicht aktiv
+        # Zwischengespeichertes, UNGEFILTERTES Aggregat für die "on demand"-
+        # Suche (§_enter_search_all/_run_large_search) — None = normaler
+        # Live-Modus. Nur gesetzt, solange eine Suche über ein Aggregat
+        # oberhalb LIVE_SEARCH_ITEM_LIMIT aktiv ist.
+        self._large_search_items: tuple[list[Item], list[str],
+                                        list[int | None], list[str | None]] | None = None
         self._current_stash_id: str | None = None  # zuletzt gewähltes Fach (Rückkehrziel)
         self._character_items: dict[str, list[Item]] = {}       # Charaktername → Ausrüstung+Inventar
         self._character_items_loaded: dict[str, str] = {}       # Charaktername → ISO-Zeitstempel
@@ -270,15 +331,20 @@ class MainWindow(QMainWindow):
         # auf: Quest, Prophecy, Relic, unbekannte frameTypes (§4.11).
         self._type_checks: dict[int, QCheckBox] = {}
         for type_key, name in self.TYPE_FILTER_ENTRIES:
-            box = QCheckBox()
+            box = _TypeFilterCheckBox()
             box.setChecked(True)
-            box.setToolTip(name)
+            box.setToolTip(f"{name}\n"
+                          f"click: show only this type\n"
+                          f"Ctrl+click: add/remove this type\n"
+                          f"Ctrl+Shift+click or double-click: show all types")
             colour = RARITY_COLORS.get(type_key, TYPE_FILTER_COLOR)
             box.setStyleSheet(
                 f"QCheckBox::indicator {{ width: 13px; height: 13px; border-radius: 3px; "
                 f"border: 2px solid {colour}; }} "
                 f"QCheckBox::indicator:checked {{ background-color: {colour}; }}")
             box.toggled.connect(lambda checked, tk=type_key: self._on_type_toggled(tk, checked))
+            box.solo_requested.connect(lambda tk=type_key: self._solo_type_filter(tk))
+            box.reset_requested.connect(self._reset_type_filters)
             self._type_checks[type_key] = box
             toolbar.addWidget(box)
 
@@ -323,6 +389,17 @@ class MainWindow(QMainWindow):
             icon_requester=lambda url: self.worker.submit(FetchIconJob(url)))
         self.proxy = ItemFilterProxy()
         self.proxy.setSourceModel(self.table_model)
+        # Dämpfer für den eigentlichen Zeilen-Filter (SEARCH_DEBOUNCE_MS):
+        # bei liga-weiten Aggregaten mit zehntausenden Items kostet
+        # invalidateFilter() spürbar Zeit — bei jedem Tastendruck sofort
+        # angewendet, ruckelte das merklich (Peter, 2026-07-28: "All Tabs
+        # liefert mir 19704 Items"). Das Umschalten in/aus dem Aggregat
+        # (_enter_search_all/_leave_search_all) bleibt dagegen sofort, da es
+        # ohnehin nur EINMAL pro Such-Session läuft, nicht pro Tastendruck.
+        self._search_debounce = QTimer(self)
+        self._search_debounce.setSingleShot(True)
+        self._search_debounce.setInterval(self.SEARCH_DEBOUNCE_MS)
+        self._search_debounce.timeout.connect(self._apply_debounced_search_filter)
         self._filter_edit.textChanged.connect(self._on_filter_text_changed)
 
         self.table = QTableView()
@@ -355,7 +432,12 @@ class MainWindow(QMainWindow):
         splitter.addWidget(left_panel)
         splitter.addWidget(right)
         splitter.setStretchFactor(1, 1)
-        splitter.setSizes([260, 840])
+        # 340px, nicht mehr 260: die Pos.-Spalte (§_tab_positions) kam später
+        # dazu und braucht neben Name/#/Status zusätzlichen Platz, sonst
+        # schneidet der Baum ohne manuelles Nachziehen etwas ab (Peter,
+        # 2026-07-28). Fensterbreite um denselben Betrag erhöht, damit die
+        # Item-Tabelle rechts nicht kleiner wird als vorher.
+        splitter.setSizes([340, 840])
 
         self.dashboard = RateLimitDashboard()
         central = QWidget()
@@ -381,6 +463,28 @@ class MainWindow(QMainWindow):
         self._offline_label = QLabel("")
         self._offline_label.setStyleSheet("color: #d9a441; font-weight: 600;")
         self.statusBar().addPermanentWidget(self._offline_label)
+        # Summe der Stack-Größen über die gerade sichtbaren (gefilterten)
+        # Items — die häufigste Alltagsfrage ("wie viel Chaos hab ich"),
+        # bisher musste man die Stack-Spalte selbst zusammenzählen oder nach
+        # CSV exportieren (Peter, 2026-07-28).
+        #
+        # NUR an modelReset gehängt (ein einziges Signal pro set_items()-
+        # Aufruf, unabhängig von der Zeilenzahl) — NICHT an layoutChanged/
+        # rowsInserted/rowsRemoved (FALLSTRICKE #39, zweiter Teil): sobald
+        # eine QTableView am Proxy hängt, feuert QSortFilterProxyModel bei
+        # einer Textsuche über ein liga-weites Aggregat pro ZUSAMMENHÄNGENDEM
+        # Block verborgener/wieder sichtbarer Zeilen ein eigenes rowsRemoved/
+        # rowsInserted — bei über die ganze Liste verstreuten Treffern
+        # (z. B. "Currency 7" bei 19704 Items) waren das ~395 Aufrufe. Jeder
+        # rief _update_stack_sum() mit einer erneuten O(sichtbare Zeilen)-
+        # Schleife auf — zusammen O(n²), gemessen 9,5 SEKUNDEN für einen
+        # einzigen Tastendruck. Stattdessen wird _update_stack_sum() jetzt an
+        # jeder Stelle, die den Filter ändert, GENAU EINMAL explizit
+        # aufgerufen (_apply_debounced_search_filter, _on_type_toggled,
+        # _apply_column_filter, _clear_column_filters).
+        self._stack_sum_label = QLabel("")
+        self.statusBar().addPermanentWidget(self._stack_sum_label)
+        self.proxy.modelReset.connect(self._update_stack_sum)
         # Sichtbarer Nachweis, dass der Hintergrund-Auto-Refresh arbeitet
         # ("Bist du dir sicher, dass das funktioniert?").
         self._auto_refresh_label = QLabel("")
@@ -494,6 +598,47 @@ class MainWindow(QMainWindow):
 
     def _on_type_toggled(self, type_key: int, visible: bool) -> None:
         self.proxy.set_type_visible(type_key, visible)
+        self._update_stack_sum()
+
+    def _solo_type_filter(self, type_key: int) -> None:
+        """Normaler Klick auf ein Typ-Symbol: nur diesen Typ zeigen, alle
+        anderen aus — der weitaus häufigere Fall als "nur diesen einen
+        abwählen", das native Einzel-Umschalten bleibt über Strg+Klick
+        erreichbar."""
+        for tk, box in self._type_checks.items():
+            box.setChecked(tk == type_key)
+
+    def _reset_type_filters(self) -> None:
+        """Strg+Umschalt+Klick oder Doppelklick auf ein Typ-Symbol: wieder
+        alle Typen zeigen."""
+        for box in self._type_checks.values():
+            box.setChecked(True)
+
+    def _update_stack_sum(self, *_args) -> None:
+        """Summe der Stack-Größe über die aktuell sichtbaren (gefilterten)
+        Zeilen — nur Items MIT Stack-Größe zählen mit; ein Item ohne
+        Stack-Angabe (Ausrüstung) ist kein "Stack von 1".
+
+        Zeigt die Summe NUR, wenn alle stapelbaren Treffer denselben Namen
+        tragen — bei "*" oder einer ungefilterten Truhe mit mehreren
+        Currency-Sorten wäre eine Summe über verschiedene Item-Typen hinweg
+        (Chaos + Portal Scrolls + …) bedeutungslos (Peter, 2026-07-28: "*"
+        ergab "Stack total: 604.911" quer über die ganze Liga). Verborgen
+        auch, wenn gar nichts Stapelbares sichtbar ist, statt immer
+        "Stack total: 0" zu zeigen.
+
+        Signatur akzeptiert beliebige Args, weil sie direkt an mehrere
+        unterschiedliche Proxy-Signale gehängt ist (modelReset,
+        layoutChanged, rowsInserted/-Removed mit je eigenen Parametern)."""
+        total = 0
+        names: set[str] = set()
+        for row in range(self.proxy.rowCount()):
+            source_row = self.proxy.mapToSource(self.proxy.index(row, 0)).row()
+            item = self.table_model.item_at(source_row)
+            if item is not None and item.stackSize:
+                total += item.stackSize
+                names.add(item.display_name)
+        self._stack_sum_label.setText(f"Stack total: {total:,}" if len(names) == 1 else "")
 
     # --- Spalten-Sichtbarkeit der Item-Tabelle --------- #
 
@@ -565,11 +710,13 @@ class MainWindow(QMainWindow):
         self._status_msg.setText(
             f"Column filter [{active}]: {shown} of {total} items visible"
             if active else f"Column filter removed — {total} items")
+        self._update_stack_sum()
 
     def _clear_column_filters(self) -> None:
         self.proxy.clear_column_filters()
         self._status_msg.setText(
             f"All column filters cleared — {self.table_model.rowCount()} items")
+        self._update_stack_sum()
 
     def _connect_worker(self) -> None:
         w = self.worker
@@ -823,6 +970,7 @@ class MainWindow(QMainWindow):
     def _on_stash_selected(self, stash_id: str, name: str) -> None:
         self._showing_aggregate = False
         self._search_all_active = False  # Baum-Klick beendet die liga-weite Suchansicht
+        self._large_search_items = None
         stash = self._find_stash(self._stash_trees.get(self._current_league, []), stash_id)
         if stash is not None and stash.type in self.SPECIAL_TAB_TYPES and stash.parent is None:
             if stash.children:
@@ -1161,6 +1309,7 @@ class MainWindow(QMainWindow):
         zusammen anzeigen (lokal filter-/exportierbar), siehe `_league_wide_items`."""
         self._showing_aggregate = True
         self._search_all_active = False
+        self._large_search_items = None
         self._current_tab_name = "All Tabs"
         self._current_stash_id = None  # Rückkehr aus der Suche landet wieder hier
         self._current_character_name = None
@@ -1213,12 +1362,24 @@ class MainWindow(QMainWindow):
     def _on_filter_text_changed(self, text: str) -> None:
         """Tippen sucht liga-weit über alle bereits geladenen Fächer; Leeren
         des Felds kehrt zur vorher gewählten Ansicht zurück. Eingrenzen auf
-        ein Fach geht weiterhin: Baum-Klick oder Spalten-Filter auf "Tab"."""
+        ein Fach geht weiterhin: Baum-Klick oder Spalten-Filter auf "Tab".
+
+        Das Umschalten in/aus dem Aggregat läuft SOFORT (nur einmal pro
+        Such-Session), der eigentliche Zeilen-Filter dagegen gedämpft über
+        ``_search_debounce`` — sonst kostet ``invalidateFilter()`` bei
+        zehntausenden Items spürbar Zeit bei JEDEM Tastendruck."""
         if text and not self._search_all_active:
             self._enter_search_all()
         elif not text and self._search_all_active:
             self._leave_search_all()
-        self.proxy.setFilterFixedString(text)
+        self._search_debounce.start()
+
+    def _apply_debounced_search_filter(self) -> None:
+        if self._large_search_items is not None:
+            self._run_large_search(self._filter_edit.text())
+        else:
+            self.proxy.setFilterFixedString(self._filter_edit.text())
+            self._update_stack_sum()
 
     def _enter_search_all(self) -> None:
         self._search_all_active = True
@@ -1226,6 +1387,19 @@ class MainWindow(QMainWindow):
         self._current_character_name = None
         items, sources, tab_indices, stash_ids = self._league_wide_items()
         self.table.setColumnHidden(TAB_COL, False)  # Herkunft ist Teil der Antwort
+        if len(items) > self.LIVE_SEARCH_ITEM_LIMIT:
+            # "On demand" statt live (FALLSTRICKE #40, Peter 2026-07-28):
+            # das komplette ungefilterte Aggregat NIE als Qt-Modell aufbauen
+            # (allein das kostet bei 200k Items ~8s) — nur zwischenspeichern,
+            # _run_large_search() füllt das Modell dann direkt mit den
+            # gefilterten Treffern, sobald der Dämpfer abgelaufen ist.
+            self._large_search_items = (items, sources, tab_indices, stash_ids)
+            self.table_model.set_items([])
+            self._status_msg.setText(
+                f"{len(items)} items in this league — keep typing, "
+                "results appear once you pause")
+            return
+        self._large_search_items = None
         # request_icons=False: sonst würde die Suche zigtausend Icon-Jobs in
         # die Worker-Queue schieben — Icons kommen lazy für sichtbare Zeilen.
         self.table_model.set_items(items, sources, tab_indices, stash_ids, request_icons=False)
@@ -1234,8 +1408,48 @@ class MainWindow(QMainWindow):
             f"Searching {loaded} loaded tabs/characters ({len(items)} items) — "
             "clear the field to return to the tab view")
 
+    def _run_large_search(self, text: str) -> None:
+        """"On demand"-Suche für Ligen oberhalb LIVE_SEARCH_ITEM_LIMIT.
+
+        Filtert reines Python direkt auf den in `_enter_search_all`
+        zwischengespeicherten Listen (kein Qt-Modell, kein
+        Python↔Qt-Aufruf-Overhead pro Zeile) — bei 200.000 Items gemessen
+        ~180ms statt der ~8s, die das bloße BEFÜLLEN eines Qt-Modells mit
+        derselben Menge kostet. Nur die TREFFER bekommen danach eine
+        Tabellenzeile spendiert; Typ- und Spalten-Filter greifen wie gehabt
+        über den Proxy auf diese (viel kleinere) Ergebnismenge.
+
+        Sanduhr statt Fortschrittsanzeige: die Aktion ist kurz genug
+        (Zielgröße < 1s), dass ein `QProgressDialog` überdimensioniert wäre
+        — der Cursor genügt als Rückmeldung "hier passiert gerade etwas"."""
+        items, sources, tab_indices, stash_ids = self._large_search_items
+        text = text.strip()
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            if text == "*":
+                matched = range(len(items))
+            else:
+                text_lower = text.lower()
+                matched = [i for i, (item, source) in enumerate(zip(items, sources))
+                          if text_lower in ItemTableModel._build_haystack(item, source)]
+            matched_items = [items[i] for i in matched]
+            matched_sources = [sources[i] for i in matched]
+            matched_tabs = [tab_indices[i] for i in matched]
+            matched_stash_ids = [stash_ids[i] for i in matched]
+            self.table_model.set_items(matched_items, matched_sources, matched_tabs,
+                                       matched_stash_ids, request_icons=False)
+            self.proxy.setFilterFixedString("")  # Modell enthält bereits nur Treffer
+            loaded = len({s for s in matched_sources})
+        finally:
+            QApplication.restoreOverrideCursor()
+        self._status_msg.setText(
+            f"{len(matched_items)} of {len(items)} items match ({loaded} tabs/characters) — "
+            "clear the field to return to the tab view")
+        self._update_stack_sum()
+
     def _leave_search_all(self) -> None:
         self._search_all_active = False
+        self._large_search_items = None
         if self._current_stash_id is not None:
             self._on_stash_selected(self._current_stash_id, self._current_tab_name)
         elif self._leaf_stashes:
@@ -1328,6 +1542,7 @@ class MainWindow(QMainWindow):
         die Item-Koordinate (falls vorhanden), Baum-Hervorhebung entfällt."""
         self._showing_aggregate = False
         self._search_all_active = False
+        self._large_search_items = None
         self._current_stash_id = None
         self.table.setColumnHidden(TAB_COL, False)
         sources = [item.inventoryId or "?" for item in items]
