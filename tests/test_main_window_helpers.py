@@ -8,7 +8,9 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from poe_view.api.models import Character, Item, StashTab
-from poe_view.services.api_worker import FetchStashListJob
+from poe_view.api.ninja import PriceIndex
+from poe_view.services import price_cache
+from poe_view.services.api_worker import FetchPricesJob, FetchStashListJob
 from poe_view.ui.main_window import MainWindow
 
 NESTED = [
@@ -402,6 +404,12 @@ def test_maybe_auto_refresh_prefers_open_tab_over_character_when_both_set(qapp, 
 def _make_leaf(stash_id: str, name: str) -> StashTab:
     return StashTab.model_validate({"id": stash_id, "name": name, "type": "CurrencyStash",
                                      "metadata": {}})
+
+
+def _price_index(**prices: float) -> PriceIndex:
+    index = PriceIndex()
+    index._simple.update(prices)
+    return index
 
 
 def test_pick_auto_refresh_candidate_ignores_only_recent_tabs(qapp) -> None:
@@ -3045,6 +3053,186 @@ def test_league_changed_skips_network_for_archived_league(qapp, monkeypatch) -> 
     assert "ended" in win._status_msg.text()
     assert win._current_league == "Legacy League"  # trotzdem aktiviert (zeigt Cache)
 
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_league_changed_submits_fetch_prices_job_when_not_cached(qapp, monkeypatch) -> None:
+    win = MainWindow()
+    monkeypatch.setattr(price_cache, "load", lambda league, ttl_seconds=None: None)
+    submitted = []
+    monkeypatch.setattr(win.worker, "submit", lambda job: submitted.append(job))
+
+    win._on_league_changed("Standard")
+
+    assert FetchPricesJob("Standard") in submitted
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_league_changed_uses_disk_cache_instead_of_a_network_job(qapp, monkeypatch) -> None:
+    fake_index = PriceIndex()
+    monkeypatch.setattr(price_cache, "load", lambda league, ttl_seconds=None: fake_index)
+    win = MainWindow()
+    submitted = []
+    monkeypatch.setattr(win.worker, "submit", lambda job: submitted.append(job))
+
+    win._on_league_changed("Standard")
+
+    assert not any(isinstance(j, FetchPricesJob) for j in submitted)
+    assert win._price_indexes["Standard"] is fake_index
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_ensure_prices_loaded_is_a_noop_once_already_known(qapp, monkeypatch) -> None:
+    win = MainWindow()
+    win._price_indexes["Standard"] = PriceIndex()
+    load_calls = []
+    monkeypatch.setattr(price_cache, "load", lambda league, ttl_seconds=None: load_calls.append(league))
+    submitted = []
+    monkeypatch.setattr(win.worker, "submit", lambda job: submitted.append(job))
+
+    win._ensure_prices_loaded("Standard")
+
+    assert load_calls == []
+    assert submitted == []
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_on_prices_loaded_stores_index_and_writes_through_to_disk_cache(qapp, monkeypatch) -> None:
+    win = MainWindow()
+    fake_index = PriceIndex()
+    saved = []
+    monkeypatch.setattr(price_cache, "save", lambda league, index: saved.append((league, index)))
+
+    win._on_prices_loaded("Standard", fake_index)
+
+    assert win._price_indexes["Standard"] is fake_index
+    assert saved == [("Standard", fake_index)]
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_on_prices_loaded_updates_table_and_value_sum_for_the_current_league(qapp) -> None:
+    win = MainWindow()
+    win._current_league = "Standard"
+    win.table_model.set_items([Item.model_validate({"typeLine": "Chaos Orb", "stackSize": 10})])
+    assert win._value_sum_label.text() == ""  # noch kein Preis-Index
+
+    index = PriceIndex()
+    index._simple["Chaos Orb"] = 1.0
+    win._on_prices_loaded("Standard", index)
+
+    assert win._value_sum_label.text() == "Value: 10c"
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_on_prices_loaded_ignores_a_league_that_is_not_currently_shown(qapp) -> None:
+    """Preise für eine im Hintergrund geladene, aber nicht angezeigte Liga
+    dürfen die aktuell sichtbare Tabelle nicht verändern."""
+    win = MainWindow()
+    win._current_league = "Standard"
+    win.table_model.set_items([Item.model_validate({"typeLine": "Chaos Orb", "stackSize": 10})])
+
+    other_index = PriceIndex()
+    other_index._simple["Chaos Orb"] = 1.0
+    win._on_prices_loaded("Hardcore", other_index)
+
+    assert win._value_sum_label.text() == ""
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_league_changed_applies_the_cached_price_index_to_the_table(qapp, monkeypatch) -> None:
+    index = PriceIndex()
+    index._simple["Chaos Orb"] = 1.0
+    monkeypatch.setattr(price_cache, "load", lambda league, ttl_seconds=None: index)
+    win = MainWindow()
+    monkeypatch.setattr(win.worker, "submit", lambda job: None)
+
+    win._on_league_changed("Standard")
+    win.table_model.set_items([Item.model_validate({"typeLine": "Chaos Orb", "stackSize": 10})])
+
+    assert win._value_sum_label.text() == "Value: 10c"
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_value_sum_label_shows_total_across_different_item_names(qapp) -> None:
+    """Anders als die Stack-Summe (nur bei EINHEITLICHEM Namen sinnvoll)
+    ist eine Chaos-Summe über verschiedene Item-Typen hinweg sinnvoll —
+    genau das will Peter mit "wie viel ist meine Truhe wert" beantworten."""
+    win = MainWindow()
+    win.table_model.set_price_index(_price_index(**{"Chaos Orb": 1.0, "Exalted Orb": 50.0}))
+    win.table_model.set_items([
+        Item.model_validate({"typeLine": "Chaos Orb", "stackSize": 10}),
+        Item.model_validate({"typeLine": "Exalted Orb", "stackSize": 2}),
+    ])
+
+    assert win._value_sum_label.text() == "Value: 110c"
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_value_sum_label_hidden_when_nothing_visible_has_a_known_price(qapp) -> None:
+    win = MainWindow()
+    win.table_model.set_price_index(_price_index(**{"Chaos Orb": 1.0}))
+    win.table_model.set_items([Item.model_validate({"typeLine": "Some Unpriced Rare"})])
+
+    assert win._value_sum_label.text() == ""
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_value_sum_label_skips_unpriced_items_but_sums_the_rest(qapp) -> None:
+    win = MainWindow()
+    win.table_model.set_price_index(_price_index(**{"Chaos Orb": 1.0}))
+    win.table_model.set_items([
+        Item.model_validate({"typeLine": "Chaos Orb", "stackSize": 5}),
+        Item.model_validate({"typeLine": "Some Unpriced Rare"}),
+    ])
+
+    assert win._value_sum_label.text() == "Value: 5.0c"
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_value_sum_label_follows_the_type_filter(qapp) -> None:
+    win = MainWindow()
+    win.table_model.set_price_index(_price_index(**{"Chaos Orb": 1.0}))
+    win.table_model.set_items([
+        Item.model_validate({"typeLine": "Chaos Orb", "stackSize": 10, "frameType": 5}),
+    ])
+    assert win._value_sum_label.text() == "Value: 10c"
+
+    win._type_checks[5].setChecked(False)  # Currency aus
+
+    assert win._value_sum_label.text() == ""
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_value_sum_recomputes_exactly_once_per_search_like_the_stack_sum(qapp, monkeypatch) -> None:
+    """Dieselbe O(n²)-Gefahr wie FALLSTRICKE #39: _update_value_sum() darf
+    nur über _update_summaries() an modelReset hängen bzw. explizit nach
+    Filteränderungen laufen, nie an rowsInserted/rowsRemoved."""
+    win = MainWindow()
+    win._search_all_active = True
+    win.table_model.set_price_index(_price_index(**{"Chaos Orb": 1.0}))
+    items = [Item.model_validate({"typeLine": "Chaos Orb" if i % 7 == 0 else "Filler",
+                                  "stackSize": 1})
+             for i in range(500)]
+    win.table_model.set_items(items)
+
+    calls: list[None] = []
+    monkeypatch.setattr(win, "_update_value_sum", lambda: calls.append(None))
+    win._filter_edit.setText("chaos")
+    win._apply_debounced_search_filter()
+
+    assert calls == [None]
     win.worker.stop()
     win.worker.wait(5000)
 

@@ -8,6 +8,24 @@ from poe_view.api.models import (Character, Item, StashTab, dominant_category,
                                  gem_level, gem_quality, get_property_value,
                                  item_category)
 
+
+def test_max_links_is_the_largest_socket_group() -> None:
+    item = Item.model_validate({"sockets": [
+        {"group": 0, "attr": "I", "sColour": "B"},
+        {"group": 0, "attr": "S", "sColour": "R"},
+        {"group": 1, "attr": "D", "sColour": "G"},
+    ]})
+    assert item.max_links == 2
+
+
+def test_max_links_is_zero_without_sockets() -> None:
+    assert Item.model_validate({}).max_links == 0
+
+
+def test_max_links_six_link() -> None:
+    item = Item.model_validate({"sockets": [{"group": 0} for _ in range(6)]})
+    assert item.max_links == 6
+
 GEM_JSON = {
     "id": "abc123",
     "name": "",

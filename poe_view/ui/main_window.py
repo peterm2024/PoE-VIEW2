@@ -22,12 +22,14 @@ from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox,
 
 from poe_view import __version__, config
 from poe_view.api.models import Character, Item, StashTab, dominant_category
-from poe_view.services import data_cache
+from poe_view.api.ninja import PriceIndex
+from poe_view.services import data_cache, price_cache
 from poe_view.services.api_worker import (ApiWorker, BootstrapJob,
                                           FetchAllItemsJob,
                                           FetchCharacterItemsJob,
                                           FetchCharactersJob, FetchIconJob,
-                                          FetchLeaguesJob, FetchStashItemsJob,
+                                          FetchLeaguesJob, FetchPricesJob,
+                                          FetchStashItemsJob,
                                           FetchStashListJob, LoginJob,
                                           LogoutJob)
 from poe_view.services.csv_export import export_items, sanitize_filename
@@ -35,7 +37,7 @@ from poe_view.ui.character_list import CharacterList
 from poe_view.ui.item_detail import ItemDetail
 from poe_view.ui.item_table import (COLUMNS, ICON_COL, MODS_COL,
                                     POSITION_COL, TAB_COL, ItemFilterProxy,
-                                    ItemTableModel)
+                                    ItemTableModel, format_chaos_value)
 from poe_view.ui.rate_limit_dashboard import RateLimitDashboard
 from poe_view.ui.raw_data_viewer import RawDataViewer
 from poe_view.ui.stash_tree import StashTree
@@ -167,6 +169,7 @@ class MainWindow(QMainWindow):
         self._character_items_loaded: dict[str, str] = {}       # Charaktername → ISO-Zeitstempel
         self._current_character_name: str | None = None         # gerade angezeigter Charakter
         self._worker_busy = False
+        self._price_indexes: dict[str, PriceIndex] = {}  # Liga → PriceIndex (Cache-Hit oder Worker-Ergebnis)
         # Startwert True: der bestehende `_current_league`-Guard blockiert den
         # Auto-Refresh ohnehin, bis eine Liga aktiv ist (was einen
         # erfolgreichen Login voraussetzt) — dieses Flag greift nur für den
@@ -478,13 +481,19 @@ class MainWindow(QMainWindow):
         # (z. B. "Currency 7" bei 19704 Items) waren das ~395 Aufrufe. Jeder
         # rief _update_stack_sum() mit einer erneuten O(sichtbare Zeilen)-
         # Schleife auf — zusammen O(n²), gemessen 9,5 SEKUNDEN für einen
-        # einzigen Tastendruck. Stattdessen wird _update_stack_sum() jetzt an
-        # jeder Stelle, die den Filter ändert, GENAU EINMAL explizit
-        # aufgerufen (_apply_debounced_search_filter, _on_type_toggled,
+        # einzigen Tastendruck. Stattdessen wird _update_summaries() (ruft
+        # _update_stack_sum() + _update_value_sum()) jetzt an jeder Stelle,
+        # die den Filter ändert, GENAU EINMAL explizit aufgerufen
+        # (_apply_debounced_search_filter, _on_type_toggled,
         # _apply_column_filter, _clear_column_filters).
         self._stack_sum_label = QLabel("")
         self.statusBar().addPermanentWidget(self._stack_sum_label)
-        self.proxy.modelReset.connect(self._update_stack_sum)
+        # Gesamtwert der sichtbaren Items (poe.ninja, §ARCHITEKTUR.md §4.14)
+        # — dieselbe Update-Disziplin wie die Stack-Summe: nur explizite
+        # Aufrufe, nie an rowsInserted/rowsRemoved (FALLSTRICKE #39).
+        self._value_sum_label = QLabel("")
+        self.statusBar().addPermanentWidget(self._value_sum_label)
+        self.proxy.modelReset.connect(self._update_summaries)
         # Sichtbarer Nachweis, dass der Hintergrund-Auto-Refresh arbeitet
         # ("Bist du dir sicher, dass das funktioniert?").
         self._auto_refresh_label = QLabel("")
@@ -598,7 +607,7 @@ class MainWindow(QMainWindow):
 
     def _on_type_toggled(self, type_key: int, visible: bool) -> None:
         self.proxy.set_type_visible(type_key, visible)
-        self._update_stack_sum()
+        self._update_summaries()
 
     def _solo_type_filter(self, type_key: int) -> None:
         """Normaler Klick auf ein Typ-Symbol: nur diesen Typ zeigen, alle
@@ -639,6 +648,35 @@ class MainWindow(QMainWindow):
                 total += item.stackSize
                 names.add(item.display_name)
         self._stack_sum_label.setText(f"Stack total: {total:,}" if len(names) == 1 else "")
+
+    def _update_summaries(self, *_args) -> None:
+        """Einziger Anschlusspunkt für beide Statuszeilen-Summen (Stack,
+        Wert) — siehe FALLSTRICKE #39: nur an modelReset hängen bzw. GENAU
+        EINMAL explizit nach jeder Filteränderung aufrufen, nie an
+        rowsInserted/rowsRemoved/layoutChanged."""
+        self._update_stack_sum()
+        self._update_value_sum()
+
+    def _update_value_sum(self) -> None:
+        """Gesamt-Chaos-Wert der aktuell sichtbaren (gefilterten) Zeilen,
+        soweit poe.ninja dafür einen Preis kennt — anders als die Stack-
+        Summe unabhängig vom Item-Namen sinnvoll (verschiedene Item-Typen
+        lassen sich in Chaos aufaddieren, anders als in Stack-Größe).
+        Bleibt leer, solange kein Preis-Index für die aktuelle Liga
+        vorliegt oder kein sichtbares Item einen Preis hat."""
+        total = 0.0
+        known = False
+        for row in range(self.proxy.rowCount()):
+            source_row = self.proxy.mapToSource(self.proxy.index(row, 0)).row()
+            value = self.table_model.value_at(source_row)
+            if value is not None:
+                total += value
+                known = True
+        if not known:
+            self._value_sum_label.setText("")
+            return
+        index = self._price_indexes.get(self._current_league)
+        self._value_sum_label.setText(f"Value: {format_chaos_value(total, index)}")
 
     # --- Spalten-Sichtbarkeit der Item-Tabelle --------- #
 
@@ -710,13 +748,13 @@ class MainWindow(QMainWindow):
         self._status_msg.setText(
             f"Column filter [{active}]: {shown} of {total} items visible"
             if active else f"Column filter removed — {total} items")
-        self._update_stack_sum()
+        self._update_summaries()
 
     def _clear_column_filters(self) -> None:
         self.proxy.clear_column_filters()
         self._status_msg.setText(
             f"All column filters cleared — {self.table_model.rowCount()} items")
-        self._update_stack_sum()
+        self._update_summaries()
 
     def _connect_worker(self) -> None:
         w = self.worker
@@ -736,6 +774,7 @@ class MainWindow(QMainWindow):
         w.bulk_progress.connect(self._on_bulk_progress)
         w.bulk_finished.connect(self._on_bulk_finished)
         w.offline_changed.connect(self._on_offline_changed)
+        w.prices_loaded.connect(self._on_prices_loaded)
 
     # --- Worker-Slots (Main-Thread) ------------------------------------ #
 
@@ -793,6 +832,12 @@ class MainWindow(QMainWindow):
         else:
             # … und trotzdem im Hintergrund bestätigen/aktualisieren (wie bisher).
             self.worker.submit(FetchStashListJob(league))
+            self._ensure_prices_loaded(league)
+        # ERST NACH _ensure_prices_loaded: bei einem Cache-Treffer landet der
+        # Preis-Index synchron in self._price_indexes (siehe dort) — davor
+        # aufgerufen würde stets None sehen, auch wenn der Cache-Treffer
+        # direkt danach eintrifft.
+        self.table_model.set_price_index(self._price_indexes.get(league))
         # Stash-Modus soll sofort auf die neue Liga umsteigen statt den
         # Rest-Takt der vorherigen Liga abzuwarten.
         self._refresh_mode_pending = False
@@ -802,6 +847,29 @@ class MainWindow(QMainWindow):
         self._stash_mode_coverage_cursor = 0
         self._stash_mode_list_refresh_due = False
         self._refresh_mode_priority_id = None  # Fach-IDs gelten nur innerhalb einer Liga
+
+    def _ensure_prices_loaded(self, league: str) -> None:
+        """Preise für eine Liga bereitstellen: Disk-Cache zuerst (kein
+        Netzwerk, sofort verfügbar), sonst Nachladen im Hintergrund über
+        den Worker — unabhängig vom GGG-Login/Online-Status, poe.ninja ist
+        ein eigener, unauthentifizierter Dienst."""
+        if league in self._price_indexes:
+            return
+        cached = price_cache.load(league)
+        if cached is not None:
+            self._price_indexes[league] = cached
+            return
+        self.worker.submit(FetchPricesJob(league))
+
+    def _on_prices_loaded(self, league: str, index: PriceIndex) -> None:
+        self._price_indexes[league] = index
+        price_cache.save(league, index)
+        if league == self._current_league:
+            # Preise treffen meist NACH den Items ein (Hintergrund-Abruf,
+            # §_ensure_prices_loaded) — Value-Spalte/-Summe füllen sich
+            # dadurch nachträglich, ohne dass der Nutzer neu klicken muss.
+            self.table_model.set_price_index(index)
+            self._update_value_sum()
         self._drive_refresh_mode()
 
     def _on_characters(self, characters: list[Character]) -> None:
@@ -1379,7 +1447,7 @@ class MainWindow(QMainWindow):
             self._run_large_search(self._filter_edit.text())
         else:
             self.proxy.setFilterFixedString(self._filter_edit.text())
-            self._update_stack_sum()
+            self._update_summaries()
 
     def _enter_search_all(self) -> None:
         self._search_all_active = True
@@ -1445,7 +1513,7 @@ class MainWindow(QMainWindow):
         self._status_msg.setText(
             f"{len(matched_items)} of {len(items)} items match ({loaded} tabs/characters) — "
             "clear the field to return to the tab view")
-        self._update_stack_sum()
+        self._update_summaries()
 
     def _leave_search_all(self) -> None:
         self._search_all_active = False

@@ -6,6 +6,19 @@ nach [SemVer](https://semver.org/lang/de/).
 
 ## [Unveröffentlicht]
 
+### Hinzugefügt
+
+- Preis-Anzeige über poe.ninja: neue **Value**-Spalte in der Item-Tabelle
+  (Chaos-Wert × Stack, Anzeige in Chaos oder Divine je nach Höhe) sowie
+  Gesamtwert der sichtbaren Items in der Statuszeile. Umfasst Currency,
+  Fragmente, Uniques (inkl. 5-/6-Link-Preise), Gems (exakt nach
+  Level/Qualität/Corrupted), Divination Cards, Scarabs, Essences, Fossils
+  u. a. — bewusst ohne Rare-Item-Basispreise. Unbekannte Preise bleiben
+  leer statt 0; Items unter einem Chaos werden dezent abgeblendet. Preise
+  werden pro Liga bis zu 6 Stunden gecacht.
+- `Item.sockets`/`Item.max_links` im Datenmodell (Grundlage der
+  Link-genauen Unique-Preis-Zuordnung).
+
 ## [0.2.0] - 2026-07-29
 
 ### Hinzugefügt

@@ -1126,6 +1126,89 @@ stattdessen ihre eigene Aktualität kontrollierbar:
 
 ---
 
+### 4.14 Preis-Anzeige (`api/ninja.py`, `services/price_cache.py`)
+
+Value-Spalte in der Item-Tabelle + Gesamtwert in der Statuszeile, auf
+Basis der öffentlichen poe.ninja-Economy-API. Umfang bewusst begrenzt
+(Entscheidung siehe ToDo.md): alle Preis-Kategorien AUSSER `BaseType`
+(Rare-Item-Basen — mit Abstand die teuerste Kategorie beim Abruf, und
+ohne iLvl-/Influence-Bewertung ohnehin unzuverlässig). Rare-Items ohne
+Basis-Preis bleiben deshalb grundsätzlich ohne Wertangabe.
+
+**API-Instabilität als Designvorgabe:** poe.ninja hat seine komplette
+Preis-API am 2026-06-28 ohne Vorankündigung umgestellt — jede zu diesem
+Zeitpunkt kursierende Doku (inkl. mehrerer GitHub-Repos) war schlagartig
+falsch (`/api/data/currencyoverview` liefert seither 404). Die aktuellen
+Routen wurden empirisch ermittelt:
+
+- `/poe1/api/economy/stash/current/currency/overview?league=X&type=Currency|Fragment`
+  → `lines[].currencyTypeName`/`chaosEquivalent`
+- `/poe1/api/economy/stash/current/item/overview?league=X&type=…`
+  → `lines[].name`/`chaosValue` (+ `gemLevel`/`gemQuality`/`corrupted`
+  bei Gems, `links` bei Weapons/Armour)
+- `/poe1/api/economy/exchange/current/overview?league=X&type=…`
+  → `items[].id→name` getrennt von `lines[].id`/`primaryValue`
+
+`fetch_price_index()` behandelt jede Kategorie einzeln als best-effort:
+schlägt eine fehl (Netzwerk, eine erneute stille API-Umstellung), fehlt
+nur diese eine Preisgruppe — kein Abbruch, keine Exception nach außen.
+Traffic ist gering: alle ~30 Requests zusammen ≈ 1,2 MB komprimiert pro
+Liga (real gemessen), da jede Anfrage eine ganze Kategorie statt eines
+Einzel-Items liefert.
+
+**Zwei Fälle, in denen der Item-Name allein nicht zum richtigen Preis
+führt** (`PriceIndex`, drei getrennte interne Dicts: `_simple`/`_gems`/
+`_links`):
+
+1. **Gems** tragen bei poe.ninja mehrere Preis-Varianten pro Name
+   (Level/Qualität/Corrupted) — real beobachtet bis Faktor 13 Unterschied
+   zwischen benachbarten Varianten. `PriceIndex._gem_price` verlangt einen
+   EXAKTEN Treffer auf allen drei Werten; ohne exakte Übereinstimmung gibt
+   es keinen Näherungswert, sondern `None` (unbekannt) — ein falscher Preis
+   um eine Größenordnung wäre schlimmer als gar keiner.
+2. **Unique Weapons/Armour** werden ab 5-/6-Link separat bepreist (alles
+   darunter bzw. ohne Sockets läuft unter einem Basis-Preis, Bucket
+   `None`) — dafür trägt `Item` seit diesem Feature `sockets: list[Socket]`
+   und `max_links` (größte Socket-Gruppe). `PriceIndex._link_price`
+   matcht auf den passenden Bucket, mit Fallback auf den nächst niedrigeren
+   bekannten (ein Item mit 6 Links, für das kein 6-Link-Preis gelistet
+   ist, bekommt den 5-Link- bzw. sonst den Basis-Preis statt gar keinen).
+3. **Chaos Orb** ist ein eigener Sonderfall: poe.ninja listet die
+   Referenzwährung nicht gegen sich selbst (kein `chaosEquivalent`-Eintrag
+   für "Chaos Orb"). `PriceIndex` seedet ihn deshalb fest mit `1.0`.
+
+**Cache mit TTL** (`services/price_cache.py`): JSON-Datei analog
+`data_cache.py`, 6 Stunden TTL (Preise bewegen sich über Stunden, nicht
+Minuten). `MainWindow._ensure_prices_loaded()` prüft den Disk-Cache
+zuerst und stößt nur bei einem Miss einen `FetchPricesJob` im
+`ApiWorker` an — eigener, persistenter `httpx`-Client, unabhängig von
+Rate-Limiter/Auth-Zustand der GGG-API (poe.ninja braucht keinen
+Login). Bei archivierten Ligen (§4.12) wird kein Preis-Job abgeschickt,
+dieselbe Regel wie beim Stash-Request.
+
+**Anzeige** (`item_table.py`): `format_chaos_value()` wählt Chaos für
+kleine Beträge, Divine sobald der Gegenwert mindestens einen Divine Orb
+erreicht (Divine-Kurs kommt aus `PriceIndex.divine_rate`, keine feste
+Konstante). Unbekannt bleibt immer LEER, nie `0` — dieselbe Lehre wie bei
+der Stack-Summe (FALLSTRICKE #39): ein unbekannter Preis ist etwas
+anderes als ein wertloses Item. Werte unter einem Chaos werden dezent
+Richtung Hintergrund abgeblendet (`theme.blend`, dieselbe Funktion wie
+die Alters-Abblendung im Stash-Baum, §4.7) — ein optischer Hinweis auf
+wahrscheinlichen Schrott, ohne eine feste Grautönung, die auf hellem wie
+dunklem Theme falsch aussähe.
+
+Die Gesamtwert-Anzeige in der Statuszeile (`_update_value_sum`) folgt
+strikt derselben Update-Disziplin wie die Stack-Summe: nur über
+`_update_summaries()` an `proxy.modelReset` gehängt bzw. explizit nach
+jeder Filteränderung aufgerufen, nie an `rowsInserted`/`rowsRemoved`
+(FALLSTRICKE #39 — genau dort saß der O(n²)-Bug). Anders als die
+Stack-Summe ist eine Wert-Summe über verschiedene Item-Typen hinweg
+sinnvoll (Chaos-Werte lassen sich aufaddieren, Stack-Größen
+unterschiedlicher Items nicht) — sie erscheint deshalb auch bei
+gemischten Treffern, nicht nur bei einheitlichem Item-Namen.
+
+---
+
 ## 5. UI-Konzept (Oberflächenvorschlag)
 
 Ein Hauptfenster: Navigation links (Charaktere + Stash getrennt), Items
@@ -1178,10 +1261,10 @@ verschwunden.
 | Navigation: Charaktere | `CharacterList` (`QListWidget`) | Bewusst KEIN Tree — Charaktere haben keine Unterstruktur (spart eine Ebene samt Auf- und Zuklapp-Klick). Flach, absteigend nach Level, liga-gefiltert (`MainWindow._apply_character_league_filter`, siehe §5.1). Höhe begrenzt (`setMaximumHeight`), damit der Stash-Baum den meisten Platz bekommt. |
 | Navigation: Stash | `StashTree` (`QTreeWidget`), 3 Spalten, **Header sichtbar** | Kein umschließender "Stash"-Wurzelknoten mehr — die Tabs SIND die Top-Level-Einträge (spart eine weitere Ebene). Ordner rekursiv (children), Map-Fächer zusätzlich nach Sektion gruppiert (§4.10). Namensspalte per `QHeaderView.ResizeMode.Interactive` (NICHT `Stretch` — Stretch-Spalten lassen sich in Qt nicht per Maus verbreitern, das war ein echter Bug) mit großzügiger Startbreite, per Header-Rand manuell nachziehbar. Tab-Farbe aus API als kleines Icon-Quadrat VOR dem Namen, bewusst NICHT als Textfarbe (manche API-Farben sind auf dunklem Grund sonst unlesbar). Klick auf Tab → `FetchStashItems`-Job, sofern nicht bereits im Cache. Spalte 2 (**#**) zeigt die Item-Anzahl (eigene Spalte statt "(N Items)"-Text im Namen; Details §4.7.1). Spalte 3 zeigt GENAU EINEN von DREI sich gegenseitig ausschließenden Zuständen (§4.7.1, §4.12): **⬇**-Text, solange nie geladen; ein **⟳-Button mit Alters-Beschriftung** (exakte Uhrzeit "⟳ 14:32:46" bei heute geladenen Daten, sonst "⟳ vor 3d") sobald mindestens einmal geladen — Klick lädt genau diesen Tab bewusst AM Cache vorbei neu (`stash_refresh_requested`-Signal); oder **📴** statt ⟳, solange GGG nicht erreichbar ist (Offline-Modus, §4.12) — derselbe Button, nur die Beschriftung ändert sich, ein Klick versucht trotzdem ein Neuladen. Rechtsklick öffnet ein Kontextmenü mit "🔍 Rohdaten anzeigen" (`raw_data_requested`-Signal, §4.9) — öffnet/aktualisiert den nicht-modalen Rohdaten-Mini-Viewer — sowie "▸ Expand All"/"▾ Collapse All" für den ganzen Baum (§4.7.3), Letzteres unabhängig davon, worauf geklickt wurde. |
 | Typ-Filter (Toolbar, neben Liga) | 8× `_TypeFilterCheckBox` (eigene `QCheckBox`-Unterklasse) | Normal/Magic/Rare/Unique/Gem/Currency/Div Card + "Sonstige" (§4.11) — Farbe des Käschchens = Typ-Farbe (Pink für "Sonstige"), Name nur im Tooltip. Alle acht standardmäßig an. Drei Gesten statt reinem An/Aus (Peter, 2026-07-28): ein modifierloser Klick zeigt NUR diesen Typ (`solo_requested`-Signal → `_solo_type_filter`) — der weitaus häufigere Wunsch als "nur diesen einen abwählen"; Strg+Klick bleibt das native `QCheckBox`-Einzel-Umschalten (dazu-/wegnehmen aus einer bereits eingeschränkten Ansicht, per `super().mousePressEvent()` durchgereicht); Strg+Umschalt+Klick oder Doppelklick setzen über `reset_requested` wieder alle Typen an. Ein normaler Doppelklick würde von Qt sonst als zwei Einzelklicks gewertet (Haken am Ende unverändert) — deshalb eigene `mouseDoubleClickEvent`-Behandlung. |
-| Item-Tabelle rechts oben | `QTableView` + `QSortFilterProxyModel` | Spalten: Icon, Tab, **Position** ("#3 (4, 7)", Tab-Nummer plus Item-Koordinate, §4.11, unterscheidet gleichnamige Fächer), Name, Typ, Level, Quality, Stack, iLvl, **Anf.Lvl, Str, Dex, Int** (aus dem `requirements`-Array, §4.11) und **Mods** (explicitMods, überwiegend Map-Modifikatoren, Tooltip zeilenweise). Klick auf den Spaltenkopf sortiert numerisch über `NUMERIC_SORT_ROLE`, also nach echten Zahlen statt nach Strings; Zeilen ohne Wert ("–") landen unten. Das Suchfeld sucht fächerübergreifend über die ganze Liga und schließt Item-Properties wie "Item Quantity" ein; ein eingebauter Clear-Button leert es, `*` zeigt alles an (gedacht für den Komplett-Export, §4.11). Je Spalte lässt sich über das Header-Rechtsklick-Menü zusätzlich ein Filter-Ausdruck setzen (`>=20`, `<45`, `=Text`, Teilstring), aktive Filter markiert ein 🔍 im Header. Sichtbare Spalten sind per Rechtsklick wählbar und werden in `%LOCALAPPDATA%/PoE-VIEW2/ui-settings.ini` gespeichert; "Typ" ist standardmäßig aus, da die Rarity bereits die Namensfarbe bestimmt. Die Tab-Spalte verwaltet die Anwendung selbst und blendet sie nicht ins Menü ein: aus bei Einzelfach-Auswahl, an in Aggregat-Ansichten ("Alle Tabs", Spezial-Tab-Elternknoten, liga-weite Suche), wo sie die Herkunft trägt ("Map (Tier 1)"). |
+| Item-Tabelle rechts oben | `QTableView` + `QSortFilterProxyModel` | Spalten: Icon, Tab, **Position** ("#3 (4, 7)", Tab-Nummer plus Item-Koordinate, §4.11, unterscheidet gleichnamige Fächer), Name, Typ, Level, Quality, Stack, iLvl, **Anf.Lvl, Str, Dex, Int** (aus dem `requirements`-Array, §4.11), **Mods** (explicitMods, überwiegend Map-Modifikatoren, Tooltip zeilenweise) und **Value** (poe.ninja-Chaos-Wert × Stack, §4.14; leer bei unbekanntem Preis, unter 1 Chaos dezent Richtung Hintergrund abgeblendet). Klick auf den Spaltenkopf sortiert numerisch über `NUMERIC_SORT_ROLE`, also nach echten Zahlen statt nach Strings; Zeilen ohne Wert ("–") landen unten. Das Suchfeld sucht fächerübergreifend über die ganze Liga und schließt Item-Properties wie "Item Quantity" ein; ein eingebauter Clear-Button leert es, `*` zeigt alles an (gedacht für den Komplett-Export, §4.11). Je Spalte lässt sich über das Header-Rechtsklick-Menü zusätzlich ein Filter-Ausdruck setzen (`>=20`, `<45`, `=Text`, Teilstring), aktive Filter markiert ein 🔍 im Header. Sichtbare Spalten sind per Rechtsklick wählbar und werden in `%LOCALAPPDATA%/PoE-VIEW2/ui-settings.ini` gespeichert; "Typ" ist standardmäßig aus, da die Rarity bereits die Namensfarbe bestimmt. Die Tab-Spalte verwaltet die Anwendung selbst und blendet sie nicht ins Menü ein: aus bei Einzelfach-Auswahl, an in Aggregat-Ansichten ("Alle Tabs", Spezial-Tab-Elternknoten, liga-weite Suche), wo sie die Herkunft trägt ("Map (Tier 1)"). |
 | Item-Detail rechts unten | eigenes Widget | Großes Icon, Name in Rarity-Farbe (frameType), Properties, Mods. Aktualisiert bei Zeilenauswahl. |
 | Rate-Limit-Dashboard | `QProgressBar` pro Regel + Status-LED + Countdown | Wird ausschließlich über das Signal `rate_limit_changed` gefüttert. Farbe: grün < 60 %, gelb < 90 %, rot ab 90 %/Wartephase. Countdown zeigt verbleibende Wartezeit. *Intention: Der User soll immer sehen, WARUM die App gerade wartet.* |
-| Statusbar | `QStatusBar` + `QProgressBar` (busy) | Login-Status, laufender Job, permanenter GGG-Disclaimer. Die `QProgressBar` läuft mit `setRange(0, 0)` im "busy"-Modus (Qt animiert das eingebaut, kein eigener Timer nötig). Sichtbarkeit hängt am eigenen `busy_changed`-Signal des Workers (`True` rund um jeden Job), NICHT am `status`-Text — siehe §4.5.1 zur Begründung. Ein permanentes **Offline-Banner** ("📴 Offline — GGG nicht erreichbar, zeige zwischengespeicherte Daten", §4.12) erscheint bei Konnektivitätsproblemen — als eigenes Label, damit die nächste "Lade …"-Statusmeldung es nicht überschreibt. Ein zweites permanentes Label (`_stack_sum_label`) zeigt die Summe der Stack-Größe über die aktuell sichtbaren (gefilterten) Zeilen ("Stack total: 12,345") — Items ohne Stack-Größe (Ausrüstung) zählen nicht mit. Erscheint NUR, wenn alle stapelbaren Treffer denselben `display_name` tragen (FALLSTRICKE #39): bei "*" oder einer ungefilterten Truhe mit mehreren Currency-Sorten wäre eine Summe über verschiedene Item-Typen hinweg bedeutungslos (Peter, 2026-07-28: "*" ergab "Stack total: 604.911" quer über die ganze Liga) — das Label bleibt dann leer, genau wie ohne jeden stapelbaren Treffer. Hängt an den Proxy-Signalen (`modelReset`, `layoutChanged`, `rowsInserted`/`-Removed`) statt in jeder einzelnen `_status_msg`-Stelle dupliziert zu werden — reagiert dadurch automatisch auf Suche, Spalten- und Typ-Filter sowie neu geladene Items. |
+| Statusbar | `QStatusBar` + `QProgressBar` (busy) | Login-Status, laufender Job, permanenter GGG-Disclaimer. Die `QProgressBar` läuft mit `setRange(0, 0)` im "busy"-Modus (Qt animiert das eingebaut, kein eigener Timer nötig). Sichtbarkeit hängt am eigenen `busy_changed`-Signal des Workers (`True` rund um jeden Job), NICHT am `status`-Text — siehe §4.5.1 zur Begründung. Ein permanentes **Offline-Banner** ("📴 Offline — GGG nicht erreichbar, zeige zwischengespeicherte Daten", §4.12) erscheint bei Konnektivitätsproblemen — als eigenes Label, damit die nächste "Lade …"-Statusmeldung es nicht überschreibt. Ein zweites permanentes Label (`_stack_sum_label`) zeigt die Summe der Stack-Größe über die aktuell sichtbaren (gefilterten) Zeilen ("Stack total: 12,345") — Items ohne Stack-Größe (Ausrüstung) zählen nicht mit, und die Zeile erscheint NUR, wenn alle stapelbaren Treffer denselben `display_name` tragen (FALLSTRICKE #39: bei "*" oder einer ungefilterten Truhe mit mehreren Currency-Sorten wäre eine Summe über verschiedene Item-Typen hinweg bedeutungslos). Ein drittes permanentes Label (`_value_sum_label`, §4.14) zeigt den Gesamt-Chaos-Wert derselben sichtbaren Zeilen ("Value: 1,234c") — anders als die Stack-Summe AUCH über verschiedene Item-Namen hinweg sinnvoll, erscheint also schon bei einem einzigen Item mit bekanntem Preis. Beide Summen-Labels hängen NUR an `proxy.modelReset` (`_update_summaries`, garantiert genau ein Signal pro `set_items()`) und werden zusätzlich an jeder Stelle, die den Filter ändert, GENAU EINMAL explizit aufgerufen (`_apply_debounced_search_filter`, `_on_type_toggled`, `_apply_column_filter`, `_clear_column_filters`) — NICHT an `layoutChanged`/`rowsInserted`/`-Removed` (FALLSTRICKE #39, zweiter Teil: genau das war der O(n²)-Bug). |
 
 **"Alle Tabs laden" (Bulk) und CSV-Export:** Über den Toolbar-Button "⇊ Alle
 Tabs laden" holt der `ApiWorker` (`FetchAllItemsJob`) die Items sämtlicher

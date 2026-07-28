@@ -20,7 +20,7 @@ import httpx
 from PySide6.QtCore import QThread, Signal
 
 from poe_view import config
-from poe_view.api import oauth
+from poe_view.api import ninja, oauth
 from poe_view.api.client import ApiError, AuthError, PoeApiClient
 from poe_view.api.models import StashTab
 from poe_view.api.rate_limiter import RateLimitManager
@@ -119,6 +119,15 @@ class FetchAllItemsJob:
 
 
 @dataclass
+class FetchPricesJob:
+    """poe.ninja-Preise für eine Liga. Unabhängig von der GGG-API — kein
+    Auth nötig, läuft deshalb auch ohne gesetztes Token (``_NEEDS_AUTH``
+    lässt diesen Job bewusst aus)."""
+
+    league: str
+
+
+@dataclass
 class _StopJob:
     pass
 
@@ -144,6 +153,7 @@ class ApiWorker(QThread):
     bulk_progress = Signal(int, int, str)      # done, total, aktueller Tab-Name
     bulk_finished = Signal(int, int)           # success_count, total
     offline_changed = Signal(bool)             # True, solange GGG nicht erreichbar ist (§4.12)
+    prices_loaded = Signal(str, object)        # league, PriceIndex
 
     def __init__(self) -> None:
         super().__init__()
@@ -153,6 +163,11 @@ class ApiWorker(QThread):
         # Callback der Qt-freien API-Schicht → Qt-Signal (Schichtengrenze).
         self.rate_limiter = RateLimitManager(status_callback=self._on_rate_limit)
         self.client = PoeApiClient(self.rate_limiter)
+        # Eigener, persistenter Client für poe.ninja — andere Basis-URL,
+        # kein Auth, keine Rate-Limit-Kopplung zur GGG-API.
+        self._ninja_http = httpx.Client(timeout=20.0, headers={
+            "User-Agent": "PoE-VIEW2-price-lookup (+https://github.com/peterm2024/PoE-VIEW2)",
+        })
 
     # Von außen (Main-Thread) aufrufen:
     def submit(self, job) -> None:
@@ -203,6 +218,7 @@ class ApiWorker(QThread):
             finally:
                 self.busy_changed.emit(False)
         self.client.close()
+        self._ninja_http.close()
 
     # Jobs, die ohne gültiges Token garantiert einen 401 kassieren. Bootstrap
     # und Login stellen die Authentifizierung selbst her, Logout und der
@@ -274,6 +290,12 @@ class ApiWorker(QThread):
             case FetchAllItemsJob(league=league, stashes=stashes, positions=positions):
                 self.status.emit(f"Loading all tabs ({league})…")
                 self._fetch_all_items(league, stashes, positions)
+            case FetchPricesJob(league=league):
+                # Kein Status-Text: läuft meist unauffällig im Hintergrund
+                # bei einem Liga-Wechsel, soll keine relevantere Meldung
+                # (z. B. "Loading stash list…") überschreiben.
+                index = ninja.fetch_price_index(league, self._ninja_http)
+                self.prices_loaded.emit(league, index)
 
     # ------------------------------------------------------------------ #
 

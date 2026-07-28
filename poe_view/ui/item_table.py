@@ -38,6 +38,12 @@ nach frameType — und-verknüpft mit allem anderen: die vier PoE-Rarities
 (Normal/Magic/Rare/Unique), dazu Gem/Currency/Divination Card, und eine
 letzte "Sonstige"-Checkbox (Pink) für alles ohne eigene Kategorie (Quest,
 Prophecy, Relic, unbekannte frameTypes) — siehe ``_type_key``.
+
+Die Value-Spalte zeigt den poe.ninja-Chaos-Wert × Stack-Größe, sobald
+``set_price_index()`` einen ``PriceIndex`` liefert (MainWindow lädt ihn
+asynchron pro Liga, siehe api/ninja.py + services/price_cache.py). Leer
+heißt unbekannter Preis, nicht wertlos — nie 0. Werte unter einem Chaos
+werden dezent Richtung Hintergrund abgeblendet ("wahrscheinlich Schrott").
 """
 
 from __future__ import annotations
@@ -47,11 +53,12 @@ from typing import Callable
 
 from PySide6.QtCore import (QAbstractTableModel, QModelIndex,
                             QSortFilterProxyModel, Qt)
-from PySide6.QtGui import QBrush, QColor, QPixmap
+from PySide6.QtGui import QBrush, QColor, QGuiApplication, QPalette, QPixmap
 
 from poe_view.api.models import (Item, gem_level, gem_quality, req_attribute,
                                  req_level)
-from poe_view.ui.theme import OTHER_TYPE, RARITY_COLORS
+from poe_view.api.ninja import PriceIndex
+from poe_view.ui.theme import OTHER_TYPE, RARITY_COLORS, blend
 
 # frameTypes mit eigener Checkbox (MainWindow.TYPE_FILTER_ENTRIES) — alles
 # andere läuft für den Typ-Filter unter OTHER_TYPE ("Sonstige").
@@ -62,16 +69,37 @@ def _type_key(frame_type: int) -> int:
     return frame_type if frame_type in _EXPLICIT_TYPES else OTHER_TYPE
 
 COLUMNS = ("Icon", "Tab", "Position", "Name", "Type", "Level", "Qual.", "Stack", "iLvl",
-           "Req.Lvl", "Str", "Dex", "Int", "Mods")
+           "Req.Lvl", "Str", "Dex", "Int", "Mods", "Value")
 ICON_COL = 0
 TAB_COL = 1
 POSITION_COL = 2       # Tab-Nr. + Gitter-Koordinate — unterscheidet gleichnamige Fächer
 _NAME_COL = 3
 _NUMERIC_FROM_COL = 5  # Level, Qual., Stack, iLvl, Req.Lvl, Str, Dex, Int
 MODS_COL = 13          # Mods (v. a. Maps) — linksbündig, nicht numerisch
+VALUE_COL = 14         # poe.ninja-Chaos-Wert × Stack — eigene Spalte NACH Mods,
+                       # damit alle bestehenden Spalten-Indizes unverändert bleiben
 # Spalten vor dem vorgerechneten _rows-Tupel (Icon, Tab, Position) — Offset
 # für den Zugriff _rows[row][col - _ROWS_OFFSET] in display_text().
 _ROWS_OFFSET = 3
+
+# Unterhalb dieser Chaos-Schwelle wird die Value-Zelle dezent Richtung
+# Hintergrund abgeblendet ("wahrscheinlich Schrott") — der von PoE-Spielern
+# gebräuchliche Richtwert "ist es mindestens einen Chaos wert" (ToDo.md:
+# "Wert eines Items schätzen? Schrott-Items finden").
+_JUNK_THRESHOLD_CHAOS = 1.0
+
+
+def format_chaos_value(chaos: float, price_index: PriceIndex | None) -> str:
+    """"Zahl + Einheit": Chaos für kleine Beträge, sobald der Gegenwert
+    mindestens einen Divine Orb erreicht in Divine — vermeidet fünf- bis
+    sechsstellige Chaos-Zahlen bei teuren Items. Eigene Funktion (nicht nur
+    Methode), damit MainWindow dieselbe Formatierung für die
+    Gesamtwert-Anzeige in der Statuszeile wiederverwenden kann."""
+    divine_rate = price_index.divine_rate if price_index else None
+    if divine_rate and chaos >= divine_rate:
+        divine = chaos / divine_rate
+        return f"{divine:,.0f}div" if divine >= 10 else f"{divine:.1f}div"
+    return f"{chaos:,.0f}c" if chaos >= 10 else f"{chaos:.1f}c"
 
 # Sortierung/Vergleich über echte Zahlen statt Anzeigetext — sonst sortiert
 # "113" vor "56" (Stringvergleich). Der Proxy nutzt diese Rolle als sortRole.
@@ -98,6 +126,7 @@ class ItemTableModel(QAbstractTableModel):
         self._pixmaps: dict[str, QPixmap] = {}
         self._requested: set[str] = set()
         self._icon_requester = icon_requester
+        self._price_index: PriceIndex | None = None
 
     # --- Daten setzen -------------------------------------------------- #
 
@@ -171,6 +200,27 @@ class ItemTableModel(QAbstractTableModel):
                f"{item.rarity} {source} "
                f"{' '.join(item.explicitMods)} {' '.join(item.implicitMods)} {prop_text}").lower()
 
+    def set_price_index(self, index: PriceIndex | None) -> None:
+        """Preise treffen meist ASYNCHRON nach ``set_items()`` ein (poe.ninja
+        lädt im Hintergrund, §services/price_cache.py) — deshalb kein Reset,
+        nur ein ``dataChanged`` für die Value-Spalte über alle Zeilen."""
+        self._price_index = index
+        if self._items:
+            top_left = self.index(0, VALUE_COL)
+            bottom_right = self.index(len(self._items) - 1, VALUE_COL)
+            self.dataChanged.emit(top_left, bottom_right,
+                                  [Qt.ItemDataRole.DisplayRole, NUMERIC_SORT_ROLE])
+
+    def value_at(self, row: int) -> float | None:
+        """Chaos-Gesamtwert EINER Zeile (Einzelpreis × Stack-Größe), ``None``
+        wenn kein Preis-Index gesetzt ist oder poe.ninja für dieses Item
+        keinen Preis kennt (z. B. ein Rare ohne Namens-Treffer)."""
+        if self._price_index is None or not (0 <= row < len(self._items)):
+            return None
+        item = self._items[row]
+        unit_price = self._price_index.price_for(item)
+        return None if unit_price is None else unit_price * (item.stackSize or 1)
+
     def item_at(self, row: int) -> Item | None:
         return self._items[row] if 0 <= row < len(self._items) else None
 
@@ -238,6 +288,9 @@ class ItemTableModel(QAbstractTableModel):
             return self._sources[row] or "–"
         if col == POSITION_COL:
             return self._position_text(row)
+        if col == VALUE_COL:
+            value = self.value_at(row)
+            return format_chaos_value(value, self._price_index) if value is not None else ""
         if col > POSITION_COL:
             return self._rows[row][col - _ROWS_OFFSET]
         return ""
@@ -252,6 +305,9 @@ class ItemTableModel(QAbstractTableModel):
             # alle anderen weiterhin als (kleingeschriebener) Text.
             if col == POSITION_COL:
                 return self._position_sort_key(index.row())
+            if col == VALUE_COL:
+                value = self.value_at(index.row())
+                return value if value is not None else float("-inf")
             text = self.display_text(index.row(), col)
             if _NUMERIC_FROM_COL <= col < MODS_COL:
                 number = _first_number(text)
@@ -270,7 +326,15 @@ class ItemTableModel(QAbstractTableModel):
             colour = RARITY_COLORS.get(item.frameType)
             if colour:
                 return QBrush(QColor(colour))
-        if role == Qt.ItemDataRole.TextAlignmentRole and _NUMERIC_FROM_COL <= col < MODS_COL:
+        if role == Qt.ItemDataRole.ForegroundRole and col == VALUE_COL:
+            value = self.value_at(index.row())
+            if value is not None and value < _JUNK_THRESHOLD_CHAOS:
+                palette = QGuiApplication.palette()
+                dimmed = blend(palette.color(QPalette.ColorRole.Text),
+                              palette.color(QPalette.ColorRole.Base), 0.5)
+                return QBrush(dimmed)
+        if role == Qt.ItemDataRole.TextAlignmentRole and (
+                (_NUMERIC_FROM_COL <= col < MODS_COL) or col == VALUE_COL):
             return int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         return None
 

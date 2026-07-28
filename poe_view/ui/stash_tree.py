@@ -78,6 +78,7 @@ from PySide6.QtWidgets import (QHeaderView, QMenu, QToolButton, QTreeWidget,
                                QTreeWidgetItem)
 
 from poe_view.api.models import StashTab
+from poe_view.ui.theme import blend as _blend
 
 _DATA_ROLE = Qt.ItemDataRole.UserRole
 _LAST_LOADED_ROLE = Qt.ItemDataRole.UserRole + 1  # für set_offline(): Refresh-Button neu beschriften
@@ -85,17 +86,6 @@ _COL_NAME, _COL_COUNT, _COL_STATUS, _COL_POSITION = 0, 1, 2, 3
 _UNLOADED_MARK = "⬇"
 _AGE_FRESH_H = 1    # < 1h: normale Textfarbe
 _AGE_RECENT_H = 3   # < 3h: leicht abgeblendet, sonst stärker abgeblendet
-
-
-def _blend(colour: QColor, towards: QColor, factor: float) -> QColor:
-    """Mischt ``colour`` zu ``factor`` Anteilen Richtung ``towards`` —
-    ergibt "gedimmt" statt eines festen Grautons, der auf hellem wie
-    dunklem Theme falsch aussähe."""
-    return QColor(
-        round(colour.red() * (1 - factor) + towards.red() * factor),
-        round(colour.green() * (1 - factor) + towards.green() * factor),
-        round(colour.blue() * (1 - factor) + towards.blue() * factor),
-    )
 
 
 def _colour_swatch(hex_colour: str, size: int = 12) -> QIcon:

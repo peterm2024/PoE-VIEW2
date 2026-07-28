@@ -34,6 +34,18 @@ class ItemProperty(BaseModel):
             return None
 
 
+class Socket(BaseModel):
+    """Ein Socket-Eintrag. Items mit gleichem ``group`` sind miteinander
+    verlinkt — die Link-Zahl eines Items ist die Größe seiner größten
+    Gruppe (siehe ``Item.max_links``)."""
+
+    model_config = ConfigDict(extra="allow")
+
+    group: int = 0
+    attr: str = ""
+    sColour: str = ""
+
+
 class Item(BaseModel):
     model_config = ConfigDict(extra="allow")
 
@@ -53,6 +65,17 @@ class Item(BaseModel):
     requirements: list[ItemProperty] = Field(default_factory=list)
     explicitMods: list[str] = Field(default_factory=list)
     implicitMods: list[str] = Field(default_factory=list)
+    sockets: list[Socket] = Field(default_factory=list)
+
+    @property
+    def max_links(self) -> int:
+        """Größe der größten Socket-Gruppe, 0 ohne Sockets."""
+        if not self.sockets:
+            return 0
+        counts: dict[int, int] = {}
+        for s in self.sockets:
+            counts[s.group] = counts.get(s.group, 0) + 1
+        return max(counts.values())
 
     @field_validator("explicitMods", "implicitMods", mode="before")
     @classmethod

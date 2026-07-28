@@ -5,8 +5,10 @@ Netzwerk) — der Client wird per Monkeypatch durch eine Fake-Methode ersetzt.
 """
 
 from poe_view.api.models import Item, StashTab
+from poe_view.api.ninja import PriceIndex
 from poe_view.services.api_worker import (ApiWorker, FetchCharacterItemsJob,
-                                          FetchLeaguesJob, FetchStashItemsJob)
+                                          FetchLeaguesJob, FetchPricesJob,
+                                          FetchStashItemsJob)
 
 
 def test_stash_items_dispatch_does_not_emit_bereit_after_result(qapp, monkeypatch) -> None:
@@ -329,6 +331,51 @@ def test_data_jobs_run_normally_once_a_token_is_set(qapp, monkeypatch) -> None:
 
     assert calls == ["Allflame"]
     worker.client.close()
+
+
+def test_fetch_prices_dispatch_emits_league_and_index(qapp, monkeypatch) -> None:
+    worker = ApiWorker()
+    fake_index = PriceIndex()
+    calls = []
+    monkeypatch.setattr("poe_view.services.api_worker.ninja.fetch_price_index",
+                        lambda league, http: calls.append((league, http)) or fake_index)
+
+    received = []
+    worker.prices_loaded.connect(lambda league, index: received.append((league, index)))
+
+    worker._dispatch(FetchPricesJob("Standard"))
+
+    assert calls == [("Standard", worker._ninja_http)]
+    assert received == [("Standard", fake_index)]
+    worker.client.close()
+    worker._ninja_http.close()
+
+
+def test_fetch_prices_dispatch_emits_no_status_text(qapp, monkeypatch) -> None:
+    """Läuft meist unauffällig bei einem Liga-Wechsel — soll keine
+    relevantere Meldung (z. B. 'Loading stash list…') überschreiben."""
+    worker = ApiWorker()
+    monkeypatch.setattr("poe_view.services.api_worker.ninja.fetch_price_index",
+                        lambda league, http: PriceIndex())
+    emitted: list[str] = []
+    worker.status.connect(emitted.append)
+
+    worker._dispatch(FetchPricesJob("Standard"))
+
+    assert emitted == []
+    worker.client.close()
+    worker._ninja_http.close()
+
+
+def test_fetch_prices_job_runs_without_a_token() -> None:
+    """poe.ninja ist unabhängig von der GGG-Anmeldung — anders als die
+    GGG-Daten-Jobs darf dieser auch ohne Token laufen (kein Eintrag in
+    ``ApiWorker._NEEDS_AUTH``)."""
+    worker = ApiWorker()
+    assert not worker.client.has_token
+    assert not worker._skip_unauthenticated(FetchPricesJob("Standard"))
+    worker.client.close()
+    worker._ninja_http.close()
 
 
 def test_a_401_without_a_token_does_not_delete_the_stored_token(qapp, monkeypatch) -> None:

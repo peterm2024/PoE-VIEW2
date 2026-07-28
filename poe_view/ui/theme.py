@@ -3,6 +3,22 @@
 Quelle Rarity ↔ frameType: docs/ARCHITEKTUR.md §5.
 """
 
+from PySide6.QtGui import QColor
+
+
+def blend(colour: QColor, towards: QColor, factor: float) -> QColor:
+    """Mischt ``colour`` zu ``factor`` Anteilen Richtung ``towards`` —
+    ergibt "gedimmt" statt eines festen Grautons, der auf hellem wie
+    dunklem Theme falsch aussähe. Genutzt für die Alters-Abblendung im
+    Stash-Baum (stash_tree.py) und die Value-Spalten-Dimmung
+    (item_table.py)."""
+    return QColor(
+        round(colour.red() * (1 - factor) + towards.red() * factor),
+        round(colour.green() * (1 - factor) + towards.green() * factor),
+        round(colour.blue() * (1 - factor) + towards.blue() * factor),
+    )
+
+
 RARITY_COLORS = {
     0: "#e8e6e3",  # Normal
     1: "#8888ff",  # Magic
