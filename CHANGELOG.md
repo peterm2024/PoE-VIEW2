@@ -6,6 +6,8 @@ nach [SemVer](https://semver.org/lang/de/).
 
 ## [Unveröffentlicht]
 
+## [0.2.0] - 2026-07-29
+
 ### Hinzugefügt
 
 - Refresh-Modus-Dropdown (Auto / Single / Stash) in der Toolbar: Single
@@ -155,5 +157,6 @@ Erste veröffentlichte Version.
 Die technischen Hintergründe einzelner Entscheidungen stehen in
 [FALLSTRICKE_UND_WORKAROUNDS.md](FALLSTRICKE_UND_WORKAROUNDS.md).
 
-[Unveröffentlicht]: https://github.com/peterm2024/PoE-VIEW2/compare/v0.1.0...HEAD
+[Unveröffentlicht]: https://github.com/peterm2024/PoE-VIEW2/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/peterm2024/PoE-VIEW2/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/peterm2024/PoE-VIEW2/releases/tag/v0.1.0
