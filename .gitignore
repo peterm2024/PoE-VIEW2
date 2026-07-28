@@ -28,3 +28,6 @@ htmlcov/
 icon-cache/
 logs/
 data-cache.json
+
+# Lokaler Arbeits-Spickzettel, nicht fuer die Oeffentlichkeit bestimmt
+ToDo.md
