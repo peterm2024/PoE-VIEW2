@@ -358,3 +358,19 @@ zweites Mal analysiert werden müssen.
 **Lösung:** `PriceIndex.__init__` seedet `_simple["Chaos Orb"] = 1.0` fest.
 
 **Grundsatzentscheidung — Gems/Uniques lieber unbepreist als falsch bepreist.** poe.ninja führt pro Gem-Name mehrere Preis-Varianten (Level/Qualität/Corrupted, real bis Faktor 13 Unterschied) und pro Unique-Waffe/Rüstung optional 5-/6-Link-Sonderpreise. `PriceIndex._gem_price` verlangt einen EXAKTEN Treffer auf allen drei Gem-Werten und liefert sonst `None` statt eines Näherungswerts — dieselbe Lehre wie bei der Stack-Summe (#39): ein falscher Wert um eine Größenordnung schadet mehr als ein leeres Feld.
+
+---
+
+## 42. "Load All Tabs" schien eingefroren — der Fortschrittsbalken zählte die falsche Einheit
+
+**Problem:** Peter meldete "Load All Tabs hat irgendwelche Probleme" samt Screenshot: der Dialog stand auf "Loading stash tab 1/362:" bei 0%, ohne sichtbare Bewegung.
+
+**Fehlgeschlagene erste Diagnose (Lehrstück für Log-Auswertung).** Eine Skript-Auswertung des Logs zeigte scheinbar sechs identische Requests hintereinander auf denselben MapStash (`/stash/Solo Self-Found/f7abb332a4`) — Schlussfolgerung damals: der Bulk-Load hängt fest und fragt endlos denselben Tab ab. **Das war falsch.** Die Ausgabezeile des Auswertungsskripts war auf 95 Zeichen gekürzt, und die URL ist bis einschließlich der Eltern-ID exakt 95 Zeichen lang — abgeschnitten wurde genau das Kind-Segment. Es waren sechs VERSCHIEDENE Sektionen (`…/f7abb332a4/bafec616ff`, `…/b098435580`, …), die Anwendung arbeitete völlig korrekt.
+**Wie vermeiden:** Bei Log-Auswertungen per Skript nie auf eine feste Zeichenzahl kürzen, wenn daraus auf Gleichheit von URLs/IDs geschlossen wird — entweder ungekürzt ausgeben oder gezielt das unterscheidende Feld extrahieren. Eine "N-mal derselbe Request"-Beobachtung ist erst belastbar, wenn die verglichenen Strings nachweislich vollständig sind.
+
+**Die echte Ursache:** Der Balken lief über TRUHENPLÄTZE, die Arbeit fällt aber pro ABRUF an. Map-/Unique-Sektionen teilen sich definitionsgemäß den Platz ihres Eltern-Tabs (#36, #37) — in Peters SSF-Liga bündelt ein einziger MapStash 365 Sektionen auf einem Platz. Der Zähler stand dadurch **67 Minuten** unverändert auf derselben Zahl, der zweitgrößte Spezial-Tab nochmal 27 Minuten. Zahlen der Liga: 1088 Abrufe gegenüber 519 Truhenplätzen, echte Gesamtdauer ~199 min, angezeigte Erwartung ~95 min.
+
+**Spannung zu #37 — beide Zahlen sind richtig, die BESCHRIFTUNG war das Problem.** #37 hatte den Zähler bewusst von Abrufen auf Truhenplätze umgestellt, weil "58/561 Tabs" bei 391 echten Fächern falsch war. Diese Korrektur bleibt gültig: 561 Abrufe sind keine 561 Tabs. Der Fehler lag darin, daraus zu folgern, der Balken müsse Plätze zählen — ein Fortschrittsbalken muss die Einheit zeigen, in der die Arbeit anfällt.
+**Lösung:** `bulk_progress` meldet jetzt BEIDE Einheiten (`done_requests`/`total_requests`, `done_slots`/`total_slots`) plus eine Restzeitschätzung. Der Balken läuft über die Abrufe, das Label nennt zusätzlich den Truhenplatz-Stand — als "tab 3 of 519", nicht als Gesamtzahl des Balkens. Regressionstest `test_load_all_tabs_request_count_advances_on_every_fetch`; der Platz-Test aus #37 bleibt daneben bestehen und prüft weiterhin, dass Sektionen die Fächer-Zahl nicht aufblähen.
+
+**Restzeit: Soll-Takt statt reiner Messung.** Eine Schätzung aus `elapsed / done` ist am Anfang grob zu optimistisch, weil der erste Abruf ohne Taktpause läuft — bei 1088 Abrufen hätte der Dialog "etwa 5 min" für einen tatsächlich dreistündigen Lauf angezeigt (Faktor 40). Gerechnet wird deshalb mit `max(steady_pace_interval_s(), elapsed / done)`: der Soll-Takt trägt die Schätzung ab dem ersten Tick, die Messung übernimmt erst, wenn Rate-Limit-Zwangspausen die Lage tatsächlich verschlechtert haben.

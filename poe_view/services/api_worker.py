@@ -150,7 +150,9 @@ class ApiWorker(QThread):
     job_error = Signal(str)                    # Fehlertext für die Statusbar
     status = Signal(str)                       # Verlaufstext ("Lade …"), nicht der Busy-Zustand
     busy_changed = Signal(bool)                # True, solange irgendein Job läuft (für den UI-Spinner)
-    bulk_progress = Signal(int, int, str)      # done, total, aktueller Tab-Name
+    # done_requests, total_requests, done_slots, total_slots, Tab-Name,
+    # geschätzte Restsekunden (<0 = noch unbekannt) — siehe _fetch_all_items
+    bulk_progress = Signal(int, int, int, int, str, float)
     bulk_finished = Signal(int, int)           # success_count, total
     offline_changed = Signal(bool)             # True, solange GGG nicht erreichbar ist (§4.12)
     prices_loaded = Signal(str, object)        # league, PriceIndex
@@ -371,16 +373,26 @@ class ApiWorker(QThread):
         ein Klick auf "Abbrechen" greift dadurch sofort und muss nicht erst
         den laufenden Takt aussitzen.
 
-        Fortschritt zählt echte Truhenplätze, nicht rohe Abrufe (FALLSTRICKE
-        #36): Map-/Unique-Sektionen laufen zwar über je einen eigenen Request,
-        teilen sich aber den Platz ihres Eltern-Tabs und dürfen die Anzeige
-        ("58/561" statt "58/391") nicht aufblähen.
+        Fortschritt wird in ZWEI Einheiten gemeldet, weil beide gebraucht
+        werden und keine allein genügt (FALLSTRICKE #37, #42):
+
+        - ``done_requests``/``total_requests``: die tatsächlichen Abrufe.
+          Nur diese Zahl wächst bei JEDEM Schritt und taugt deshalb für
+          Balken und Restzeit.
+        - ``done_slots``/``total_slots``: echte Truhenplätze. Map-/
+          Unique-Sektionen teilen sich den Platz ihres Eltern-Tabs; diese
+          Zahl beantwortet "wie viele meiner Fächer sind durch", steht
+          dafür aber bei einem großen Spezial-Tab lange still (real
+          gemessen: 365 Sektionen auf einem Platz = 67 Minuten).
         """
         self._cancel_bulk.clear()
-        total = len({positions.get(s.id, s.id) for s in stashes})
+        total_slots = len({positions.get(s.id, s.id) for s in stashes})
+        total_requests = len(stashes)
         done_slots: set[str | int] = set()
         success_slots: set[str | int] = set()
         policy: str | None = None
+        started_at = time.monotonic()
+        done_requests = 0
         for i, stash in enumerate(stashes, start=1):
             # Vor dem ERSTEN Tab nicht warten; danach je einen Takt — der
             # Policy-Name stammt aus dem eigenen letzten Request, nicht aus
@@ -388,8 +400,8 @@ class ApiWorker(QThread):
             cancelled = (self._cancel_bulk.wait(self.rate_limiter.steady_pace_interval_s(policy))
                          if i > 1 else self._cancel_bulk.is_set())
             if cancelled:
-                log.info("Bulk-Laden abgebrochen nach %d/%d Truhenplätzen",
-                         len(done_slots), total)
+                log.info("Bulk-Laden abgebrochen nach %d/%d Abrufen (%d/%d Truhenplätzen)",
+                         done_requests, total_requests, len(done_slots), total_slots)
                 break
             slot = positions.get(stash.id, stash.id)
             try:
@@ -400,8 +412,21 @@ class ApiWorker(QThread):
             except Exception:
                 log.exception("Bulk-Laden: Tab %s fehlgeschlagen", stash.name)
             done_slots.add(slot)
-            self.bulk_progress.emit(len(done_slots), total, stash.name)
-        self.bulk_finished.emit(len(success_slots), total)
+            done_requests += 1
+            # Restzeit über den SCHLECHTEREN von Soll-Takt und gemessener
+            # Rate. Reines elapsed/done wäre am Anfang grob zu optimistisch,
+            # weil der erste Abruf ohne Taktpause läuft (bei 1088 Abrufen:
+            # "etwa 5 min" statt der realen ~3 h). Der Soll-Takt trägt vom
+            # ersten Tick an, die Messung übernimmt, sobald Rate-Limit-
+            # Zwangspausen die Sache tatsächlich verschlechtert haben.
+            elapsed = time.monotonic() - started_at
+            per_request = max(self.rate_limiter.steady_pace_interval_s(policy),
+                             elapsed / done_requests)
+            remaining_s = per_request * (total_requests - done_requests)
+            self.bulk_progress.emit(done_requests, total_requests,
+                                   len(done_slots), total_slots,
+                                   stash.name, remaining_s)
+        self.bulk_finished.emit(len(success_slots), total_slots)
 
     def _on_rate_limit(self, policy: str, rules: list[dict], wait_s: float) -> None:
         """Läuft im Worker-Thread; Signal-Emission ist threadsicher (queued)."""

@@ -6,6 +6,16 @@ nach [SemVer](https://semver.org/lang/de/).
 
 ## [Unveröffentlicht]
 
+### Behoben
+
+- "Load All Tabs" wirkte bei großen Truhen eingefroren: Der
+  Fortschrittsbalken zählte Truhenfächer, die Arbeit fällt aber pro Abruf
+  an. Ein Map-Stash bündelt hunderte Sektionen in einem einzigen Fach —
+  die Anzeige stand dadurch über eine Stunde auf derselben Zahl. Der
+  Balken läuft jetzt über die tatsächlichen Abrufe, das Label nennt
+  zusätzlich das Fach ("Section 128 of 1088 · tab 3 of 519") und eine
+  geschätzte Restzeit.
+
 ### Hinzugefügt
 
 - Preis-Anzeige über poe.ninja: neue **Value**-Spalte in der Item-Tabelle

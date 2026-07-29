@@ -1382,24 +1382,54 @@ class MainWindow(QMainWindow):
             self._show_aggregate()  # schon alles im Cache
             return
 
-        # Anzeige zählt echte Truhenplätze, nicht die rohen Abrufe: eine
-        # Map-/Unique-Sektion braucht zwar einen eigenen Request, teilt sich
-        # aber den Platz ihres Eltern-Tabs (FALLSTRICKE #36 — sonst z. B.
-        # "58/561" statt "58/391").
+        # Der BALKEN läuft über die tatsächlichen Abrufe, nicht über
+        # Truhenplätze: nur die Abrufe wachsen bei jedem Schritt. Ein großer
+        # MapStash bündelt hunderte Sektionen auf EINEM Platz — an Plätzen
+        # gemessen stünde die Anzeige dort über eine Stunde still
+        # (FALLSTRICKE #42). Die Platz-Zahl bleibt als Text im Label
+        # (_on_bulk_progress), weil sie die Frage "wie viele meiner Fächer
+        # sind durch" beantwortet.
         positions = self._tab_positions()
-        real_total = len({positions.get(s.id, s.id) for s in to_fetch})
 
         self._bulk_dialog = QProgressDialog(
-            "Loading stash tabs…", "Cancel", 0, real_total, self)
+            "Loading stash tabs…", "Cancel", 0, len(to_fetch), self)
         self._bulk_dialog.setWindowModality(Qt.WindowModality.WindowModal)
         self._bulk_dialog.setMinimumDuration(0)
         self._bulk_dialog.canceled.connect(self.worker.cancel_bulk)
         self.worker.submit(FetchAllItemsJob(self._current_league, to_fetch, positions))
 
-    def _on_bulk_progress(self, done: int, total: int, name: str) -> None:
-        if self._bulk_dialog is not None:
-            self._bulk_dialog.setLabelText(f"Loading stash tab {done}/{total}: {name}")
-            self._bulk_dialog.setValue(done)
+    @staticmethod
+    def _format_remaining(seconds: float) -> str:
+        """"about 2 h 55 min remaining" — grob gerundet, weil die Schätzung
+        über Stunden hinweg ohnehin nur größenordnungsgenau ist."""
+        if seconds < 0:
+            return ""
+        minutes = int(seconds // 60)
+        if minutes < 1:
+            return "less than a minute remaining"
+        if minutes < 60:
+            return f"about {minutes} min remaining"
+        return f"about {minutes // 60} h {minutes % 60} min remaining"
+
+    def _on_bulk_progress(self, done_requests: int, total_requests: int,
+                          done_slots: int, total_slots: int,
+                          name: str, remaining_s: float) -> None:
+        """Balken läuft über die ABRUFE — nur die wachsen bei jedem Schritt.
+        Der Truhenplatz-Zähler steht bei einem großen Spezial-Tab sonst über
+        eine Stunde still (FALLSTRICKE #42), beantwortet aber als Text die
+        Frage "wie viele meiner Fächer sind durch" und bleibt deshalb
+        daneben stehen — nur eben nicht mehr als "stash tabs" beschriftet,
+        was er nie war (FALLSTRICKE #37)."""
+        if self._bulk_dialog is None:
+            return
+        lines = [f"Loading: {name}",
+                 f"Section {done_requests} of {total_requests}  ·  "
+                 f"tab {done_slots} of {total_slots}"]
+        eta = self._format_remaining(remaining_s)
+        if eta:
+            lines.append(eta)
+        self._bulk_dialog.setLabelText("\n".join(lines))
+        self._bulk_dialog.setValue(done_requests)
 
     def _on_bulk_finished(self, success: int, total: int) -> None:
         if self._bulk_dialog is not None:

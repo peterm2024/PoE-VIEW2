@@ -488,40 +488,82 @@ def test_load_all_tabs_cancel_takes_effect_during_the_pause(qapp, monkeypatch) -
     worker.client.close()
 
 
-def test_load_all_tabs_counts_map_stash_sections_as_one_slot(qapp, monkeypatch) -> None:
-    """Regression FALLSTRICKE #36 (dritte Stelle): Peters echte Standard-Liga
-    zeigte "58/561" statt "58/391" — 561 war die Anzahl ladbarer Einheiten
-    (jede Map-/Unique-Sektion ein eigener Abruf), nicht echter Truhenplätze.
-    Drei Sektionen eines Map-Stashs teilen sich hier EINEN Platz (5)."""
-    from poe_view.services.api_worker import FetchAllItemsJob
+def _progress_worker(monkeypatch):
+    """Worker mit gemocktem Netz/Takt für die Bulk-Fortschritts-Tests."""
     worker = ApiWorker()
     worker.client.set_token("test")
-    stashes = [
-        StashTab.model_validate({"id": "map-a", "name": "Map A", "parent": "map",
-                                 "type": "Standard", "metadata": {}}),
-        StashTab.model_validate({"id": "map-b", "name": "Map B", "parent": "map",
-                                 "type": "Standard", "metadata": {}}),
-        StashTab.model_validate({"id": "map-c", "name": "Map C", "parent": "map",
-                                 "type": "Standard", "metadata": {}}),
-        StashTab.model_validate({"id": "t1", "name": "Tab 1", "type": "CurrencyStash",
-                                 "metadata": {}}),
-    ]
-    positions = {"map-a": 5, "map-b": 5, "map-c": 5, "t1": 9}
     fetched = StashTab.model_validate(
         {"id": "t", "name": "T", "type": "CurrencyStash", "metadata": {}, "items": []})
     monkeypatch.setattr(worker.client, "get_stash",
                         lambda league, sid, parent_id=None: fetched)
     monkeypatch.setattr(worker.rate_limiter, "steady_pace_interval_s", lambda *a, **k: 11.0)
     monkeypatch.setattr(worker._cancel_bulk, "wait", lambda timeout=None: False)
-    progress: list[tuple[int, int]] = []
-    worker.bulk_progress.connect(lambda done, total, name: progress.append((done, total)))
+    return worker
+
+
+_MAP_SECTIONS = [
+    {"id": "map-a", "name": "Map A", "parent": "map", "type": "Standard", "metadata": {}},
+    {"id": "map-b", "name": "Map B", "parent": "map", "type": "Standard", "metadata": {}},
+    {"id": "map-c", "name": "Map C", "parent": "map", "type": "Standard", "metadata": {}},
+    {"id": "t1", "name": "Tab 1", "type": "CurrencyStash", "metadata": {}},
+]
+_MAP_POSITIONS = {"map-a": 5, "map-b": 5, "map-c": 5, "t1": 9}
+
+
+def test_load_all_tabs_counts_map_stash_sections_as_one_slot(qapp, monkeypatch) -> None:
+    """Regression FALLSTRICKE #36/#37: Peters echte Standard-Liga zeigte
+    "58/561" statt "58/391" — 561 war die Anzahl ladbarer Einheiten (jede
+    Map-/Unique-Sektion ein eigener Abruf), nicht echter Truhenplätze. Die
+    TRUHENPLATZ-Zahl muss diese drei Sektionen weiterhin als EINEN Platz (5)
+    zählen; sie steht als Text im Dialog-Label."""
+    from poe_view.services.api_worker import FetchAllItemsJob
+    worker = _progress_worker(monkeypatch)
+    stashes = [StashTab.model_validate(s) for s in _MAP_SECTIONS]
+    slots: list[tuple[int, int]] = []
+    worker.bulk_progress.connect(
+        lambda dq, tq, ds, ts, name, eta: slots.append((ds, ts)))
     done = []
     worker.bulk_finished.connect(lambda ok, total: done.append((ok, total)))
 
-    worker._dispatch(FetchAllItemsJob("Standard", stashes, positions))
+    worker._dispatch(FetchAllItemsJob("Standard", stashes, _MAP_POSITIONS))
 
-    # 4 Abrufe, aber nur 2 echte Plätze (5 und 9) — der Fortschritt bleibt
-    # bei "1/2" stehen, solange noch Sektionen von Platz 5 offen sind.
-    assert progress == [(1, 2), (1, 2), (1, 2), (2, 2)]
+    # 4 Abrufe, aber nur 2 echte Plätze (5 und 9).
+    assert slots == [(1, 2), (1, 2), (1, 2), (2, 2)]
     assert done == [(2, 2)]
+    worker.client.close()
+
+
+def test_load_all_tabs_request_count_advances_on_every_fetch(qapp, monkeypatch) -> None:
+    """Regression FALLSTRICKE #42: Der Balken darf NICHT an Truhenplätzen
+    hängen — bei Peters MapStash mit 365 Sektionen auf einem Platz stünde
+    er sonst 67 Minuten still. Die Abruf-Zahl wächst bei jedem Schritt."""
+    from poe_view.services.api_worker import FetchAllItemsJob
+    worker = _progress_worker(monkeypatch)
+    stashes = [StashTab.model_validate(s) for s in _MAP_SECTIONS]
+    requests: list[tuple[int, int]] = []
+    worker.bulk_progress.connect(
+        lambda dq, tq, ds, ts, name, eta: requests.append((dq, tq)))
+
+    worker._dispatch(FetchAllItemsJob("Standard", stashes, _MAP_POSITIONS))
+
+    assert requests == [(1, 4), (2, 4), (3, 4), (4, 4)]
+    worker.client.close()
+
+
+def test_load_all_tabs_reports_a_remaining_time_estimate(qapp, monkeypatch) -> None:
+    """Restzeit kommt aus der gemessenen Rate, nicht aus dem Soll-Takt —
+    sonst blieben Rate-Limit-Zwangspausen unsichtbar. Sie sinkt monoton
+    und ist beim letzten Abruf null."""
+    from poe_view.services.api_worker import FetchAllItemsJob
+    worker = _progress_worker(monkeypatch)
+    stashes = [StashTab.model_validate(s) for s in _MAP_SECTIONS]
+    etas: list[float] = []
+    worker.bulk_progress.connect(
+        lambda dq, tq, ds, ts, name, eta: etas.append(eta))
+
+    worker._dispatch(FetchAllItemsJob("Standard", stashes, _MAP_POSITIONS))
+
+    assert all(e >= 0 for e in etas)
+    assert etas == sorted(etas, reverse=True)  # monoton fallend
+    assert etas[-1] == 0.0                     # nach dem letzten Abruf nichts mehr offen
     worker.client.close()

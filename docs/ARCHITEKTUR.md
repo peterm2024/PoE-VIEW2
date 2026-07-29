@@ -1322,14 +1322,34 @@ Der Durchsatz ist dadurch nicht geringer, nur gleichmäßig statt "Sprint,
 dann fünf Minuten Stillstand" — und der Fortschrittsbalken läuft sichtbar
 weiter. Gewartet wird über `_cancel_bulk.wait(...)` statt `time.sleep`,
 damit "Abbrechen" sofort greift und nicht erst den Takt aussitzen muss.
-Fortschritt (`QProgressDialog`-Maximum, `bulk_progress`/`bulk_finished`)
-zählt echte Truhenplätze, nicht rohe Abrufe (FALLSTRICKE #37): eine Map-/
-Unique-Sektion braucht zwar einen eigenen Request, teilt sich aber den
-Platz ihres Eltern-Tabs. `FetchAllItemsJob` bekommt dafür zusätzlich
-`positions` (`_tab_positions()`-Ergebnis) mit; `_fetch_all_items()`
-gruppiert Fortschritt und Gesamtzahl über `positions.get(stash.id,
-stash.id)` statt über die rohe Fach-ID — sonst zeigte der Dialog z. B.
-"58/561" (ladbare Einheiten) statt "58/391" (echte Fächer).
+**Fortschritt wird in ZWEI Einheiten gemeldet** (`bulk_progress`:
+`done_requests`, `total_requests`, `done_slots`, `total_slots`, Tab-Name,
+Restsekunden), weil keine allein genügt:
+
+- **Truhenplätze** beantworten "wie viele meiner Fächer sind durch". Eine
+  Map-/Unique-Sektion braucht zwar einen eigenen Request, teilt sich aber
+  den Platz ihres Eltern-Tabs; `FetchAllItemsJob` bekommt dafür
+  `positions` (`_tab_positions()`) mit. Ohne diese Gruppierung zeigte der
+  Dialog "58/561" (ladbare Einheiten) statt "58/391" (echte Fächer) —
+  FALLSTRICKE #37.
+- **Abrufe** sind die Einheit, in der die Arbeit tatsächlich anfällt, und
+  daher das Maximum des `QProgressDialog`. An Truhenplätzen gemessen
+  stünde der Balken bei einem großen Spezial-Tab sehr lange still: in
+  Peters SSF-Liga bündelt ein MapStash 365 Sektionen auf einem Platz —
+  67 Minuten unveränderte Anzeige, bei insgesamt 1088 Abrufen gegenüber
+  519 Plätzen (FALLSTRICKE #42).
+
+Der Balken läuft also über die Abrufe, das Label nennt beide Zahlen
+("Section 128 of 1088 · tab 3 of 519"). Beide Angaben sind korrekt —
+falsch war nie die Zahl, sondern sie als "stash tabs" zu beschriften.
+
+**Restzeit** kommt aus `max(steady_pace_interval_s(), elapsed /
+done_requests)`. Reines `elapsed / done` wäre am Anfang grob zu
+optimistisch, weil der erste Abruf ohne Taktpause läuft — bei 1088
+Abrufen hätte der Dialog "etwa 5 min" für einen real dreistündigen Lauf
+angezeigt. Der Soll-Takt trägt die Schätzung ab dem ersten Tick, die
+Messung übernimmt, sobald Rate-Limit-Zwangspausen die Lage tatsächlich
+verschlechtert haben.
 
 Solange der Bulk-Dialog offen ist, pausiert der Refresh-Modus
 (`_drive_refresh_mode`) — sonst liefen beide Taktgeber parallel und
