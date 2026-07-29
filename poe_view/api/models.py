@@ -223,6 +223,20 @@ def dominant_category(items: list[Item]) -> str | None:
     return max(counts, key=counts.get) if counts else None
 
 
+def is_ggg_suffix(name: str) -> bool:
+    """Erkennt einen GGG-Zusatz-Hinweis im ``name``-Feld eines Kind-Tabs
+    (" (Remove-only)" u. ä.) an seinem führenden Leerzeichen — GGG liefert
+    ihn so statt eines separaten Feldes. So ein Suffix ist KEIN echter,
+    eigenständiger Name: an einer Stelle definiert, weil sowohl
+    ``StashTab.display_name`` (hier anhängen) als auch
+    ``MainWindow._stamp_category``/``_restamp_from_cached_items`` (dort
+    NICHT als "hat schon einen brauchbaren Namen" werten) sie brauchen —
+    ein Unique-Stash-Kind mit reinem Suffix-Namen sah sonst nie seinen
+    Kategorie-Stempel und zeigte nur noch "(Remove-only)" statt z. B.
+    "Ring (Remove-only)" (real bei Peter beobachtet, 2026-07-30)."""
+    return bool(name) and name != name.lstrip()
+
+
 class StashTab(BaseModel):
     """Stash-Tab; Ordner haben ``children`` (rekursiv) und metadata.folder=true.
 
@@ -264,20 +278,23 @@ class StashTab(BaseModel):
           ist daneben wertlos ("1"), AUSSER es ist ein GGG-Suffix mit
           führendem Leerzeichen (" (Remove-only)") — das hängen wir an.
         - Unique-Kinder: völlig namenlos (nur metadata.items = Anzahl) →
-          Typ + Item-Anzahl, damit die Einträge unterscheidbar bleiben.
+          von UNS gestempelte Kategorie (§_stamp_category). Ein GGG-Suffix
+          (§is_ggg_suffix) hängt sich dabei ebenso an wie bei Map-Kindern,
+          zählt aber NICHT als "schon echt benannt".
         """
+        suffix = self.name if is_ggg_suffix(self.name) else ""
         map_name = (self.metadata.get("map") or {}).get("name")
         if map_name:
-            is_suffix = self.name != self.name.lstrip()  # " (Remove-only)" u. ä.
-            return f"{map_name}{self.name}" if is_suffix else str(map_name)
-        if self.name.strip():
+            return f"{map_name}{suffix}"
+        if self.name.strip() and not suffix:
             return self.name.strip()
         # Von UNS gestempelte Kategorie (dominant_category nach dem ersten
         # Item-Load, Präfix "poeview_" = synthetisch) — namenlose Unique-
         # Stash-Fächer heißen damit "Ring" statt "UniqueStash". Die
         # Item-Anzahl steht in der eigenen Baum-Spalte,
         # nicht mehr im Namen.
-        return self.metadata.get("poeview_category") or self.type or self.id[:8]
+        base = self.metadata.get("poeview_category") or self.type or self.id[:8]
+        return f"{base}{suffix}"
 
 
 class Character(BaseModel):

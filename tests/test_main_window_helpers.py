@@ -1969,6 +1969,137 @@ def test_unique_child_gets_category_name_after_item_load(qapp) -> None:
     win.worker.wait(5000)
 
 
+def test_reloading_a_unique_stash_keeps_the_names_of_its_children(qapp) -> None:
+    """Regression (Peter, 2026-07-30, Screenshot): nach einem "Load All
+    Tabs"-Lauf hießen fast alle Unique-Fächer wieder "UniqueStash" — nur das
+    eine, dessen Items NACH dem Eltern-Abruf durchkamen, hieß noch
+    "Sceptre". Ein erneuter Abruf des Eltern-Fachs liefert die Kinder neu
+    und in der API sind sie namenlos; unsere Kategorie-Stempel müssen
+    mitwandern."""
+    win = MainWindow()
+    win._current_league = "Standard"
+    unique = StashTab.model_validate({"id": "u1", "name": "Uniq", "type": "UniqueStash",
+                                      "metadata": {}})
+    win._stash_trees["Standard"] = [unique]
+    win._activate_stash_tree(win._stash_trees["Standard"])
+    win._on_stash_children("Standard", "u1", "Uniq", [_unique_child("c1")], silent=False)
+    # Waffenklasse steht bei GGG als erste, wertlose Property (§item_category).
+    sceptres = [Item.model_validate({"typeLine": "Void Sceptre", "baseType": "Void Sceptre",
+                                     "frameType": 3,
+                                     "properties": [{"name": "Sceptre", "values": []}]})]
+    win._on_stash_items("Standard", "c1", "UniqueStash", sceptres, silent=True)
+    assert win.tree._stash_nodes["c1"].text(0) == "Sceptre"
+
+    # Eltern-Fach nochmal abrufen — die API liefert das Kind wieder namenlos.
+    win._on_stash_children("Standard", "u1", "Uniq", [_unique_child("c1")], silent=False)
+
+    assert win._stash_trees["Standard"][0].children[0].metadata["poeview_category"] == "Sceptre"
+    assert win.tree._stash_nodes["c1"].text(0) == "Sceptre"
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_reloading_a_unique_stash_restamps_from_cached_items(qapp) -> None:
+    """Heilt bereits beschädigte Caches: liegen die Items eines namenlosen
+    Fachs noch im Cache, wird die Kategorie beim nächsten Eltern-Abruf neu
+    vergeben — ohne einen zusätzlichen Request."""
+    win = MainWindow()
+    win._current_league = "Standard"
+    unique = StashTab.model_validate({"id": "u1", "name": "Uniq", "type": "UniqueStash",
+                                      "metadata": {}})
+    win._stash_trees["Standard"] = [unique]
+    win._activate_stash_tree(win._stash_trees["Standard"])
+    # Kaputter Cache-Zustand: Items da, Stempel weg.
+    win._items["Standard"] = {"c1": [Item.model_validate(
+        {"typeLine": "Amethyst Ring", "baseType": "Amethyst Ring", "frameType": 3})]}
+
+    win._on_stash_children("Standard", "u1", "Uniq", [_unique_child("c1")], silent=False)
+
+    assert win.tree._stash_nodes["c1"].text(0) == "Ring"
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_reloading_a_special_tab_keeps_fresh_api_metadata(qapp) -> None:
+    """Nur die selbst gestempelten ``poeview_``-Schlüssel wandern mit —
+    echte API-Felder muss die frische Antwort gewinnen, sonst klebte z. B.
+    eine im Spiel geleerte Item-Anzahl am alten Stand."""
+    win = MainWindow()
+    win._current_league = "Standard"
+    unique = StashTab.model_validate({"id": "u1", "name": "Uniq", "type": "UniqueStash",
+                                      "metadata": {}})
+    old = _unique_child("c1")            # metadata.items == 2
+    old.metadata["poeview_category"] = "Ring"
+    unique.children = [old]
+    win._stash_trees["Standard"] = [unique]
+    win._activate_stash_tree(win._stash_trees["Standard"])
+    fresh = StashTab.model_validate({"id": "c1", "name": "", "parent": "u1",
+                                     "type": "UniqueStash", "metadata": {"items": 7}})
+
+    win._on_stash_children("Standard", "u1", "Uniq", [fresh], silent=False)
+
+    child = win._stash_trees["Standard"][0].children[0]
+    assert child.metadata["poeview_category"] == "Ring"
+    assert child.metadata["items"] == 7
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_unique_child_with_remove_only_suffix_still_gets_stamped(qapp) -> None:
+    """Regression (Peter, 2026-07-30, Screenshot): ein Unique-Stash-Kind mit
+    name=" (Remove-only)" (führendes Leerzeichen — GGG-Suffix, kein echter
+    Name) galt für ``tab.name.strip()`` fälschlich als "schon benannt" und
+    wurde nie gestempelt — jedes Kind eines Remove-only-Uniq-Tabs zeigte
+    dadurch nur noch "(Remove-only)" statt z. B. "Ring (Remove-only)"."""
+    win = MainWindow()
+    win._current_league = "Standard"
+    unique = StashTab.model_validate({"id": "u1", "name": "Uniq (Remove-only)",
+                                      "type": "UniqueStash", "metadata": {}})
+    ro_child = StashTab.model_validate({"id": "c1", "name": " (Remove-only)", "parent": "u1",
+                                        "type": "UniqueStash", "metadata": {"items": 2}})
+    unique.children = [ro_child]
+    win._stash_trees["Standard"] = [unique]
+    win._activate_stash_tree(win._stash_trees["Standard"])
+    assert win.tree._stash_nodes["c1"].text(0) == "UniqueStash (Remove-only)"
+
+    ring = Item.model_validate({"typeLine": "Amethyst Ring", "baseType": "Amethyst Ring",
+                                "frameType": 3})
+    win._on_stash_items("Standard", "c1", "UniqueStash (Remove-only)", [ring], silent=True)
+
+    tab = win._stash_trees["Standard"][0].children[0]
+    assert tab.metadata["poeview_category"] == "Ring"
+    assert win.tree._stash_nodes["c1"].text(0) == "Ring (Remove-only)"
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_restamp_from_cache_handles_remove_only_suffix_children(qapp) -> None:
+    """Dieselbe Suffix-Falle in der Cache-Heilung (§_restamp_from_cached_items):
+    ohne die Unterscheidung hätte ein namenloses Remove-only-Kind mit
+    bereits gecachten Items nie eine Kategorie bekommen."""
+    win = MainWindow()
+    win._current_league = "Standard"
+    unique = StashTab.model_validate({"id": "u1", "name": "Uniq", "type": "UniqueStash",
+                                      "metadata": {}})
+    win._stash_trees["Standard"] = [unique]
+    win._activate_stash_tree(win._stash_trees["Standard"])
+    win._items["Standard"] = {"c1": [Item.model_validate(
+        {"typeLine": "Amethyst Ring", "baseType": "Amethyst Ring", "frameType": 3})]}
+    ro_child = StashTab.model_validate({"id": "c1", "name": " (Remove-only)", "parent": "u1",
+                                        "type": "UniqueStash", "metadata": {"items": 2}})
+
+    win._on_stash_children("Standard", "u1", "Uniq", [ro_child], silent=False)
+
+    assert win.tree._stash_nodes["c1"].text(0) == "Ring (Remove-only)"
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
 def test_category_stamp_skips_named_tabs_and_map_children(qapp) -> None:
     win = MainWindow()
     win._current_league = "Standard"
@@ -3404,6 +3535,267 @@ def test_refresh_mode_pauses_while_load_all_tabs_runs(qapp, monkeypatch) -> None
     win._bulk_dialog = None  # Bulk fertig -> Modus läuft wieder
     win._drive_refresh_mode()
     assert len(submitted) == 1
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+# --- Refresh-Modus "Pause" (Peter, 2026-07-30) ------------------------- #
+
+
+def test_refresh_mode_pause_submits_nothing(qapp, monkeypatch) -> None:
+    """"Pause" ist der einzige Modus ganz ohne Hintergrund-Requests — weder
+    über die Takt-Kette (Single/Stash) noch über den 40s-Timer (Auto).
+    Manuelle Klicks und "Load All Tabs" bleiben unberührt."""
+    win = MainWindow()
+    win._current_league = "Standard"
+    win._current_stash_id = "t1"
+    win._leaf_stashes = [_make_leaf("t1", "Tab 1")]
+    submitted = []
+    monkeypatch.setattr(win.worker, "submit", lambda job: submitted.append(job))
+
+    win._on_refresh_mode_changed("Pause")
+    win._drive_refresh_mode()
+    win._maybe_auto_refresh()
+
+    assert submitted == []
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_sync_bar_reflects_the_rate_limit_window_coverage(qapp, monkeypatch) -> None:
+    """Peter, 2026-07-30: nach einem Neustart tickte die Verbrauchsanzeige
+    alle 30s statt alle 11s, weil die Treffer der Vorsitzung nur geschätzt
+    werden können. Der Sync-Balken macht genau diese Unsicherheit sichtbar —
+    rot frisch gestartet, grün sobald das Fenster durch eigene Messungen
+    gedeckt ist. Gespeist vom ohnehin laufenden Sekunden-Tick."""
+    from poe_view.ui.theme import DASH_BAD, DASH_OK
+    win = MainWindow()
+    coverage = [(0.1, 270.0)]
+    monkeypatch.setattr(win.worker.rate_limiter, "window_coverage",
+                        lambda: coverage[0])
+
+    win._update_auto_refresh_countdown()
+    assert win.dashboard._sync.value() == 10
+    assert DASH_BAD in win.dashboard._sync.styleSheet()
+    assert "4:30" in win.dashboard._sync.format()  # Restzeit, nicht nur Farbe
+
+    coverage[0] = (1.0, 0.0)
+    win._update_auto_refresh_countdown()
+    assert win.dashboard._sync.value() == 100
+    assert DASH_OK in win.dashboard._sync.styleSheet()
+    assert "✓" in win.dashboard._sync.format()
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_rule_label_shows_when_the_next_slot_frees_up(qapp) -> None:
+    """Peter, 2026-07-30: "12/30" stand nach einem frischen Start zwei
+    Minuten still, weil vor Ablauf der ersten 300s nichts frei werden KANN.
+    Die Restzeit macht genau das sichtbar; fehlt sie (keine eigenen Treffer
+    im Fenster bekannt), bleibt das Label unverändert kurz."""
+    win = MainWindow()
+
+    win.dashboard.update_state(
+        "stash-request-limit",
+        [{"current": 12, "max": 30, "window_s": 300, "locked": False,
+          "next_free_s": 139.0}], 0.0)
+    assert win.dashboard._bars[0][1].text() == "12/30 · 300 s · next in 2:19"
+
+    win.dashboard.update_state(
+        "stash-request-limit",
+        [{"current": 12, "max": 30, "window_s": 300, "locked": False,
+          "next_free_s": None}], 0.0)
+    assert win.dashboard._bars[0][1].text() == "12/30 · 300 s"
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_sync_bar_does_not_displace_the_per_rule_bars(qapp) -> None:
+    """Der Sync-Balken sitzt fest zwischen Policy-Name und den Regel-Balken;
+    deren Einfüge-Offset muss das berücksichtigen, sonst landen sie in
+    falscher Reihenfolge im Layout."""
+    win = MainWindow()
+
+    win.dashboard.update_state(
+        "stash-request-limit",
+        [{"current": 3, "max": 15, "window_s": 15, "locked": False},
+         {"current": 7, "max": 30, "window_s": 300, "locked": False}], 0.0)
+
+    layout = win.dashboard._layout
+    order = [layout.itemAt(i).widget() for i in range(layout.count())]
+    assert order[0] is win.dashboard._policy
+    assert order[1] is win.dashboard._sync
+    assert order[2] is win.dashboard._bars[0][0]
+    assert order[4] is win.dashboard._bars[1][0]
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_refresh_mode_pause_marks_the_rate_limit_dashboard(qapp) -> None:
+    """Peter, 2026-07-30: 'Wenn ich den Pause-Mode aktiviere verbleibt der
+    Policy-Status unverändert.' Das Dashboard bekommt beim Umschalten sofort
+    ein sichtbares "(Paused)", nicht erst wenn ein neuer Request die Zahlen
+    ändert — und verliert es wieder, sobald ein anderer Modus aktiv wird."""
+    win = MainWindow()
+
+    win._on_refresh_mode_changed("Pause")
+    assert "(Paused)" in win.dashboard._policy.text()
+
+    win._on_refresh_mode_changed("Auto")
+    assert "(Paused)" not in win.dashboard._policy.text()
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_refresh_mode_pause_mark_survives_the_second_tick(qapp, monkeypatch) -> None:
+    """Der Sekunden-Tick ruft ``update_state`` unabhängig vom Refresh-Modus
+    auf (§_update_auto_refresh_countdown) — ein einmaliges ``setText`` beim
+    Umschalten würde vom nächsten Tick sofort wieder überschrieben."""
+    win = MainWindow()
+    monkeypatch.setattr(
+        win.worker.rate_limiter, "snapshot",
+        lambda: ("stash-request-limit",
+                 [{"current": 3, "max": 15, "window_s": 10, "locked": False}], 0.0))
+    win._on_refresh_mode_changed("Pause")
+
+    win._update_auto_refresh_countdown()
+
+    assert "(Paused)" in win.dashboard._policy.text()
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_refresh_mode_pause_says_so_in_the_countdown_label(qapp) -> None:
+    """Ohne Text stünde da der Auto-Countdown weiter — genau die
+    Verwechslung, gegen die die Anzeige überhaupt eingeführt wurde."""
+    win = MainWindow()
+    win._current_league = "Standard"
+    win._refresh_mode_combo.setCurrentText("Pause")
+
+    win._update_auto_refresh_countdown()
+
+    assert "Pause" in win._auto_refresh_countdown_label.text()
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+# --- Bulk-Fortschritt: Countdown und Baum-Fokus ------------------------ #
+
+
+def _bulk_window(monkeypatch) -> MainWindow:
+    """Fenster mit offenem Bulk-Dialog und einem Baum aus zwei Fächern."""
+    from PySide6.QtWidgets import QProgressDialog
+    win = MainWindow()
+    win._current_league = "Standard"
+    stashes = [_make_leaf("t1", "Tab 1"), _make_leaf("t2", "Tab 2")]
+    win._leaf_stashes = stashes
+    win.tree.set_stashes(stashes)
+    win._bulk_dialog = QProgressDialog("", "Cancel", 0, 4, win)
+    win._bulk_dialog.setMinimumDuration(100000)  # nie wirklich zeigen
+    # Sonst setzt Qt den Balken beim Erreichen des Maximums selbst zurück
+    # (value() == -1) — der echte Dialog wird stattdessen von
+    # _on_bulk_finished geschlossen.
+    win._bulk_dialog.setAutoReset(False)
+    return win
+
+
+def _progress(**overrides):
+    from poe_view.services.api_worker import BulkProgress
+    fields = dict(done_requests=1, total_requests=4, done_slots=1, total_slots=2,
+                  name="Tab 1", stash_id="t1", remaining_s=33.0, next_wait_s=11.0)
+    fields.update(overrides)
+    return BulkProgress(**fields)
+
+
+def test_bulk_progress_counts_down_to_the_next_fetch(qapp, monkeypatch) -> None:
+    """Zwischen zwei Abrufen liegen ~11s Takt. Ohne Countdown ist von außen
+    nicht zu unterscheiden, ob noch etwas läuft (dieselbe Rückfrage wie beim
+    Auto-Refresh: "ca. 5 Minuten gewartet ohne dass irgendwas passiert
+    ist"). Der Sekunden-Tick zählt ihn herunter, ohne auf den nächsten
+    Fortschritts-Tick zu warten."""
+    win = _bulk_window(monkeypatch)
+    clock = [1000.0]
+    monkeypatch.setattr("poe_view.ui.main_window.time.monotonic", lambda: clock[0])
+
+    win._on_bulk_progress(_progress())
+    assert "Next tab in 11s" in win._bulk_dialog.labelText()
+
+    clock[0] += 7.0
+    win._update_bulk_label()  # das macht sonst der 1s-Tick
+    assert "Next tab in 4s" in win._bulk_dialog.labelText()
+
+    clock[0] += 5.0
+    win._update_bulk_label()
+    assert "Fetching…" in win._bulk_dialog.labelText()
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_bulk_progress_shows_a_rate_limit_lock_instead_of_the_pace(qapp, monkeypatch) -> None:
+    """Die 300s-Zwangspause steckt in keinem Header (kein HTTP 429, der
+    Limiter bremst selbst) — sie kommt nur über den Sekunden-Countdown des
+    RateLimitManagers herein. Sie hat Vorrang vor dem 11s-Takt, sonst stünde
+    "Fetching…" fünf Minuten lang da."""
+    win = _bulk_window(monkeypatch)
+    clock = [1000.0]
+    monkeypatch.setattr("poe_view.ui.main_window.time.monotonic", lambda: clock[0])
+
+    win._on_bulk_progress(_progress())
+    win._on_rate_limit_changed("stash-limit", [], 287.0)
+    win._update_bulk_label()
+
+    assert "Rate limit — resuming in 287s" in win._bulk_dialog.labelText()
+
+    win._on_rate_limit_changed("stash-limit", [], 0.0)  # Sperre vorbei
+    win._update_bulk_label()
+    assert "Rate limit" not in win._bulk_dialog.labelText()
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_bulk_progress_focuses_the_current_tab_in_the_tree(qapp, monkeypatch) -> None:
+    """Peter, 2026-07-30: "den aktuell behandelten Stash im Stash-Tree
+    fokussieren und dort öffnen". Bewusst über highlight_stash — das löst
+    kein stash_selected aus, die Item-Tabelle bleibt also stehen."""
+    win = _bulk_window(monkeypatch)
+    selected = []
+    win.tree.stash_selected.connect(lambda sid, name: selected.append(sid))
+
+    win._on_bulk_progress(_progress(stash_id="t2", name="Tab 2"))
+
+    current = win.tree.currentItem()
+    assert current is not None and current.text(0) == "Tab 2"
+    assert selected == [], "Fokus darf keinen Fach-Wechsel in der Tabelle auslösen"
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_bulk_progress_keeps_both_counts_and_the_eta_in_the_label(qapp, monkeypatch) -> None:
+    """Regression FALLSTRICKE #37/#42: der Balken zählt Abrufe, das Label
+    nennt zusätzlich den Truhenplatz-Stand — die neue Countdown-Zeile darf
+    weder das eine noch das andere verdrängen."""
+    win = _bulk_window(monkeypatch)
+
+    win._on_bulk_progress(_progress(done_requests=3, total_requests=4,
+                                    done_slots=2, total_slots=2,
+                                    remaining_s=4000.0))
+
+    text = win._bulk_dialog.labelText()
+    assert "Section 3 of 4" in text
+    assert "tab 2 of 2" in text
+    assert "about 1 h 6 min remaining" in text
+    assert win._bulk_dialog.value() == 3
 
     win.worker.stop()
     win.worker.wait(5000)

@@ -21,11 +21,12 @@ from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox,
                                QWidgetAction)
 
 from poe_view import __version__, config
-from poe_view.api.models import Character, Item, StashTab, dominant_category
+from poe_view.api.models import (Character, Item, StashTab,
+                                 dominant_category, is_ggg_suffix)
 from poe_view.api.ninja import PriceIndex
 from poe_view.services import data_cache, price_cache
 from poe_view.services.api_worker import (ApiWorker, BootstrapJob,
-                                          FetchAllItemsJob,
+                                          BulkProgress, FetchAllItemsJob,
                                           FetchCharacterItemsJob,
                                           FetchCharactersJob, FetchIconJob,
                                           FetchLeaguesJob, FetchPricesJob,
@@ -139,6 +140,11 @@ class MainWindow(QMainWindow):
     # Items noch deutlich Luft darunter.
     LIVE_SEARCH_ITEM_LIMIT = 50_000
 
+    # Refresh-Modi, die sich selbst im Takt weitertreiben
+    # (§_drive_refresh_mode). "auto" läuft stattdessen am 40s-Timer,
+    # "pause" gar nicht — für beide ist _drive_refresh_mode ein No-Op.
+    STEPPING_REFRESH_MODES = ("single", "stash")
+
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle(f"PoE-VIEW2 v{__version__}")
@@ -157,6 +163,12 @@ class MainWindow(QMainWindow):
         self._current_league: str = ""
         self._current_tab_name: str = ""
         self._bulk_dialog: QProgressDialog | None = None
+        self._bulk_progress: BulkProgress | None = None  # letzter Tick, für den Sekunden-Countdown
+        self._bulk_next_fetch_at = 0.0   # time.monotonic()-Zeitpunkt des nächsten Bulk-Abrufs
+        # Rest der aktuellen Rate-Limit-Zwangspause, gespeist vom
+        # Sekunden-Countdown des RateLimitManagers (§_on_rate_limit_changed).
+        # 0 = keine Sperre aktiv.
+        self._rate_limit_wait_until = 0.0
         self._showing_aggregate = False
         self._search_all_active = False        # Suchfeld → liga-weite Ansicht aktiv
         # Zwischengespeichertes, UNGEFILTERTES Aggregat für die "on demand"-
@@ -297,7 +309,7 @@ class MainWindow(QMainWindow):
 
         toolbar.addWidget(QLabel(" Mode: "))
         self._refresh_mode_combo = QComboBox()
-        self._refresh_mode_combo.addItems(["Auto", "Single", "Stash"])
+        self._refresh_mode_combo.addItems(["Auto", "Single", "Stash", "Pause"])
         self._refresh_mode_combo.setToolTip(
             "Auto: keeps the open tab/character live, sweeps the rest of the "
             "stash in the background (default, reserves budget for manual clicks).\n"
@@ -305,7 +317,9 @@ class MainWindow(QMainWindow):
             "on a steady clock, as tight as the rate limit allows.\n"
             "Stash: cycles through the whole stash on that same steady clock, "
             "non-empty tabs first. For an immediate one-off pass, use "
-            "\"Load All Tabs\" instead.")
+            "\"Load All Tabs\" instead.\n"
+            "Pause: no background requests at all — clicks and \"Load All "
+            "Tabs\" still work and get the full rate limit budget.")
         self._refresh_mode_combo.currentTextChanged.connect(self._on_refresh_mode_changed)
         toolbar.addWidget(self._refresh_mode_combo)
 
@@ -803,7 +817,7 @@ class MainWindow(QMainWindow):
         w.stash_children_loaded.connect(self._on_stash_children)
         w.character_items_loaded.connect(self._on_character_items)
         w.icon_loaded.connect(self._on_icon)
-        w.rate_limit_changed.connect(self.dashboard.update_state)
+        w.rate_limit_changed.connect(self._on_rate_limit_changed)
         w.status.connect(self._on_status)
         w.busy_changed.connect(self._on_busy_changed)
         w.job_error.connect(self._on_error)
@@ -813,6 +827,19 @@ class MainWindow(QMainWindow):
         w.prices_loaded.connect(self._on_prices_loaded)
 
     # --- Worker-Slots (Main-Thread) ------------------------------------ #
+
+    def _on_rate_limit_changed(self, policy: str, rules: list[dict],
+                               wait_s: float) -> None:
+        """Dashboard aktualisieren und die Rest-Sperre merken.
+
+        Der ``RateLimitManager`` meldet während einer Zwangspause im
+        Sekundentakt die Restzeit (§rate_limiter._countdown). Das ist die
+        EINZIGE Quelle dafür: die selbst auferlegte Pause (Fenster voll,
+        kein HTTP 429) steckt in keinem Header und taucht deshalb auch in
+        ``snapshot()`` nicht auf. Der Bulk-Dialog zeigt sie damit an, statt
+        minutenlang scheinbar zu hängen."""
+        self.dashboard.update_state(policy, rules, wait_s)
+        self._rate_limit_wait_until = (time.monotonic() + wait_s) if wait_s > 0 else 0.0
 
     def _on_logged_in(self, account_name: str) -> None:
         self._account_name = account_name
@@ -1210,6 +1237,8 @@ class MainWindow(QMainWindow):
         if tree is not None:
             tab = self._find_stash(tree, stash_id)
             if tab is not None:
+                self._carry_over_stamps(tab.children, children)
+                self._restamp_from_cached_items(league, children)
                 tab.children = children
             # Erst NACH dem Anhängen der Kinder neu abflachen — die neu
             # entdeckten Unter-Fächer sind ab jetzt die ladbaren Einheiten
@@ -1238,6 +1267,51 @@ class MainWindow(QMainWindow):
                 "click a sub-tab to load its items")
             self._update_raw_viewer(stash_id, name)
 
+    @staticmethod
+    def _carry_over_stamps(old: list[StashTab], new: list[StashTab]) -> None:
+        """Selbst vergebene Metadaten (Präfix ``poeview_``) von den alten auf
+        die frisch abgerufenen Unter-Tabs übertragen, zugeordnet über die ID.
+
+        Ein erneuter Abruf des Eltern-Fachs liefert die Kinder komplett neu —
+        und Unique-Stash-Kinder sind in der API namenlos. Ohne diese
+        Übernahme fällt jedes bereits getaufte Fach (§_stamp_category) auf
+        "UniqueStash" zurück, sobald das Eltern-Fach nochmal geladen wird:
+        real beobachtet nach einem "Load All Tabs"-Lauf, der Spezial-Tabs
+        immer neu abruft — von 20 benannten Fächern blieb nur das eine
+        übrig, dessen Items NACH dem Eltern-Abruf durchkamen. Der Verlust
+        wanderte über ``_persist_cache`` auch gleich in den Datei-Cache.
+
+        Nur ``poeview_``-Schlüssel wandern mit: alles andere kommt von GGG
+        und muss die frische Antwort gewinnen lassen (eine im Spiel geleerte
+        Item-Anzahl darf nicht am alten Stand kleben bleiben).
+        """
+        stamps = {tab.id: {k: v for k, v in tab.metadata.items()
+                           if k.startswith("poeview_")}
+                  for tab in old}
+        for tab in new:
+            tab.metadata.update(stamps.get(tab.id) or {})
+
+    def _restamp_from_cached_items(self, league: str, children: list[StashTab]) -> None:
+        """Namenlose Unter-Tabs, deren Items schon im Cache liegen, sofort
+        (neu) taufen — ohne dafür einen Request auszulösen.
+
+        Zweck ist die Reparatur bereits verlorener Namen: Cache-Dateien, in
+        denen die Kategorie-Stempel vor dem Fix (§_carry_over_stamps)
+        überschrieben wurden, heilen so beim nächsten Abruf des Eltern-Fachs
+        von selbst, statt zu warten, bis jedes einzelne Unter-Fach wieder
+        an der Reihe ist. Dieselbe Regel wie ``_stamp_category``: nur echte
+        Namenlose, und nur wenn sich aus den Items überhaupt eine dominante
+        Kategorie ergibt."""
+        cached = self._items.get(league, {})
+        for tab in children:
+            if ((tab.name.strip() and not is_ggg_suffix(tab.name))
+                    or tab.metadata.get("map")
+                    or tab.metadata.get("poeview_category")):
+                continue
+            category = dominant_category(cached.get(tab.id) or [])
+            if category:
+                tab.metadata["poeview_category"] = category
+
     def _stamp_category(self, league: str, stash_id: str, items: list[Item]) -> str | None:
         """Namenlose Unique-Stash-Fächer nach dem ersten Item-Load taufen
         ("über die Kategorie gehen, z. B. Two Handed Axe,
@@ -1248,7 +1322,7 @@ class MainWindow(QMainWindow):
         tab = self._find_stash(self._stash_trees.get(league, []), stash_id)
         if tab is None or tab.parent is None:
             return None  # nur Kinder von Spezial-Tabs sind namenlos
-        if tab.name.strip() or tab.metadata.get("map"):
+        if (tab.name.strip() and not is_ggg_suffix(tab.name)) or tab.metadata.get("map"):
             return None  # hat bereits einen brauchbaren Namen (Map-Fächer etc.)
         category = dominant_category(items)
         if not category or tab.metadata.get("poeview_category") == category:
@@ -1396,6 +1470,8 @@ class MainWindow(QMainWindow):
         self._bulk_dialog.setWindowModality(Qt.WindowModality.WindowModal)
         self._bulk_dialog.setMinimumDuration(0)
         self._bulk_dialog.canceled.connect(self.worker.cancel_bulk)
+        self._bulk_progress = None
+        self._bulk_next_fetch_at = 0.0
         self.worker.submit(FetchAllItemsJob(self._current_league, to_fetch, positions))
 
     @staticmethod
@@ -1411,30 +1487,68 @@ class MainWindow(QMainWindow):
             return f"about {minutes} min remaining"
         return f"about {minutes // 60} h {minutes % 60} min remaining"
 
-    def _on_bulk_progress(self, done_requests: int, total_requests: int,
-                          done_slots: int, total_slots: int,
-                          name: str, remaining_s: float) -> None:
+    def _on_bulk_progress(self, progress: BulkProgress) -> None:
         """Balken läuft über die ABRUFE — nur die wachsen bei jedem Schritt.
         Der Truhenplatz-Zähler steht bei einem großen Spezial-Tab sonst über
         eine Stunde still (FALLSTRICKE #42), beantwortet aber als Text die
         Frage "wie viele meiner Fächer sind durch" und bleibt deshalb
         daneben stehen — nur eben nicht mehr als "stash tabs" beschriftet,
-        was er nie war (FALLSTRICKE #37)."""
+        was er nie war (FALLSTRICKE #37).
+
+        Zusätzlich wandert die Auswahl im Stash-Baum auf das gerade
+        abgerufene Fach (Peter, 2026-07-30: "dann sieht man das auch ein
+        bisschen mehr"). ``highlight_stash`` klappt die nötigen
+        Eltern-Ordner auf und scrollt hin, löst aber bewusst kein
+        ``stash_selected`` aus — der Bulk-Lauf soll die Item-Tabelle nicht
+        bei jedem Tick umschalten."""
         if self._bulk_dialog is None:
             return
-        lines = [f"Loading: {name}",
-                 f"Section {done_requests} of {total_requests}  ·  "
-                 f"tab {done_slots} of {total_slots}"]
-        eta = self._format_remaining(remaining_s)
+        self._bulk_progress = progress
+        self._bulk_next_fetch_at = time.monotonic() + progress.next_wait_s
+        self._bulk_dialog.setValue(progress.done_requests)
+        self.tree.highlight_stash(progress.stash_id)
+        self._update_bulk_label()
+
+    def _bulk_wait_line(self) -> str:
+        """Sekundengenaue Auskunft, worauf gerade gewartet wird.
+
+        Zwischen zwei Abrufen liegen ~11s Takt (§_fetch_all_items) und
+        gelegentlich eine mehrminütige Rate-Limit-Zwangspause. Ohne
+        Countdown ist beides von außen nicht von einem Absturz zu
+        unterscheiden — dieselbe Frage wie beim Auto-Refresh-Countdown
+        ("ca. 5 Minuten gewartet ohne dass irgendwas passiert ist")."""
+        now = time.monotonic()
+        locked_for = self._rate_limit_wait_until - now
+        if locked_for > 1:
+            return f"⏸ Rate limit — resuming in {round(locked_for)}s"
+        pace_left = self._bulk_next_fetch_at - now
+        if pace_left > 0:
+            return f"Next tab in {round(pace_left)}s"
+        return "Fetching…"
+
+    def _update_bulk_label(self) -> None:
+        """Label des Bulk-Dialogs neu setzen. Läuft auch aus dem
+        Sekunden-Tick (§_update_auto_refresh_countdown), damit der Countdown
+        zwischen zwei Fortschritts-Ticks weiterläuft — ein eigener QTimer
+        wäre dafür überflüssig."""
+        progress = self._bulk_progress
+        if self._bulk_dialog is None or progress is None:
+            return
+        lines = [f"Loaded: {progress.name}",
+                 f"Section {progress.done_requests} of {progress.total_requests}"
+                 f"  ·  tab {progress.done_slots} of {progress.total_slots}",
+                 self._bulk_wait_line()]
+        eta = self._format_remaining(progress.remaining_s)
         if eta:
             lines.append(eta)
         self._bulk_dialog.setLabelText("\n".join(lines))
-        self._bulk_dialog.setValue(done_requests)
 
     def _on_bulk_finished(self, success: int, total: int) -> None:
         if self._bulk_dialog is not None:
             self._bulk_dialog.close()
             self._bulk_dialog = None
+        self._bulk_progress = None
+        self._bulk_next_fetch_at = 0.0
         self._status_msg.setText(f"All tabs loaded: {success}/{total} successful.")
         self._show_aggregate()
 
@@ -1725,7 +1839,7 @@ class MainWindow(QMainWindow):
         # Rest der Session stillschweigend stoppen. Im "auto"-Modus ein No-Op.
         # Der Takt wird dabei mitgezählt wie bei Erfolg: ein Fehlschlag darf
         # keinen Sofort-Retry auslösen, der das Rate-Limit-Budget verheizt.
-        if self._refresh_mode != "auto":
+        if self._refresh_mode in self.STEPPING_REFRESH_MODES:
             self._note_refresh_mode_job_done()
 
     def _on_offline_changed(self, offline: bool) -> None:
@@ -1831,7 +1945,13 @@ class MainWindow(QMainWindow):
         Header mehr reinkommt, der sie sonst antreiben würde (Rückfrage
         "Policy-Statusleiste aktualisiert sich während der Pause nicht")."""
         self.dashboard.update_state(*self.worker.rate_limiter.snapshot())
+        # Abdeckung des Rate-Limit-Fensters durch eigene Messungen — bewusst
+        # ein eigener Setter statt eines vierten Signal-Parameters: die Zahl
+        # hängt nur an der Uhr, nicht an einem Request, und der Sekunden-Tick
+        # ist ohnehin die einzige Stelle, die sie braucht.
+        self.dashboard.set_sync(*self.worker.rate_limiter.window_coverage())
         self.tree.refresh_age_colors()
+        self._update_bulk_label()  # Countdown im Bulk-Dialog weiterzählen
         # Sicherheitsnetz für Single/Stash: falls die Job-Kette (§_drive_
         # refresh_mode) je stockt — etwa weil ein Fehler den erwarteten
         # Erfolgs-Signal-Pfad übersprungen hat —, stößt der ohnehin
@@ -1840,7 +1960,11 @@ class MainWindow(QMainWindow):
         if not self._current_league:
             self._auto_refresh_countdown_label.setText("")
             return
-        if self._refresh_mode != "auto":
+        if self._refresh_mode == "pause":
+            self._auto_refresh_countdown_label.setText(
+                "Refresh mode: Pause — no background requests")
+            return
+        if self._refresh_mode in self.STEPPING_REFRESH_MODES:
             seconds = max(0, round(self._refresh_mode_next_due - time.monotonic()))
             self._auto_refresh_countdown_label.setText(
                 f"Refresh mode: {self._refresh_mode_combo.currentText()} — "
@@ -1859,6 +1983,7 @@ class MainWindow(QMainWindow):
         self._refresh_mode_next_due = 0.0  # sofort beim Umschalten aktualisieren, nicht erst nach einem Takt
         self._refresh_mode_policy = None
         self._refresh_mode_priority_id = None
+        self.dashboard.set_paused(self._refresh_mode == "pause")
         self._drive_refresh_mode()
 
     def _prioritise_selection_in_refresh_mode(self, stash_id: str) -> None:
@@ -1981,8 +2106,8 @@ class MainWindow(QMainWindow):
         Rate-Limit-Budget für manuelle Klicks reserviert — das ist hier
         gewollt, der Nutzer hat den Modus bewusst gewählt, um den vollen
         Pool für genau dieses Ziel einzusetzen."""
-        if self._refresh_mode == "auto":
-            return
+        if self._refresh_mode not in self.STEPPING_REFRESH_MODES:
+            return  # "auto" läuft am eigenen Timer, "pause" gar nicht
         if (self._refresh_mode_pending or not self._logged_in
                 or not self._current_league or self._current_league_is_archived()):
             return

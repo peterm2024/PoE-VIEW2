@@ -15,8 +15,43 @@ nach [SemVer](https://semver.org/lang/de/).
   Balken läuft jetzt über die tatsächlichen Abrufe, das Label nennt
   zusätzlich das Fach ("Section 128 of 1088 · tab 3 of 519") und eine
   geschätzte Restzeit.
+- Unique-Stash: Die selbst vergebenen Fach-Namen ("Ring", "Sceptre", …)
+  gingen verloren, sobald das Eltern-Fach erneut geladen wurde — nach
+  einem "Load All Tabs"-Lauf hießen dadurch fast alle Unterfächer wieder
+  "UniqueStash". Die Namen bleiben jetzt erhalten; bereits betroffene
+  Caches füllen sich beim nächsten Laden des Eltern-Fachs wieder auf,
+  soweit die Items noch zwischengespeichert sind.
+- Unique-Stash: Kinder eines Remove-only-Tabs zeigten nur noch
+  "(Remove-only)" statt der Kategorie ("Ring (Remove-only)") — der
+  GGG-Suffix im Namensfeld wurde fälschlich als vollständiger Name
+  gewertet.
+- Rate-Limit-Dashboard zeigt jetzt sofort "(Paused)" neben dem
+  Policy-Namen, sobald der Refresh-Modus "Pause" aktiv ist.
+- Rate-Limit-Dashboard: der angezeigte Verbrauch je Regel stand bis zum
+  vollen Fensterablauf unverändert und sprang dann abrupt auf 0. Er altert
+  jetzt gleitend mit — eigene Anfragen fallen einzeln aus dem Fenster, im
+  selben Takt, in dem sie entstanden sind (bei ~11s Refresh-Takt also auch
+  ~11s je Tick abwärts). Nur die Anzeige; die tatsächliche
+  Warte-Entscheidung bleibt unverändert konservativ.
 
 ### Hinzugefügt
+
+- Rate-Limit-Dashboard: jede Regel zeigt jetzt zusätzlich, wann der
+  nächste belegte Platz wieder frei wird ("12/30 · 300 s · next in 2:19").
+  Kurz nach dem Start kann bauartbedingt minutenlang nichts frei werden —
+  ohne diese Angabe sah der stillstehende Zähler wie ein Hänger aus.
+- Rate-Limit-Dashboard: neuer **Sync-Balken** neben dem Policy-Namen. GGGs
+  Zähler überlebt den Programmstart — direkt danach sind die gemeldeten
+  Treffer aus der Vorsitzung geschätzt statt gemessen. Der Balken zeigt,
+  wann das Fenster wieder vollständig durch eigene Messungen gedeckt ist
+  (rot → gelb → grün, mit Restzeit im Balken).
+- "Load All Tabs" zeigt im Fortschrittsdialog einen Sekunden-Countdown bis
+  zum nächsten Abruf ("Next tab in 8s") und, falls das Rate-Limit gerade
+  bremst, dessen Restzeit statt scheinbaren Stillstands. Zusätzlich springt
+  der Stash-Baum jeweils auf das gerade abgerufene Fach und klappt es auf.
+- Neuer Refresh-Modus **Pause**: keinerlei Hintergrund-Anfragen. Manuelle
+  Klicks, die ⟳-Buttons im Baum und "Load All Tabs" funktionieren
+  unverändert und bekommen das volle Rate-Limit-Budget.
 
 - Preis-Anzeige über poe.ninja: neue **Value**-Spalte in der Item-Tabelle
   (Chaos-Wert × Stack, Anzeige in Chaos oder Divine je nach Höhe) sowie

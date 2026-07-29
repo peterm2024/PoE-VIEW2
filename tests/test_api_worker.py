@@ -521,7 +521,7 @@ def test_load_all_tabs_counts_map_stash_sections_as_one_slot(qapp, monkeypatch) 
     stashes = [StashTab.model_validate(s) for s in _MAP_SECTIONS]
     slots: list[tuple[int, int]] = []
     worker.bulk_progress.connect(
-        lambda dq, tq, ds, ts, name, eta: slots.append((ds, ts)))
+        lambda p: slots.append((p.done_slots, p.total_slots)))
     done = []
     worker.bulk_finished.connect(lambda ok, total: done.append((ok, total)))
 
@@ -542,7 +542,7 @@ def test_load_all_tabs_request_count_advances_on_every_fetch(qapp, monkeypatch) 
     stashes = [StashTab.model_validate(s) for s in _MAP_SECTIONS]
     requests: list[tuple[int, int]] = []
     worker.bulk_progress.connect(
-        lambda dq, tq, ds, ts, name, eta: requests.append((dq, tq)))
+        lambda p: requests.append((p.done_requests, p.total_requests)))
 
     worker._dispatch(FetchAllItemsJob("Standard", stashes, _MAP_POSITIONS))
 
@@ -558,12 +558,43 @@ def test_load_all_tabs_reports_a_remaining_time_estimate(qapp, monkeypatch) -> N
     worker = _progress_worker(monkeypatch)
     stashes = [StashTab.model_validate(s) for s in _MAP_SECTIONS]
     etas: list[float] = []
-    worker.bulk_progress.connect(
-        lambda dq, tq, ds, ts, name, eta: etas.append(eta))
+    worker.bulk_progress.connect(lambda p: etas.append(p.remaining_s))
 
     worker._dispatch(FetchAllItemsJob("Standard", stashes, _MAP_POSITIONS))
 
     assert all(e >= 0 for e in etas)
     assert etas == sorted(etas, reverse=True)  # monoton fallend
     assert etas[-1] == 0.0                     # nach dem letzten Abruf nichts mehr offen
+    worker.client.close()
+
+
+def test_load_all_tabs_reports_the_pause_until_the_next_fetch(qapp, monkeypatch) -> None:
+    """Der Bulk-Dialog zeigt einen Sekunden-Countdown bis zum nächsten Abruf
+    — dafür muss der Worker die Taktpause melden, die seine Schleife gleich
+    selbst abwartet. Nach dem LETZTEN Abruf wartet niemand mehr (0)."""
+    from poe_view.services.api_worker import FetchAllItemsJob
+    worker = _progress_worker(monkeypatch)
+    stashes = [StashTab.model_validate(s) for s in _MAP_SECTIONS]
+    waits: list[float] = []
+    worker.bulk_progress.connect(lambda p: waits.append(p.next_wait_s))
+
+    worker._dispatch(FetchAllItemsJob("Standard", stashes, _MAP_POSITIONS))
+
+    assert waits == [11.0, 11.0, 11.0, 0.0]
+    worker.client.close()
+
+
+def test_load_all_tabs_reports_the_stash_id_of_each_fetched_tab(qapp, monkeypatch) -> None:
+    """Für die Hervorhebung im Stash-Baum (MainWindow._on_bulk_progress →
+    StashTree.highlight_stash) braucht die UI die Fach-ID, nicht nur den
+    Namen: Namen sind in Map-/Unique-Sektionen nicht eindeutig."""
+    from poe_view.services.api_worker import FetchAllItemsJob
+    worker = _progress_worker(monkeypatch)
+    stashes = [StashTab.model_validate(s) for s in _MAP_SECTIONS]
+    ids: list[str] = []
+    worker.bulk_progress.connect(lambda p: ids.append(p.stash_id))
+
+    worker._dispatch(FetchAllItemsJob("Standard", stashes, _MAP_POSITIONS))
+
+    assert ids == ["map-a", "map-b", "map-c", "t1"]
     worker.client.close()

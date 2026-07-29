@@ -132,6 +132,27 @@ class _StopJob:
     pass
 
 
+@dataclass(frozen=True)
+class BulkProgress:
+    """Ein Fortschritts-Tick von "Alle Tabs laden".
+
+    Bewusst ein Datensatz statt vieler Signal-Parameter: der Fortschritt
+    braucht inzwischen zwei Zähl-Einheiten (§_fetch_all_items), zwei
+    Zeitangaben und die Fach-Identität für die Baum-Hervorhebung. Als
+    Positionsargumente wäre am Empfänger nicht mehr zu erkennen, welche
+    Zahl welche ist.
+    """
+
+    done_requests: int    # tatsächliche Abrufe — wächst bei JEDEM Schritt
+    total_requests: int
+    done_slots: int       # echte Truhenplätze — Sektionen teilen sich einen
+    total_slots: int
+    name: str             # gerade abgerufenes Fach
+    stash_id: str         # dito, für StashTree.highlight_stash()
+    remaining_s: float    # Restzeit-Schätzung für den ganzen Lauf
+    next_wait_s: float    # Taktpause bis zum nächsten Abruf (~11s)
+
+
 class ApiWorker(QThread):
     """Arbeitet die Job-Queue ab, bis ``stop()`` gerufen wird."""
 
@@ -150,9 +171,7 @@ class ApiWorker(QThread):
     job_error = Signal(str)                    # Fehlertext für die Statusbar
     status = Signal(str)                       # Verlaufstext ("Lade …"), nicht der Busy-Zustand
     busy_changed = Signal(bool)                # True, solange irgendein Job läuft (für den UI-Spinner)
-    # done_requests, total_requests, done_slots, total_slots, Tab-Name,
-    # geschätzte Restsekunden (<0 = noch unbekannt) — siehe _fetch_all_items
-    bulk_progress = Signal(int, int, int, int, str, float)
+    bulk_progress = Signal(object)             # BulkProgress, siehe _fetch_all_items
     bulk_finished = Signal(int, int)           # success_count, total
     offline_changed = Signal(bool)             # True, solange GGG nicht erreichbar ist (§4.12)
     prices_loaded = Signal(str, object)        # league, PriceIndex
@@ -384,6 +403,11 @@ class ApiWorker(QThread):
           Zahl beantwortet "wie viele meiner Fächer sind durch", steht
           dafür aber bei einem großen Spezial-Tab lange still (real
           gemessen: 365 Sektionen auf einem Platz = 67 Minuten).
+
+        Dazu kommen ``remaining_s`` (Restzeit des ganzen Laufs) und
+        ``next_wait_s`` (Taktpause bis zum nächsten Abruf) — Letzteres,
+        damit die UI die ~11s zwischen zwei Ticks als Countdown zeigen kann
+        statt scheinbar stillzustehen. Alles zusammen in ``BulkProgress``.
         """
         self._cancel_bulk.clear()
         total_slots = len({positions.get(s.id, s.id) for s in stashes})
@@ -420,12 +444,20 @@ class ApiWorker(QThread):
             # ersten Tick an, die Messung übernimmt, sobald Rate-Limit-
             # Zwangspausen die Sache tatsächlich verschlechtert haben.
             elapsed = time.monotonic() - started_at
-            per_request = max(self.rate_limiter.steady_pace_interval_s(policy),
-                             elapsed / done_requests)
+            pace_s = self.rate_limiter.steady_pace_interval_s(policy)
+            per_request = max(pace_s, elapsed / done_requests)
             remaining_s = per_request * (total_requests - done_requests)
-            self.bulk_progress.emit(done_requests, total_requests,
-                                   len(done_slots), total_slots,
-                                   stash.name, remaining_s)
+            # ``next_wait_s`` ist genau die Pause, die die nächste
+            # Schleifenrunde oben abwartet — die UI kann sie deshalb als
+            # sekundengenauen Countdown anzeigen, statt zwischen zwei Ticks
+            # elf Sekunden lang scheinbar stillzustehen. Nach dem letzten
+            # Abruf wartet niemand mehr, also 0.
+            next_wait_s = pace_s if done_requests < total_requests else 0.0
+            self.bulk_progress.emit(BulkProgress(
+                done_requests=done_requests, total_requests=total_requests,
+                done_slots=len(done_slots), total_slots=total_slots,
+                name=stash.name, stash_id=stash.id,
+                remaining_s=remaining_s, next_wait_s=next_wait_s))
         self.bulk_finished.emit(len(success_slots), total_slots)
 
     def _on_rate_limit(self, policy: str, rules: list[dict], wait_s: float) -> None:

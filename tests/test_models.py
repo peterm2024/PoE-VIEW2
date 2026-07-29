@@ -172,6 +172,23 @@ def test_stash_display_name_from_real_special_tab_structures() -> None:
                                           "metadata": {"items": 5}})
     assert uniq_child.display_name == "UniqueStash"
 
+    # Unique-Kind eines Remove-only-Tabs: name=" (Remove-only)" ist ein
+    # GGG-Suffix, KEIN echter Name — Regression (Peter, 2026-07-30,
+    # Screenshot): ohne die Unterscheidung zeigte jedes Kind nur noch
+    # "(Remove-only)" statt "Ring (Remove-only)".
+    uniq_ro_child = StashTab.model_validate({"id": "e", "name": " (Remove-only)", "parent": "u1",
+                                             "type": "UniqueStash",
+                                             "metadata": {"items": 3,
+                                                          "poeview_category": "Ring"}})
+    assert uniq_ro_child.display_name == "Ring (Remove-only)"
+
+    # Dasselbe VOR dem ersten Item-Load (noch keine Kategorie gestempelt):
+    # Suffix bleibt sichtbar, statt den ganzen Namen zu verschlucken.
+    uniq_ro_unstamped = StashTab.model_validate({"id": "f", "name": " (Remove-only)", "parent": "u1",
+                                                 "type": "UniqueStash",
+                                                 "metadata": {"items": 3}})
+    assert uniq_ro_unstamped.display_name == "UniqueStash (Remove-only)"
+
     bare = StashTab.model_validate({"id": "c0ffee42", "type": "UniqueStash", "metadata": {}})
     assert bare.display_name == "UniqueStash"
 

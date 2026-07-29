@@ -374,3 +374,47 @@ zweites Mal analysiert werden müssen.
 **Lösung:** `bulk_progress` meldet jetzt BEIDE Einheiten (`done_requests`/`total_requests`, `done_slots`/`total_slots`) plus eine Restzeitschätzung. Der Balken läuft über die Abrufe, das Label nennt zusätzlich den Truhenplatz-Stand — als "tab 3 of 519", nicht als Gesamtzahl des Balkens. Regressionstest `test_load_all_tabs_request_count_advances_on_every_fetch`; der Platz-Test aus #37 bleibt daneben bestehen und prüft weiterhin, dass Sektionen die Fächer-Zahl nicht aufblähen.
 
 **Restzeit: Soll-Takt statt reiner Messung.** Eine Schätzung aus `elapsed / done` ist am Anfang grob zu optimistisch, weil der erste Abruf ohne Taktpause läuft — bei 1088 Abrufen hätte der Dialog "etwa 5 min" für einen tatsächlich dreistündigen Lauf angezeigt (Faktor 40). Gerechnet wird deshalb mit `max(steady_pace_interval_s(), elapsed / done)`: der Soll-Takt trägt die Schätzung ab dem ersten Tick, die Messung übernimmt erst, wenn Rate-Limit-Zwangspausen die Lage tatsächlich verschlechtert haben.
+
+---
+
+## 43. Unique-Stash: die selbst vergebenen Fach-Namen verschwanden beim erneuten Abruf des Eltern-Fachs
+
+**Problem:** Peter meldete mit Screenshot, dass im "Uniq"-Tab fast alle Unterfächer wieder "UniqueStash" hießen — nur eines trug noch seinen richtigen Namen ("Sceptre"). Die restlichen hatten ihn nachweislich schon einmal gehabt.
+
+**Ursache:** Unique-Stash-Kinder sind in der GGG-API völlig namenlos; wir taufen sie nach dem ersten Item-Load selbst über `dominant_category()` und legen das Ergebnis als synthetischen Schlüssel `poeview_category` in den Tab-Metadaten ab (§ARCHITEKTUR.md §4.10). `_on_stash_children` ersetzte bei jedem erneuten Abruf des ELTERN-Fachs aber die komplette Kinderliste durch die frische API-Antwort (`tab.children = children`) — und die kennt den Stempel nicht. Alle Namen fielen zurück, und `_persist_cache()` schrieb den Verlust gleich in den Datei-Cache.
+
+Der Screenshot erklärt sich damit exakt: das Eltern-Fach wurde um 21:28:57 abgerufen (alle Stempel weg), das eine noch benannte Fach um 21:29:37 — also NACH dem Eltern-Abruf, weshalb sein Stempel als einziger überlebte. Ausgelöst hat es ein "Load All Tabs"-Lauf, der Spezial-Tabs grundsätzlich neu abruft (§4.10) und dadurch reihum jedes Eltern-Fach anfasst.
+
+**Warum es lange nicht auffiel:** Im Normalbetrieb kommt ein Eltern-Fach selten dran, und direkt danach lädt der Auto-Refresher nach und nach die Kinder wieder — die Namen kamen also von selbst zurück, nur eben langsam. Erst der Bulk-Lauf machte den Effekt auf einen Schlag über alle Fächer sichtbar.
+
+**Lösung:** `_carry_over_stamps(old, new)` überträgt vor dem Ersetzen alle `poeview_`-Schlüssel anhand der Fach-ID auf die frischen Objekte. Bewusst NUR dieses Präfix: alle echten API-Felder muss die frische Antwort gewinnen, sonst klebte z. B. eine im Spiel geleerte Item-Anzahl am alten Stand (eigener Test dafür). Zusätzlich tauft `_restamp_from_cached_items()` namenlose Fächer neu, deren Items noch im Item-Cache liegen — dadurch heilen bereits beschädigte Cache-Dateien (wie Peters) beim nächsten Eltern-Abruf von selbst, ohne einen zusätzlichen Request.
+
+**Wie vermeiden:** Selbst berechnete Daten, die in fremden Datenstrukturen mitwohnen, überleben kein pauschales Ersetzen dieser Struktur. Wo eine API-Antwort ein Objekt komplett neu liefert, gehört jede eigene Anreicherung explizit mit übernommen — oder sie muss außerhalb des ersetzten Objekts liegen. Das `poeview_`-Präfix macht wenigstens maschinell entscheidbar, was "unser" ist.
+
+---
+
+## 44. Unique-Stash: Remove-only-Kinder zeigten nur "(Remove-only)" statt der Kategorie
+
+**Problem:** Peter meldete mit Screenshot: unter einem Remove-only-Uniq-Tab ("u6 (Remove-only)") hießen alle Kinder nur "(Remove-only)" — ohne die Kategorie ("Ring", "Sceptre", …), die #43 gerade erst repariert hatte.
+
+**Ursache:** GGG liefert einen Zusatz-Hinweis wie " (Remove-only)" nicht als eigenes Feld, sondern im `name`-Feld des Kindes selbst, erkennbar am führenden Leerzeichen — dieselbe Struktur wie bei Map-Kindern (§ARCHITEKTUR.md §4.10, Beispiel "Death and Taxes (Remove-only)"). Für Map-Kinder wird das schon lange richtig behandelt: der Suffix hängt sich an `metadata.map.name` an. Für Unique-Kinder fehlte diese Unterscheidung an drei Stellen (`StashTab.display_name`, `MainWindow._stamp_category`, `_restamp_from_cached_items`) — sie prüften nur `tab.name.strip()`, und "(Remove-only)".strip() ist truthy. Ein reiner Suffix ohne echten Namen zählte damit als "hat schon einen brauchbaren Namen": `display_name` gab ihn direkt zurück (ohne Kategorie davor), und `_stamp_category` stempelte gar nicht erst.
+
+**Lösung:** `models.is_ggg_suffix(name)` erkennt den Fall zentral (führendes Leerzeichen). `display_name` hängt den Suffix jetzt auch bei Unique-Kindern an die (evtl. noch fehlende) Kategorie an, statt ihn als kompletten Namen zu behandeln; `_stamp_category` und `_restamp_from_cached_items` werten ihn nicht mehr als "schon benannt".
+
+**Wie vermeiden:** Als #43 geschrieben wurde, fiel dieser Fall nicht auf, weil kein Testfall einen Unique-Stash-Tab MIT Remove-only-Suffix abdeckte — nur der Suffix bei Map-Kindern und der einfache namenlose Unique-Fall waren getestet. Bei einer Sonderbehandlung, die für EINE Tab-Art (Map-Kinder) schon existiert, lohnt sich die Nachfrage, ob dieselbe Struktur auch bei verwandten Tab-Arten (hier: Unique-Kinder) auftreten kann — GGGs Suffix-Konvention war hier fach-typübergreifend, unsere Behandlung davon nicht.
+
+---
+
+## 45. Rate-Limit-Dashboard zeigte den Verbrauch bis zum vollen Fensterablauf unverändert an
+
+**Problem:** Peter, mit Screenshot ("Policy: stash-request-limit (Paused) — 0/15·10s — 23/30·300s"): "müsste sich das im Laufe der Pausierung nicht verändern? Das sollte doch wieder weniger werden je länger ich pausiere, oder?"
+
+**Ursache:** `RateLimitRule.snapshot()` gab unverändert `self.current` zurück — den zuletzt von GGG gemeldeten Verbrauch. Der einzige Mechanismus, der diesen Wert je änderte, war `_decay_expired_rules()`: ein harter Sprung auf 0, aber erst wenn das GESAMTE Fenster seit dem letzten Header-Update verstrichen ist (bewusst so für die reale Warte-Entscheidung, §32/#34 — konservative Worst-Case-Annahme, dass alle Treffer gleich zu Fensterbeginn lagen). Für die Anzeige hieß das: "23/30" stand bis zu 300 Sekunden lang exakt gleich da und sprang dann abrupt auf "0/30" — obwohl GGGs Fenster gleitend ist und einzelne Treffer laufend herausaltern.
+
+**Erster Versuch war zu grob — Peters Nachfrage deckte es auf.** Die erste Fassung schätzte pauschal linear ab (`current * (1 - elapsed/window_s)`), also eine gleichmäßige Verteilung ALLER Treffer übers Fenster. Peter rechnete nach: "die Anzeige sollte doch genauso schnell wieder runterticken wie rauf, also alle ca. 11s ein Tick down?" Das ist korrekt und die Pauschal-Schätzung traf es nicht: bei 23 Treffern über 300s ergab sie einen Tick alle ~13s, und nach einem Burst (z. B. "Load All Tabs") hätte sie gleichmäßig abgeklungen, obwohl die Treffer real alle zusammen herausfallen. Der Denkfehler: die Zeitpunkte sind gar nicht unbekannt — unsere eigenen Requests laufen alle durch diesen Manager.
+
+**Lösung — zweigeteilt nach dem, was wir wirklich wissen.** `PolicyState.request_times` schreibt bei jedem `update_from_headers` den Zeitpunkt des eigenen Requests mit (beschnitten aufs längste Fenster, bei 30/300s also höchstens ~30 Einträge). `PolicyState.display_snapshot(now)` altert diese exakt: jeder fällt genau `window_s` nach seinem eigenen Zeitpunkt heraus — beim ~11s-Takt des Stash-Modus tickt die Anzeige damit auch mit ~11s herunter, genau wie sie hochgezählt hat. Nur für Treffer, die wir NICHT selbst gemacht haben (zweite Instanz, anderes Tool, alles von vor dem App-Start; erkennbar als Differenz zwischen Header-Summe und eigenen Zeitstempeln), bleibt die gleichmäßige Verteilung die einzig mögliche Annahme und damit das lineare Abklingen.
+
+Betroffen sind ausschließlich die beiden Anzeige-Pfade `RateLimitManager.snapshot()` (Sekunden-Tick-Polling) und `_emit()` (Callback nach jedem echten Update). Die reale Bremse (`_required_wait`, `headroom_fraction()`, `steady_pace_interval_s()`) rechnet unverändert mit dem konservativen `rule.current` weiter — Regressionstest `test_snapshot_decay_does_not_affect_the_real_wait_decision` stellt sicher, dass ein rechnerisch "entspannter" Anzeigewert die tatsächliche Wartezeit nicht verkürzt.
+
+**Wie vermeiden:** Zwei Lehren. Erstens: ein und derselbe Zahlenwert kann für zwei Zwecke unterschiedlich genaue Antworten brauchen — eine konservative Schätzung für eine sicherheitskritische Entscheidung (nie zu früh senden) versus eine möglichst realistische für eine reine Information (was ist gerade wirklich los). Beide über denselben Rohwert laufen zu lassen erzwingt den unbequemeren Kompromiss; sie an der Ausgabe zu trennen behält die sichere Grundlage UND macht die Anzeige ehrlich. Zweitens: bevor man etwas schätzt, prüfen, ob man es nicht messen kann. Die Annahme "ohne Einzel-Zeitstempel ist nur eine Pauschalschätzung möglich" stimmte nur für fremden Traffic — der eigene läuft ohnehin komplett durch dieselbe Klasse und war damit die ganze Zeit exakt verfügbar.

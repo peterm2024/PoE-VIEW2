@@ -50,7 +50,11 @@ class RateLimitRule:
     active_lock_s: float = 0.0  # Rest-Sperre zum Zeitpunkt des letzten Updates
 
     def snapshot(self) -> dict:
-        """Anzeige-Daten für das Dashboard, als reine Python-Typen."""
+        """Anzeige-Daten für das Dashboard, als reine Python-Typen.
+
+        ``current`` ist hier der zuletzt von GGG gemeldete Rohwert; die
+        gleitende Alterung für die Anzeige rechnet
+        ``PolicyState.display_snapshot`` darüber."""
         return {
             "group": self.rule_group,
             "current": self.current,
@@ -67,6 +71,80 @@ class PolicyState:
     policy_name: str
     rules: dict[tuple[str, int], RateLimitRule] = field(default_factory=dict)
     last_update: float = 0.0  # Zeitstempel des letzten Header-Updates
+    # Zeitpunkte UNSERER eigenen Requests an diese Policy (monotonic), auf
+    # das längste Fenster beschnitten — Grundlage der gleitenden
+    # Anzeige-Alterung, siehe display_snapshot().
+    request_times: list[float] = field(default_factory=list)
+
+    def note_request(self, now: float) -> None:
+        """Einen eigenen Request mitschreiben und alte Einträge wegwerfen.
+        Aufzuheben ist nur, was ins längste Fenster fällt (bei 30/300s also
+        höchstens ~30 Zeitstempel)."""
+        self.request_times.append(now)
+        longest = max((r.window_s for r in self.rules.values()), default=0)
+        cutoff = now - longest
+        self.request_times = [t for t in self.request_times if t > cutoff]
+
+    def display_snapshot(self, now: float) -> list[dict]:
+        """Anzeige-Stand aller Regeln mit GLEITENDEM Fenster.
+
+        GGG zählt in einem gleitenden Fenster: jeder einzelne Treffer altert
+        genau ``window_s`` nach seinem Zeitpunkt heraus, nicht erst das ganze
+        Fenster auf einmal. Der gemeldete Rohwert ``rule.current`` steht
+        dagegen bis zum nächsten Header still — die Anzeige fror dadurch bei
+        z. B. "23/30" minutenlang ein und sprang dann in einem Schritt auf 0
+        (Peter, 2026-07-30: "das sollte doch wieder weniger werden, je länger
+        ich pausiere").
+
+        Für UNSERE eigenen Requests ist die Alterung exakt bekannt — ihre
+        Zeitpunkte stehen in ``request_times``. Sie fallen einzeln heraus,
+        im selben Takt, in dem sie entstanden sind: läuft der Stash-Modus
+        mit ~11s, tickt die Anzeige auch mit ~11s wieder herunter. Läuft
+        das Fenster dagegen noch nicht voll (App gerade gestartet, kürzere
+        Historie als ``window_s``), dauert es entsprechend länger bis zum
+        ersten Tick — das ist die Realität, kein Hänger.
+
+        Treffer, die wir NICHT selbst gemacht haben (anderes PoE-Tool,
+        zweite Instanz, oder alles von vor dem App-Start), kennt nur die
+        Summe im Header. Für sie bleibt die einzige mögliche Annahme eine
+        gleichmäßige Verteilung übers Fenster, also lineares Abklingen.
+
+        Dazu kommt ``next_free_s``: die Sekunden, bis der nächste belegte
+        Platz wieder frei wird — also bis der älteste eigene Treffer aus dem
+        Fenster fällt. Ohne diese Angabe wirkt eine ganz normale Phase wie
+        ein Hänger: hat die App gerade erst zwölf Anfragen abgesetzt, KANN
+        vor Ablauf der ersten 300s nichts frei werden, und der Zähler steht
+        minutenlang still (Peter, 2026-07-30). ``None``, wenn wir keinen
+        eigenen Treffer im Fenster haben — dann wissen wir es schlicht
+        nicht. Liegen zusätzlich fremde/ältere Treffer im Fenster, ist der
+        Wert eine OBERGRENZE: die sind älter und werden früher frei.
+
+        Ausschliesslich für die ANZEIGE. Die tatsächliche
+        Warte-Entscheidung (``_required_wait``, ``headroom_fraction``,
+        ``steady_pace_interval_s``) rechnet unverändert mit dem
+        konservativen ``rule.current``: ein dort zu früh gesenkter Zähler
+        könnte einen echten HTTP 429 riskieren (FALLSTRICKE #34).
+        """
+        elapsed = max(0.0, now - self.last_update)
+        snapshots = []
+        for rule in self.rules.values():
+            snap = rule.snapshot()
+            snap["next_free_s"] = None
+            window = rule.window_s
+            if window > 0:
+                # Eigene Treffer, die beim letzten Header im Fenster lagen …
+                known = sum(1 for t in self.request_times
+                            if t > self.last_update - window)
+                # … und davon die, die JETZT noch drin sind.
+                in_window = [t for t in self.request_times if t > now - window]
+                unknown = max(0, rule.current - known)
+                unknown_left = unknown * max(0.0, 1 - elapsed / window)
+                snap["current"] = min(rule.current,
+                                      len(in_window) + round(unknown_left))
+                if in_window and snap["current"] > 0:
+                    snap["next_free_s"] = max(0.0, min(in_window) + window - now)
+            snapshots.append(snap)
+        return snapshots
 
 
 class RateLimitManager:
@@ -85,6 +163,9 @@ class RateLimitManager:
         self._callback = status_callback
         self._now = now or time.monotonic
         self._last_policy: str = ""
+        # Lebensdauer dieser Instanz = Zeitraum, für den wir eigene
+        # Request-Zeitpunkte lückenlos kennen (§window_coverage).
+        self._started_at = self._now()
 
     @property
     def last_policy(self) -> str:
@@ -183,6 +264,11 @@ class RateLimitManager:
                                   headers.get(f"X-Rate-Limit-{group}", ""),
                                   headers.get(f"X-Rate-Limit-{group}-State", ""))
             state.last_update = self._now()
+            # Genau EIN eigener Request hat diese Antwort erzeugt — sein
+            # Zeitpunkt trägt die gleitende Anzeige-Alterung
+            # (§PolicyState.display_snapshot). Erst NACH _parse_group, damit
+            # die Fenstergrößen fürs Beschneiden schon bekannt sind.
+            state.note_request(state.last_update)
             self._last_policy = policy
         self._emit(policy, 0.0)
 
@@ -283,7 +369,38 @@ class RateLimitManager:
                 return self._last_policy, [], 0.0
             self._decay_expired_rules(state)
             wait = max((r.active_lock_s for r in state.rules.values()), default=0.0)
-            return self._last_policy, [r.snapshot() for r in state.rules.values()], wait
+            return self._last_policy, state.display_snapshot(self._now()), wait
+
+    def window_coverage(self) -> tuple[float, float]:
+        """Wie weit deckt unsere eigene Messung das Rate-Limit-Fenster ab?
+
+        Rückgabe ``(anteil, restsekunden)`` — ``anteil`` 0.0…1.0, ``rest``
+        die Sekunden bis zur vollen Abdeckung (0.0, sobald erreicht).
+
+        Hintergrund: GGGs Zähler überlebt unseren Prozess. Direkt nach dem
+        Start meldet der Header deshalb Treffer, die eine FRÜHERE Sitzung
+        (oder ein anderes Tool) verursacht hat — für die kennen wir keine
+        Zeitpunkte und müssen in der Anzeige schätzen
+        (§PolicyState.display_snapshot). Sobald diese Instanz aber ein
+        volles Fenster lang läuft, kann kein Treffer im Fenster mehr aus
+        der Zeit davor stammen: ab da ist die Anzeige exakt.
+
+        Maßgeblich ist das LÄNGSTE Fenster der aktuellen Policy (bei
+        "15/15s + 30/300s" also 300s) — das kürzere ist immer vorher fertig.
+        Ohne bekannte Policy gibt es noch nichts zu wissen: 0.0.
+
+        Achtung, die Abdeckung sagt nichts über FREMDEN Traffic: läuft
+        parallel ein anderes Tool auf demselben Account, bleiben dessen
+        Treffer dauerhaft unbekannt, auch bei Abdeckung 1.0.
+        """
+        with self._lock:
+            state = self._policies.get(self._last_policy)
+            longest = max((r.window_s for r in state.rules.values()),
+                          default=0) if state else 0
+            if longest <= 0:
+                return 0.0, 0.0
+            lifetime = self._now() - self._started_at
+            return min(1.0, lifetime / longest), max(0.0, longest - lifetime)
 
     def register_penalty(self, retry_after_s: float, policy_name: str | None = None) -> None:
         """HTTP 429 trotz Vorsicht: Sperre aus Retry-After übernehmen."""
@@ -302,5 +419,5 @@ class RateLimitManager:
             return
         with self._lock:
             state = self._policies.get(policy_name)
-            snap = [r.snapshot() for r in state.rules.values()] if state else []
+            snap = state.display_snapshot(self._now()) if state else []
         self._callback(policy_name, snap, wait_remaining)
