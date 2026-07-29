@@ -49,6 +49,56 @@ class RateLimitRule:
     current: int = 0       # zuletzt gemeldeter Verbrauch
     active_lock_s: float = 0.0  # Rest-Sperre zum Zeitpunkt des letzten Updates
 
+    # --- ab hier keine GGG-Daten mehr, sondern Anzeige-Inferenz --------- #
+    # Aus beobachteten Abläufen gelernte Dichte der UNBEKANNTEN Treffer
+    # (die aus einer früheren Sitzung), siehe observe_unknown/drain_s.
+    unknown_seen: int | None = None    # zuletzt beobachtete Zahl Unbekannter
+    unknown_expired: int = 0           # wie viele davon wir ablaufen sahen
+    unknown_first_expiry: float = 0.0  # wann der ERSTE davon ablief
+    unknown_last_expiry: float = 0.0   # wann zuletzt einer ablief
+
+    def observe_unknown(self, unknown: int, now: float) -> None:
+        """Beobachtet, wie schnell die unbekannten Treffer wegfallen.
+
+        Jeder Rückgang der Zahl bedeutet: so viele Treffer aus der früheren
+        Sitzung sind gerade aus dem Fenster gefallen — sie lagen also
+        ``window_s`` vorher. Damit lässt sich messen, wie dicht die übrigen
+        liegen, statt sie weiter nur zu schätzen (Peters Beobachtung
+        2026-07-30: "der geschätzte next hat gerade stattgefunden, darauf
+        basierend können wir die nachfolgenden genau ermitteln").
+
+        Nur bei einem RÜCKGANG gelernt: steigt die Zahl, hat ein fremdes
+        Tool welche hinzugefügt — daraus lässt sich nichts über die
+        Zeitpunkte der schon vorhandenen ableiten."""
+        previous = self.unknown_seen
+        self.unknown_seen = unknown
+        if previous is None:
+            return
+        if unknown < previous:
+            if self.unknown_expired == 0:
+                self.unknown_first_expiry = now
+            self.unknown_expired += previous - unknown
+            self.unknown_last_expiry = now
+        elif unknown > previous:
+            # Fremder Traffic: gelerntes Tempo passt nicht mehr, neu anfangen.
+            self.unknown_expired = 0
+            self.unknown_first_expiry = 0.0
+            self.unknown_last_expiry = 0.0
+
+    def drain_s(self) -> float | None:
+        """Gemessener Abstand zwischen zwei Abläufen unbekannter Treffer,
+        oder ``None``, solange zu wenig beobachtet wurde.
+
+        Gemessen wird von Ablauf zu Ablauf, NICHT ab Beobachtungsbeginn: bis
+        zum ersten Ablauf vergeht je nach Alter der Altlast beliebig viel
+        Totzeit, die den Mittelwert sonst verwässert (real im Test: 29.7s
+        statt der echten 12s). Zwischen ``unknown_expired`` Abläufen liegen
+        genau ``unknown_expired - 1`` Abstände."""
+        if self.unknown_expired < 2:
+            return None
+        span = self.unknown_last_expiry - self.unknown_first_expiry
+        return span / (self.unknown_expired - 1) if span > 0 else None
+
     def snapshot(self) -> dict:
         """Anzeige-Daten für das Dashboard, als reine Python-Typen.
 
@@ -85,7 +135,56 @@ class PolicyState:
         cutoff = now - longest
         self.request_times = [t for t in self.request_times if t > cutoff]
 
-    def display_snapshot(self, now: float) -> list[dict]:
+    def unknown_count(self, rule: RateLimitRule) -> int:
+        """Treffer im Fenster, die NICHT von uns stammen — also aus einer
+        früheren Sitzung oder einem anderen Tool. Differenz zwischen GGGs
+        Summe und unseren eigenen Zeitstempeln im selben Fenster."""
+        known = sum(1 for t in self.request_times
+                    if t > self.last_update - rule.window_s)
+        return max(0, rule.current - known)
+
+    def _unknown_left(self, rule: RateLimitRule, unknown: int,
+                      now: float, started_at: float) -> float:
+        """Wie viele der unbekannten Treffer stecken JETZT noch im Fenster?
+
+        Zwei Stufen, gemessen schlägt geschätzt:
+
+        1. **Gemessen** — sobald wir zwei Abläufe beobachtet haben
+           (``rule.drain_s()``), kennen wir ihren tatsächlichen Abstand und
+           zählen damit linear herunter. Das ist Peters Beobachtung vom
+           2026-07-30: ein beobachteter Ablauf verrät den Takt der früheren
+           Sitzung, und der gilt für die restlichen genauso.
+        2. **Geschätzt** — vorher bleibt nur Gleichverteilung. Aber NICHT
+           übers ganze Fenster: unbekannte Treffer können nur aus der Zeit
+           VOR unserem Start stammen, liegen also zwingend im Intervall
+           ``[letzter Header − Fenster, started_at]``. Über dieses (meist
+           deutlich kürzere) Intervall zu verteilen ist die schärfere und
+           damit ehrlichere Annahme — vorher liefen sie zu langsam ab, was
+           genau zu dem von Peter gemeldeten verfrühten "Rutsch" führte.
+        """
+        drain = rule.drain_s()
+        if drain:
+            since = now - rule.unknown_last_expiry
+            return max(0.0, unknown - since / drain)
+        span = started_at - (self.last_update - rule.window_s)
+        if span <= 0:
+            # Unser Start liegt vor dem Fensteranfang: die Unbekannten sind
+            # dann fremder Traffic von JETZT, gleichmäßig übers Fenster.
+            span = float(rule.window_s)
+        left = (started_at - (now - rule.window_s)) / span
+        return unknown * max(0.0, min(1.0, left))
+
+    def _next_unknown_free(self, rule: RateLimitRule, unknown_left: float,
+                           now: float) -> float | None:
+        """Sekunden bis zum nächsten Ablauf eines UNBEKANNTEN Treffers —
+        nur wenn wir den Takt gemessen haben, sonst ``None`` (raten würde
+        genau die falsche Zusage erzeugen, die es zu vermeiden gilt)."""
+        drain = rule.drain_s()
+        if not drain or unknown_left < 1:
+            return None
+        return max(0.0, rule.unknown_last_expiry + drain - now)
+
+    def display_snapshot(self, now: float, started_at: float = 0.0) -> list[dict]:
         """Anzeige-Stand aller Regeln mit GLEITENDEM Fenster.
 
         GGG zählt in einem gleitenden Fenster: jeder einzelne Treffer altert
@@ -104,20 +203,18 @@ class PolicyState:
         Historie als ``window_s``), dauert es entsprechend länger bis zum
         ersten Tick — das ist die Realität, kein Hänger.
 
-        Treffer, die wir NICHT selbst gemacht haben (anderes PoE-Tool,
-        zweite Instanz, oder alles von vor dem App-Start), kennt nur die
-        Summe im Header. Für sie bleibt die einzige mögliche Annahme eine
-        gleichmäßige Verteilung übers Fenster, also lineares Abklingen.
+        Treffer, die wir NICHT selbst gemacht haben, behandelt
+        ``_unknown_left`` (gemessener Takt, sonst Gleichverteilung über das
+        Intervall, in dem sie überhaupt liegen können).
 
         Dazu kommt ``next_free_s``: die Sekunden, bis der nächste belegte
-        Platz wieder frei wird — also bis der älteste eigene Treffer aus dem
-        Fenster fällt. Ohne diese Angabe wirkt eine ganz normale Phase wie
-        ein Hänger: hat die App gerade erst zwölf Anfragen abgesetzt, KANN
-        vor Ablauf der ersten 300s nichts frei werden, und der Zähler steht
-        minutenlang still (Peter, 2026-07-30). ``None``, wenn wir keinen
-        eigenen Treffer im Fenster haben — dann wissen wir es schlicht
-        nicht. Liegen zusätzlich fremde/ältere Treffer im Fenster, ist der
-        Wert eine OBERGRENZE: die sind älter und werden früher frei.
+        Platz wieder frei wird. Berücksichtigt beides — den ältesten eigenen
+        Treffer UND, falls sein Takt gemessen ist, den nächsten unbekannten;
+        der frühere von beiden gewinnt. Ohne diese Angabe wirkt eine ganz
+        normale Phase wie ein Hänger: hat die App gerade erst zwölf Anfragen
+        abgesetzt, KANN vor Ablauf der ersten 300s nichts frei werden, und
+        der Zähler steht minutenlang still. ``None``, wenn wir nichts
+        Belastbares haben — dann lieber keine Angabe als eine falsche.
 
         Ausschliesslich für die ANZEIGE. Die tatsächliche
         Warte-Entscheidung (``_required_wait``, ``headroom_fraction``,
@@ -125,24 +222,31 @@ class PolicyState:
         konservativen ``rule.current``: ein dort zu früh gesenkter Zähler
         könnte einen echten HTTP 429 riskieren (FALLSTRICKE #34).
         """
-        elapsed = max(0.0, now - self.last_update)
         snapshots = []
         for rule in self.rules.values():
             snap = rule.snapshot()
             snap["next_free_s"] = None
+            snap["next_free_exact"] = True
             window = rule.window_s
             if window > 0:
-                # Eigene Treffer, die beim letzten Header im Fenster lagen …
-                known = sum(1 for t in self.request_times
-                            if t > self.last_update - window)
-                # … und davon die, die JETZT noch drin sind.
                 in_window = [t for t in self.request_times if t > now - window]
-                unknown = max(0, rule.current - known)
-                unknown_left = unknown * max(0.0, 1 - elapsed / window)
+                unknown = self.unknown_count(rule)
+                unknown_left = self._unknown_left(rule, unknown, now, started_at)
                 snap["current"] = min(rule.current,
                                       len(in_window) + round(unknown_left))
-                if in_window and snap["current"] > 0:
-                    snap["next_free_s"] = max(0.0, min(in_window) + window - now)
+                due = [min(in_window) + window - now] if in_window else []
+                nxt = self._next_unknown_free(rule, unknown_left, now)
+                if nxt is not None:
+                    due.append(nxt)
+                if due and snap["current"] > 0:
+                    snap["next_free_s"] = max(0.0, min(due))
+                # Unbekannte Treffer sind ÄLTER als unsere eigenen und fallen
+                # damit früher heraus. Solange welche übrig sind und ihr Takt
+                # noch nicht gemessen wurde, ist der Wert nur eine Obergrenze
+                # — genau die Zusage, die Peter am 2026-07-30 platzen sah
+                # ("next in 2:42", dann Rutsch von 23 auf 19). Sie deshalb
+                # als Schätzung kennzeichnen statt sie als exakt auszugeben.
+                snap["next_free_exact"] = unknown_left < 1 or nxt is not None
             snapshots.append(snap)
         return snapshots
 
@@ -269,6 +373,11 @@ class RateLimitManager:
             # (§PolicyState.display_snapshot). Erst NACH _parse_group, damit
             # die Fenstergrößen fürs Beschneiden schon bekannt sind.
             state.note_request(state.last_update)
+            # Jetzt, mit frischem Header UND eingetragenem eigenen Request,
+            # lernen wie schnell die unbekannten Treffer wegfallen
+            # (§RateLimitRule.observe_unknown).
+            for rule in state.rules.values():
+                rule.observe_unknown(state.unknown_count(rule), state.last_update)
             self._last_policy = policy
         self._emit(policy, 0.0)
 
@@ -369,7 +478,8 @@ class RateLimitManager:
                 return self._last_policy, [], 0.0
             self._decay_expired_rules(state)
             wait = max((r.active_lock_s for r in state.rules.values()), default=0.0)
-            return self._last_policy, state.display_snapshot(self._now()), wait
+            return (self._last_policy,
+                    state.display_snapshot(self._now(), self._started_at), wait)
 
     def window_coverage(self) -> tuple[float, float]:
         """Wie weit deckt unsere eigene Messung das Rate-Limit-Fenster ab?
@@ -419,5 +529,6 @@ class RateLimitManager:
             return
         with self._lock:
             state = self._policies.get(policy_name)
-            snap = state.display_snapshot(self._now()) if state else []
+            snap = (state.display_snapshot(self._now(), self._started_at)
+                    if state else [])
         self._callback(policy_name, snap, wait_remaining)

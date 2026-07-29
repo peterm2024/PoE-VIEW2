@@ -3610,6 +3610,14 @@ def test_rule_label_shows_when_the_next_slot_frees_up(qapp) -> None:
           "next_free_s": None}], 0.0)
     assert win.dashboard._bars[0][1].text() == "12/30 · 300 s"
 
+    # Altlast aus einer Vorsitzung im Fenster, Takt noch nicht gemessen:
+    # der Wert ist nur eine Obergrenze und wird als Schaetzung markiert.
+    win.dashboard.update_state(
+        "stash-request-limit",
+        [{"current": 12, "max": 30, "window_s": 300, "locked": False,
+          "next_free_s": 139.0, "next_free_exact": False}], 0.0)
+    assert win.dashboard._bars[0][1].text() == "12/30 · 300 s · next in ~2:19"
+
     win.worker.stop()
     win.worker.wait(5000)
 

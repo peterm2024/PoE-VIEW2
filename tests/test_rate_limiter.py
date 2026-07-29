@@ -278,6 +278,118 @@ def test_next_free_is_unknown_without_own_requests_in_the_window() -> None:
     assert mgr.snapshot()[1][0]["next_free_s"] is None
 
 
+def _session_with_leftovers(clock, leftover: int, own_pace: float, own_n: int,
+                            leftover_pace: float):
+    """Frischer Start mit ``leftover`` Treffern aus einer Vorsitzung, die im
+    Takt ``leftover_pace`` entstanden sind und entsprechend wieder
+    herausaltern. Danach eigene Requests im Takt ``own_pace``.
+    Gibt den Manager zurück; die Uhr steht am letzten eigenen Request."""
+    mgr = make_manager(clock)
+    start = clock.t
+    # Ablauf-Zeitpunkte der Altlast: der aelteste zuerst.
+    expire_at = [start + 300.0 - leftover_pace * i for i in range(leftover, 0, -1)]
+    for i in range(own_n):
+        clock.t = start + own_pace * i
+        still_there = sum(1 for e in expire_at if e > clock.t)
+        # GGG zaehlt nur, was IM Fenster liegt — auch bei unseren eigenen.
+        own_in_window = sum(1 for j in range(i + 1)
+                            if start + own_pace * j > clock.t - 300.0)
+        headers = dict(STEADY_HEADERS)
+        headers["X-Rate-Limit-Account-State"] = f"{still_there + own_in_window}:300:0"
+        mgr.update_from_headers(headers)
+    return mgr
+
+
+def test_observed_expiries_teach_the_pace_of_unknown_hits() -> None:
+    """Peter, 2026-07-30: "der geschätzte next hat gerade stattgefunden, und
+    darauf basierend können wir die nachfolgenden genau ermitteln" — genau
+    das. Jeder beobachtete Rückgang verrät den Takt der Vorsitzung; ab zwei
+    Beobachtungen rechnen wir mit dem GEMESSENEN Abstand statt zu schätzen."""
+    clock = FakeClock()
+    # Altlast im 12s-Takt, eigene Requests im 11s-Takt.
+    mgr = _session_with_leftovers(clock, leftover=10, own_pace=11.0,
+                                  own_n=30, leftover_pace=12.0)
+    rule = next(iter(mgr._policies["stash-request-limit"].rules.values()))
+
+    assert rule.unknown_expired >= 2, "Abläufe müssen beobachtet worden sein"
+    assert rule.drain_s() == pytest.approx(12.0, abs=1.0), \
+        "gemessener Takt muss dem echten 12s-Takt der Vorsitzung entsprechen"
+
+
+def test_next_free_uses_the_unknown_pace_instead_of_over_promising() -> None:
+    """Vorher zählte ``next_free_s`` nur eigene Treffer — bei vorhandener
+    Altlast versprach die Anzeige dadurch "next in 2:42" und der Wert fiel
+    schon viel früher (Peters Beobachtung). Jetzt gewinnt der frühere der
+    beiden Termine."""
+    clock = FakeClock()
+    # 20 eigene Requests = 209s Laufzeit; die Altlast laeuft ab t=180 ab,
+    # zwei Ablaeufe sind bis dahin also beobachtet.
+    mgr = _session_with_leftovers(clock, leftover=10, own_pace=11.0,
+                                  own_n=20, leftover_pace=12.0)
+    state = mgr._policies["stash-request-limit"]
+    rule = next(iter(state.rules.values()))
+
+    own_only = min(state.request_times) + 300.0 - clock.t
+    next_free = mgr.snapshot()[1][0]["next_free_s"]
+
+    assert rule.drain_s() is not None, "Takt der Altlast muss gemessen sein"
+    assert next_free < own_only, \
+        "der naechste unbekannte Ablauf kommt vor unserem aeltesten eigenen"
+    assert next_free <= 12.0 + 1.0, "und zwar im gemessenen Altlast-Takt"
+
+
+def test_next_free_is_flagged_as_an_estimate_while_leftovers_are_unmeasured() -> None:
+    """Peters Beobachtung: "next in 2:42" stand da, dann fiel der Wert von
+    23 auf 19 — die Zusage platzte, weil unbekannte (aeltere) Treffer frueher
+    herausfallen als unsere eigenen. Solange ihr Takt nicht gemessen ist,
+    wird der Wert deshalb als Schaetzung markiert; sobald er gemessen ist,
+    gilt er als exakt."""
+    clock = FakeClock()
+    mgr = make_manager(clock)
+    headers = dict(STEADY_HEADERS)
+    headers["X-Rate-Limit-Account-State"] = "11:300:0"  # 10 Altlast + 1 eigener
+    mgr.update_from_headers(headers)
+
+    clock.t += 20.0
+    assert mgr.snapshot()[1][0]["next_free_exact"] is False
+
+    # Ohne Altlast (frischer Start, alles selbst gemacht) ist er exakt.
+    clock2 = FakeClock()
+    mgr2 = make_manager(clock2)
+    headers2 = dict(STEADY_HEADERS)
+    headers2["X-Rate-Limit-Account-State"] = "1:300:0"
+    mgr2.update_from_headers(headers2)
+    clock2.t += 20.0
+    assert mgr2.snapshot()[1][0]["next_free_exact"] is True
+
+
+def test_unknown_hits_decay_only_within_the_interval_they_can_lie_in() -> None:
+    """Unbekannte Treffer koennen nur aus der Zeit VOR unserem Start
+    stammen. Die Schaetzung (solange nichts gemessen ist) verteilt sie
+    deshalb ueber ``[letzter Header - Fenster, started_at]`` statt uebers
+    ganze Fenster — sonst klingen sie zu langsam ab und die Anzeige haengt
+    dem echten Wert hinterher.
+
+    Laeuft die App schon 200s, ist dieses Intervall nur noch 100s lang
+    (Fenster 300s, davon 200s nachweislich von uns): die Altlast MUSS
+    binnen 100s weg sein, nicht erst nach 300s."""
+    clock = FakeClock()
+    mgr = make_manager(clock)                 # started_at = 1000
+    clock.t += 200.0
+    headers = dict(STEADY_HEADERS)
+    headers["X-Rate-Limit-Account-State"] = "9:300:0"  # 8 Altlast + 1 eigener
+    mgr.update_from_headers(headers)          # t=1200, Fenster [900, 1200]
+
+    # Die 8 Unbekannten liegen zwingend in [900, 1000] — nach 50s ist die
+    # Haelfte dieses Intervalls durch.
+    clock.t += 50.0
+    assert mgr.snapshot()[1][0]["current"] == 5   # 4 geschaetzte + 1 eigener
+
+    # Nach 100s ist es komplett durch: nur noch unser eigener Treffer.
+    clock.t += 50.0
+    assert mgr.snapshot()[1][0]["current"] == 1
+
+
 def test_window_coverage_grows_to_full_over_one_window() -> None:
     """Der Synchronisierungsbalken (Peter, 2026-07-30): erst wenn diese
     Instanz ein volles Fenster lang läuft, kann kein Treffer im Fenster mehr

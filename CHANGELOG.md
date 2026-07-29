@@ -40,6 +40,9 @@ nach [SemVer](https://semver.org/lang/de/).
   nächste belegte Platz wieder frei wird ("12/30 · 300 s · next in 2:19").
   Kurz nach dem Start kann bauartbedingt minutenlang nichts frei werden —
   ohne diese Angabe sah der stillstehende Zähler wie ein Hänger aus.
+  Anfragen aus einer früheren Sitzung werden anfangs nur geschätzt (am "~"
+  im Countdown erkennbar); sobald zwei von ihnen ablaufen, ist ihr Takt
+  gemessen und die Angabe exakt.
 - Rate-Limit-Dashboard: neuer **Sync-Balken** neben dem Policy-Namen. GGGs
   Zähler überlebt den Programmstart — direkt danach sind die gemeldeten
   Treffer aus der Vorsitzung geschätzt statt gemessen. Der Balken zeigt,

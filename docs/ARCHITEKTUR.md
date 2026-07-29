@@ -717,6 +717,36 @@ Toolbar ("Mode: Auto / Single / Stash / Pause", additiv neben dem normalen
   Altlast-Treffern über einen gleichmäßigen Abstieg, bei eigenen über das
   Herausaltern in genau dem Takt, in dem sie entstanden sind.
 
+  **Der Takt der Altlast wird gemessen, nicht dauerhaft geschätzt**
+  (`RateLimitRule.observe_unknown`/`drain_s`, Peters Beobachtung
+  2026-07-30: "next in 2:42" stand da, dann fiel der Wert von 23 auf 19 —
+  "das heißt doch, dass genau dieser geschätzte next gerade stattgefunden
+  hat, und darauf basierend können wir die nachfolgenden genau
+  ermitteln"). Genau so: jeder Rückgang der Unbekannten-Zahl ist ein
+  beobachteter Ablauf und verrät, dass dort ein Treffer `window_s` vorher
+  lag. Ab zwei Beobachtungen kennen wir den Abstand und rechnen mit dem
+  GEMESSENEN Takt weiter. Gemessen wird dabei von Ablauf zu Ablauf, nicht
+  ab Beobachtungsbeginn — die Totzeit bis zum ersten Ablauf verwässerte
+  den Mittelwert sonst erheblich (im Test 29,7s statt der echten 12s).
+  An Peters realer Sitzung (13 Altlast-Treffer aus einer Vorsitzung mit
+  11s-Takt) nachgestellt: ab ~200s Laufzeit misst der Manager 11,2s und
+  trifft damit den echten Takt der Vorsitzung.
+
+  Zwei Folgerungen daraus im Code:
+
+  - `_unknown_left` zählt mit dem gemessenen Takt herunter. Solange nichts
+    gemessen ist, bleibt Gleichverteilung — aber über das Intervall, in dem
+    die Treffer überhaupt liegen KÖNNEN (`[letzter Header − Fenster,
+    started_at]`), nicht über das ganze Fenster. Läuft die App schon 200s,
+    ist dieses Intervall nur noch 100s lang; die alte Rechnung ließ die
+    Altlast dreimal zu langsam abklingen.
+  - `next_free_s` berücksichtigt jetzt beides und nimmt den früheren
+    Termin. Ist der Takt der Altlast noch nicht gemessen, ist der Wert nur
+    eine Obergrenze (Unbekannte sind älter und fallen früher heraus) —
+    genau die Zusage, die bei Peter platzte. Das Label markiert sie
+    deshalb mit `~` (`next in ~2:19`), bis sie gemessen und damit exakt
+    ist (`next_free_exact` im Snapshot).
+
 Single/Stash reservieren bewusst KEIN Budget für manuelle Klicks (anders
 als Auto) — der Nutzer hat den Modus bewusst gewählt, um den vollen Pool
 für genau dieses Ziel einzusetzen. Beide takten GLEICHMÄSSIG statt in

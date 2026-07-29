@@ -147,7 +147,12 @@ class RateLimitDashboard(QFrame):
         text = f'{rule["current"]}/{rule["max"]} · {rule["window_s"]} s'
         next_free = rule.get("next_free_s")
         if next_free is not None:
-            text += f" · next in {RateLimitDashboard._short_time(next_free)}"
+            # "~" solange Treffer aus einer früheren Sitzung im Fenster
+            # stecken, deren Takt wir noch nicht gemessen haben: die sind
+            # älter als unsere eigenen und werden FRÜHER frei, der Wert ist
+            # dann nur eine Obergrenze.
+            approx = "" if rule.get("next_free_exact", True) else "~"
+            text += f" · next in {approx}{RateLimitDashboard._short_time(next_free)}"
         return text
 
     @staticmethod
@@ -156,9 +161,14 @@ class RateLimitDashboard(QFrame):
                f'{rule["window_s"]} s (sliding window).')
         if rule.get("next_free_s") is not None:
             tip += ("\nEach request frees its slot exactly "
-                    f'{rule["window_s"]} s after it was made — the countdown is '
-                    "the oldest one we know of. Requests from before the app "
-                    "started (see the sync bar) may free up sooner.")
+                    f'{rule["window_s"]} s after it was made.')
+            if rule.get("next_free_exact", True):
+                tip += " This countdown is measured, not estimated."
+            else:
+                tip += ("\n\"~\": requests from before the app started are still "
+                        "in the window. They are older than ours, so a slot may "
+                        "free up sooner than shown. Once we have seen two of them "
+                        "expire we know their pace and the countdown becomes exact.")
         return tip
 
     def _ensure_bars(self, count: int) -> None:
