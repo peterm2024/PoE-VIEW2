@@ -28,10 +28,24 @@ Req.Lvl/Str/Dex/Int kommen aus dem requirements-Array der GGG-API — die
 Daten waren dank ``extra="allow"`` längst im Cache, wurden nur nie gezeigt
 (eine externe Quelle wie PoEDB ist dafür nicht nötig).
 
+Die Base-Spalte zeigt ``item.baseType`` — anders als Name (kann bei
+Uniques/Rares ein Fantasiename sein) immer die reine Item-Basis ("Sun
+Plate", "Crimson Jewel"). "Unidentifiziert" wird bewusst NICHT hier,
+sondern nur im Item-Detail-Panel markiert (``item_detail.py``) — in der
+Tabelle wäre eine eigene Spalte/Markierung dafür Platzverschwendung, da
+unidentifizierte Items selten sind.
+
 Die Mods-Spalte zeigt die explicitMods (v. a. Map-Modifikatoren);
 der Live-Filter durchsucht sie mit. Zusätzlich kann jede Spalte einen
 eigenen Filter-Ausdruck tragen (">=20", "<45", "=Text", Teilstring) —
 gesetzt über das Header-Rechtsklick-Menü, markiert mit 🔍 im Header.
+
+Das Suchfeld wertet die Eingabe standardmäßig als regulären Ausdruck aus
+(Umschalter ".*" in der Toolbar) — genau wie PoEs eigene Truhensuche,
+sodass auf poe.re zusammengeklickte Muster unverändert funktionieren.
+Dafür steht auch ``Item.socket_string`` ("R-R-G", Gruppen durch
+Leerzeichen) mit im Suchindex. Ein unfertiges Muster fällt still auf die
+Teilstring-Suche zurück, statt die Liste zu leeren.
 
 Acht Typ-Checkboxen (MainWindow, neben dem Liga-Feld) filtern zusätzlich
 nach frameType — und-verknüpft mit allem anderen: die vier PoE-Rarities
@@ -68,15 +82,17 @@ _EXPLICIT_TYPES = frozenset({0, 1, 2, 3, 4, 5, 6})
 def _type_key(frame_type: int) -> int:
     return frame_type if frame_type in _EXPLICIT_TYPES else OTHER_TYPE
 
-COLUMNS = ("Icon", "Tab", "Position", "Name", "Type", "Level", "Qual.", "Stack", "iLvl",
+COLUMNS = ("Icon", "Tab", "Position", "Name", "Base", "Type", "Level", "Qual.", "Stack", "iLvl",
            "Req.Lvl", "Str", "Dex", "Int", "Mods", "Value")
 ICON_COL = 0
 TAB_COL = 1
 POSITION_COL = 2       # Tab-Nr. + Gitter-Koordinate — unterscheidet gleichnamige Fächer
 _NAME_COL = 3
-_NUMERIC_FROM_COL = 5  # Level, Qual., Stack, iLvl, Req.Lvl, Str, Dex, Int
-MODS_COL = 13          # Mods (v. a. Maps) — linksbündig, nicht numerisch
-VALUE_COL = 14         # poe.ninja-Chaos-Wert × Stack — eigene Spalte NACH Mods,
+BASE_COL = 4           # item.baseType — anders als Name (kann der Unique-/Rare-Name sein)
+                       # immer die reine Basis ("Sun Plate", "Crimson Jewel")
+_NUMERIC_FROM_COL = 6  # Level, Qual., Stack, iLvl, Req.Lvl, Str, Dex, Int
+MODS_COL = 14          # Mods (v. a. Maps) — linksbündig, nicht numerisch
+VALUE_COL = 15         # poe.ninja-Chaos-Wert × Stack — eigene Spalte NACH Mods,
                        # damit alle bestehenden Spalten-Indizes unverändert bleiben
 # Spalten vor dem vorgerechneten _rows-Tupel (Icon, Tab, Position) — Offset
 # für den Zugriff _rows[row][col - _ROWS_OFFSET] in display_text().
@@ -176,7 +192,7 @@ class ItemTableModel(QAbstractTableModel):
 
     @staticmethod
     def _precompute(item: Item) -> tuple:
-        return (item.display_name, item.rarity, gem_level(item) or "–",
+        return (item.display_name, item.baseType or "–", item.rarity, gem_level(item) or "–",
                 gem_quality(item) or "–",
                 str(item.stackSize) if item.stackSize else "–",
                 str(item.ilvl) if item.ilvl else "–",
@@ -197,7 +213,7 @@ class ItemTableModel(QAbstractTableModel):
         selbst tragen den Wert nur als Property)."""
         prop_text = " ".join(f"{p.name} {p.display_value or ''}" for p in item.properties)
         return (f"{item.display_name} {item.typeLine} {item.baseType} "
-               f"{item.rarity} {source} "
+               f"{item.rarity} {source} {item.socket_string} "
                f"{' '.join(item.explicitMods)} {' '.join(item.implicitMods)} {prop_text}").lower()
 
     def set_price_index(self, index: PriceIndex | None) -> None:
@@ -339,6 +355,25 @@ class ItemTableModel(QAbstractTableModel):
         return None
 
 
+def compile_search(text: str, regex_enabled: bool) -> re.Pattern | None:
+    """Suchmuster für den Regex-Modus, ``None`` für die einfache
+    Teilstring-Suche (Modus aus, leerer Text oder ein noch unfertiges
+    Muster). Gemeinsam genutzt von ``ItemFilterProxy`` und der
+    On-Demand-Suche über große Ligen (MainWindow._run_large_search)."""
+    if not regex_enabled or not text:
+        return None
+    try:
+        return re.compile(text)
+    except re.error:
+        return None
+
+
+def matches_search(haystack: str, text_lower: str, pattern: re.Pattern | None) -> bool:
+    """Ein Treffer-Test für beide Suchmodi — der Aufrufer entscheidet über
+    ``pattern``, ob als Regex oder als Teilstring gesucht wird."""
+    return bool(pattern.search(haystack)) if pattern else text_lower in haystack
+
+
 # Vergleichsoperator am Anfang eines Spalten-Filter-Ausdrucks
 _OP_RE = re.compile(r"^\s*(<=|>=|!=|<>|<|>|=)\s*(.+)$")
 
@@ -379,7 +414,22 @@ class ItemFilterProxy(QSortFilterProxyModel):
         self._column_filters: dict[int, str] = {}
         self._search_text = ""
         self._search_text_lower = ""
+        self._regex_enabled = True
+        self._search_regex: re.Pattern | None = None
         self._hidden_types: set[int] = set()  # _type_key(frameType), per Checkbox abgewählt
+
+    def set_regex_enabled(self, enabled: bool) -> None:
+        self.beginFilterChange()
+        self._regex_enabled = enabled
+        self._compile_search()
+        self.endFilterChange()
+
+    def _compile_search(self) -> None:
+        """Übersetzt den Suchtext in ein Muster, wenn der Regex-Modus an
+        ist. Ein unfertiges/ungültiges Muster (beim Tippen praktisch immer
+        kurz der Fall, etwa nach einer offenen Klammer) fällt still auf
+        die normale Teilstring-Suche zurück, statt die Liste zu leeren."""
+        self._search_regex = compile_search(self._search_text_lower, self._regex_enabled)
 
     def lessThan(self, left: QModelIndex, right: QModelIndex) -> bool:  # noqa: N802 (Qt-API)
         """Eigene Tie-Break-Regel für gleiche Sortierwerte.
@@ -423,6 +473,7 @@ class ItemFilterProxy(QSortFilterProxyModel):
         pro Zeile statt einmal pro Tastendruck."""
         self._search_text = text or ""
         self._search_text_lower = self._search_text.strip().lower()
+        self._compile_search()
         super().setFilterFixedString(text)
 
     # --- Spalten-Filter -------------------------------------------------- #
@@ -482,5 +533,6 @@ class ItemFilterProxy(QSortFilterProxyModel):
             return True
         # Haystack ist bereits beim Laden vorgerechnet und klein geschrieben
         # (ItemTableModel._build_haystack) — hier nur noch ein billiger
-        # Teilstring-Test, kein erneutes Zusammenbauen pro Zeile/Tastendruck.
-        return self._search_text_lower in model.search_haystack_at(row)
+        # Test, kein erneutes Zusammenbauen pro Zeile/Tastendruck.
+        return matches_search(model.search_haystack_at(row),
+                             self._search_text_lower, self._search_regex)

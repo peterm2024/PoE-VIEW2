@@ -61,6 +61,7 @@ class Item(BaseModel):
     y: int | None = None
     inventoryId: str = ""  # bei Charakter-Items der Slot ("Weapon", "BodyArmour", "MainInventory", …)
     corrupted: bool = False
+    identified: bool = True  # API liefert das Feld immer explizit, Default nur zur Sicherheit
     properties: list[ItemProperty] = Field(default_factory=list)
     requirements: list[ItemProperty] = Field(default_factory=list)
     explicitMods: list[str] = Field(default_factory=list)
@@ -76,6 +77,25 @@ class Item(BaseModel):
         for s in self.sockets:
             counts[s.group] = counts.get(s.group, 0) + 1
         return max(counts.values())
+
+    @property
+    def socket_string(self) -> str:
+        """Sockets in derselben Schreibweise, die PoEs eigene Truhen-/
+        Händlersuche durchsucht: Farben einer Link-Gruppe mit ``-``
+        verbunden, Gruppen durch Leerzeichen getrennt ("R-R-R-R-R-R",
+        "B B-B-B-B-B"). Damit greifen die auf poe.re zusammengeklickten
+        Regex-Muster (``r-r-g|r-g-r|g-r-r``, ``-\\w-.-``, ``(-\\w){5}``)
+        unverändert auch hier.
+
+        Neben R/G/B liefert die API auch ``A`` (Abyss), ``W`` (weiß) und
+        ``DV`` (Resonator) — unverändert übernommen, sonst verschöbe sich
+        die Link-Zählung gegenüber dem, was im Spiel steht."""
+        if not self.sockets:
+            return ""
+        groups: dict[int, list[str]] = {}
+        for s in self.sockets:
+            groups.setdefault(s.group, []).append(s.sColour)
+        return " ".join("-".join(colours) for _, colours in sorted(groups.items()))
 
     @field_validator("explicitMods", "implicitMods", mode="before")
     @classmethod

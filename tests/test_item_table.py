@@ -3,11 +3,30 @@
 from PySide6.QtCore import Qt
 
 from poe_view.api.models import Item
-from poe_view.ui.item_table import MODS_COL, ItemFilterProxy, ItemTableModel
+from poe_view.ui.item_table import BASE_COL, MODS_COL, ItemFilterProxy, ItemTableModel
 
 
 def make_item(name: str, mods: list[str] | None = None) -> Item:
     return Item.model_validate({"typeLine": name, "explicitMods": mods or []})
+
+
+def test_base_column_shows_the_items_base_type(qapp) -> None:
+    """Anders als Name (kann ein Unique-/Rare-Name sein) zeigt Base immer
+    die reine Basis — Peters Wunsch: "Sun Plate" statt nur eines
+    Fantasienamens."""
+    model = ItemTableModel()
+    item = Item.model_validate({"name": "Timeless Slayer", "typeLine": "Vaal Regalia",
+                                "baseType": "Vaal Regalia", "frameType": 2})
+    model.set_items([item])
+    idx = model.index(0, BASE_COL)
+    assert model.data(idx, Qt.ItemDataRole.DisplayRole) == "Vaal Regalia"
+
+
+def test_base_column_shows_dash_when_unknown(qapp) -> None:
+    model = ItemTableModel()
+    model.set_items([Item.model_validate({"typeLine": "Chaos Orb", "baseType": ""})])
+    idx = model.index(0, BASE_COL)
+    assert model.data(idx, Qt.ItemDataRole.DisplayRole) == "–"
 
 
 def test_tab_column_shows_given_source(qapp) -> None:

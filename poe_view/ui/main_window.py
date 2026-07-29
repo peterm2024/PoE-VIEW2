@@ -37,7 +37,8 @@ from poe_view.ui.character_list import CharacterList
 from poe_view.ui.item_detail import ItemDetail
 from poe_view.ui.item_table import (COLUMNS, ICON_COL, MODS_COL,
                                     POSITION_COL, TAB_COL, ItemFilterProxy,
-                                    ItemTableModel, format_chaos_value)
+                                    ItemTableModel, compile_search,
+                                    format_chaos_value, matches_search)
 from poe_view.ui.rate_limit_dashboard import RateLimitDashboard
 from poe_view.ui.raw_data_viewer import RawDataViewer
 from poe_view.ui.stash_tree import StashTree
@@ -359,6 +360,20 @@ class MainWindow(QMainWindow):
         self._filter_edit.setFixedWidth(260)
         self._filter_edit.setClearButtonEnabled(True)  # eingebautes "x" zum Leeren
         toolbar.addWidget(self._filter_edit)
+        # Regex-Umschalter, standardmäßig AN: entspricht PoEs eigener
+        # Truhensuche, sodass auf poe.re zusammengeklickte Muster
+        # ("r-r-g|r-g-r|g-r-r", "-\w-.-") unverändert funktionieren. Wer
+        # nur nach einem Namen sucht, merkt davon nichts — ein reiner Text
+        # ist auch als Regex ein Teilstring-Treffer.
+        self._regex_toggle = QCheckBox(".*")
+        self._regex_toggle.setToolTip(
+            "Regular expressions\n"
+            "on: search text is a regex — poe.re socket patterns work here\n"
+            "off: plain text search")
+        self._regex_toggle.setChecked(self._load_regex_enabled())
+        self._regex_search_enabled = self._regex_toggle.isChecked()
+        self._regex_toggle.toggled.connect(self._on_regex_toggled)
+        toolbar.addWidget(self._regex_toggle)
 
         # Linke Seite: Charakterliste (flach) oben, Stash-Baum unten — je mit
         # eigener Überschrift statt eines gemeinsamen Wrapper-Baums (spart
@@ -392,6 +407,9 @@ class MainWindow(QMainWindow):
             icon_requester=lambda url: self.worker.submit(FetchIconJob(url)))
         self.proxy = ItemFilterProxy()
         self.proxy.setSourceModel(self.table_model)
+        # Erst hier möglich: der Umschalter entsteht schon in der Toolbar
+        # (oben), der Proxy aber erst jetzt.
+        self.proxy.set_regex_enabled(self._regex_search_enabled)
         # Dämpfer für den eigentlichen Zeilen-Filter (SEARCH_DEBOUNCE_MS):
         # bei liga-weiten Aggregaten mit zehntausenden Items kostet
         # invalidateFilter() spürbar Zeit — bei jedem Tastendruck sofort
@@ -695,6 +713,24 @@ class MainWindow(QMainWindow):
         if stored is None:
             return set(self.DEFAULT_HIDDEN_COLUMNS)
         return {name for name in str(stored).split(";") if name}
+
+    def _load_regex_enabled(self) -> bool:
+        """Default AN — entspricht PoEs eigener Truhensuche (§4.11)."""
+        stored = self._settings().value("item_table/regex_search")
+        if stored is None:
+            return True
+        return str(stored).lower() in ("true", "1")
+
+    def _on_regex_toggled(self, enabled: bool) -> None:
+        self._regex_search_enabled = enabled
+        self._settings().setValue("item_table/regex_search", enabled)
+        self.proxy.set_regex_enabled(enabled)
+        # Laufende Suche sofort mit dem neuen Modus neu auswerten, statt
+        # bis zum nächsten Tastendruck den alten Treffer-Stand zu zeigen.
+        if self._filter_edit.text():
+            self._apply_debounced_search_filter()
+        else:
+            self._update_summaries()
 
     def _apply_hidden_columns(self, hidden: set[str]) -> None:
         for i, name in enumerate(COLUMNS):
@@ -1497,9 +1533,13 @@ class MainWindow(QMainWindow):
             if text == "*":
                 matched = range(len(items))
             else:
+                # Dieselbe Muster-Logik wie im Proxy (§item_table), damit
+                # der Regex-Umschalter in beiden Suchpfaden identisch wirkt.
                 text_lower = text.lower()
+                pattern = compile_search(text_lower, self._regex_search_enabled)
                 matched = [i for i, (item, source) in enumerate(zip(items, sources))
-                          if text_lower in ItemTableModel._build_haystack(item, source)]
+                          if matches_search(ItemTableModel._build_haystack(item, source),
+                                           text_lower, pattern)]
             matched_items = [items[i] for i in matched]
             matched_sources = [sources[i] for i in matched]
             matched_tabs = [tab_indices[i] for i in matched]

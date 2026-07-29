@@ -26,6 +26,34 @@ def test_max_links_six_link() -> None:
     item = Item.model_validate({"sockets": [{"group": 0} for _ in range(6)]})
     assert item.max_links == 6
 
+
+def _sockets(spec: str) -> Item:
+    """"R-R G" → Sockets mit passenden Gruppen (Leerzeichen trennt Gruppen)."""
+    sockets = []
+    for group, chunk in enumerate(spec.split(" ")):
+        for colour in chunk.split("-"):
+            sockets.append({"group": group, "sColour": colour})
+    return Item.model_validate({"sockets": sockets})
+
+
+def test_socket_string_matches_poe_notation() -> None:
+    """Format wie in PoEs eigener Suche: Farben einer Link-Gruppe mit '-',
+    Gruppen durch Leerzeichen (an echten Cache-Daten verifiziert)."""
+    assert _sockets("R-R-R-R-R-R").socket_string == "R-R-R-R-R-R"
+    assert _sockets("B B-B-B-B-B").socket_string == "B B-B-B-B-B"
+    assert _sockets("G-B-B G").socket_string == "G-B-B G"
+
+
+def test_socket_string_empty_without_sockets() -> None:
+    assert Item.model_validate({}).socket_string == ""
+
+
+def test_socket_string_keeps_non_rgb_colours() -> None:
+    """A (Abyss), W (weiß), DV (Resonator) unverändert übernehmen — sonst
+    verschöbe sich die Link-Zählung gegenüber der Anzeige im Spiel."""
+    assert _sockets("A").socket_string == "A"
+    assert _sockets("W-W").socket_string == "W-W"
+
 GEM_JSON = {
     "id": "abc123",
     "name": "",

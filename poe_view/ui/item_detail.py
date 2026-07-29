@@ -8,7 +8,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout
 
-from poe_view.api.models import Item
+from poe_view.api.models import Item, req_attribute, req_level
 from poe_view.ui.theme import RARITY_COLORS
 
 
@@ -35,11 +35,25 @@ class ItemDetail(QFrame):
 
     def show_item(self, item: Item, pixmap: QPixmap | None) -> None:
         colour = RARITY_COLORS.get(item.frameType, "#e8e6e3")
-        suffix = "  [corrupted]" if item.corrupted else ""
+        tags = [tag for tag, present in
+               (("Unidentified", not item.identified), ("Corrupted", item.corrupted))
+               if present]
+        suffix = f"  [{', '.join(tags)}]" if tags else ""
         self._name.setText(item.display_name + suffix)
         self._name.setStyleSheet(f"font-weight:600; font-size:13px; color:{colour};")
 
         lines: list[str] = [item.rarity + (f" · {item.typeLine}" if item.name else "")]
+        requirement_bits = []
+        if item.ilvl:
+            requirement_bits.append(f"iLvl {item.ilvl}")
+        if req_level(item):
+            requirement_bits.append(f"Req. Lvl {req_level(item)}")
+        for label in ("Str", "Dex", "Int"):
+            value = req_attribute(item, label)
+            if value:
+                requirement_bits.append(f"Req. {label} {value}")
+        if requirement_bits:
+            lines.append(" · ".join(requirement_bits))
         for prop in item.properties:
             value = prop.display_value
             if value:

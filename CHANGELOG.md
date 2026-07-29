@@ -18,6 +18,19 @@ nach [SemVer](https://semver.org/lang/de/).
   werden pro Liga bis zu 6 Stunden gecacht.
 - `Item.sockets`/`Item.max_links` im Datenmodell (Grundlage der
   Link-genauen Unique-Preis-Zuordnung).
+- Neue **Base**-Spalte in der Item-Tabelle (`item.baseType`, z. B. "Sun
+  Plate", "Crimson Jewel") — anders als Name bei Uniques/Rares immer die
+  reine Item-Basis statt eines Fantasienamens.
+- Item-Detail-Panel zeigt jetzt Itemlevel, Charakter-Levelanforderung und
+  Attributs-Anforderungen (Str/Dex/Int) sowie eine "Unidentified"-Markierung
+  für unidentifizierte Items (neben "Corrupted").
+- **Regex-Suche** (Umschalter ".*" neben dem Suchfeld, standardmäßig an):
+  Die Suche versteht jetzt reguläre Ausdrücke wie PoEs eigene Truhensuche.
+  Sockets stehen dafür in derselben Schreibweise im Suchindex wie im Spiel
+  ("R-R-G"), sodass auf poe.re zusammengeklickte Muster unverändert
+  funktionieren — etwa `r-r-g|r-g-r|g-r-r` für einen 3-Link mit zwei roten
+  und einem grünen Socket oder `(-\w){5}` für 6-Links. Ein unfertiges
+  Muster fällt still auf die normale Textsuche zurück.
 
 ## [0.2.0] - 2026-07-29
 
