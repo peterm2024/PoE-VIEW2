@@ -24,6 +24,17 @@ _CACHE_FILE = config.APP_DATA_DIR / "price-cache.json"
 # aktuell genug, ohne bei jedem Start unnötig ~1 MB nachzuladen.
 TTL_SECONDS = 6 * 3600
 
+# Kürzere TTL für ein Ergebnis ohne eine einzige echte Preiszeile
+# (``PriceIndex.is_empty``) — entweder ein transienter Abruf-Fehler oder
+# dauerhaft eine Liga, die poe.ninja nicht führt (FALLSTRICKE #49). Die
+# volle 6h-TTL hätte einen echten transienten Fehler unnötig lange
+# festgehalten (real beobachtet: "Standard" bekam einmal eine leere
+# Antwort und blieb dadurch 6h ohne jeden Preis, obwohl poe.ninja Sekunden
+# später wieder normal antwortete). Immer noch spürbar länger als ein
+# einzelner Liga-Wechsel, damit eine dauerhaft leere Liga nicht bei jedem
+# Wechsel erneut ~30 Requests gegen poe.ninja auslöst.
+EMPTY_TTL_SECONDS = 3600
+
 
 def _index_to_payload(index: PriceIndex) -> dict:
     return {
@@ -54,7 +65,8 @@ def _payload_to_index(payload: dict) -> PriceIndex:
 def save(league: str, index: PriceIndex) -> None:
     """Schreibt EINEN Liga-Eintrag; andere Ligen im Cache bleiben erhalten."""
     all_leagues = _read_raw()
-    all_leagues[league] = {"fetched_at": time.time(), "prices": _index_to_payload(index)}
+    all_leagues[league] = {"fetched_at": time.time(), "empty": index.is_empty,
+                           "prices": _index_to_payload(index)}
     try:
         config.ensure_dirs()
         _CACHE_FILE.write_text(json.dumps(all_leagues), encoding="utf-8")
@@ -62,12 +74,18 @@ def save(league: str, index: PriceIndex) -> None:
         log.exception("Preis-Cache: Schreiben fehlgeschlagen")
 
 
-def load(league: str, ttl_seconds: float = TTL_SECONDS) -> PriceIndex | None:
+def load(league: str, ttl_seconds: float | None = None) -> PriceIndex | None:
     """None, wenn nichts gecacht ist ODER der Eintrag älter als die TTL —
-    beide Fälle bedeuten für den Aufrufer dasselbe: neu abrufen."""
+    beide Fälle bedeuten für den Aufrufer dasselbe: neu abrufen.
+
+    Ohne explizite ``ttl_seconds`` entscheidet der beim Speichern
+    vermerkte ``empty``-Zustand über die TTL (§EMPTY_TTL_SECONDS) — ein
+    Ergebnis ganz ohne Preiszeile verdient kein 6h-Vertrauen."""
     entry = _read_raw().get(league)
     if entry is None:
         return None
+    if ttl_seconds is None:
+        ttl_seconds = EMPTY_TTL_SECONDS if entry.get("empty") else TTL_SECONDS
     age = time.time() - entry.get("fetched_at", 0)
     if age > ttl_seconds:
         return None

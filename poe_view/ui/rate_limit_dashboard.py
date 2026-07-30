@@ -26,62 +26,15 @@ class RateLimitDashboard(QFrame):
         self._policy_name = ""
         self._paused = False  # Refresh-Modus "Pause", siehe set_paused()
 
-        # Synchronisierungsbalken: wie viel des Rate-Limit-Fensters deckt
-        # unsere eigene Messung ab (§set_sync). Steht direkt neben dem
-        # Policy-Namen, weil er dessen Zahlen qualifiziert.
-        self._sync = QProgressBar()
-        self._sync.setFixedWidth(95)
-        self._sync.setRange(0, 100)
-
         self._layout.addWidget(self._policy)
-        self._layout.addWidget(self._sync)
         self._layout.addStretch()
         self._layout.addWidget(self._led)
         self._layout.addWidget(self._wait)
         self._set_led(DASH_OK, "OK")
-        self.set_sync(0.0, 0.0)
-
-    def set_sync(self, fraction: float, remaining_s: float) -> None:
-        """Abdeckung des Rate-Limit-Fensters durch unsere eigene Messung
-        (``RateLimitManager.window_coverage()``).
-
-        GGGs Zähler überlebt unseren Prozess: direkt nach dem Start stammen
-        die gemeldeten Treffer aus einer früheren Sitzung, deren Zeitpunkte
-        wir nicht kennen — die Verbrauchsanzeige ist dann geschätzt statt
-        gemessen (FALLSTRICKE #45). Ohne diesen Balken war das unsichtbar
-        und führte prompt zur Rückfrage, warum die Anzeige nach einem
-        Neustart alle 30s statt alle 11s herunterzählt.
-
-        Rot → frisch gestartet, überwiegend geschätzt. Gelb → teils
-        gemessen. Grün → das Fenster ist vollständig durch eigene Messungen
-        abgedeckt, ab hier ist die Anzeige exakt.
-
-        Die Restzeit steht im Balken selbst, nicht nur in der Farbe: bei
-        Gelb wäre sonst nicht zu erkennen, ob noch 10 Sekunden oder zwei
-        Minuten fehlen."""
-        percent = int(round(max(0.0, min(1.0, fraction)) * 100))
-        self._sync.setValue(percent)
-        if percent >= 100:
-            colour = DASH_OK
-            self._sync.setFormat("Sync ✓")
-            tip = ("Rate-limit window fully covered by our own measurements — "
-                   "the usage numbers above are exact.")
-        else:
-            colour = DASH_WARN if percent >= 50 else DASH_BAD
-            self._sync.setFormat(f"Sync {self._short_time(remaining_s)}")
-            tip = (f"Syncing: {percent}% of the rate-limit window is covered by "
-                   f"our own measurements, exact in {self._short_time(remaining_s)}.\n"
-                   "GGG's counter outlives the app — hits from a previous run have "
-                   "no known timestamp, so their share of the usage numbers above "
-                   "is estimated rather than measured.")
-        self._sync.setStyleSheet(f"QProgressBar::chunk {{ background: {colour}; }}")
-        self._sync.setToolTip(
-            tip + "\n\nNote: hits caused by another tool on the same account stay "
-            "unknown even at 100%.")
 
     @staticmethod
     def _short_time(seconds: float) -> str:
-        """"45s" / "2:30" — muss in einen 95px-Balken passen."""
+        """"45s" / "2:30"."""
         total = int(round(max(0.0, seconds)))
         if total < 60:
             return f"{total}s"
@@ -135,40 +88,31 @@ class RateLimitDashboard(QFrame):
 
     @staticmethod
     def _rule_text(rule: dict) -> str:
-        """"12/30 · 300 s · next in 2:19" — die Restzeit sagt, wann der
-        nächste belegte Platz wieder frei wird.
+        """"12/30 · 300 s · next in ~2:19".
 
-        Ohne sie sieht eine völlig normale Phase wie ein Hänger aus: hat die
-        App gerade zwölf Anfragen abgesetzt, kann vor Ablauf der ersten 300s
-        nichts frei werden, der Zähler steht also minutenlang still (Peter,
-        2026-07-30). Fehlt die Angabe (kein eigener Treffer im Fenster,
-        z. B. direkt nach dem Start), bleibt sie weg statt geraten zu
-        werden."""
+        Die Restzeit ist IMMER eine grobe Schätzung: reale Header-Daten
+        zeigten, dass GGGs Zähler nicht gleitend pro Treffer sinkt, sondern
+        blockweise alle ~window_s/5 Sekunden (FALLSTRICKE #45, Runde 6) —
+        deshalb konsequent mit "~" statt einer erfundenen Präzision. Ohne
+        die Angabe sieht eine völlig normale Phase, in der der Zähler
+        gerade zwischen zwei Absenkungen steht, wie ein Hänger aus. Fehlt
+        sie (noch keine zwei Absenkungen beobachtet), bleibt sie weg statt
+        geraten zu werden."""
         text = f'{rule["current"]}/{rule["max"]} · {rule["window_s"]} s'
         next_free = rule.get("next_free_s")
         if next_free is not None:
-            # "~" solange Treffer aus einer früheren Sitzung im Fenster
-            # stecken, deren Takt wir noch nicht gemessen haben: die sind
-            # älter als unsere eigenen und werden FRÜHER frei, der Wert ist
-            # dann nur eine Obergrenze.
-            approx = "" if rule.get("next_free_exact", True) else "~"
-            text += f" · next in {approx}{RateLimitDashboard._short_time(next_free)}"
+            text += f" · next in ~{RateLimitDashboard._short_time(next_free)}"
         return text
 
     @staticmethod
     def _rule_tooltip(rule: dict) -> str:
         tip = (f'{rule["current"]} of {rule["max"]} requests used in the last '
-               f'{rule["window_s"]} s (sliding window).')
+               f'{rule["window_s"]} s.')
         if rule.get("next_free_s") is not None:
-            tip += ("\nEach request frees its slot exactly "
-                    f'{rule["window_s"]} s after it was made.')
-            if rule.get("next_free_exact", True):
-                tip += " This countdown is measured, not estimated."
-            else:
-                tip += ("\n\"~\": requests from before the app started are still "
-                        "in the window. They are older than ours, so a slot may "
-                        "free up sooner than shown. Once we have seen two of them "
-                        "expire we know their pace and the countdown becomes exact.")
+            tip += ("\nGGG's counter doesn't slide continuously per request — "
+                    "it drops in batches roughly every window/5 seconds. This "
+                    "is the average interval between drops observed so far, "
+                    "not an exact countdown for a specific request.")
         return tip
 
     def _ensure_bars(self, count: int) -> None:
@@ -177,9 +121,9 @@ class RateLimitDashboard(QFrame):
             bar.setFixedWidth(140)
             bar.setTextVisible(False)
             label = QLabel()
-            # vor Stretch/LED einfügen; davor stehen fest der Policy-Name
-            # und der Sync-Balken, daher Offset 2.
-            insert_at = 2 + 2 * len(self._bars)
+            # vor Stretch/LED einfügen; davor steht fest der Policy-Name,
+            # daher Offset 1.
+            insert_at = 1 + 2 * len(self._bars)
             self._layout.insertWidget(insert_at, bar)
             self._layout.insertWidget(insert_at + 1, label)
             self._bars.append((bar, label))

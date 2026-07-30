@@ -37,9 +37,10 @@ from poe_view.services.csv_export import export_items, sanitize_filename
 from poe_view.ui.character_list import CharacterList
 from poe_view.ui.item_detail import ItemDetail
 from poe_view.ui.item_table import (COLUMNS, ICON_COL, MODS_COL,
-                                    POSITION_COL, TAB_COL, ItemFilterProxy,
-                                    ItemTableModel, compile_search,
-                                    format_chaos_value, matches_search)
+                                    POSITION_COL, TAB_COL, VALUE_COL,
+                                    ItemFilterProxy, ItemTableModel,
+                                    compile_search, format_chaos_value,
+                                    matches_search)
 from poe_view.ui.rate_limit_dashboard import RateLimitDashboard
 from poe_view.ui.raw_data_viewer import RawDataViewer
 from poe_view.ui.stash_tree import StashTree
@@ -389,6 +390,8 @@ class MainWindow(QMainWindow):
         self._regex_toggle.toggled.connect(self._on_regex_toggled)
         toolbar.addWidget(self._regex_toggle)
 
+        self._update_online_controls_enabled()
+
         # Linke Seite: Charakterliste (flach) oben, Stash-Baum unten — je mit
         # eigener Überschrift statt eines gemeinsamen Wrapper-Baums (spart
         # eine Ebene).
@@ -440,6 +443,13 @@ class MainWindow(QMainWindow):
         self.table = QTableView()
         self.table.setModel(self.proxy)
         self.table.setSortingEnabled(True)
+        # Voreinstellung statt roher API-Reihenfolge: aufsteigend nach Wert,
+        # damit unbekannte/geringe Preise ("wahrscheinlich Schrott", siehe
+        # VALUE_COL-Abblendung) von selbst oben gruppiert sind (ToDo.md:
+        # "Schrott-Items finden"). Nur der Startzustand — ein Klick auf
+        # einen anderen Header überschreibt ihn wie jede normale
+        # Sortierung, Qt merkt sich das eigenständig.
+        self.table.sortByColumn(VALUE_COL, Qt.SortOrder.AscendingOrder)
         self.table.setSelectionBehavior(QTableView.SelectionBehavior.SelectRows)
         self.table.verticalHeader().hide()
         self.table.setColumnWidth(0, 36)
@@ -846,6 +856,7 @@ class MainWindow(QMainWindow):
         self._logged_in = True
         self._login_action.setText(f"⚷ {account_name}")
         self._login_action.setEnabled(False)
+        self._update_online_controls_enabled()
         self.worker.submit(FetchLeaguesJob())
         self.worker.submit(FetchCharactersJob())
 
@@ -863,6 +874,25 @@ class MainWindow(QMainWindow):
         self._login_action.setEnabled(True)
         self._login_action.setText("🔑 Log in")
         self._status_msg.setText(reason)
+        self._update_online_controls_enabled()
+
+    def _update_online_controls_enabled(self) -> None:
+        """Sperrt Online-Funktionen, solange kein gültiger Login besteht.
+
+        Ohne dieses Gate blieb z. B. "Load All Tabs" bei abgelaufenem oder
+        fehlendem Token anklickbar, solange noch ein Daten-Cache aus einer
+        früheren Sitzung vorlag (der auch ohne Login sichtbar bleibt, siehe
+        ``_restore_cached_data``): der Fortschrittsdialog öffnete sich, der
+        zugehörige Job wurde vom Worker aber lautlos verworfen
+        (``ApiWorker._skip_unauthenticated``) — der Dialog blieb dadurch für
+        immer bei 0 % hängen, ohne jede Fehlermeldung.
+
+        Bewusst NICHT betroffen: Stash-Baum, Charakterliste und
+        Liga-Auswahl bleiben nutzbar, damit gecachte Daten weiter offline
+        durchsuchbar sind — genau der Zweck des Caches."""
+        self._refresh_action.setEnabled(self._logged_in)
+        self._load_all_action.setEnabled(self._logged_in)
+        self._refresh_mode_combo.setEnabled(self._logged_in)
 
     def _on_leagues(self, leagues: list[str]) -> None:
         self._live_leagues = set(leagues)
@@ -892,6 +922,12 @@ class MainWindow(QMainWindow):
             self._status_msg.setText(
                 f"{league}: league ended — showing the last known state "
                 "(no more online access).")
+        elif self.worker.rate_limiter.pacing_blocked("stash-list-request-limit"):
+            # Fenster für Fach-LISTEN-Abrufe schon zu voll (z. B. mehrere
+            # schnelle Liga-Wechsel hintereinander) — der gecachte Baum
+            # steht bereits, der nächste Auto-Sweep oder ein manueller
+            # Refresh holt die Bestätigung nach (FALLSTRICKE #47/#48).
+            self._ensure_prices_loaded(league)
         else:
             # … und trotzdem im Hintergrund bestätigen/aktualisieren (wie bisher).
             self.worker.submit(FetchStashListJob(league))
@@ -902,10 +938,15 @@ class MainWindow(QMainWindow):
         # direkt danach eintrifft.
         self.table_model.set_price_index(self._price_indexes.get(league))
         # Stash-Modus soll sofort auf die neue Liga umsteigen statt den
-        # Rest-Takt der vorherigen Liga abzuwarten.
+        # Rest-Takt der vorherigen Liga abzuwarten. NICHT zurückgesetzt:
+        # _refresh_mode_policy — die Policy eines Fach-Abrufs
+        # ("stash-request-limit") ist liga-unabhängig, ein Reset hier
+        # würde `pacing_blocked`/`steady_pace_interval_s` bis zum ersten
+        # Job der neuen Liga auf den globalen, kontaminierbaren
+        # `_last_policy`-Fallback zurückwerfen — exakt die Lücke, die
+        # FALLSTRICKE #33 schon einmal geschlossen hat (FALLSTRICKE #48).
         self._refresh_mode_pending = False
         self._refresh_mode_next_due = 0.0
-        self._refresh_mode_policy = None
         self._stash_mode_round_picks = 0
         self._stash_mode_coverage_cursor = 0
         self._stash_mode_list_refresh_due = False
@@ -1945,11 +1986,6 @@ class MainWindow(QMainWindow):
         Header mehr reinkommt, der sie sonst antreiben würde (Rückfrage
         "Policy-Statusleiste aktualisiert sich während der Pause nicht")."""
         self.dashboard.update_state(*self.worker.rate_limiter.snapshot())
-        # Abdeckung des Rate-Limit-Fensters durch eigene Messungen — bewusst
-        # ein eigener Setter statt eines vierten Signal-Parameters: die Zahl
-        # hängt nur an der Uhr, nicht an einem Request, und der Sekunden-Tick
-        # ist ohnehin die einzige Stelle, die sie braucht.
-        self.dashboard.set_sync(*self.worker.rate_limiter.window_coverage())
         self.tree.refresh_age_colors()
         self._update_bulk_label()  # Countdown im Bulk-Dialog weiterzählen
         # Sicherheitsnetz für Single/Stash: falls die Job-Kette (§_drive_
@@ -1965,10 +2001,17 @@ class MainWindow(QMainWindow):
                 "Refresh mode: Pause — no background requests")
             return
         if self._refresh_mode in self.STEPPING_REFRESH_MODES:
+            mode_name = self._refresh_mode_combo.currentText()
+            # Pausiert der Takt wegen zu vollen Fensters, gehört genau das
+            # ins Label — ein weiterlaufender Countdown, der bei 0s stehen
+            # bleibt, sähe wieder wie ein Hänger aus (§pacing_blocked).
+            if self.worker.rate_limiter.pacing_blocked(self._refresh_mode_policy):
+                self._auto_refresh_countdown_label.setText(
+                    f"Refresh mode: {mode_name} — waiting for rate-limit headroom")
+                return
             seconds = max(0, round(self._refresh_mode_next_due - time.monotonic()))
             self._auto_refresh_countdown_label.setText(
-                f"Refresh mode: {self._refresh_mode_combo.currentText()} — "
-                f"next update in {seconds}s")
+                f"Refresh mode: {mode_name} — next update in {seconds}s")
             return
         reason = self._auto_refresh_blocked_reason()
         if reason is not None:
@@ -1981,7 +2024,8 @@ class MainWindow(QMainWindow):
         self._refresh_mode = mode.lower()
         self._refresh_mode_pending = False
         self._refresh_mode_next_due = 0.0  # sofort beim Umschalten aktualisieren, nicht erst nach einem Takt
-        self._refresh_mode_policy = None
+        # _refresh_mode_policy bewusst NICHT zurückgesetzt — siehe
+        # Kommentar in _on_league_changed (FALLSTRICKE #48).
         self._refresh_mode_priority_id = None
         self.dashboard.set_paused(self._refresh_mode == "pause")
         self._drive_refresh_mode()
@@ -2102,10 +2146,15 @@ class MainWindow(QMainWindow):
         der Antwort — siehe dort, warum das nicht schon beim Absenden passieren
         darf.
 
-        Anders als Auto (§_auto_refresh_blocked_reason) wird KEIN
-        Rate-Limit-Budget für manuelle Klicks reserviert — das ist hier
-        gewollt, der Nutzer hat den Modus bewusst gewählt, um den vollen
-        Pool für genau dieses Ziel einzusetzen."""
+        Anders als Auto (§_auto_refresh_blocked_reason) wird kein festes
+        Budget für manuelle Klicks reserviert — der Nutzer hat den Modus
+        bewusst gewählt, um den Pool für genau dieses Ziel einzusetzen.
+        Eine Obergrenze gibt es trotzdem: ``rate_limiter.pacing_blocked()``
+        stoppt den Takt, sobald das Fenster ohnehin schon zu voll ist.
+        Ohne sie taktete der Modus stur weiter, während ungetaktete
+        Requests (Klicks, Liga-Wechsel, Programmstart) dasselbe Fenster
+        mitfüllten — real endete das in 289s Zwangspause
+        (FALLSTRICKE #47)."""
         if self._refresh_mode not in self.STEPPING_REFRESH_MODES:
             return  # "auto" läuft am eigenen Timer, "pause" gar nicht
         if (self._refresh_mode_pending or not self._logged_in
@@ -2116,6 +2165,8 @@ class MainWindow(QMainWindow):
             # (§ApiWorker._fetch_all_items). Liefe der Modus daneben weiter,
             # verdoppelte sich die Anfragerate und beide zusammen liefen
             # prompt in die 300s-Sperre, die jeder für sich vermeidet.
+            return
+        if self.worker.rate_limiter.pacing_blocked(self._refresh_mode_policy):
             return
         now = time.monotonic()
         if now < self._refresh_mode_next_due:

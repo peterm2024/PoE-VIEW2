@@ -91,3 +91,48 @@ def test_load_ignores_a_league_missing_from_the_cache(tmp_path, monkeypatch) -> 
     monkeypatch.setattr(price_cache, "_CACHE_FILE", tmp_path / "prices.json")
     price_cache.save("Standard", _index_with_all_kinds())
     assert price_cache.load("Hardcore") is None
+
+
+def test_empty_result_expires_sooner_than_a_real_one(tmp_path, monkeypatch) -> None:
+    """Regression zu FALLSTRICKE #49: real beobachtet bekam "Standard"
+    einmal eine leere Antwort von poe.ninja (kein einziger Preis, nur die
+    eingebaute Chaos-Orb-Referenz) und blieb dadurch mit der vollen 6h-TTL
+    stundenlang ohne jeden Preis, obwohl poe.ninja Sekunden später wieder
+    normal antwortete. Ein leeres Ergebnis muss deutlich früher als die
+    volle TTL wieder als "abgelaufen" gelten."""
+    path = tmp_path / "prices.json"
+    monkeypatch.setattr(price_cache, "_CACHE_FILE", path)
+    price_cache.save("Standard", PriceIndex())  # nur der Chaos-Orb-Seed
+
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    raw["Standard"]["fetched_at"] -= price_cache.EMPTY_TTL_SECONDS + 60
+    path.write_text(json.dumps(raw), encoding="utf-8")
+
+    assert price_cache.load("Standard") is None
+
+
+def test_empty_result_is_still_usable_shortly_after_saving(tmp_path, monkeypatch) -> None:
+    """Die kürzere TTL darf ein frisches leeres Ergebnis nicht sofort
+    verwerfen — sonst würde JEDE Anzeige direkt nach dem Speichern erneut
+    einen vollen poe.ninja-Abruf auslösen."""
+    path = tmp_path / "prices.json"
+    monkeypatch.setattr(price_cache, "_CACHE_FILE", path)
+    price_cache.save("Standard", PriceIndex())
+
+    loaded = price_cache.load("Standard")
+    assert loaded is not None
+    assert loaded.is_empty
+
+
+def test_a_real_result_keeps_the_normal_ttl_even_though_empty_flag_exists(tmp_path, monkeypatch) -> None:
+    """Ein Ergebnis MIT echten Preisen darf nicht von der kürzeren
+    Empty-TTL betroffen sein, nur weil das Feature jetzt existiert."""
+    path = tmp_path / "prices.json"
+    monkeypatch.setattr(price_cache, "_CACHE_FILE", path)
+    price_cache.save("Standard", _index_with_all_kinds())
+
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    raw["Standard"]["fetched_at"] -= price_cache.EMPTY_TTL_SECONDS + 60
+    path.write_text(json.dumps(raw), encoding="utf-8")
+
+    assert price_cache.load("Standard") is not None

@@ -8,6 +8,15 @@ nach [SemVer](https://semver.org/lang/de/).
 
 ### Behoben
 
+- Preis-Anzeige: Ein poe.ninja-Abruf ohne eine einzige Preiszeile (z. B.
+  ein transienter Ausrutscher) wurde bislang wie ein normaler Erfolg 6
+  Stunden lang gecacht — eine Liga konnte dadurch stundenlang ohne jeden
+  Preis dastehen, obwohl poe.ninja längst wieder normal antwortete. Ein
+  solches Ergebnis läuft jetzt nach 1 Stunde statt 6 Stunden ab.
+  Hinweis: SSF-Ligen (z. B. "Solo Self-Found") werden von poe.ninja
+  grundsätzlich nicht getrackt — ohne Spieler-Handel gibt es dort keine
+  Handelsaktivität, aus der sich Preise ableiten ließen. Das ist eine
+  Grenze der Datenquelle, kein Fehler in PoE-VIEW2.
 - "Load All Tabs" wirkte bei großen Truhen eingefroren: Der
   Fortschrittsbalken zählte Truhenfächer, die Arbeit fällt aber pro Abruf
   an. Ein Map-Stash bündelt hunderte Sektionen in einem einzigen Fach —
@@ -27,27 +36,50 @@ nach [SemVer](https://semver.org/lang/de/).
   gewertet.
 - Rate-Limit-Dashboard zeigt jetzt sofort "(Paused)" neben dem
   Policy-Namen, sobald der Refresh-Modus "Pause" aktiv ist.
-- Rate-Limit-Dashboard: der angezeigte Verbrauch je Regel stand bis zum
-  vollen Fensterablauf unverändert und sprang dann abrupt auf 0. Er altert
-  jetzt gleitend mit — eigene Anfragen fallen einzeln aus dem Fenster, im
-  selben Takt, in dem sie entstanden sind (bei ~11s Refresh-Takt also auch
-  ~11s je Tick abwärts). Nur die Anzeige; die tatsächliche
-  Warte-Entscheidung bleibt unverändert konservativ.
+- Rate-Limit-Dashboard: der angezeigte Verbrauch je Regel zeigt jetzt immer
+  den zuletzt von GGG gemeldeten Rohwert. Reale Header-Logs zeigten, dass
+  GGGs Zähler nicht gleitend pro Treffer altert, sondern in Blöcken von
+  ~60 Sekunden auf einmal sinkt — die vorherige, feiner gedachte
+  Interpolation traf dadurch systematisch daneben. Die tatsächliche
+  Warte-Entscheidung war davon nie betroffen und bleibt unverändert
+  konservativ.
+- Die Refresh-Modi "Single" und "Stash" liefen nach einiger Zeit in eine
+  fünfminütige Zwangspause. Ihr gleichmäßiger Takt war so berechnet, dass
+  er das Rate-Limit gerade eben nicht reißt — er unterstellte dabei aber,
+  der einzige Verbraucher zu sein. Klicks auf noch nicht geladene Fächer,
+  Liga-Wechsel und die Abrufe direkt nach dem Programmstart füllen dasselbe
+  Kontingent jedoch mit, wodurch die verbleibende Marge von einer einzigen
+  Anfrage sofort aufgebraucht war. Der Takt pausiert jetzt selbsttätig,
+  sobald das Fenster zu voll ist, und nennt den Grund in der Statuszeile.
+- Liga-Wechsel trugen weiterhin zur 300s-Zwangspause bei: der Abruf der
+  Fach-LISTE der neu gewählten Liga lief ungebremst, und eine Lücke im
+  gerade erst gebauten Rate-Limit-Schutz ließ auch den Refresh-Modus-Takt
+  direkt danach ungebremst durch. Beides behoben — der Listen-Abruf
+  entfällt jetzt bei zu vollem Fenster (der gecachte Baum bleibt sichtbar),
+  und der Refresh-Modus-Schutz greift jetzt auch unmittelbar nach einem
+  Liga- oder Modus-Wechsel zuverlässig.
+- "Load All Tabs", "Refresh" und der Refresh-Modus-Umschalter blieben ohne
+  gültigen Login anklickbar, solange noch ein Daten-Cache aus einer
+  früheren Sitzung sichtbar war — der Fortschrittsdialog von "Load All
+  Tabs" öffnete sich dann, hing aber für immer bei 0 %, weil der Job vom
+  Worker lautlos verworfen wurde. Diese drei Online-Funktionen sind jetzt
+  gesperrt, solange kein Login besteht; Stash-Baum, Charakterliste und
+  Liga-Auswahl bleiben zum Durchsuchen des Caches weiter nutzbar.
 
 ### Hinzugefügt
 
-- Rate-Limit-Dashboard: jede Regel zeigt jetzt zusätzlich, wann der
-  nächste belegte Platz wieder frei wird ("12/30 · 300 s · next in 2:19").
-  Kurz nach dem Start kann bauartbedingt minutenlang nichts frei werden —
-  ohne diese Angabe sah der stillstehende Zähler wie ein Hänger aus.
-  Anfragen aus einer früheren Sitzung werden anfangs nur geschätzt (am "~"
-  im Countdown erkennbar); sobald zwei von ihnen ablaufen, ist ihr Takt
-  gemessen und die Angabe exakt.
-- Rate-Limit-Dashboard: neuer **Sync-Balken** neben dem Policy-Namen. GGGs
-  Zähler überlebt den Programmstart — direkt danach sind die gemeldeten
-  Treffer aus der Vorsitzung geschätzt statt gemessen. Der Balken zeigt,
-  wann das Fenster wieder vollständig durch eigene Messungen gedeckt ist
-  (rot → gelb → grün, mit Restzeit im Balken).
+- Item-Tabelle startet jetzt voreingestellt aufsteigend nach Wert sortiert
+  statt in roher API-Reihenfolge — Items mit unbekanntem oder geringem
+  Preis ("wahrscheinlich Schrott") gruppieren sich dadurch von selbst oben.
+  Ein Klick auf eine andere Spalte überschreibt die Voreinstellung wie
+  jede normale Sortierung.
+- Rate-Limit-Dashboard: jede Regel zeigt jetzt zusätzlich eine grobe
+  Schätzung, wann der Zähler das nächste Mal sinkt ("12/30 · 300 s · next
+  in ~2:19", immer mit "~" — GGGs Zähler sinkt blockweise statt gleitend
+  pro Treffer, sobald zwei Absenkungen beobachtet wurden, ist ihr
+  ungefährer Rhythmus gelernt). Kurz nach dem Start kann bauartbedingt
+  minutenlang nichts sinken — ohne diese Angabe sah der stillstehende
+  Zähler wie ein Hänger aus.
 - "Load All Tabs" zeigt im Fortschrittsdialog einen Sekunden-Countdown bis
   zum nächsten Abruf ("Next tab in 8s") und, falls das Rate-Limit gerade
   bremst, dessen Restzeit statt scheinbaren Stillstands. Zusätzlich springt
@@ -55,6 +87,10 @@ nach [SemVer](https://semver.org/lang/de/).
 - Neuer Refresh-Modus **Pause**: keinerlei Hintergrund-Anfragen. Manuelle
   Klicks, die ⟳-Buttons im Baum und "Load All Tabs" funktionieren
   unverändert und bekommen das volle Rate-Limit-Budget.
+- Log: jede Rate-Limit-Antwort schreibt jetzt zusätzlich eine Zeile mit den
+  rohen X-Rate-Limit-Werten je Regel plus dem gelernten Absenkungs-Takt.
+  Diese Rohdaten haben belegt, dass GGGs Zähler blockweise statt gleitend
+  sinkt, siehe FALLSTRICKE_UND_WORKAROUNDS.md #45.
 
 - Preis-Anzeige über poe.ninja: neue **Value**-Spalte in der Item-Tabelle
   (Chaos-Wert × Stack, Anzeige in Chaos oder Divine je nach Höhe) sowie

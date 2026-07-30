@@ -138,6 +138,21 @@ def test_headroom_fraction_is_0_when_locked() -> None:
     assert mgr.headroom_fraction() == 0.0
 
 
+def test_header_detail_is_logged(caplog: pytest.LogCaptureFixture) -> None:
+    """Rohe X-Rate-Limit-Werte je Regel müssen im Log landen — erst damit
+    ließ sich beweisen, dass GGGs Zähler blockweise statt gleitend sinkt
+    (FALLSTRICKE_UND_WORKAROUNDS.md #45, Runde 6)."""
+    caplog.set_level("INFO", logger="poe_view.api.rate_limiter")
+    mgr = make_manager(FakeClock())
+    mgr.update_from_headers(HEADERS)
+
+    detail_lines = [r.message for r in caplog.records if "Rate-Limit-Header" in r.message]
+    assert any("stash-request-limit/Account" in line and "current=3/15" in line
+                for line in detail_lines)
+    assert any("current=7/90" in line and "window=300s" in line
+               for line in detail_lines)
+
+
 def test_headroom_fraction_recovers_after_window_elapses_without_a_new_request() -> None:
     """Regression: ohne diesen Selbst-Zerfall würde eine Auto-Refresh-Pause
     sich für immer selbst aufrechterhalten — pausiert heißt kein Request
@@ -185,233 +200,99 @@ STEADY_HEADERS = {
 }
 
 
-def test_snapshot_ages_out_our_own_requests_one_per_tick() -> None:
-    """Peter, 2026-07-30: "die Anzeige sollte doch genauso schnell wieder
-    runterticken wie rauf, also alle ca. 11s ein Tick down?" — genau so.
-    Unsere eigenen Requests kennen wir mit Zeitstempel, sie fallen einzeln
-    aus dem gleitenden Fenster, im selben Takt, in dem sie entstanden sind."""
-    clock = FakeClock()
-    mgr = make_manager(clock)
-    # Fünf eigene Requests im 11s-Takt, wie der Stash-Modus sie erzeugt.
-    for i in range(1, 6):
-        headers = dict(STEADY_HEADERS)
-        headers["X-Rate-Limit-Account-State"] = f"{i}:300:0"
-        mgr.update_from_headers(headers)
-        if i < 5:
-            clock.t += 11.0
-    assert mgr.snapshot()[1][0]["current"] == 5  # t=1044, Treffer bei 1000…1044
-
-    # Der älteste Treffer (t=1000) fällt bei t=1300 aus dem 300s-Fenster.
-    clock.t = 1300.0
-    assert mgr.snapshot()[1][0]["current"] == 4
-    clock.t += 11.0  # …und dann einer je Takt, exakt wie beim Hochzählen
-    assert mgr.snapshot()[1][0]["current"] == 3
-    clock.t += 11.0
-    assert mgr.snapshot()[1][0]["current"] == 2
+def test_rule_observe_leaves_current_untouched_on_increase() -> None:
+    """Ein steigender Wert ist ein ganz normaler neuer Treffer, keine
+    Absenkung — ``last_drop_at``/``drop_interval_s`` dürfen sich dabei
+    nicht verändern."""
+    from poe_view.api.rate_limiter import RateLimitRule
+    rule = RateLimitRule(rule_group="Account", max_hits=30, window_s=300, lock_s=1800)
+    rule.observe(5, now=1000.0)
+    rule.observe(6, now=1011.0)
+    assert rule.current == 6
+    assert rule.last_drop_at == 0.0
+    assert rule.drop_interval_s is None
 
 
-def test_snapshot_estimates_hits_we_did_not_make_ourselves() -> None:
-    """Treffer aus einer anderen Instanz/einem anderen Tool (oder von vor
-    dem App-Start) kennt nur die Header-Summe. Für sie bleibt die
-    gleichmäßige Verteilung übers Fenster die einzig mögliche Annahme —
-    die Anzeige klingt dann linear ab statt einzeln zu ticken."""
-    clock = FakeClock()
-    mgr = make_manager(clock)
-    mgr.update_from_headers(STEADY_HEADERS)  # meldet 23, davon 1 von uns
+def test_rule_learns_drop_interval_from_two_observed_decreases() -> None:
+    """Reale Header-Daten (2026-07-30, FALLSTRICKE #45 Runde 6) zeigten:
+    GGGs Zähler sinkt nicht gleitend pro Treffer, sondern in Blöcken alle
+    ~60s (bei 30 Treffern/300s beobachtet: Sprünge von 4-5 auf einmal, im
+    Abstand von durchschnittlich ~60s). ``observe()`` muss diesen Abstand
+    aus zwei beliebig großen Absenkungen lernen — die Größe des Sprungs
+    ist dabei irrelevant, nur der Zeitpunkt zählt."""
+    from poe_view.api.rate_limiter import RateLimitRule
+    rule = RateLimitRule(rule_group="Account", max_hits=30, window_s=300, lock_s=1800)
+    rule.observe(27, now=1000.0)
+    assert rule.drop_interval_s is None  # noch keine Absenkung gesehen
 
-    clock.t += 150.0  # halbes 300s-Fenster verstrichen, kein neuer Request
-    # 1 eigener Treffer (noch im Fenster) + round(22 * 0.5) geschätzte
-    assert mgr.snapshot()[1][0]["current"] == 12
+    rule.observe(23, now=1060.0)  # erste Absenkung, -4
+    assert rule.drop_interval_s is None  # eine allein reicht nicht
 
-    clock.t += 120.0  # insgesamt 270s von 300s
-    assert mgr.snapshot()[1][0]["current"] == 3  # 1 eigener + round(22 * 0.1)
+    rule.observe(27, now=1071.0)  # wieder hoch (neue eigene Treffer)
+    rule.observe(23, now=1120.0)  # zweite Absenkung, -4, 60s nach der ersten
+    assert rule.drop_interval_s == pytest.approx(60.0)
 
 
-def test_snapshot_decay_does_not_affect_the_real_wait_decision(monkeypatch) -> None:
-    """Die lineare Anzeige-Schätzung darf die tatsächliche Bremse nicht
-    aufweichen — die bleibt bewusst konservativ (FALLSTRICKE #34): erst nach
-    dem VOLLEN Fenster darf wieder gesendet werden, nicht schon, sobald die
-    Anzeige rechnerisch unter die Schwelle gesunken wäre."""
+def test_next_free_estimate_uses_the_learned_drop_interval() -> None:
+    """Nach zwei beobachteten Absenkungen lässt sich eine grobe Vorhersage
+    treffen, wann die nächste fällig ist — keine Zusage für einen
+    bestimmten eigenen Treffer, nur der gelernte Rhythmus."""
+    from poe_view.api.rate_limiter import RateLimitRule
+    rule = RateLimitRule(rule_group="Account", max_hits=30, window_s=300, lock_s=1800)
+    assert rule.next_free_estimate_s(now=1000.0) is None  # noch nichts gelernt
+
+    rule.observe(27, now=1000.0)
+    rule.observe(23, now=1060.0)
+    assert rule.next_free_estimate_s(now=1060.0) is None  # erst eine Absenkung
+
+    rule.observe(19, now=1120.0)  # zweite Absenkung, Abstand 60s gemessen
+    assert rule.next_free_estimate_s(now=1120.0) == pytest.approx(60.0)
+    assert rule.next_free_estimate_s(now=1150.0) == pytest.approx(30.0)
+    assert rule.next_free_estimate_s(now=1200.0) == pytest.approx(0.0)  # überfällig, nicht negativ
+
+
+def test_snapshot_reports_raw_current_without_inventing_a_smoother_number() -> None:
+    """Zentrale Lehre aus FALLSTRICKE #45 Runde 6: GGGs Zähler zwischen zwei
+    Requests weiter "gleitend" herunterzurechnen war die ganze Zeit falsch
+    (reale Header sinken blockweise, nicht pro Treffer). Die Anzeige zeigt
+    deshalb schlicht den zuletzt gemeldeten Rohwert — auch nach Ablauf von
+    Zeit, solange kein neuer Header und kein voller Fensterablauf etwas
+    anderes belegen."""
     clock = FakeClock()
     mgr = make_manager(clock)
     headers = dict(STEADY_HEADERS)
-    headers["X-Rate-Limit-Account-State"] = "29:300:0"  # an der Bremsschwelle (30 - SAFETY_MARGIN)
+    headers["X-Rate-Limit-Account-State"] = "23:300:0"
     mgr.update_from_headers(headers)
 
-    clock.t += 150.0  # Anzeige würde schon deutlich niedriger schätzen
-    _policy, rules, _wait = mgr.snapshot()
-    assert rules[0]["current"] < 29  # Anzeige bewegt sich sichtbar
-
-    monkeypatch.setattr("poe_view.api.rate_limiter.time.sleep",
-                        lambda s: setattr(clock, "t", clock.t + s))
-    assert mgr.check_and_wait("stash-request-limit") > 0.0  # real weiterhin gebremst
+    clock.t += 150.0  # kein neuer Request, halbes Fenster verstrichen
+    assert mgr.snapshot()[1][0]["current"] == 23  # unverändert, nicht "geschätzt"
 
 
 def test_snapshot_reports_when_the_next_slot_frees_up() -> None:
-    """Peter, 2026-07-30: nach einem frischen Start standen 12/30 über zwei
-    Minuten still — völlig korrekt (nichts KANN vor 300s frei werden), sah
-    aber aus wie ein Hänger. Die Anzeige nennt deshalb die Restzeit bis zum
-    nächsten frei werdenden Platz: ältester eigener Treffer + 300s."""
-    clock = FakeClock()
-    mgr = make_manager(clock)
-    for i in range(1, 4):  # drei Requests im 11s-Takt
-        headers = dict(STEADY_HEADERS)
-        headers["X-Rate-Limit-Account-State"] = f"{i}:300:0"
-        mgr.update_from_headers(headers)
-        if i < 3:
-            clock.t += 11.0
-    # t=1022, ältester Treffer bei t=1000 → frei bei t=1300
-    assert mgr.snapshot()[1][0]["next_free_s"] == pytest.approx(278.0)
-
-    clock.t += 278.0  # der älteste fällt heraus, jetzt zählt der zweite (t=1011)
-    assert mgr.snapshot()[1][0]["next_free_s"] == pytest.approx(11.0)
-
-
-def test_next_free_is_unknown_without_own_requests_in_the_window() -> None:
-    """Stammen alle gemeldeten Treffer aus einer früheren Sitzung, kennen
-    wir keinen einzigen Zeitpunkt — dann bleibt die Angabe leer, statt eine
-    Zahl zu erfinden."""
-    clock = FakeClock()
-    mgr = make_manager(clock)
-    mgr.update_from_headers(STEADY_HEADERS)   # ein eigener Request bei t=1000
-    clock.t += 301.0                          # der ist längst herausgefallen
-    assert mgr.snapshot()[1][0]["next_free_s"] is None
-
-
-def _session_with_leftovers(clock, leftover: int, own_pace: float, own_n: int,
-                            leftover_pace: float):
-    """Frischer Start mit ``leftover`` Treffern aus einer Vorsitzung, die im
-    Takt ``leftover_pace`` entstanden sind und entsprechend wieder
-    herausaltern. Danach eigene Requests im Takt ``own_pace``.
-    Gibt den Manager zurück; die Uhr steht am letzten eigenen Request."""
-    mgr = make_manager(clock)
-    start = clock.t
-    # Ablauf-Zeitpunkte der Altlast: der aelteste zuerst.
-    expire_at = [start + 300.0 - leftover_pace * i for i in range(leftover, 0, -1)]
-    for i in range(own_n):
-        clock.t = start + own_pace * i
-        still_there = sum(1 for e in expire_at if e > clock.t)
-        # GGG zaehlt nur, was IM Fenster liegt — auch bei unseren eigenen.
-        own_in_window = sum(1 for j in range(i + 1)
-                            if start + own_pace * j > clock.t - 300.0)
-        headers = dict(STEADY_HEADERS)
-        headers["X-Rate-Limit-Account-State"] = f"{still_there + own_in_window}:300:0"
-        mgr.update_from_headers(headers)
-    return mgr
-
-
-def test_observed_expiries_teach_the_pace_of_unknown_hits() -> None:
-    """Peter, 2026-07-30: "der geschätzte next hat gerade stattgefunden, und
-    darauf basierend können wir die nachfolgenden genau ermitteln" — genau
-    das. Jeder beobachtete Rückgang verrät den Takt der Vorsitzung; ab zwei
-    Beobachtungen rechnen wir mit dem GEMESSENEN Abstand statt zu schätzen."""
-    clock = FakeClock()
-    # Altlast im 12s-Takt, eigene Requests im 11s-Takt.
-    mgr = _session_with_leftovers(clock, leftover=10, own_pace=11.0,
-                                  own_n=30, leftover_pace=12.0)
-    rule = next(iter(mgr._policies["stash-request-limit"].rules.values()))
-
-    assert rule.unknown_expired >= 2, "Abläufe müssen beobachtet worden sein"
-    assert rule.drain_s() == pytest.approx(12.0, abs=1.0), \
-        "gemessener Takt muss dem echten 12s-Takt der Vorsitzung entsprechen"
-
-
-def test_next_free_uses_the_unknown_pace_instead_of_over_promising() -> None:
-    """Vorher zählte ``next_free_s`` nur eigene Treffer — bei vorhandener
-    Altlast versprach die Anzeige dadurch "next in 2:42" und der Wert fiel
-    schon viel früher (Peters Beobachtung). Jetzt gewinnt der frühere der
-    beiden Termine."""
-    clock = FakeClock()
-    # 20 eigene Requests = 209s Laufzeit; die Altlast laeuft ab t=180 ab,
-    # zwei Ablaeufe sind bis dahin also beobachtet.
-    mgr = _session_with_leftovers(clock, leftover=10, own_pace=11.0,
-                                  own_n=20, leftover_pace=12.0)
-    state = mgr._policies["stash-request-limit"]
-    rule = next(iter(state.rules.values()))
-
-    own_only = min(state.request_times) + 300.0 - clock.t
-    next_free = mgr.snapshot()[1][0]["next_free_s"]
-
-    assert rule.drain_s() is not None, "Takt der Altlast muss gemessen sein"
-    assert next_free < own_only, \
-        "der naechste unbekannte Ablauf kommt vor unserem aeltesten eigenen"
-    assert next_free <= 12.0 + 1.0, "und zwar im gemessenen Altlast-Takt"
-
-
-def test_next_free_is_flagged_as_an_estimate_while_leftovers_are_unmeasured() -> None:
-    """Peters Beobachtung: "next in 2:42" stand da, dann fiel der Wert von
-    23 auf 19 — die Zusage platzte, weil unbekannte (aeltere) Treffer frueher
-    herausfallen als unsere eigenen. Solange ihr Takt nicht gemessen ist,
-    wird der Wert deshalb als Schaetzung markiert; sobald er gemessen ist,
-    gilt er als exakt."""
+    """Peter, 2026-07-30: nach einem frischen Start stand der Zähler über
+    zwei Minuten still — sah aus wie ein Hänger, war aber die Realität
+    (GGGs Zähler sinkt erst nach einer Weile, und dann in einem Block). Die
+    Anzeige nennt deshalb eine grobe Restzeit, sobald zwei Absenkungen
+    beobachtet wurden."""
     clock = FakeClock()
     mgr = make_manager(clock)
     headers = dict(STEADY_HEADERS)
-    headers["X-Rate-Limit-Account-State"] = "11:300:0"  # 10 Altlast + 1 eigener
+    headers["X-Rate-Limit-Account-State"] = "23:300:0"
     mgr.update_from_headers(headers)
+    assert mgr.snapshot()[1][0]["next_free_s"] is None  # noch keine Absenkung gesehen
 
-    clock.t += 20.0
-    assert mgr.snapshot()[1][0]["next_free_exact"] is False
+    clock.t += 60.0
+    headers["X-Rate-Limit-Account-State"] = "19:300:0"  # erste Absenkung
+    mgr.update_from_headers(headers)
+    assert mgr.snapshot()[1][0]["next_free_s"] is None  # eine allein reicht nicht
 
-    # Ohne Altlast (frischer Start, alles selbst gemacht) ist er exakt.
-    clock2 = FakeClock()
-    mgr2 = make_manager(clock2)
-    headers2 = dict(STEADY_HEADERS)
-    headers2["X-Rate-Limit-Account-State"] = "1:300:0"
-    mgr2.update_from_headers(headers2)
-    clock2.t += 20.0
-    assert mgr2.snapshot()[1][0]["next_free_exact"] is True
+    clock.t += 60.0
+    headers["X-Rate-Limit-Account-State"] = "15:300:0"  # zweite Absenkung, Takt messbar
+    mgr.update_from_headers(headers)
+    assert mgr.snapshot()[1][0]["next_free_s"] == pytest.approx(60.0)
 
-
-def test_unknown_hits_decay_only_within_the_interval_they_can_lie_in() -> None:
-    """Unbekannte Treffer koennen nur aus der Zeit VOR unserem Start
-    stammen. Die Schaetzung (solange nichts gemessen ist) verteilt sie
-    deshalb ueber ``[letzter Header - Fenster, started_at]`` statt uebers
-    ganze Fenster — sonst klingen sie zu langsam ab und die Anzeige haengt
-    dem echten Wert hinterher.
-
-    Laeuft die App schon 200s, ist dieses Intervall nur noch 100s lang
-    (Fenster 300s, davon 200s nachweislich von uns): die Altlast MUSS
-    binnen 100s weg sein, nicht erst nach 300s."""
-    clock = FakeClock()
-    mgr = make_manager(clock)                 # started_at = 1000
-    clock.t += 200.0
-    headers = dict(STEADY_HEADERS)
-    headers["X-Rate-Limit-Account-State"] = "9:300:0"  # 8 Altlast + 1 eigener
-    mgr.update_from_headers(headers)          # t=1200, Fenster [900, 1200]
-
-    # Die 8 Unbekannten liegen zwingend in [900, 1000] — nach 50s ist die
-    # Haelfte dieses Intervalls durch.
-    clock.t += 50.0
-    assert mgr.snapshot()[1][0]["current"] == 5   # 4 geschaetzte + 1 eigener
-
-    # Nach 100s ist es komplett durch: nur noch unser eigener Treffer.
-    clock.t += 50.0
-    assert mgr.snapshot()[1][0]["current"] == 1
-
-
-def test_window_coverage_grows_to_full_over_one_window() -> None:
-    """Der Synchronisierungsbalken (Peter, 2026-07-30): erst wenn diese
-    Instanz ein volles Fenster lang läuft, kann kein Treffer im Fenster mehr
-    aus der Zeit VOR dem App-Start stammen — ab da ist die Verbrauchsanzeige
-    exakt statt teils geschätzt. Maßgeblich ist das LÄNGSTE Fenster (300s)."""
-    clock = FakeClock()
-    mgr = make_manager(clock)
-    assert mgr.window_coverage() == (0.0, 0.0)  # noch keine Policy bekannt
-
-    mgr.update_from_headers(HEADERS)  # Fenster 15s und 300s
-    fraction, remaining = mgr.window_coverage()
-    assert fraction == 0.0 and remaining == pytest.approx(300.0)
-
-    clock.t += 150.0
-    fraction, remaining = mgr.window_coverage()
-    assert fraction == pytest.approx(0.5) and remaining == pytest.approx(150.0)
-
-    clock.t += 150.0
-    assert mgr.window_coverage() == (1.0, 0.0)
-
-    clock.t += 1000.0  # bleibt voll — unser Wissen verfällt nicht wieder
-    assert mgr.window_coverage() == (1.0, 0.0)
+    clock.t += 40.0
+    assert mgr.snapshot()[1][0]["next_free_s"] == pytest.approx(20.0)
 
 
 def test_snapshot_before_any_policy_is_known() -> None:
@@ -461,6 +342,75 @@ def test_steady_pace_interval_stays_strictly_below_the_throttle_threshold() -> N
     # Kernaussage, unabhängig von der konkreten Formel: die Anzahl Requests,
     # die dieser Takt in ein volles Fenster legt, bleibt unter der Schwelle.
     assert 300 / interval < 30 - SAFETY_MARGIN
+
+
+def test_pacing_blocked_stops_the_steady_clock_before_the_throttle_hits() -> None:
+    """Regression zu FALLSTRICKE #47 (real: 289s Zwangspause am 2026-07-30).
+
+    Der Takt allein schützt nicht — er rechnet, als wäre das Fenster leer
+    und als kämen nur seine eigenen Requests darin vor. Ungetaktete
+    Requests (Klicks, Liga-Wechsel, Programmstart) füllen dasselbe Fenster
+    mit; bei "30 pro 300s" ist die Restmarge von genau einem Treffer dann
+    sofort weg. Ab ``PACING_FILL_LIMIT`` der Bremsschwelle (0.85 · 29 ≈
+    24.7, also ab 25) muss der Takt deshalb pausieren, deutlich BEVOR
+    ``_required_wait`` bei 29 die volle Fenstersperre auslöst."""
+    clock = FakeClock()
+    mgr = make_manager(clock)
+    headers = dict(STEADY_HEADERS)
+
+    headers["X-Rate-Limit-Account-State"] = "24:300:0"
+    mgr.update_from_headers(headers)
+    assert mgr.pacing_blocked("stash-request-limit") is False
+
+    headers["X-Rate-Limit-Account-State"] = "25:300:0"
+    mgr.update_from_headers(headers)
+    assert mgr.pacing_blocked("stash-request-limit") is True
+    # …und zwar lange bevor die echte Bremse überhaupt greifen würde.
+    assert mgr._required_wait("stash-request-limit") == 0.0
+
+
+def test_pacing_blocked_is_false_without_a_known_policy() -> None:
+    """Vor dem ersten Request gibt es nichts zu blockieren — sonst käme der
+    Takt nach dem Programmstart nie in Gang."""
+    mgr = make_manager(FakeClock())
+    assert mgr.pacing_blocked("nie-gesehen") is False
+
+
+def test_pacing_blocked_recovers_once_the_counter_drops_again() -> None:
+    """Die Sperre ist kein Endzustand: sobald GGGs Zähler wieder sinkt
+    (blockweise, §RateLimitRule), darf der Takt weiterlaufen. Ohne das
+    würde der Modus nach einem vollen Fenster dauerhaft stehen bleiben."""
+    clock = FakeClock()
+    mgr = make_manager(clock)
+    headers = dict(STEADY_HEADERS)
+    headers["X-Rate-Limit-Account-State"] = "26:300:0"
+    mgr.update_from_headers(headers)
+    assert mgr.pacing_blocked("stash-request-limit") is True
+
+    clock.t += 60.0
+    headers["X-Rate-Limit-Account-State"] = "21:300:0"  # GGG senkt um 5
+    mgr.update_from_headers(headers)
+    assert mgr.pacing_blocked("stash-request-limit") is False
+
+
+def test_pacing_blocked_stays_usable_for_small_quotas() -> None:
+    """Als Anteil statt fester Reserve formuliert: bei "5 pro 300s" ergäbe
+    ein fester Abzug von 3 eine Obergrenze von 1 — der Takt käme nie zum
+    Zug. Mit 0.85 · (5-1) = 3.4 bleiben drei nutzbare Treffer."""
+    clock = FakeClock()
+    mgr = make_manager(clock)
+    small = {
+        "X-Rate-Limit-Policy": "character-request-limit",
+        "X-Rate-Limit-Rules": "Account",
+        "X-Rate-Limit-Account": "5:300:1800",
+        "X-Rate-Limit-Account-State": "3:300:0",
+    }
+    mgr.update_from_headers(small)
+    assert mgr.pacing_blocked("character-request-limit") is False
+
+    small["X-Rate-Limit-Account-State"] = "4:300:0"
+    mgr.update_from_headers(small)
+    assert mgr.pacing_blocked("character-request-limit") is True
 
 
 def test_steady_pace_interval_ignores_unrelated_older_policies() -> None:

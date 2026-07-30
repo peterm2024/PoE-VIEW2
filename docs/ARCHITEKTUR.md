@@ -236,6 +236,21 @@ Zuordnung von Regel zu Verbrauch eine bekannte Fehlerquelle ist:
   der `_required_wait` bremst: ein Takt, der die Schwelle exakt trifft,
   löst im Dauerbetrieb genau die Sperre aus, die er verhindern soll
   (FALLSTRICKE #34).
+- `_log_header_detail(policy, state)` — schreibt bei jedem
+  `update_from_headers` eine INFO-Zeile JE Regel mit den rohen Header-Werten
+  (`current/max`, `window_s`, `lock_rest`) und dem gelernten Absenkungs-Takt
+  (`letzte_absenkung_vor`, `takt`). Vorher stand im Log nur, DASS ein
+  Request lief (httpx-Zeile), nie WAS der Header meldete — erst mit dieser
+  Zeile ließ sich beweisen, dass GGGs Zähler blockweise statt gleitend
+  sinkt (§4.8, FALLSTRICKE #45, Runde 6).
+- `pacing_blocked(policy_name=None)` — harte Obergrenze für den
+  gleichmäßigen Takt (Single-/Stash-Modus): `True`, sobald eine Regel
+  schon voller ist als `PACING_FILL_LIMIT` (0.85) ihrer Bremsschwelle.
+  Ergänzt `steady_pace_interval_s()`, das für sich genommen nicht reicht:
+  der berechnete Takt unterstellt ein leeres Fenster und sich selbst als
+  einzigen Verbraucher, während ungetaktete Requests (Klicks,
+  Liga-Wechsel, Programmstart) dasselbe Kontingent mitfüllen
+  (FALLSTRICKE #47).
 - `snapshot()` — aktueller Anzeige-Stand ohne Seiteneffekt auf einen
   echten Request, fürs periodische UI-Polling (siehe unten).
 - `_decay_expired_rules(state)` — setzt abgelaufene Fenster lokal zurück,
@@ -529,6 +544,18 @@ real im Log beobachtet über mehrere Minuten alle 40s in Folge HTTP 401,
 bis der Nutzer den Login-Button von Hand bemerkte). `_on_login_required`
 setzt das Flag auf `False`, `_on_logged_in` wieder auf `True`.
 
+Dasselbe Flag sperrt über `_update_online_controls_enabled()` auch die
+Toolbar-Aktionen "⟳ Refresh", "⇊ Load All Tabs" und den
+Refresh-Modus-Umschalter, solange kein Login besteht (FALLSTRICKE #46).
+Ohne dieses Gate blieben sie anklickbar, weil der Daten-Cache Liga,
+Charakterliste und Stash-Baum auch ohne Login sichtbar hält
+(`_restore_cached_data`, §4.7) — ein Klick auf "Load All Tabs" öffnete
+dann den Fortschrittsdialog, der zugehörige Job wurde vom Worker aber
+lautlos verworfen (`ApiWorker._skip_unauthenticated`) und der Dialog hing
+für immer bei 0 %. Bewusst NICHT gesperrt: Stash-Baum, Charakterliste,
+Liga-Auswahl und "💾 Export CSV" — sie arbeiten mit bereits geladenen bzw.
+gecachten Daten und sollen offline durchsuchbar bleiben.
+
 **Job läuft "silent":** `FetchStashItemsJob(..., silent=True)` unterdrückt
 sowohl den Status-Text (`ApiWorker._dispatch`) als auch das Umschalten der
 sichtbaren Item-Tabelle (`MainWindow._on_stash_items`) — der Nutzer merkt
@@ -643,113 +670,63 @@ Toolbar ("Mode: Auto / Single / Stash / Pause", additiv neben dem normalen
   auf (§_update_auto_refresh_countdown) und würde einen einmaligen Text
   sofort wieder überschreiben.
 
-  **Die Verbrauchszahlen selbst altern jetzt gleitend mit**
-  (`PolicyState.display_snapshot`, Peter 2026-07-30, Folgefragen zum selben
-  Screenshot: "das sollte doch wieder weniger werden, je länger ich
-  pausiere" und "genauso schnell runterticken wie rauf, also alle ca. 11s
-  ein Tick down?"). Bis dahin blieb der angezeigte Verbrauch exakt bis zum
-  vollen Fensterablauf stehen und sprang dann in einem Schritt auf 0
-  (`_decay_expired_rules`, bewusst konservativ für die reale
-  Warte-Entscheidung, FALLSTRICKE #34/#32) — für die reine ANZEIGE aber
-  falsch, weil GGGs Fenster gleitend ist: jeder einzelne Treffer altert
-  genau `window_s` nach SEINEM Zeitpunkt heraus.
+  **Die Verbrauchszahl ist der rohe, zuletzt gemeldete GGG-Wert — ohne
+  Glättung.** Das war nicht immer so: fünf Runden lang (2026-07-30,
+  FALLSTRICKE #45) wurde versucht, den Verbrauch zwischen zwei Requests
+  gleitend "herunterzurechnen", zuerst pauschal-linear, dann exakt pro
+  eigenem Treffer plus gemessenem Takt für den Rest. Auslöser war die
+  berechtigte Beobachtung, dass der Wert bis zum vollen Fensterablauf
+  stehen blieb und dann abrupt auf 0 sprang (`_decay_expired_rules`,
+  weiterhin bewusst konservativ für die reale Warte-Entscheidung,
+  FALLSTRICKE #34/#32). Die Annahme dahinter — GGGs Fenster altere
+  gleitend, jeder Treffer falle genau `window_s` nach SEINEM Zeitpunkt
+  einzeln heraus — erwies sich anhand echter Header-Logs
+  (`RateLimitManager._log_header_detail`, siehe unten) als **falsch**:
 
-  Die Anzeige rechnet deshalb zweigeteilt:
+  > Frische Session, 30/300s-Regel, keinerlei Altlast: der Zähler stieg im
+  > ~11s-Takt sauber von 1 bis 27, blieb dann stehen und sprang **um 4-5 auf
+  > einmal** — 11 solcher Sprünge im Abstand von durchschnittlich **59,7s**.
+  > Ein einzelner Treffer kann unmöglich nach 65 Sekunden aus einem
+  > 300s-Fenster fallen; GGG zählt diese Regel offenbar in **~5 Blöcken à
+  > ~60s** (300 ÷ 5 = 60, und 60s ÷ 11s ≈ 5,4 Treffer passen exakt zu den
+  > beobachteten Sprunggrößen), nicht gleitend pro Einzeltreffer.
 
-  - **Unsere eigenen Requests** sind exakt bekannt — `PolicyState.
-    request_times` schreibt bei jedem `update_from_headers` den Zeitpunkt
-    mit (beschnitten aufs längste Fenster, bei 30/300s also ≤ 30 Einträge).
-    Sie fallen einzeln heraus, im selben Takt, in dem sie entstanden sind:
-    beim ~11s-Takt des Stash-Modus tickt die Anzeige auch mit ~11s wieder
-    herunter. Ist die Historie kürzer als das Fenster (App gerade
-    gestartet), dauert es entsprechend länger bis zum ersten Tick — das ist
-    die Realität, kein Hänger.
-  - **Treffer, die wir nicht selbst gemacht haben** (zweite Instanz,
-    anderes Tool, alles von vor dem App-Start) kennt nur die Header-Summe.
-    Für sie bleibt die gleichmäßige Verteilung übers Fenster die einzig
-    mögliche Annahme, also lineares Abklingen.
+  Die Konsequenz: `RateLimitRule.current` wird jetzt unverändert
+  weitergereicht, kein Interpolieren mehr zwischen zwei Headern. Das ist
+  nicht nur einfacher, sondern auch ehrlicher — der alte Ansatz hat ein
+  falsches Modell fünf Runden lang immer genauer ausgebaut, statt die
+  Grundannahme infrage zu stellen. `PolicyState.request_times`,
+  `RateLimitRule.observe_unknown`/`drain_s`, `RateLimitManager.
+  window_coverage()` und der Sync-Balken im Dashboard sind ersatzlos
+  entfernt — sie modellierten alle dasselbe, jetzt widerlegte
+  Gleitfenster-Verhalten.
 
-  Betrifft NUR die Anzeige (`RateLimitManager.snapshot()` und `_emit()`,
-  beide Quellen des Dashboards); `_required_wait`, `headroom_fraction()`
-  und `steady_pace_interval_s()` rechnen unverändert mit dem konservativen
-  `rule.current` — ein zu früh gesenkter Zähler dort könnte einen echten
-  HTTP 429 riskieren, falls GGGs Treffer tatsächlich alle am Fensteranfang
-  lagen.
+  **`next_free_s` schätzt stattdessen den gelernten Block-Rhythmus.**
+  `RateLimitRule.observe()` merkt sich JEDE beobachtete Absenkung
+  (unabhängig von ihrer Größe) und lernt daraus den Abstand zwischen zwei
+  Absenkungen (`drop_interval_s`). Ab der zweiten Beobachtung ergibt sich
+  eine grobe Vorhersage: letzte Absenkung + gelernter Abstand − jetzt. Das
+  ist explizit KEINE Zusage für einen bestimmten Treffer (das war die
+  falsche Prämisse der Vorgänger-Rundem), sondern der Durchschnittstakt der
+  Absenkungen selbst — im Dashboard deshalb immer mit `~` markiert
+  (`12/30 · 300 s · next in ~0:52`). Ohne zwei beobachtete Absenkungen
+  bleibt der Wert `None`, statt geraten zu werden — genau wie die
+  ursprüngliche Motivation für dieses Feld: eine völlig normale Ruhephase
+  soll nicht wie ein Hänger aussehen (Peter, 2026-07-30). An echten
+  Header-Logs verifiziert: die Vorhersage läuft sauber auf 0 herunter und
+  trifft den realen Sprung auf die Sekunde genau.
 
-  **Der Sync-Balken macht sichtbar, welcher der beiden Fälle gerade gilt**
-  (`RateLimitManager.window_coverage()`, Peter 2026-07-30). GGGs Zähler
-  überlebt unseren Prozess: direkt nach einem Neustart stammen die
-  gemeldeten Treffer aus der vorherigen Sitzung und sind damit geschätzt
-  statt gemessen. Sobald der Manager ein volles Fenster lang läuft, kann
-  kein Treffer im Fenster mehr aus der Zeit davor stammen — ab da ist die
-  Anzeige exakt. Genau dieser Fortschritt ist der Balken: `min(1,
-  Laufzeit / längstes Fenster)`, plus die Restzeit für die Beschriftung.
-  Er hängt allein an der Uhr, nicht an einem Request, und wird deshalb vom
-  1-Sekunden-Tick gesetzt statt als vierter Parameter durch
-  `rate_limit_changed` gereicht. Real belegt an Peters Log: nach einem
-  Neustart um 22:40:54 meldete der Header 13/30 — exakt die 13 Requests der
-  Vorsitzung von 22:38:18 bis 22:40:30 (sauberer 11s-Takt), von denen der
-  neue Prozess keinen einzigen Zeitstempel hatte. Die Anzeige tickte
-  dadurch im 30s-Raster statt im 11s-Raster, was ohne den Balken wie ein
-  Fehler aussah. **Grenze:** Treffer eines ANDEREN Tools auf demselben
-  Account bleiben auch bei 100 % unbekannt — steht im Tooltip, geht aber
-  bewusst nicht in die Farbe ein (das würde nur flackern).
-
-  **`next_free_s` je Regel erklärt die stillen Phasen.** Ein Treffer gibt
-  seinen Platz exakt `window_s` nach SEINEM Zeitpunkt wieder frei. Hat die
-  App gerade erst zwölf Anfragen abgesetzt, KANN vor Ablauf der ersten 300s
-  nichts frei werden — der Zähler steht dann minutenlang völlig korrekt
-  still und sieht trotzdem aus wie ein Hänger (Peter, 2026-07-30, zweimal
-  nachgefragt; die Erwartung war ein gleichmäßiger Abstieg auf 0/30, die
-  aber eine Gleichverteilung der Treffer übers Fenster unterstellt — real
-  liegen sie dort geballt, wo die App sie erzeugt hat). `display_snapshot`
-  liefert deshalb je Regel die Sekunden bis zum nächsten frei werdenden
-  Platz (ältester eigener Treffer im Fenster + `window_s` − jetzt), das
-  Label zeigt sie an: `12/30 · 300 s · next in 2:19`. Ohne eigenen Treffer
-  im Fenster bleibt der Wert `None` und die Angabe entfällt, statt geraten
-  zu werden; liegen zusätzlich fremde (ältere) Treffer im Fenster, ist der
-  Wert eine Obergrenze — die werden früher frei. An Peters realer Sitzung
-  nachgestellt: zwischen 180s und 300s stand weiterhin "12/30", daneben
-  lief "next in 2:01 → 1:31 → 1:01 → 31s → 1s" sichtbar herunter.
-
-  Was in beiden Fällen gilt und die ursprüngliche Erwartung bestätigt:
-  300 Sekunden nach dem letzten Request steht garantiert 0/30 — bei
-  Altlast-Treffern über einen gleichmäßigen Abstieg, bei eigenen über das
-  Herausaltern in genau dem Takt, in dem sie entstanden sind.
-
-  **Der Takt der Altlast wird gemessen, nicht dauerhaft geschätzt**
-  (`RateLimitRule.observe_unknown`/`drain_s`, Peters Beobachtung
-  2026-07-30: "next in 2:42" stand da, dann fiel der Wert von 23 auf 19 —
-  "das heißt doch, dass genau dieser geschätzte next gerade stattgefunden
-  hat, und darauf basierend können wir die nachfolgenden genau
-  ermitteln"). Genau so: jeder Rückgang der Unbekannten-Zahl ist ein
-  beobachteter Ablauf und verrät, dass dort ein Treffer `window_s` vorher
-  lag. Ab zwei Beobachtungen kennen wir den Abstand und rechnen mit dem
-  GEMESSENEN Takt weiter. Gemessen wird dabei von Ablauf zu Ablauf, nicht
-  ab Beobachtungsbeginn — die Totzeit bis zum ersten Ablauf verwässerte
-  den Mittelwert sonst erheblich (im Test 29,7s statt der echten 12s).
-  An Peters realer Sitzung (13 Altlast-Treffer aus einer Vorsitzung mit
-  11s-Takt) nachgestellt: ab ~200s Laufzeit misst der Manager 11,2s und
-  trifft damit den echten Takt der Vorsitzung.
-
-  Zwei Folgerungen daraus im Code:
-
-  - `_unknown_left` zählt mit dem gemessenen Takt herunter. Solange nichts
-    gemessen ist, bleibt Gleichverteilung — aber über das Intervall, in dem
-    die Treffer überhaupt liegen KÖNNEN (`[letzter Header − Fenster,
-    started_at]`), nicht über das ganze Fenster. Läuft die App schon 200s,
-    ist dieses Intervall nur noch 100s lang; die alte Rechnung ließ die
-    Altlast dreimal zu langsam abklingen.
-  - `next_free_s` berücksichtigt jetzt beides und nimmt den früheren
-    Termin. Ist der Takt der Altlast noch nicht gemessen, ist der Wert nur
-    eine Obergrenze (Unbekannte sind älter und fallen früher heraus) —
-    genau die Zusage, die bei Peter platzte. Das Label markiert sie
-    deshalb mit `~` (`next in ~2:19`), bis sie gemessen und damit exakt
-    ist (`next_free_exact` im Snapshot).
-
-Single/Stash reservieren bewusst KEIN Budget für manuelle Klicks (anders
-als Auto) — der Nutzer hat den Modus bewusst gewählt, um den vollen Pool
-für genau dieses Ziel einzusetzen. Beide takten GLEICHMÄSSIG statt in
+Single/Stash reservieren kein FESTES Budget für manuelle Klicks (anders
+als Auto) — der Nutzer hat den Modus bewusst gewählt, um den Pool für
+genau dieses Ziel einzusetzen. Eine Obergrenze gibt es trotzdem:
+`rate_limiter.pacing_blocked()` stoppt den Takt, sobald das Fenster
+ohnehin schon zu voll ist (§4.3, FALLSTRICKE #47). Ohne sie taktete der
+Modus stur weiter, während ungetaktete Requests (Klicks auf ungeladene
+Fächer, Liga-Wechsel, Programmstart) dasselbe Kontingent mitfüllten — die
+Restmarge des berechneten Takts beträgt genau EINEN Treffer und war damit
+sofort weg; real endete das in 289s Zwangspause. Die Pause steht im
+Countdown-Label ("waiting for rate-limit headroom") statt eines bei 0s
+hängenden Countdowns. Beide takten GLEICHMÄSSIG statt in
 einem Burst, ausgelöst vom selben 1-Sekunden-Timer wie der Countdown
 (`_refresh_mode_next_due`, ein `time.monotonic()`-Zeitstempel) — ein
 Burst-dann-Warten hätte denselben Gesamtdurchsatz, sähe aber minutenlang
@@ -759,7 +736,22 @@ bereits "Load All Tabs"). Der Takt selbst kommt aus
 `_refresh_mode_policy` ist der beim EIGENEN letzten Job gemerkte
 Policy-Name, nicht der globale `rate_limiter.last_policy`, der von jedem
 beliebigen (auch fremden) Request überschrieben werden kann
-(FALLSTRICKE #33).
+(FALLSTRICKE #33). **Wird bei Liga- und Modus-Wechsel bewusst NICHT
+zurückgesetzt** (FALLSTRICKE #48): die Policy einer Fach-Anfrage hängt am
+Endpunkt-Typ, nicht an der Liga, ein Reset würfe `pacing_blocked()`/
+`steady_pace_interval_s()` bis zum ersten Job der neuen Liga wieder auf
+den kontaminierbaren globalen Fallback zurück — real beobachtet direkt
+neben einem `FetchStashListJob` mit ANDERER Policy, der `_last_policy`
+kurz zuvor überschrieben hatte.
+
+Ein Liga-Wechsel selbst kann ebenfalls zur Fensterfülle beitragen:
+`_on_league_changed` löst neben dem sofortigen Refresh-Modus-Tick auch
+`FetchStashListJob(league)` aus, um die (evtl. veraltete) gecachte
+Fach-Liste zu bestätigen. Bei mehreren schnellen Wechseln hintereinander
+entfällt dieser Abruf, sobald `pacing_blocked("stash-list-request-limit")`
+meldet, dass auch DIESES (von `stash-request-limit` getrennte) Fenster
+schon zu voll ist — der gecachte Baum bleibt trotzdem sofort sichtbar, ein
+späterer Auto-Sweep oder manueller Refresh bestätigt die Liste nach.
 
 Die Fälligkeit des nächsten Takts setzt `_note_refresh_mode_job_done()`
 beim EINTREFFEN der Antwort, nicht `_drive_refresh_mode()` beim Absenden.
@@ -1376,6 +1368,23 @@ Rate-Limiter/Auth-Zustand der GGG-API (poe.ninja braucht keinen
 Login). Bei archivierten Ligen (§4.12) wird kein Preis-Job abgeschickt,
 dieselbe Regel wie beim Stash-Request.
 
+**Kürzere TTL für ein leeres Ergebnis** (FALLSTRICKE #49): `PriceIndex.
+is_empty` erkennt "außer der Chaos-Orb-Referenz keine einzige echte
+Preiszeile". `price_cache.save()` vermerkt das als `empty`-Flag im
+Cache-Eintrag; `load()` wendet dafür `EMPTY_TTL_SECONDS` (1h) statt der
+vollen `TTL_SECONDS` (6h) an, sofern der Aufrufer keine explizite TTL
+übergibt. Zwei Ursachen sehen für den Aufrufer gleich aus: ein
+transienter Abruf-Fehler (real beobachtet: "Standard" bekam einmal eine
+leere Antwort, obwohl poe.ninja Sekunden später wieder normal
+antwortete) ODER eine Liga, die poe.ninja PRINZIPIELL nicht führt — reale
+Prüfung gegen poe.ninjas `/economy/leagues` ergab, dass SSF-/private
+Ligen wie Peters "Solo Self-Found" dort gar nicht gelistet sind: ohne
+Spieler-Handel gibt es keine Handelsaktivität, aus der sich Preise
+ableiten ließen. Für SSF bleibt die Value-Spalte deshalb dauerhaft
+weitgehend leer — bewusst nicht bei jedem Liga-Wechsel neu versucht
+(würde ~30 nutzlose Requests pro Wechsel gegen poe.ninja auslösen),
+sondern höchstens einmal pro Stunde.
+
 **Anzeige** (`item_table.py`): `format_chaos_value()` wählt Chaos für
 kleine Beträge, Divine sobald der Gegenwert mindestens einen Divine Orb
 erreicht (Divine-Kurs kommt aus `PriceIndex.divine_rate`, keine feste
@@ -1386,6 +1395,17 @@ Richtung Hintergrund abgeblendet (`theme.blend`, dieselbe Funktion wie
 die Alters-Abblendung im Stash-Baum, §4.7) — ein optischer Hinweis auf
 wahrscheinlichen Schrott, ohne eine feste Grautönung, die auf hellem wie
 dunklem Theme falsch aussähe.
+
+Die Tabelle startet voreingestellt aufsteigend nach Value sortiert
+(`self.table.sortByColumn(VALUE_COL, ...)` in `_build_ui()`) statt in
+roher API-Reihenfolge — Peters Entscheidung 2026-07-30 für "Schrott-Items
+finden" (ToDo.md): unbekannte Preise landen dank `NUMERIC_SORT_ROLE`s
+`float("-inf")`-Fallback zusammen mit den geringsten bekannten Werten ganz
+oben. Nur der Startzustand; ein Klick auf eine andere Spalte überschreibt
+ihn wie jede normale Sortierung (`setSortingEnabled(True)` lässt Qt sie
+danach eigenständig verwalten). Die numerische Sortierbarkeit der
+Value-Spalte selbst gab es schon vorher — neu ist nur, dass sie von
+Anfang an aktiv ist.
 
 Die Gesamtwert-Anzeige in der Statuszeile (`_update_value_sum`) folgt
 strikt derselben Update-Disziplin wie die Stack-Summe: nur über
@@ -1429,8 +1449,8 @@ gemeinsamen Baum, die textliche Beschreibung unten ist aktuell.)
 │                       │ │IMG │  Gem · Level 5 · Quality +20%            │
 │                       │ └────┘  Requires Level 72 · corrupted           │
 ├──────────────────────┴─────────────────────────────────────────────────┤
-│ RATE-LIMIT   Policy: stash-request-limit   [███ Sync ✓ ███]             │
-│ [███████░░] 8/15 · 15 s · next in 4s  [██░░░░░░] 12/90 · 300 s · 2:19 ●│
+│ RATE-LIMIT   Policy: stash-request-limit                                │
+│ [███████░░] 8/15 · 15 s · next in ~4s  [██░░░░░░] 12/90 · 300 s · ~2:19●│
 │ Warte: – s                                                              │
 ├─────────────────────────────────────────────────────────────────────────┤
 │ Bereit · Eingeloggt als PeterM · Not affiliated with Grinding Gear Games│
@@ -1453,7 +1473,7 @@ verschwunden.
 | Typ-Filter (Toolbar, neben Liga) | 8× `_TypeFilterCheckBox` (eigene `QCheckBox`-Unterklasse) | Normal/Magic/Rare/Unique/Gem/Currency/Div Card + "Sonstige" (§4.11) — Farbe des Käschchens = Typ-Farbe (Pink für "Sonstige"), Name nur im Tooltip. Alle acht standardmäßig an. Drei Gesten statt reinem An/Aus (Peter, 2026-07-28): ein modifierloser Klick zeigt NUR diesen Typ (`solo_requested`-Signal → `_solo_type_filter`) — der weitaus häufigere Wunsch als "nur diesen einen abwählen"; Strg+Klick bleibt das native `QCheckBox`-Einzel-Umschalten (dazu-/wegnehmen aus einer bereits eingeschränkten Ansicht, per `super().mousePressEvent()` durchgereicht); Strg+Umschalt+Klick oder Doppelklick setzen über `reset_requested` wieder alle Typen an. Ein normaler Doppelklick würde von Qt sonst als zwei Einzelklicks gewertet (Haken am Ende unverändert) — deshalb eigene `mouseDoubleClickEvent`-Behandlung. |
 | Item-Tabelle rechts oben | `QTableView` + `QSortFilterProxyModel` | Spalten: Icon, Tab, **Position** ("#3 (4, 7)", Tab-Nummer plus Item-Koordinate, §4.11, unterscheidet gleichnamige Fächer), Name, **Base** (`item.baseType`, z. B. "Sun Plate", "Crimson Jewel" — anders als Name bei Uniques/Rares immer die reine Basis statt des Fantasienamens), Typ, Level, Quality, Stack, iLvl, **Anf.Lvl, Str, Dex, Int** (aus dem `requirements`-Array, §4.11), **Mods** (explicitMods, überwiegend Map-Modifikatoren, Tooltip zeilenweise) und **Value** (poe.ninja-Chaos-Wert × Stack, §4.14; leer bei unbekanntem Preis, unter 1 Chaos dezent Richtung Hintergrund abgeblendet). Klick auf den Spaltenkopf sortiert numerisch über `NUMERIC_SORT_ROLE`, also nach echten Zahlen statt nach Strings; Zeilen ohne Wert ("–") landen unten. Das Suchfeld sucht fächerübergreifend über die ganze Liga und schließt Item-Properties wie "Item Quantity" ein; ein eingebauter Clear-Button leert es, `*` zeigt alles an (gedacht für den Komplett-Export, §4.11). Je Spalte lässt sich über das Header-Rechtsklick-Menü zusätzlich ein Filter-Ausdruck setzen (`>=20`, `<45`, `=Text`, Teilstring), aktive Filter markiert ein 🔍 im Header. Sichtbare Spalten sind per Rechtsklick wählbar und werden in `%LOCALAPPDATA%/PoE-VIEW2/ui-settings.ini` gespeichert; "Typ" ist standardmäßig aus, da die Rarity bereits die Namensfarbe bestimmt. Die Tab-Spalte verwaltet die Anwendung selbst und blendet sie nicht ins Menü ein: aus bei Einzelfach-Auswahl, an in Aggregat-Ansichten ("Alle Tabs", Spezial-Tab-Elternknoten, liga-weite Suche), wo sie die Herkunft trägt ("Map (Tier 1)"). |
 | Item-Detail rechts unten | eigenes Widget | Großes Icon, Name in Rarity-Farbe (frameType) mit Tag-Suffix `[Unidentified, Corrupted]` (nur die zutreffenden Tags), eigene Zeile mit iLvl/Req.Lvl/Req.Str/Dex/Int (dieselben Helfer wie die Tabellenspalten, §4.11 — hier bewusst NUR im Detail-Panel, nicht zusätzlich in der Tabelle), Properties, Mods. Aktualisiert bei Zeilenauswahl. |
-| Rate-Limit-Dashboard | `QProgressBar` pro Regel + **Sync-Balken** + Status-LED + Countdown | Gefüttert über das Signal `rate_limit_changed` und den 1-Sekunden-Tick (§4.8). Farbe je Regel: grün < 60 %, gelb < 90 %, rot ab 90 %/Wartephase. Countdown zeigt verbleibende Wartezeit; `(Paused)` neben dem Policy-Namen, solange der Refresh-Modus "Pause" aktiv ist. Jedes Regel-Label nennt zusätzlich die Restzeit bis zum nächsten frei werdenden Platz (`12/30 · 300 s · next in 2:19`, §4.8) — ohne sie sieht eine völlig normale Phase, in der noch gar nichts frei werden kann, wie ein Hänger aus. Der **Sync-Balken** direkt neben dem Policy-Namen zeigt, wie weit unsere eigene Messung das Rate-Limit-Fenster abdeckt (`RateLimitManager.window_coverage()` → `RateLimitDashboard.set_sync()`): rot frisch gestartet, gelb teilweise, grün ("Sync ✓") sobald das Fenster vollständig gedeckt ist. Bis dahin steht die Restzeit IM Balken ("Sync 2:30") — bei reiner Farbe wäre bei Gelb nicht zu erkennen, ob noch 10 Sekunden oder zwei Minuten fehlen. *Intention: Der User soll immer sehen, WARUM die App gerade wartet — und wie verlässlich die Zahlen dabei sind.* |
+| Rate-Limit-Dashboard | `QProgressBar` pro Regel + Status-LED + Countdown | Gefüttert über das Signal `rate_limit_changed` und den 1-Sekunden-Tick (§4.8). Farbe je Regel: grün < 60 %, gelb < 90 %, rot ab 90 %/Wartephase. Countdown zeigt verbleibende Wartezeit; `(Paused)` neben dem Policy-Namen, solange der Refresh-Modus "Pause" aktiv ist. Jedes Regel-Label nennt zusätzlich eine grobe Restzeit bis zur nächsten Absenkung des Zählers (`12/30 · 300 s · next in ~2:19`, §4.8, immer mit `~` — GGGs Zähler sinkt blockweise, nicht gleitend pro Treffer, FALLSTRICKE #45 Runde 6) — ohne sie sieht eine völlig normale Phase, in der noch gar nichts frei werden kann, wie ein Hänger aus. *Intention: Der User soll immer sehen, WARUM die App gerade wartet.* |
 | Statusbar | `QStatusBar` + `QProgressBar` (busy) | Login-Status, laufender Job, permanenter GGG-Disclaimer. Die `QProgressBar` läuft mit `setRange(0, 0)` im "busy"-Modus (Qt animiert das eingebaut, kein eigener Timer nötig). Sichtbarkeit hängt am eigenen `busy_changed`-Signal des Workers (`True` rund um jeden Job), NICHT am `status`-Text — siehe §4.5.1 zur Begründung. Ein permanentes **Offline-Banner** ("📴 Offline — GGG nicht erreichbar, zeige zwischengespeicherte Daten", §4.12) erscheint bei Konnektivitätsproblemen — als eigenes Label, damit die nächste "Lade …"-Statusmeldung es nicht überschreibt. Ein zweites permanentes Label (`_stack_sum_label`) zeigt die Summe der Stack-Größe über die aktuell sichtbaren (gefilterten) Zeilen ("Stack total: 12,345") — Items ohne Stack-Größe (Ausrüstung) zählen nicht mit, und die Zeile erscheint NUR, wenn alle stapelbaren Treffer denselben `display_name` tragen (FALLSTRICKE #39: bei "*" oder einer ungefilterten Truhe mit mehreren Currency-Sorten wäre eine Summe über verschiedene Item-Typen hinweg bedeutungslos). Ein drittes permanentes Label (`_value_sum_label`, §4.14) zeigt den Gesamt-Chaos-Wert derselben sichtbaren Zeilen ("Value: 1,234c") — anders als die Stack-Summe AUCH über verschiedene Item-Namen hinweg sinnvoll, erscheint also schon bei einem einzigen Item mit bekanntem Preis. Beide Summen-Labels hängen NUR an `proxy.modelReset` (`_update_summaries`, garantiert genau ein Signal pro `set_items()`) und werden zusätzlich an jeder Stelle, die den Filter ändert, GENAU EINMAL explizit aufgerufen (`_apply_debounced_search_filter`, `_on_type_toggled`, `_apply_column_filter`, `_clear_column_filters`) — NICHT an `layoutChanged`/`rowsInserted`/`-Removed` (FALLSTRICKE #39, zweiter Teil: genau das war der O(n²)-Bug). |
 
 **"Alle Tabs laden" (Bulk) und CSV-Export:** Über den Toolbar-Button "⇊ Alle

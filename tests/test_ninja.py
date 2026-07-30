@@ -40,6 +40,34 @@ def test_simple_lookup_unknown_name_returns_none() -> None:
     assert index.price_for(_item(typeLine="Irgendwas")) is None
 
 
+# --- PriceIndex.is_empty ------------------------------------------------- #
+
+def test_fresh_index_with_only_the_seed_is_empty() -> None:
+    """Nur die eingebaute Chaos-Orb-Referenz, keine einzige echte
+    Preiszeile — genau der Zustand, den ein poe.ninja-Abruf ohne jede
+    Trefferzeile hinterlässt (real beobachtet für SSF-Ligen, die
+    poe.ninja gar nicht führt, FALLSTRICKE #49)."""
+    assert PriceIndex().is_empty is True
+
+
+def test_index_with_a_simple_price_is_not_empty() -> None:
+    index = PriceIndex()
+    index._simple["Divine Orb"] = 220.0
+    assert index.is_empty is False
+
+
+def test_index_with_only_a_gem_price_is_not_empty() -> None:
+    index = PriceIndex()
+    index._gems["Melee Support"] = [(20, 20, False, 5.0)]
+    assert index.is_empty is False
+
+
+def test_index_with_only_a_link_price_is_not_empty() -> None:
+    index = PriceIndex()
+    index._links["Oni-Goroshi"] = {None: 100.0}
+    assert index.is_empty is False
+
+
 def test_chaos_orb_is_seeded_as_the_reference_currency() -> None:
     """poe.ninja listet Chaos Orb nicht gegen sich selbst (real geprüft:
     kein Eintrag in der Currency-Route) — ohne Seed wäre der Preis

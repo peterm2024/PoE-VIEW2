@@ -63,6 +63,22 @@ class PriceIndex:
         Umschaltung in der Anzeige (siehe ``item_table.format_chaos_value``)."""
         return self._simple.get("Divine Orb")
 
+    @property
+    def is_empty(self) -> bool:
+        """True, wenn außer der eingebauten Chaos-Orb-Referenz keine
+        einzige echte Preiszeile ankam.
+
+        Zwei sehr unterschiedliche Ursachen sehen für den Aufrufer gleich
+        aus: ein transienter Abruf-Fehler (kurz retry-würdig) ODER eine
+        Liga, die poe.ninja dauerhaft gar nicht führt — reale Prüfung
+        gegen poe.ninjas eigene ``/economy/leagues``-Liste ergab, dass
+        private/SSF-Ligen wie "Solo Self-Found" dort gar nicht auftauchen:
+        ohne Spieler-Handel gibt es keine Handelsaktivität, aus der sich
+        Preise ableiten ließen (FALLSTRICKE #49). ``price_cache`` nutzt
+        dieses Flag für eine kürzere TTL, damit ein solches Ergebnis nicht
+        die vollen 6h als vermeintlicher Erfolg festgehalten wird."""
+        return len(self._simple) <= 1 and not self._gems and not self._links
+
     def price_for(self, item: Item) -> float | None:
         """Chaos-Wert EINES Items, ohne stackSize-Multiplikation — das
         macht der Aufrufer. ``None`` heißt unbekannt, nie 0 (ein

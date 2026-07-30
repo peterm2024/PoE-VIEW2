@@ -1313,6 +1313,44 @@ def test_refresh_mode_countdown_label_shows_active_mode(qapp) -> None:
     win.worker.wait(5000)
 
 
+def test_stepping_mode_stops_while_the_rate_limit_window_is_too_full(qapp, monkeypatch) -> None:
+    """Regression zu FALLSTRICKE #47 (real: 289s Zwangspause am 2026-07-30).
+
+    Der gleichmäßige Takt rechnet, als wäre das Fenster leer und als kämen
+    nur seine eigenen Requests darin vor. Real füllen ungetaktete Requests
+    (Klicks, Liga-Wechsel, Programmstart) dasselbe Fenster mit — der Takt
+    lief stur weiter bis zur Bremsschwelle. Ist das Fenster schon zu voll,
+    muss er pausieren, und das Label muss den Grund nennen statt einen
+    Countdown zu zeigen, der bei 0s stehen bleibt."""
+    win = MainWindow()
+    win._current_league = "Standard"
+    win._refresh_mode_combo.setCurrentText("Stash")
+    win._leaf_stashes = [_make_leaf("t1", "Tab 1")]
+    win._items["Standard"] = {"t1": [object()]}
+
+    submitted = []
+    monkeypatch.setattr(win.worker, "submit", lambda job: submitted.append(job))
+    blocked = [True]
+    monkeypatch.setattr(win.worker.rate_limiter, "pacing_blocked",
+                        lambda policy=None: blocked[0])
+
+    win._refresh_mode_next_due = 0.0
+    win._drive_refresh_mode()
+    assert submitted == []  # kein Request, solange das Fenster zu voll ist
+
+    win._update_auto_refresh_countdown()
+    assert "headroom" in win._auto_refresh_countdown_label.text()
+
+    # Sobald GGGs Zähler wieder sinkt, läuft der Takt weiter.
+    blocked[0] = False
+    win._refresh_mode_next_due = 0.0
+    win._drive_refresh_mode()
+    assert len(submitted) == 1
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
 def test_maybe_auto_refresh_stops_after_token_expires_mid_session(qapp, monkeypatch) -> None:
     """Regression (Rückfrage 'Automatik hat nicht hingehauen'):
     real im Log beobachtet — nach einem abgelaufenen Token lief der
@@ -1338,6 +1376,29 @@ def test_maybe_auto_refresh_stops_after_token_expires_mid_session(qapp, monkeypa
     submitted.clear()
     win._maybe_auto_refresh()
     assert len(submitted) == 1  # nach erneutem Login läuft der Auto-Refresh wieder
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_online_actions_disabled_while_not_logged_in(qapp) -> None:
+    """Ohne gültigen Login blieb 'Load All Tabs' anklickbar, solange ein
+    Daten-Cache aus einer früheren Sitzung vorlag (bleibt auch ohne Login
+    sichtbar) — der Fortschrittsdialog öffnete sich, der Job wurde vom
+    Worker aber lautlos verworfen und der Dialog hing für immer bei 0 %.
+    Refresh/Load-All-Tabs/Refresh-Modus müssen bei fehlendem Login gesperrt
+    sein und nach erneutem Login wieder freigegeben werden."""
+    win = MainWindow()
+
+    win._on_login_required("No valid token — please log in.")
+    assert not win._refresh_action.isEnabled()
+    assert not win._load_all_action.isEnabled()
+    assert not win._refresh_mode_combo.isEnabled()
+
+    win._on_logged_in("PeterM")
+    assert win._refresh_action.isEnabled()
+    assert win._load_all_action.isEnabled()
+    assert win._refresh_mode_combo.isEnabled()
 
     win.worker.stop()
     win.worker.wait(5000)
@@ -3188,6 +3249,47 @@ def test_league_changed_skips_network_for_archived_league(qapp, monkeypatch) -> 
     win.worker.wait(5000)
 
 
+def test_league_changed_skips_stash_list_when_that_window_is_too_full(qapp, monkeypatch) -> None:
+    """Regression zu FALLSTRICKE #48: mehrere schnelle Liga-Wechsel feuerten
+    bisher ungebremst je einen FetchStashListJob — das trug real dazu bei,
+    das Rate-Limit-Fenster Richtung Zwangspause zu treiben. Ist das Fenster
+    für Fach-Listen-Abrufe schon zu voll, bleibt der gecachte Baum stehen
+    und der Job entfällt für diesen Wechsel."""
+    win = MainWindow()
+    submitted = []
+    monkeypatch.setattr(win.worker, "submit", lambda job: submitted.append(job))
+    monkeypatch.setattr(win.worker.rate_limiter, "pacing_blocked",
+                        lambda policy=None: policy == "stash-list-request-limit")
+
+    win._on_league_changed("Standard")
+
+    assert not any(isinstance(j, FetchStashListJob) for j in submitted)
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_league_change_does_not_reset_the_remembered_refresh_mode_policy(qapp) -> None:
+    """Regression zu FALLSTRICKE #48: `_refresh_mode_policy` wurde bei jedem
+    Liga-Wechsel auf None zurückgesetzt. Bis zum ersten Job der neuen Liga
+    fiel `pacing_blocked()`/`steady_pace_interval_s()` dadurch auf den
+    globalen, von JEDEM Request überschreibbaren `_last_policy` zurück —
+    exakt die Kontamination, die FALLSTRICKE #33 schon einmal behoben hat.
+    Da die Policy einer Fach-Anfrage liga-unabhängig ist, darf der Wert den
+    Wechsel unverändert überstehen."""
+    win = MainWindow()
+    win._refresh_mode_policy = "stash-request-limit"
+
+    win._on_league_changed("Standard")
+    assert win._refresh_mode_policy == "stash-request-limit"
+
+    win._refresh_mode_combo.setCurrentText("Single")
+    assert win._refresh_mode_policy == "stash-request-limit"
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
 def test_league_changed_submits_fetch_prices_job_when_not_cached(qapp, monkeypatch) -> None:
     win = MainWindow()
     monkeypatch.setattr(price_cache, "load", lambda league, ttl_seconds=None: None)
@@ -3342,6 +3444,31 @@ def test_value_sum_label_follows_the_type_filter(qapp) -> None:
     win._type_checks[5].setChecked(False)  # Currency aus
 
     assert win._value_sum_label.text() == ""
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_table_defaults_to_sorting_by_value_ascending(qapp) -> None:
+    """ToDo.md "Schrott-Items finden": statt roher API-Reihenfolge soll die
+    Tabelle von Anfang an nach Wert aufsteigend sortiert sein, damit
+    unbekannte/geringe Preise ("wahrscheinlich Schrott") von selbst oben
+    gruppiert sind — kein manueller Klick auf den Value-Header nötig. Ein
+    Klick auf einen anderen Header überschreibt das wie jede normale
+    Sortierung; das ist nur der Startzustand."""
+    from poe_view.ui.item_table import COLUMNS
+
+    win = MainWindow()
+    win.table_model.set_price_index(_price_index(**{"Chaos Orb": 1.0, "Exalted Orb": 50.0}))
+    win.table_model.set_items([
+        Item.model_validate({"typeLine": "Exalted Orb", "stackSize": 1}),   # 50c
+        Item.model_validate({"typeLine": "Some Unpriced Rare"}),            # unbekannt
+        Item.model_validate({"typeLine": "Chaos Orb", "stackSize": 1}),     # 1c
+    ])
+
+    names = [win.proxy.index(row, COLUMNS.index("Name")).data()
+             for row in range(win.proxy.rowCount())]
+    assert names == ["Some Unpriced Rare", "Chaos Orb", "Exalted Orb"]
+
     win.worker.stop()
     win.worker.wait(5000)
 
@@ -3564,45 +3691,20 @@ def test_refresh_mode_pause_submits_nothing(qapp, monkeypatch) -> None:
     win.worker.wait(5000)
 
 
-def test_sync_bar_reflects_the_rate_limit_window_coverage(qapp, monkeypatch) -> None:
-    """Peter, 2026-07-30: nach einem Neustart tickte die Verbrauchsanzeige
-    alle 30s statt alle 11s, weil die Treffer der Vorsitzung nur geschätzt
-    werden können. Der Sync-Balken macht genau diese Unsicherheit sichtbar —
-    rot frisch gestartet, grün sobald das Fenster durch eigene Messungen
-    gedeckt ist. Gespeist vom ohnehin laufenden Sekunden-Tick."""
-    from poe_view.ui.theme import DASH_BAD, DASH_OK
-    win = MainWindow()
-    coverage = [(0.1, 270.0)]
-    monkeypatch.setattr(win.worker.rate_limiter, "window_coverage",
-                        lambda: coverage[0])
-
-    win._update_auto_refresh_countdown()
-    assert win.dashboard._sync.value() == 10
-    assert DASH_BAD in win.dashboard._sync.styleSheet()
-    assert "4:30" in win.dashboard._sync.format()  # Restzeit, nicht nur Farbe
-
-    coverage[0] = (1.0, 0.0)
-    win._update_auto_refresh_countdown()
-    assert win.dashboard._sync.value() == 100
-    assert DASH_OK in win.dashboard._sync.styleSheet()
-    assert "✓" in win.dashboard._sync.format()
-
-    win.worker.stop()
-    win.worker.wait(5000)
-
-
 def test_rule_label_shows_when_the_next_slot_frees_up(qapp) -> None:
     """Peter, 2026-07-30: "12/30" stand nach einem frischen Start zwei
-    Minuten still, weil vor Ablauf der ersten 300s nichts frei werden KANN.
-    Die Restzeit macht genau das sichtbar; fehlt sie (keine eigenen Treffer
-    im Fenster bekannt), bleibt das Label unverändert kurz."""
+    Minuten still — sah aus wie ein Hänger, war aber die Realität (GGGs
+    Zähler sinkt blockweise statt gleitend, FALLSTRICKE #45 Runde 6). Die
+    Restzeit ist deshalb immer eine grobe Schätzung ("~"), nie eine Zusage;
+    fehlt sie (noch keine zwei Absenkungen beobachtet), bleibt das Label
+    unverändert kurz."""
     win = MainWindow()
 
     win.dashboard.update_state(
         "stash-request-limit",
         [{"current": 12, "max": 30, "window_s": 300, "locked": False,
           "next_free_s": 139.0}], 0.0)
-    assert win.dashboard._bars[0][1].text() == "12/30 · 300 s · next in 2:19"
+    assert win.dashboard._bars[0][1].text() == "12/30 · 300 s · next in ~2:19"
 
     win.dashboard.update_state(
         "stash-request-limit",
@@ -3610,22 +3712,12 @@ def test_rule_label_shows_when_the_next_slot_frees_up(qapp) -> None:
           "next_free_s": None}], 0.0)
     assert win.dashboard._bars[0][1].text() == "12/30 · 300 s"
 
-    # Altlast aus einer Vorsitzung im Fenster, Takt noch nicht gemessen:
-    # der Wert ist nur eine Obergrenze und wird als Schaetzung markiert.
-    win.dashboard.update_state(
-        "stash-request-limit",
-        [{"current": 12, "max": 30, "window_s": 300, "locked": False,
-          "next_free_s": 139.0, "next_free_exact": False}], 0.0)
-    assert win.dashboard._bars[0][1].text() == "12/30 · 300 s · next in ~2:19"
-
     win.worker.stop()
     win.worker.wait(5000)
 
 
-def test_sync_bar_does_not_displace_the_per_rule_bars(qapp) -> None:
-    """Der Sync-Balken sitzt fest zwischen Policy-Name und den Regel-Balken;
-    deren Einfüge-Offset muss das berücksichtigen, sonst landen sie in
-    falscher Reihenfolge im Layout."""
+def test_rule_bars_are_inserted_after_the_policy_label(qapp) -> None:
+    """Regel-Balken landen direkt nach dem Policy-Namen im Layout."""
     win = MainWindow()
 
     win.dashboard.update_state(
@@ -3636,9 +3728,8 @@ def test_sync_bar_does_not_displace_the_per_rule_bars(qapp) -> None:
     layout = win.dashboard._layout
     order = [layout.itemAt(i).widget() for i in range(layout.count())]
     assert order[0] is win.dashboard._policy
-    assert order[1] is win.dashboard._sync
-    assert order[2] is win.dashboard._bars[0][0]
-    assert order[4] is win.dashboard._bars[1][0]
+    assert order[1] is win.dashboard._bars[0][0]
+    assert order[3] is win.dashboard._bars[1][0]
 
     win.worker.stop()
     win.worker.wait(5000)

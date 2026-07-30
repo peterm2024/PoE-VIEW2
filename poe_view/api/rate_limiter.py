@@ -34,6 +34,11 @@ SAFETY_MARGIN = 1
 # Policy bekannt ist (vor dem ersten Request dieser Session).
 DEFAULT_PACING_INTERVAL_S = 20.0
 
+# Anteil der Bremsschwelle, den der gleichmäßige Takt (Single-/Stash-Modus)
+# höchstens SELBST belegen darf — der Rest bleibt Reserve für ungetaktete
+# Requests (Klicks, Liga-Wechsel, Programmstart). Siehe pacing_blocked().
+PACING_FILL_LIMIT = 0.85
+
 # callback(policy_name, rules_snapshot, wait_remaining_s)
 StatusCallback = Callable[[str, list[dict], float], None]
 
@@ -49,68 +54,49 @@ class RateLimitRule:
     current: int = 0       # zuletzt gemeldeter Verbrauch
     active_lock_s: float = 0.0  # Rest-Sperre zum Zeitpunkt des letzten Updates
 
-    # --- ab hier keine GGG-Daten mehr, sondern Anzeige-Inferenz --------- #
-    # Aus beobachteten Abläufen gelernte Dichte der UNBEKANNTEN Treffer
-    # (die aus einer früheren Sitzung), siehe observe_unknown/drain_s.
-    unknown_seen: int | None = None    # zuletzt beobachtete Zahl Unbekannter
-    unknown_expired: int = 0           # wie viele davon wir ablaufen sahen
-    unknown_first_expiry: float = 0.0  # wann der ERSTE davon ablief
-    unknown_last_expiry: float = 0.0   # wann zuletzt einer ablief
+    # --- Anzeige-Inferenz: wann sinkt GGGs Zähler das nächste Mal? ------ #
+    # Reale Header-Daten (2026-07-30, FALLSTRICKE #45 Runde 6) zeigten: GGG
+    # zählt NICHT gleitend pro Treffer, sondern senkt den Zähler in Blöcken
+    # von rund window_s/5 Sekunden auf einen Schlag (bei 30 Treffern/300s
+    # beobachtet: Sprünge von 4-5 Treffern alle ~60s, exakt was unser
+    # ~11s-Takt in einen ~60s-Eimer packt). Frühere Fassungen dieser Klasse
+    # versuchten fünf Runden lang, das Altern EXAKT pro Treffer zu simulieren
+    # ("next in 2:19" auf die Sekunde) — das Modell war von Anfang an falsch,
+    # nicht nur ungenau. Jetzt wird nur noch der GROBE Rhythmus gelernt, mit
+    # dem der Zähler tatsächlich sinkt.
+    last_drop_at: float = 0.0             # wann zuletzt eine Absenkung beobachtet wurde
+    drop_interval_s: float | None = None  # gemessener Abstand zweier Absenkungen
 
-    def observe_unknown(self, unknown: int, now: float) -> None:
-        """Beobachtet, wie schnell die unbekannten Treffer wegfallen.
+    def observe(self, new_current: int, now: float) -> None:
+        """Übernimmt den neu gemeldeten Verbrauch und lernt dabei den Takt,
+        in dem GGGs Zähler von sich aus sinkt (siehe Klassen-Kommentar).
+        Jede Absenkung — egal wie groß — ist ein Datenpunkt für diesen Takt."""
+        if new_current < self.current:
+            if self.last_drop_at:
+                self.drop_interval_s = now - self.last_drop_at
+            self.last_drop_at = now
+        self.current = new_current
 
-        Jeder Rückgang der Zahl bedeutet: so viele Treffer aus der früheren
-        Sitzung sind gerade aus dem Fenster gefallen — sie lagen also
-        ``window_s`` vorher. Damit lässt sich messen, wie dicht die übrigen
-        liegen, statt sie weiter nur zu schätzen (Peters Beobachtung
-        2026-07-30: "der geschätzte next hat gerade stattgefunden, darauf
-        basierend können wir die nachfolgenden genau ermitteln").
+    def next_free_estimate_s(self, now: float) -> float | None:
+        """Grobe Schätzung, wann der Zähler das nächste Mal sinkt.
 
-        Nur bei einem RÜCKGANG gelernt: steigt die Zahl, hat ein fremdes
-        Tool welche hinzugefügt — daraus lässt sich nichts über die
-        Zeitpunkte der schon vorhandenen ableiten."""
-        previous = self.unknown_seen
-        self.unknown_seen = unknown
-        if previous is None:
-            return
-        if unknown < previous:
-            if self.unknown_expired == 0:
-                self.unknown_first_expiry = now
-            self.unknown_expired += previous - unknown
-            self.unknown_last_expiry = now
-        elif unknown > previous:
-            # Fremder Traffic: gelerntes Tempo passt nicht mehr, neu anfangen.
-            self.unknown_expired = 0
-            self.unknown_first_expiry = 0.0
-            self.unknown_last_expiry = 0.0
-
-    def drain_s(self) -> float | None:
-        """Gemessener Abstand zwischen zwei Abläufen unbekannter Treffer,
-        oder ``None``, solange zu wenig beobachtet wurde.
-
-        Gemessen wird von Ablauf zu Ablauf, NICHT ab Beobachtungsbeginn: bis
-        zum ersten Ablauf vergeht je nach Alter der Altlast beliebig viel
-        Totzeit, die den Mittelwert sonst verwässert (real im Test: 29.7s
-        statt der echten 12s). Zwischen ``unknown_expired`` Abläufen liegen
-        genau ``unknown_expired - 1`` Abstände."""
-        if self.unknown_expired < 2:
+        Keine Zusage für einen bestimmten EIGENEN Treffer — das würde die
+        inzwischen widerlegte Annahme gleitenden Alterns wiederholen (siehe
+        FALLSTRICKE #45). Nur der gelernte Rhythmus der Absenkungen selbst.
+        ``None``, solange wir noch keine zwei davon beobachtet haben."""
+        if not self.drop_interval_s or not self.last_drop_at:
             return None
-        span = self.unknown_last_expiry - self.unknown_first_expiry
-        return span / (self.unknown_expired - 1) if span > 0 else None
+        return max(0.0, self.last_drop_at + self.drop_interval_s - now)
 
-    def snapshot(self) -> dict:
-        """Anzeige-Daten für das Dashboard, als reine Python-Typen.
-
-        ``current`` ist hier der zuletzt von GGG gemeldete Rohwert; die
-        gleitende Alterung für die Anzeige rechnet
-        ``PolicyState.display_snapshot`` darüber."""
+    def snapshot(self, now: float) -> dict:
+        """Anzeige-Daten für das Dashboard, als reine Python-Typen."""
         return {
             "group": self.rule_group,
             "current": self.current,
             "max": self.max_hits,
             "window_s": self.window_s,
             "locked": self.active_lock_s > 0,
+            "next_free_s": self.next_free_estimate_s(now),
         }
 
 
@@ -121,134 +107,6 @@ class PolicyState:
     policy_name: str
     rules: dict[tuple[str, int], RateLimitRule] = field(default_factory=dict)
     last_update: float = 0.0  # Zeitstempel des letzten Header-Updates
-    # Zeitpunkte UNSERER eigenen Requests an diese Policy (monotonic), auf
-    # das längste Fenster beschnitten — Grundlage der gleitenden
-    # Anzeige-Alterung, siehe display_snapshot().
-    request_times: list[float] = field(default_factory=list)
-
-    def note_request(self, now: float) -> None:
-        """Einen eigenen Request mitschreiben und alte Einträge wegwerfen.
-        Aufzuheben ist nur, was ins längste Fenster fällt (bei 30/300s also
-        höchstens ~30 Zeitstempel)."""
-        self.request_times.append(now)
-        longest = max((r.window_s for r in self.rules.values()), default=0)
-        cutoff = now - longest
-        self.request_times = [t for t in self.request_times if t > cutoff]
-
-    def unknown_count(self, rule: RateLimitRule) -> int:
-        """Treffer im Fenster, die NICHT von uns stammen — also aus einer
-        früheren Sitzung oder einem anderen Tool. Differenz zwischen GGGs
-        Summe und unseren eigenen Zeitstempeln im selben Fenster."""
-        known = sum(1 for t in self.request_times
-                    if t > self.last_update - rule.window_s)
-        return max(0, rule.current - known)
-
-    def _unknown_left(self, rule: RateLimitRule, unknown: int,
-                      now: float, started_at: float) -> float:
-        """Wie viele der unbekannten Treffer stecken JETZT noch im Fenster?
-
-        Zwei Stufen, gemessen schlägt geschätzt:
-
-        1. **Gemessen** — sobald wir zwei Abläufe beobachtet haben
-           (``rule.drain_s()``), kennen wir ihren tatsächlichen Abstand und
-           zählen damit linear herunter. Das ist Peters Beobachtung vom
-           2026-07-30: ein beobachteter Ablauf verrät den Takt der früheren
-           Sitzung, und der gilt für die restlichen genauso.
-        2. **Geschätzt** — vorher bleibt nur Gleichverteilung. Aber NICHT
-           übers ganze Fenster: unbekannte Treffer können nur aus der Zeit
-           VOR unserem Start stammen, liegen also zwingend im Intervall
-           ``[letzter Header − Fenster, started_at]``. Über dieses (meist
-           deutlich kürzere) Intervall zu verteilen ist die schärfere und
-           damit ehrlichere Annahme — vorher liefen sie zu langsam ab, was
-           genau zu dem von Peter gemeldeten verfrühten "Rutsch" führte.
-        """
-        drain = rule.drain_s()
-        if drain:
-            since = now - rule.unknown_last_expiry
-            return max(0.0, unknown - since / drain)
-        span = started_at - (self.last_update - rule.window_s)
-        if span <= 0:
-            # Unser Start liegt vor dem Fensteranfang: die Unbekannten sind
-            # dann fremder Traffic von JETZT, gleichmäßig übers Fenster.
-            span = float(rule.window_s)
-        left = (started_at - (now - rule.window_s)) / span
-        return unknown * max(0.0, min(1.0, left))
-
-    def _next_unknown_free(self, rule: RateLimitRule, unknown_left: float,
-                           now: float) -> float | None:
-        """Sekunden bis zum nächsten Ablauf eines UNBEKANNTEN Treffers —
-        nur wenn wir den Takt gemessen haben, sonst ``None`` (raten würde
-        genau die falsche Zusage erzeugen, die es zu vermeiden gilt)."""
-        drain = rule.drain_s()
-        if not drain or unknown_left < 1:
-            return None
-        return max(0.0, rule.unknown_last_expiry + drain - now)
-
-    def display_snapshot(self, now: float, started_at: float = 0.0) -> list[dict]:
-        """Anzeige-Stand aller Regeln mit GLEITENDEM Fenster.
-
-        GGG zählt in einem gleitenden Fenster: jeder einzelne Treffer altert
-        genau ``window_s`` nach seinem Zeitpunkt heraus, nicht erst das ganze
-        Fenster auf einmal. Der gemeldete Rohwert ``rule.current`` steht
-        dagegen bis zum nächsten Header still — die Anzeige fror dadurch bei
-        z. B. "23/30" minutenlang ein und sprang dann in einem Schritt auf 0
-        (Peter, 2026-07-30: "das sollte doch wieder weniger werden, je länger
-        ich pausiere").
-
-        Für UNSERE eigenen Requests ist die Alterung exakt bekannt — ihre
-        Zeitpunkte stehen in ``request_times``. Sie fallen einzeln heraus,
-        im selben Takt, in dem sie entstanden sind: läuft der Stash-Modus
-        mit ~11s, tickt die Anzeige auch mit ~11s wieder herunter. Läuft
-        das Fenster dagegen noch nicht voll (App gerade gestartet, kürzere
-        Historie als ``window_s``), dauert es entsprechend länger bis zum
-        ersten Tick — das ist die Realität, kein Hänger.
-
-        Treffer, die wir NICHT selbst gemacht haben, behandelt
-        ``_unknown_left`` (gemessener Takt, sonst Gleichverteilung über das
-        Intervall, in dem sie überhaupt liegen können).
-
-        Dazu kommt ``next_free_s``: die Sekunden, bis der nächste belegte
-        Platz wieder frei wird. Berücksichtigt beides — den ältesten eigenen
-        Treffer UND, falls sein Takt gemessen ist, den nächsten unbekannten;
-        der frühere von beiden gewinnt. Ohne diese Angabe wirkt eine ganz
-        normale Phase wie ein Hänger: hat die App gerade erst zwölf Anfragen
-        abgesetzt, KANN vor Ablauf der ersten 300s nichts frei werden, und
-        der Zähler steht minutenlang still. ``None``, wenn wir nichts
-        Belastbares haben — dann lieber keine Angabe als eine falsche.
-
-        Ausschliesslich für die ANZEIGE. Die tatsächliche
-        Warte-Entscheidung (``_required_wait``, ``headroom_fraction``,
-        ``steady_pace_interval_s``) rechnet unverändert mit dem
-        konservativen ``rule.current``: ein dort zu früh gesenkter Zähler
-        könnte einen echten HTTP 429 riskieren (FALLSTRICKE #34).
-        """
-        snapshots = []
-        for rule in self.rules.values():
-            snap = rule.snapshot()
-            snap["next_free_s"] = None
-            snap["next_free_exact"] = True
-            window = rule.window_s
-            if window > 0:
-                in_window = [t for t in self.request_times if t > now - window]
-                unknown = self.unknown_count(rule)
-                unknown_left = self._unknown_left(rule, unknown, now, started_at)
-                snap["current"] = min(rule.current,
-                                      len(in_window) + round(unknown_left))
-                due = [min(in_window) + window - now] if in_window else []
-                nxt = self._next_unknown_free(rule, unknown_left, now)
-                if nxt is not None:
-                    due.append(nxt)
-                if due and snap["current"] > 0:
-                    snap["next_free_s"] = max(0.0, min(due))
-                # Unbekannte Treffer sind ÄLTER als unsere eigenen und fallen
-                # damit früher heraus. Solange welche übrig sind und ihr Takt
-                # noch nicht gemessen wurde, ist der Wert nur eine Obergrenze
-                # — genau die Zusage, die Peter am 2026-07-30 platzen sah
-                # ("next in 2:42", dann Rutsch von 23 auf 19). Sie deshalb
-                # als Schätzung kennzeichnen statt sie als exakt auszugeben.
-                snap["next_free_exact"] = unknown_left < 1 or nxt is not None
-            snapshots.append(snap)
-        return snapshots
 
 
 class RateLimitManager:
@@ -267,9 +125,6 @@ class RateLimitManager:
         self._callback = status_callback
         self._now = now or time.monotonic
         self._last_policy: str = ""
-        # Lebensdauer dieser Instanz = Zeitraum, für den wir eigene
-        # Request-Zeitpunkte lückenlos kennen (§window_coverage).
-        self._started_at = self._now()
 
     @property
     def last_policy(self) -> str:
@@ -317,7 +172,12 @@ class RateLimitManager:
         Auto-Refresh-Pause für immer auf dem letzten (veralteten) Stand
         stehen: ohne Request kommt auch kein neuer Header mehr rein, der
         Zähler würde sich sonst nie mehr von selbst erholen (Rückfrage
-        "Policy-Statusleiste aktualisiert sich während der Pause nicht")."""
+        "Policy-Statusleiste aktualisiert sich während der Pause nicht").
+
+        Bewusst ohne ``RateLimitRule.observe()``: dieser Reset ist unsere
+        eigene, konservative Annahme (volles Fenster abgelaufen), keine
+        tatsächlich beobachtete GGG-Absenkung — er soll den gelernten
+        Absenkungs-Takt nicht verfälschen."""
         elapsed = self._now() - state.last_update
         if elapsed <= 0:
             return
@@ -363,26 +223,38 @@ class RateLimitManager:
         rule_groups = [g.strip() for g in headers.get("X-Rate-Limit-Rules", "").split(",") if g.strip()]
         with self._lock:
             state = self._policies.setdefault(policy, PolicyState(policy_name=policy))
+            now = self._now()
             for group in rule_groups:
                 self._parse_group(state, group,
                                   headers.get(f"X-Rate-Limit-{group}", ""),
-                                  headers.get(f"X-Rate-Limit-{group}-State", ""))
-            state.last_update = self._now()
-            # Genau EIN eigener Request hat diese Antwort erzeugt — sein
-            # Zeitpunkt trägt die gleitende Anzeige-Alterung
-            # (§PolicyState.display_snapshot). Erst NACH _parse_group, damit
-            # die Fenstergrößen fürs Beschneiden schon bekannt sind.
-            state.note_request(state.last_update)
-            # Jetzt, mit frischem Header UND eingetragenem eigenen Request,
-            # lernen wie schnell die unbekannten Treffer wegfallen
-            # (§RateLimitRule.observe_unknown).
-            for rule in state.rules.values():
-                rule.observe_unknown(state.unknown_count(rule), state.last_update)
+                                  headers.get(f"X-Rate-Limit-{group}-State", ""),
+                                  now)
+            state.last_update = now
             self._last_policy = policy
+            self._log_header_detail(policy, state)
         self._emit(policy, 0.0)
 
+    def _log_header_detail(self, policy: str, state: PolicyState) -> None:
+        """Rohe Header-Werte JE Regel plus unsere Inferenz mitschreiben.
+
+        Bislang stand im Log nur, DASS ein Request lief (httpx-Zeile) — die
+        eigentlichen X-Rate-Limit-Zahlen waren nirgends nachvollziehbar. Erst
+        mit dieser Zeile ließ sich beweisen, dass GGGs Zähler blockweise statt
+        gleitend sinkt (FALLSTRICKE_UND_WORKAROUNDS.md #45, Runde 6). Bewusst
+        INFO statt DEBUG, damit die Datei bei einem realen Vorfall ohne
+        Neustart mit anderem Log-Level bereits die Antwort enthält."""
+        for rule in state.rules.values():
+            since_drop = (f"{state.last_update - rule.last_drop_at:.1f}s"
+                          if rule.last_drop_at else "-")
+            takt = f"{rule.drop_interval_s:.1f}s" if rule.drop_interval_s else "-"
+            log.info(
+                "Rate-Limit-Header %s/%s: current=%d/%d window=%ds lock_rest=%.1fs "
+                "letzte_absenkung_vor=%s takt=%s",
+                policy, rule.rule_group, rule.current, rule.max_hits, rule.window_s,
+                rule.active_lock_s, since_drop, takt)
+
     def _parse_group(self, state: PolicyState, group: str,
-                     rules_str: str, state_str: str) -> None:
+                     rules_str: str, state_str: str, now: float) -> None:
         """Regel- und State-String einer Gruppe parsen, Zuordnung über die
         Fenstergröße (siehe Modul-Docstring)."""
         # State zuerst indexieren: Fenstergröße → (aktuell, restsperre)
@@ -398,7 +270,8 @@ class RateLimitManager:
                               window_s=window, lock_s=lock_s))
             rule.max_hits, rule.lock_s = max_hits, lock_s
             current, lock_rest = usage_by_window.get(window, (rule.current, 0.0))
-            rule.current, rule.active_lock_s = current, lock_rest
+            rule.observe(current, now)
+            rule.active_lock_s = lock_rest
 
     # ------------------------------------------------------------------ #
 
@@ -466,6 +339,41 @@ class RateLimitManager:
                     intervals.append(rule.window_s / usable)
             return max(intervals) if intervals else DEFAULT_PACING_INTERVAL_S
 
+    def pacing_blocked(self, policy_name: str | None = None) -> bool:
+        """Ist das Fenster für den gleichmäßigen Takt schon zu voll?
+
+        Der Takt allein (``steady_pace_interval_s``) reicht als Schutz
+        nicht. Er hält im Dauerbetrieb zwar knapp unter der Bremsschwelle,
+        rechnet dabei aber so, als wäre das Fenster leer und als kämen
+        ausschließlich seine eigenen Requests darin vor. Real kommen
+        ungetaktete Requests dazu: Klicks auf noch nicht geladene Fächer,
+        Liga-Wechsel, die Abrufe direkt nach dem Programmstart. Die füllen
+        dasselbe Fenster mit, der Takt zählt unbeirrt weiter — und seine
+        Restmarge von genau EINEM Treffer ist sofort aufgebraucht (real
+        beobachtet 2026-07-30: 18 ungetaktete Requests in den ersten 55s
+        nach dem Start, danach kletterte der Takt schnurstracks bis 29/30
+        und löste 289s Zwangspause aus, FALLSTRICKE #47).
+
+        Deshalb zusätzlich diese harte Obergrenze: Der Takt darf das
+        Fenster höchstens bis ``PACING_FILL_LIMIT`` der Bremsschwelle
+        füllen und pausiert darüber, bis GGGs Zähler wieder sinkt. Ein
+        bloß proportionales Ausbremsen genügt nicht — in den ersten
+        ``window_s`` nach dem Start fällt überhaupt nichts heraus (GGG
+        senkt blockweise, §RateLimitRule), der Zähler erreichte die
+        Schwelle also auch langsam getaktet unweigerlich.
+
+        Als Anteil statt als feste Reserve formuliert, damit auch knappe
+        Kontingente sinnvoll bleiben: bei "5 pro 300s" ergäbe ein fester
+        Abzug von 3 eine Obergrenze von 1, der Takt käme nie zum Zug.
+        """
+        with self._lock:
+            state = self._policies.get(policy_name or self._last_policy)
+            if state is None:
+                return False
+            self._decay_expired_rules(state)
+            return any(rule.current >= (rule.max_hits - SAFETY_MARGIN) * PACING_FILL_LIMIT
+                       for rule in state.rules.values())
+
     def snapshot(self) -> tuple[str, list[dict], float]:
         """Aktueller Anzeige-Stand der zuletzt benutzten Policy, ohne dafür
         einen echten Request auszulösen — fürs periodische UI-Polling
@@ -478,39 +386,9 @@ class RateLimitManager:
                 return self._last_policy, [], 0.0
             self._decay_expired_rules(state)
             wait = max((r.active_lock_s for r in state.rules.values()), default=0.0)
+            now = self._now()
             return (self._last_policy,
-                    state.display_snapshot(self._now(), self._started_at), wait)
-
-    def window_coverage(self) -> tuple[float, float]:
-        """Wie weit deckt unsere eigene Messung das Rate-Limit-Fenster ab?
-
-        Rückgabe ``(anteil, restsekunden)`` — ``anteil`` 0.0…1.0, ``rest``
-        die Sekunden bis zur vollen Abdeckung (0.0, sobald erreicht).
-
-        Hintergrund: GGGs Zähler überlebt unseren Prozess. Direkt nach dem
-        Start meldet der Header deshalb Treffer, die eine FRÜHERE Sitzung
-        (oder ein anderes Tool) verursacht hat — für die kennen wir keine
-        Zeitpunkte und müssen in der Anzeige schätzen
-        (§PolicyState.display_snapshot). Sobald diese Instanz aber ein
-        volles Fenster lang läuft, kann kein Treffer im Fenster mehr aus
-        der Zeit davor stammen: ab da ist die Anzeige exakt.
-
-        Maßgeblich ist das LÄNGSTE Fenster der aktuellen Policy (bei
-        "15/15s + 30/300s" also 300s) — das kürzere ist immer vorher fertig.
-        Ohne bekannte Policy gibt es noch nichts zu wissen: 0.0.
-
-        Achtung, die Abdeckung sagt nichts über FREMDEN Traffic: läuft
-        parallel ein anderes Tool auf demselben Account, bleiben dessen
-        Treffer dauerhaft unbekannt, auch bei Abdeckung 1.0.
-        """
-        with self._lock:
-            state = self._policies.get(self._last_policy)
-            longest = max((r.window_s for r in state.rules.values()),
-                          default=0) if state else 0
-            if longest <= 0:
-                return 0.0, 0.0
-            lifetime = self._now() - self._started_at
-            return min(1.0, lifetime / longest), max(0.0, longest - lifetime)
+                    [r.snapshot(now) for r in state.rules.values()], wait)
 
     def register_penalty(self, retry_after_s: float, policy_name: str | None = None) -> None:
         """HTTP 429 trotz Vorsicht: Sperre aus Retry-After übernehmen."""
@@ -529,6 +407,6 @@ class RateLimitManager:
             return
         with self._lock:
             state = self._policies.get(policy_name)
-            snap = (state.display_snapshot(self._now(), self._started_at)
-                    if state else [])
+            now = self._now()
+            snap = [r.snapshot(now) for r in state.rules.values()] if state else []
         self._callback(policy_name, snap, wait_remaining)
