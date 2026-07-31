@@ -68,6 +68,17 @@ nach [SemVer](https://semver.org/lang/de/).
 
 ### Hinzugefügt
 
+- Doppelklick auf ein Item öffnet eine vergrößerte Ansicht: großes Icon
+  und der vollständige Property-/Mod-Text ohne die Zeilen-Kürzung des
+  kompakten Detail-Panels. Bei Divination Cards zeigt sie das echte
+  Karten-Artwork (GGGs eigenes CDN) statt des für jede Karte identischen
+  generischen Icons aus der Stash-API, mit einem dekorativen
+  Pergament-Rahmen angelehnt an die bekannte Karten-Optik.
+- Doppelklick auf einen Charakter öffnet eine Paperdoll: Ausrüstung als
+  Puppenlayout (Helm, Waffen, Rüstung, Ringe, Gürtel, Handschuhe, Stiefel,
+  Flaschen, ggf. Waffentausch-Set/Trinket) statt flacher Tabellenzeilen,
+  inklusive Liste der Jewels im Passiv-Baum. Klick auf einen Slot zeigt das
+  Item im Detail-Panel.
 - Item-Tabelle startet jetzt voreingestellt aufsteigend nach Wert sortiert
   statt in roher API-Reihenfolge — Items mit unbekanntem oder geringem
   Preis ("wahrscheinlich Schrott") gruppieren sich dadurch von selbst oben.

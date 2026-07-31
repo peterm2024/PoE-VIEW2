@@ -1417,6 +1417,156 @@ sinnvoll (Chaos-Werte lassen sich aufaddieren, Stack-Größen
 unterschiedlicher Items nicht) — sie erscheint deshalb auch bei
 gemischten Treffern, nicht nur bei einheitlichem Item-Namen.
 
+### 4.15 Externe Tools per Rechtsklick (`ui/external_tools.py`)
+
+Rechtsklick auf eine Item-Zeile öffnet ein Kontextmenü mit Links zu
+externen Nachschlage-Tools (ToDo.md: "andere Tools per Rechtsklick
+anbinden?", Peter 2026-07-30). Die reine URL-Erzeugung sitzt bewusst in
+einem eigenen, Qt-freien Modul (`external_tools.py`) —
+`MainWindow._build_item_tools_menu(item)` verkabelt sie nur noch an
+`QDesktopServices.openUrl`. Diese Trennung war auch für die Tests nötig:
+`QMenu.exec()` öffnet eine blockierende Nested-Event-Loop und lässt sich
+nicht sinnvoll direkt aufrufen, `_build_item_tools_menu()` dagegen liefert
+das fertige `QMenu`-Objekt ohne es anzuzeigen.
+
+Zwei Ziele, immer verfügbar:
+
+- **PoEDB** (`poedb.tw/us/<Name>`) und **PoE Wiki**
+  (`poewiki.net/wiki/<Name>`) — beide MediaWiki-artig, Leerzeichen werden
+  zu Unterstrichen, Original-Schreibweise (inkl. Apostrophe) bleibt
+  erhalten. `item.display_name` (Unique-/Anzeigename, sonst Base) trifft
+  in beiden Fällen die richtige Wiki-Seite. Für jedes Item verfügbar.
+
+Ein drittes Ziel, nur unter einer Bedingung:
+
+- **poe.ninja** — NUR für Currency/Fragmente (`frameType == 5`): das ist
+  das einzige Deep-Link-Schema, das real bestätigt ist
+  (`https://poe.ninja/poe1/economy/<liga>/currency/<item>`, von Peter am
+  echten Link `.../allflame/currency/hinekoras-lock` verifiziert,
+  2026-07-30). Die Liga wird genauso wie der Item-Name klein geschrieben,
+  Satzzeichen entfernt, Leerzeichen zu Bindestrichen (`"Hinekora's Lock"`
+  → `"hinekoras-lock"`, NICHT `"hinekora-s-lock"` — das Apostroph
+  verschwindet ersatzlos). Für andere Kategorien (Uniques, Gems, …) ist
+  das Website-URL-Schema unbestätigt; lieber kein Eintrag im Menü als ein
+  Link, der ins Leere führt.
+
+Ein viertes, geplantes Ziel (**Craft of Exile**) wurde probeweise gebaut
+und wieder entfernt: CoE lehnt einen Item-Import ohne "Advanced mod
+descriptions" (Tag-Kopfzeile pro Mod plus Wertspanne statt Wälzwert, z. B.
+`+20(20-30)%` statt `+29%`) komplett ab, live gegen den echten CoE-Import
+bestätigt. Diese Daten (Mod-ID/Tier/Spannen) liefert GGGs API nachweislich
+nie — echte Stash-Cache-Dumps geprüft, kein Item trägt je ein
+"extended"-Feld dafür. Ohne externe Mod-Datenbank (z. B. RePoE) ist der
+Import dauerhaft kaputt, nicht nur ungenau; Peters Entscheidung war daher,
+den Menüpunkt komplett zu entfernen statt einen wissentlich fehlschlagenden
+Import anzubieten. Siehe FALLSTRICKE #50.
+
+### 4.16 Charakter-Paperdoll (`ui/paperdoll.py`)
+
+Doppelklick auf einen Charakter (`CharacterList.character_paperdoll_requested`)
+öffnet ein separates, nicht-modales Fenster mit der Ausrüstung als
+Puppenlayout statt als flache Tabellenzeilen (ToDo.md: "Doppelklick auf
+einen Char 'beleuchtet' diesen", Peter 2026-07-31). Reine Anzeige bereits
+geladener Daten — `PaperdollDialog` bekommt Items direkt übergeben, kein
+eigener Netzzugriff, kein Wissen über Worker/Icon-Cache (Icons kommen über
+einen injizierten `pixmap_for`-Callback, üblicherweise
+`MainWindow.table_model.pixmap_for`).
+
+Zehn feste Kern-Slots (Helm, Waffe, Amulett, Zweithand, Rüstung, 2× Ring,
+Gürtel, Handschuhe, Stiefel) nach GGGs realen `inventoryId`-Werten
+(Peters Stash-Cache geprüft, 2026-07-31 — **"Helm" nicht "Helmet"**,
+**"Offhand"/"Offhand2" nicht "Shield"**). Leere Slots bleiben als
+deaktivierter Platzhalter-Button sichtbar (kein leeres Loch im Layout).
+Zusätzlich, nur wenn tatsächlich vorhanden:
+
+- **Flaschen** (`inventoryId == "Flask"`, alle fünf tragen denselben Wert
+  — die Reihenfolge kommt aus der `x`-Koordinate, 0–4).
+- **Waffentausch-Set** (`Weapon2`/`Offhand2`) und **Trinket** (Ritual-/
+  Necropolis-Liga-Feature) — nicht jeder Charakter hat beides.
+- **Jewels im Passiv-Baum** (`PassiveJewels`) als reine Namensliste, nicht
+  als Doll-Slot: es sind potenziell Dutzende, ihre `x`-Koordinate ist eine
+  Position im Passiv-Baum, keine sinnvolle Sortierung fürs Layout.
+
+Klick auf einen belegten Slot zeigt das Item im eingebetteten `ItemDetail`
+(demselben Widget, das auch die Haupttabelle nutzt) — kein Duplikat der
+Detail-Darstellung.
+
+Doppelklick-Timing: `_on_character_paperdoll_requested` öffnet sofort bei
+Cache-Treffer. Ohne Cache-Treffer merkt sich `MainWindow` den Charakter in
+`_paperdoll_pending_char` — der vorangehende Einzelklick derselben
+Doppelklick-Sequenz hat über `_on_character_selected` bereits einen
+`FetchCharacterItemsJob` ausgelöst, `_on_character_items` öffnet die
+Paperdoll nach, sobald das Ergebnis eintrifft. Dieser Check läuft bewusst
+VOR dem `name != self._current_character_name`-Ausstieg: der Doppelklick
+galt dem angeklickten Charakter, unabhängig davon, ob die Auswahl bis zum
+Eintreffen der Daten weitergesprungen ist.
+
+Bewusst NICHT im Doll: `MainInventory`-Items (der Rucksack) — die zeigt
+die Haupttabelle bereits beim einfachen Klick auf den Charakter, ein
+Duplikat in der Paperdoll hätte keinen Mehrwert. "Beleuchten" heißt hier
+nur die AUSRÜSTUNG.
+
+### 4.17 Vergrößerte Item-Ansicht (`ui/item_zoom.py`)
+
+Doppelklick auf eine Zeile der Item-Tabelle (`table.doubleClicked`, Qt-
+eigenes Signal, keine eigene Mouse-Event-Behandlung nötig) öffnet
+`ItemZoomDialog`: großes Icon statt der 64px im kompakten `ItemDetail`,
+und der VOLLSTÄNDIGE Mod-/Property-Text ohne dessen `lines[:12]`-Kürzung —
+genau das ist der Zweck des Fensters, eine erneute Kürzung wäre sinnlos
+(ToDo.md: "Doppelklick auf ein Item 'beleuchtet' dies", Peter 2026-07-31).
+
+Das Icon skaliert um einen FESTEN Faktor (`_ZOOM_FACTOR = 2`, also 200 %
+der Originalgröße) statt auf eine feste Box ODER die Fensterbreite — Peter
+probierte die Fensterbreiten-Variante zuerst live aus ("das ging schief"):
+normale, kleine Item-Icons wurden dabei auf hunderte Pixel aufgeblasen und
+wirkten verpixelt. Der erste feste Faktor (300 %) war Peter dann beim
+Live-Test noch zu groß, 200 % ist der aktuelle Stand (Peter, 2026-07-31).
+Ein fester Faktor auf die tatsächliche Originalgröße bleibt für jedes
+Icon proportional maßvoll — bei Divination-Card-Artwork (~237×170px)
+ergibt das ~474×340px, deutlich größer als das generische 64px-Icon, ohne
+zu verzerren (`Qt.AspectRatioMode.KeepAspectRatio` sichert das zusätzlich
+ab). Reagiert bewusst NICHT mehr auf Fenstergrößenänderungen.
+
+Zwei Teile der ursprünglichen Idee sind NICHT enthalten, aus denselben
+Datengründen wie beim Craft-of-Exile-Rückzug (FALLSTRICKE #50):
+
+- **Tier-Level/Stat-Wertebereiche** ("Range der Stats (Balken)", T0/T1/T2)
+  bräuchten Mod-ID/Tier/Spannen-Rohdaten, die GGGs API nachweislich nie
+  liefert.
+- **Beliebtheit als Crafting-Basis / Build-Nutzung** bräuchte eine neue,
+  eigenständige Anbindung an poe.ninjas Build-Suche — der bestehende
+  `api/ninja.py`-Client holt ausschließlich Preise, keine Build-Daten.
+
+Beide bleiben als zurückgestellte Ideen in ToDo.md vermerkt.
+
+**Divination Cards (frameType 6):** GGGs Stash-API liefert für JEDE
+Div-Card dasselbe generische Icon (`2DItems/Divination/InventoryIcon.png`
+— real geprüft an Peters Stash-Cache, alle acht dort vorkommenden Karten
+trugen identisch dieselbe URL), das wäre in dieser vergrößerten Ansicht
+wertlos. `_on_table_row_double_clicked` fordert deshalb zusätzlich das
+echte Artwork an (`external_tools.divination_card_art_url`, GGGs eigenes
+CDN `web.poecdn.com/image/divination-card/<Name ohne Leerzeichen>.png`,
+live an zehn echten PoEDB-Kartenseiten verifiziert, FALLSTRICKE #52).
+Cache-Treffer (`icon_cache.load`) aktualisieren das Icon sofort synchron,
+sonst läuft der Download wie jedes andere Item-Icon über
+`FetchIconJob`/`icon_loaded` — `MainWindow._pending_card_art` merkt sich
+dafür (URL, Ziel-Dialog), `_on_icon` löst es beim Eintreffen auf. Da
+`web.poecdn.com` GGGs eigenes CDN ist (nicht PoEDB/Wiki/poe.ninja selbst),
+gilt die "Seitenbetreiber fragen"-Vorsicht der anderen drei Rechtsklick-
+Tools hier nicht.
+
+**Wichtig, von Peter am echten Ergebnis geprüft (2026-07-31):** Diese URL
+liefert NUR das bloße Illustrations-Panel (querformatig, ~237×170px) —
+KEINEN vollständigen Karten-Look mit Pergament-Rahmen, Titel-Schriftrolle,
+Tier-Box oder Flavour-Text (das ist eine eigene, von Wikis komponierte
+Darstellung, kein einzelnes GGG-Asset). Peter fand über die Wiki-Seite
+eine solche Voll-Karten-Ansicht als optische Referenz; Text (Flavour,
+Tier, Stack) käme ohnehin nicht von GGG und ist laut Peter "nicht so
+wichtig" — nur ein rein dekorativer Rahmen wurde umgesetzt
+(`ItemZoomDialog._build_card_frame`, Qt-Stylesheet: Pergament-farbenes
+Titel-Banner um `self._name`, dunkler umrandeter Rahmen um Titel+Icon).
+Reine Optik, keine neuen Daten — nur bei `frameType == 6` aktiv.
+
 ---
 
 ## 5. UI-Konzept (Oberflächenvorschlag)

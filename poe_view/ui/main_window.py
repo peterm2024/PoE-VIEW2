@@ -11,8 +11,8 @@ import logging
 import time
 from datetime import datetime, timedelta, timezone
 
-from PySide6.QtCore import QSettings, Qt, QTimer, Signal
-from PySide6.QtGui import QAction, QMouseEvent, QPixmap
+from PySide6.QtCore import QSettings, Qt, QTimer, QUrl, Signal
+from PySide6.QtGui import QAction, QDesktopServices, QMouseEvent, QPixmap
 from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox,
                                QFileDialog, QLabel, QLineEdit, QMainWindow,
                                QMenu, QMessageBox, QProgressBar,
@@ -24,7 +24,7 @@ from poe_view import __version__, config
 from poe_view.api.models import (Character, Item, StashTab,
                                  dominant_category, is_ggg_suffix)
 from poe_view.api.ninja import PriceIndex
-from poe_view.services import data_cache, price_cache
+from poe_view.services import data_cache, icon_cache, price_cache
 from poe_view.services.api_worker import (ApiWorker, BootstrapJob,
                                           BulkProgress, FetchAllItemsJob,
                                           FetchCharacterItemsJob,
@@ -34,6 +34,7 @@ from poe_view.services.api_worker import (ApiWorker, BootstrapJob,
                                           FetchStashListJob, LoginJob,
                                           LogoutJob)
 from poe_view.services.csv_export import export_items, sanitize_filename
+from poe_view.ui import external_tools
 from poe_view.ui.character_list import CharacterList
 from poe_view.ui.item_detail import ItemDetail
 from poe_view.ui.item_table import (COLUMNS, ICON_COL, MODS_COL,
@@ -41,6 +42,8 @@ from poe_view.ui.item_table import (COLUMNS, ICON_COL, MODS_COL,
                                     ItemFilterProxy, ItemTableModel,
                                     compile_search, format_chaos_value,
                                     matches_search)
+from poe_view.ui.item_zoom import ItemZoomDialog
+from poe_view.ui.paperdoll import PaperdollDialog
 from poe_view.ui.rate_limit_dashboard import RateLimitDashboard
 from poe_view.ui.raw_data_viewer import RawDataViewer
 from poe_view.ui.stash_tree import StashTree
@@ -182,6 +185,13 @@ class MainWindow(QMainWindow):
         self._character_items: dict[str, list[Item]] = {}       # Charaktername → Ausrüstung+Inventar
         self._character_items_loaded: dict[str, str] = {}       # Charaktername → ISO-Zeitstempel
         self._current_character_name: str | None = None         # gerade angezeigter Charakter
+        # Doppelklick auf einen Char ohne Cache-Treffer: die Paperdoll öffnet
+        # sich erst, sobald FetchCharacterItemsJob (vom vorangehenden
+        # Einzelklick ausgelöst, siehe _on_character_selected) fertig ist.
+        self._paperdoll_pending_char: str | None = None
+        # Divination-Card-Artwork, das noch über FetchIconJob unterwegs ist
+        # (URL, Ziel-ItemZoomDialog) — siehe _request_card_art/_on_icon.
+        self._pending_card_art: tuple[str, ItemZoomDialog] | None = None
         self._worker_busy = False
         self._price_indexes: dict[str, PriceIndex] = {}  # Liga → PriceIndex (Cache-Hit oder Worker-Ergebnis)
         # Startwert True: der bestehende `_current_league`-Guard blockiert den
@@ -405,6 +415,8 @@ class MainWindow(QMainWindow):
         self.character_list = CharacterList()
         self.character_list.character_selected.connect(self._on_character_selected)
         self.character_list.character_refresh_requested.connect(self._on_character_refresh)
+        self.character_list.character_paperdoll_requested.connect(
+            self._on_character_paperdoll_requested)
         self.character_list.setMaximumHeight(220)
 
         stash_label = QLabel("Stash")
@@ -459,6 +471,13 @@ class MainWindow(QMainWindow):
             self.table.setColumnWidth(COLUMNS.index(name), 58)
         self.table.setColumnWidth(MODS_COL, 320)
         self.table.selectionModel().currentRowChanged.connect(self._on_row_selected)
+        # Rechtsklick auf eine Zeile: externe Tools zum markierten Item
+        # (PoEDB, Wiki, poe.ninja — ToDo.md, Peter 2026-07-30).
+        self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.table.customContextMenuRequested.connect(self._on_table_row_menu)
+        # Doppelklick auf eine Zeile: vergrößerte Item-Ansicht (ToDo.md:
+        # "Doppelklick auf ein Item 'beleuchtet' dies", Peter 2026-07-31).
+        self.table.doubleClicked.connect(self._on_table_row_double_clicked)
         # Spalten per Rechtsklick auf den Header an-/abwählbar;
         # die Wahl überlebt den Neustart (ui-settings.ini im APP_DATA_DIR).
         table_header = self.table.horizontalHeader()
@@ -1824,9 +1843,35 @@ class MainWindow(QMainWindow):
             # _count_silent_refresh.
             self._refresh_mode_policy = self.worker.rate_limiter.last_policy
             self._note_refresh_mode_job_done()
+        if name == self._paperdoll_pending_char:
+            # Unabhängig von _current_character_name: der Doppelklick galt
+            # genau diesem Charakter, auch wenn die Auswahl inzwischen
+            # weitergesprungen ist.
+            self._paperdoll_pending_char = None
+            self._open_paperdoll(name, items)
         if name != self._current_character_name:
             return
         self._show_character_items(name, items)
+
+    def _on_character_paperdoll_requested(self, char: Character) -> None:
+        """Doppelklick auf einen Charakter (ToDo.md: "Doppelklick auf einen
+        Char 'beleuchtet' diesen"). Der vorangehende Einzelklick (Teil
+        derselben Doppelklick-Sequenz) hat _on_character_selected bereits
+        ausgelöst — bei fehlendem Cache wartet die Paperdoll auf dessen
+        Ergebnis (siehe _on_character_items)."""
+        cached = self._character_items.get(char.name)
+        if cached is not None:
+            self._open_paperdoll(char.name, cached)
+        else:
+            self._paperdoll_pending_char = char.name
+
+    def _open_paperdoll(self, name: str, items: list[Item]) -> None:
+        char = next((c for c in self._all_characters if c.name == name), None)
+        if char is None:
+            return
+        self._paperdoll_dialog = PaperdollDialog(char, items, self.table_model.pixmap_for,
+                                                 parent=self)
+        self._paperdoll_dialog.show()
 
     def _show_character_items(self, name: str, items: list[Item]) -> None:
         """Slot (``inventoryId``, z. B. "Weapon"/"BodyArmour"/"MainInventory")
@@ -1844,8 +1889,13 @@ class MainWindow(QMainWindow):
 
     def _on_icon(self, url: str, data: bytes) -> None:
         pixmap = QPixmap()
-        if pixmap.loadFromData(data):
-            self.table_model.set_icon(url, pixmap)
+        if not pixmap.loadFromData(data):
+            return
+        self.table_model.set_icon(url, pixmap)
+        if self._pending_card_art and self._pending_card_art[0] == url:
+            _, dialog = self._pending_card_art
+            self._pending_card_art = None
+            dialog.set_icon_pixmap(pixmap)
 
     def _on_row_selected(self, current, _previous) -> None:
         source_idx = self.proxy.mapToSource(current)
@@ -1860,6 +1910,71 @@ class MainWindow(QMainWindow):
         stash_id = self.table_model.stash_id_at(source_idx.row())
         if stash_id is not None:
             self.tree.highlight_stash(stash_id)
+
+    def _on_table_row_double_clicked(self, index) -> None:
+        """Doppelklick auf ein Item: vergrößerte Ansicht (ToDo.md, Peter
+        2026-07-31) — dieselben Daten wie das kompakte Detail-Panel, nur
+        ohne dessen Zeilen-Kürzung und mit größerem Icon."""
+        source_idx = self.proxy.mapToSource(index)
+        item = self.table_model.item_at(source_idx.row())
+        if item is None:
+            return
+        self._item_zoom_dialog = ItemZoomDialog(item, self.table_model.pixmap_for(item),
+                                                parent=self)
+        self._item_zoom_dialog.show()
+        if item.frameType == 6:  # Divination Card — echtes Artwork nachladen
+            self._request_card_art(item, self._item_zoom_dialog)
+
+    def _request_card_art(self, item: Item, dialog: ItemZoomDialog) -> None:
+        """Ersetzt das generische (für jede Div-Card identische) Icon durch
+        das echte Karten-Artwork (FALLSTRICKE #52). Cache-Treffer sind ein
+        schneller, synchroner Datei-Read (wie an anderen Stellen auch),
+        sonst läuft der Download wie jedes andere Icon über den Worker."""
+        url = external_tools.divination_card_art_url(item)
+        if url is None:
+            return
+        cached = icon_cache.load(url)
+        if cached is not None:
+            pixmap = QPixmap()
+            if pixmap.loadFromData(cached):
+                dialog.set_icon_pixmap(pixmap)
+            return
+        self._pending_card_art = (url, dialog)
+        self.worker.submit(FetchIconJob(url))
+
+    def _on_table_row_menu(self, pos) -> None:
+        """Rechtsklick auf ein Item: externe Tools dazu öffnen (ToDo.md,
+        Peter 2026-07-30)."""
+        index = self.table.indexAt(pos)
+        if not index.isValid():
+            return
+        self.table.selectRow(index.row())
+        source_idx = self.proxy.mapToSource(index)
+        item = self.table_model.item_at(source_idx.row())
+        if item is None:
+            return
+        menu = self._build_item_tools_menu(item)
+        menu.exec(self.table.viewport().mapToGlobal(pos))
+
+    def _build_item_tools_menu(self, item: Item) -> QMenu:
+        """Losgelöst von ``_on_table_row_menu``, damit Tests die
+        Menü-Zusammenstellung prüfen können, ohne ``QMenu.exec()`` (blockiert
+        ohne echte Nutzerinteraktion) auszulösen. poe.ninja nur für Currency
+        (einziges real bestätigte Deep-Link-Schema, siehe
+        external_tools.ninja_url). Ein vierter Eintrag (Craft of Exile)
+        wurde probeweise gebaut und wieder entfernt — CoE lehnt den Import
+        ohne Mod-Tag/Tier-Daten komplett ab, die GGGs API nicht liefert,
+        siehe FALLSTRICKE #50."""
+        menu = QMenu(self.table)
+        menu.addAction("PoEDB öffnen",
+                       lambda: QDesktopServices.openUrl(QUrl(external_tools.poedb_url(item))))
+        menu.addAction("PoE Wiki öffnen",
+                       lambda: QDesktopServices.openUrl(QUrl(external_tools.wiki_url(item))))
+        ninja_link = external_tools.ninja_url(item, self._current_league)
+        if ninja_link:
+            menu.addAction("poe.ninja öffnen",
+                           lambda: QDesktopServices.openUrl(QUrl(ninja_link)))
+        return menu
 
     def _on_status(self, text: str) -> None:
         """Reiner Verlaufstext — Busy-Zustand kommt separat über busy_changed

@@ -17,10 +17,12 @@ _DATA_ROLE = Qt.ItemDataRole.UserRole
 class CharacterList(QListWidget):
     character_selected = Signal(object)           # Character
     character_refresh_requested = Signal(object)   # Character — Rechtsklick "Aktualisieren"
+    character_paperdoll_requested = Signal(object)  # Character — Doppelklick
 
     def __init__(self) -> None:
         super().__init__()
         self.itemClicked.connect(self._on_click)
+        self.itemDoubleClicked.connect(self._on_double_click)
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.customContextMenuRequested.connect(self._on_context_menu)
 
@@ -35,6 +37,9 @@ class CharacterList(QListWidget):
 
     def _on_click(self, item: QListWidgetItem) -> None:
         self.character_selected.emit(item.data(_DATA_ROLE))
+
+    def _on_double_click(self, item: QListWidgetItem) -> None:
+        self.character_paperdoll_requested.emit(item.data(_DATA_ROLE))
 
     def _on_context_menu(self, pos) -> None:
         """Analog StashTree._on_context_menu: manuelles Neuladen, da es (anders

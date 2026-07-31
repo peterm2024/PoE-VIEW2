@@ -327,6 +327,65 @@ def test_on_character_items_ignores_late_result_for_deselected_character(qapp) -
     win.worker.wait(5000)
 
 
+# --- Charakter-Paperdoll: Doppelklick (ToDo.md, Peter 2026-07-31) ---
+
+def test_paperdoll_opens_immediately_for_a_cached_character(qapp) -> None:
+    win = MainWindow()
+    char = make_char("WitchOfPeter", "Standard")
+    win._all_characters = [char]
+    win._character_items["WitchOfPeter"] = [
+        Item.model_validate({"typeLine": "Sword", "frameType": 2, "inventoryId": "Weapon"})]
+
+    win._on_character_paperdoll_requested(char)
+
+    assert win._paperdoll_dialog.windowTitle() == "WitchOfPeter — Witch 50"
+    assert win._paperdoll_pending_char is None
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_paperdoll_waits_for_the_fetch_when_not_cached(qapp, monkeypatch) -> None:
+    win = MainWindow()
+    char = make_char("WitchOfPeter", "Standard")
+    win._all_characters = [char]
+    monkeypatch.setattr(win.worker, "submit", lambda job: None)
+
+    win._on_character_paperdoll_requested(char)
+    assert win._paperdoll_pending_char == "WitchOfPeter"
+    assert not hasattr(win, "_paperdoll_dialog")
+
+    weapon = Item.model_validate({"typeLine": "Sword", "frameType": 2, "inventoryId": "Weapon"})
+    win._on_character_items("WitchOfPeter", [weapon], False)
+
+    assert win._paperdoll_pending_char is None
+    assert win._paperdoll_dialog.windowTitle() == "WitchOfPeter — Witch 50"
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_paperdoll_pending_fires_even_if_selection_moved_on(qapp) -> None:
+    """Der Doppelklick galt WitchOfPeter — auch wenn der Nutzer inzwischen
+    einen anderen Charakter angeklickt hat, bevor die Daten eintrafen, soll
+    die Paperdoll trotzdem für den ursprünglich angeklickten Charakter
+    aufgehen (unabhängig von _current_character_name, das die Tabellen-
+    Anzeige steuert)."""
+    win = MainWindow()
+    char = make_char("WitchOfPeter", "Standard")
+    win._all_characters = [char]
+    win._paperdoll_pending_char = "WitchOfPeter"
+    win._current_character_name = "SomeoneElse"
+
+    weapon = Item.model_validate({"typeLine": "Sword", "frameType": 2, "inventoryId": "Weapon"})
+    win._on_character_items("WitchOfPeter", [weapon], False)
+
+    assert win._paperdoll_dialog.windowTitle() == "WitchOfPeter — Witch 50"
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
 def test_character_refresh_bypasses_cache_and_switches_view(qapp, monkeypatch) -> None:
     """Rechtsklick "Aktualisieren" — bewusst AM Cache vorbei, analog
     _on_stash_refresh, und schaltet die Ansicht auf diesen Charakter um."""
@@ -3895,6 +3954,169 @@ def test_bulk_progress_keeps_both_counts_and_the_eta_in_the_label(qapp, monkeypa
     assert "tab 2 of 2" in text
     assert "about 1 h 6 min remaining" in text
     assert win._bulk_dialog.value() == 3
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+# --- Rechtsklick-Menü: externe Tools (ToDo.md, Peter 2026-07-30) ---
+
+def test_row_context_menu_returns_early_for_an_empty_click(qapp) -> None:
+    """Rechtsklick unterhalb der letzten Zeile (leere Tabelle) darf kein
+    Menü öffnen bzw. bei fehlendem Item nicht abstürzen — das ist der
+    einzige Teil von _on_table_row_menu, der ohne QMenu.exec() (blockiert
+    ohne echte Nutzerinteraktion) direkt testbar ist."""
+    win = MainWindow()
+    win._on_table_row_menu(win.table.rect().center())  # keine Items geladen
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_item_tools_menu_offers_ninja_link_only_for_currency(qapp) -> None:
+    win = MainWindow()
+    win._current_league = "Standard"
+    currency = Item.model_validate({"typeLine": "Chaos Orb", "baseType": "Chaos Orb", "frameType": 5})
+    labels = [a.text() for a in win._build_item_tools_menu(currency).actions()]
+    assert any("poe.ninja" in l for l in labels)
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_item_tools_menu_has_no_ninja_link_for_a_rare(qapp) -> None:
+    win = MainWindow()
+    win._current_league = "Standard"
+    rare = Item.model_validate({"typeLine": "Vaal Regalia", "baseType": "Vaal Regalia", "frameType": 2})
+    labels = [a.text() for a in win._build_item_tools_menu(rare).actions()]
+    assert not any("poe.ninja" in l for l in labels)
+    assert any("PoEDB" in l for l in labels)
+    assert any("Wiki" in l for l in labels)
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+# --- Item-Doppelklick: vergrößerte Ansicht (ToDo.md, Peter 2026-07-31) ---
+
+def test_double_click_on_a_row_opens_the_zoom_dialog(qapp) -> None:
+    win = MainWindow()
+    win.table_model.set_items([Item.model_validate({"typeLine": "Chaos Orb", "frameType": 5})])
+    index = win.proxy.index(0, 0)
+
+    win._on_table_row_double_clicked(index)
+
+    assert win._item_zoom_dialog.windowTitle() == "Chaos Orb"
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_double_click_with_no_item_at_the_index_does_nothing(qapp) -> None:
+    win = MainWindow()  # leere Tabelle
+    win._on_table_row_double_clicked(win.proxy.index(0, 0))  # ungültiger Index
+    assert not hasattr(win, "_item_zoom_dialog")
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def _fake_png_bytes() -> bytes:
+    """Echte, minimale PNG-Bytes für QPixmap.loadFromData() — kein Mocken
+    von Qt-internem Bildparsing nötig."""
+    from PySide6.QtCore import QBuffer, QIODevice
+    from PySide6.QtGui import QPixmap
+
+    pixmap = QPixmap(2, 2)
+    pixmap.fill()
+    buffer = QBuffer()
+    buffer.open(QIODevice.OpenModeFlag.WriteOnly)
+    pixmap.save(buffer, "PNG")
+    return bytes(buffer.data())
+
+
+def test_double_click_on_a_divination_card_fetches_its_real_artwork(qapp, monkeypatch) -> None:
+    """GGGs API liefert für jede Div-Card dasselbe generische Icon
+    (FALLSTRICKE #52) — der Doppelklick muss deshalb zusätzlich das echte
+    Artwork über den Worker anfordern."""
+    win = MainWindow()
+    monkeypatch.setattr("poe_view.ui.main_window.icon_cache.load", lambda url: None)
+    submitted = []
+    monkeypatch.setattr(win.worker, "submit", lambda job: submitted.append(job))
+    win.table_model.set_items([Item.model_validate({"typeLine": "The Doctor", "frameType": 6})])
+
+    win._on_table_row_double_clicked(win.proxy.index(0, 0))
+
+    assert len(submitted) == 1
+    assert submitted[0].url == "https://web.poecdn.com/image/divination-card/TheDoctor.png"
+    assert win._pending_card_art == (submitted[0].url, win._item_zoom_dialog)
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_double_click_on_a_divination_card_uses_a_cached_artwork_immediately(qapp, monkeypatch) -> None:
+    win = MainWindow()
+    monkeypatch.setattr("poe_view.ui.main_window.icon_cache.load", lambda url: _fake_png_bytes())
+    submitted = []
+    monkeypatch.setattr(win.worker, "submit", lambda job: submitted.append(job))
+    win.table_model.set_items([Item.model_validate({"typeLine": "The Doctor", "frameType": 6})])
+
+    win._on_table_row_double_clicked(win.proxy.index(0, 0))
+
+    assert submitted == []  # Cache-Treffer: kein Download nötig
+    assert not win._item_zoom_dialog._icon.pixmap().isNull()
+    assert win._pending_card_art is None
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_double_click_on_a_non_card_item_does_not_fetch_art(qapp, monkeypatch) -> None:
+    win = MainWindow()
+    submitted = []
+    monkeypatch.setattr(win.worker, "submit", lambda job: submitted.append(job))
+    win.table_model.set_items([Item.model_validate({"typeLine": "Chaos Orb", "frameType": 5})])
+
+    win._on_table_row_double_clicked(win.proxy.index(0, 0))
+
+    assert submitted == []
+    assert win._pending_card_art is None
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_on_icon_updates_a_pending_card_art_dialog(qapp) -> None:
+    from poe_view.ui.item_zoom import ItemZoomDialog
+
+    win = MainWindow()
+    card = Item.model_validate({"typeLine": "The Doctor", "frameType": 6})
+    dialog = ItemZoomDialog(card, None, parent=win)
+    url = "https://web.poecdn.com/image/divination-card/TheDoctor.png"
+    win._pending_card_art = (url, dialog)
+
+    win._on_icon(url, _fake_png_bytes())
+
+    assert win._pending_card_art is None
+    assert not dialog._icon.pixmap().isNull()
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_on_icon_ignores_unrelated_urls_for_pending_card_art(qapp) -> None:
+    from poe_view.ui.item_zoom import ItemZoomDialog
+
+    win = MainWindow()
+    card = Item.model_validate({"typeLine": "The Doctor", "frameType": 6})
+    dialog = ItemZoomDialog(card, None, parent=win)
+    url = "https://web.poecdn.com/image/divination-card/TheDoctor.png"
+    win._pending_card_art = (url, dialog)
+
+    win._on_icon("https://web.poecdn.com/some/other/icon.png", _fake_png_bytes())
+
+    assert win._pending_card_art == (url, dialog)  # unverändert
+    assert dialog._icon.pixmap().isNull()  # noch nicht aktualisiert
 
     win.worker.stop()
     win.worker.wait(5000)
