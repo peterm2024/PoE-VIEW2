@@ -1655,16 +1655,23 @@ Konfiguration ist bewusst der erste, einfachere Ausbauschritt.
 ### 4.19 Zonenwechsel-Trigger für den Live-Refresh (`services/zone_watcher.py`)
 
 Peter, 2026-08-01: "Ich habe die Vermutung, dass sich der Stash-Inhalt
-erst aktualisiert, wenn wir die Zone gewechselt haben." Empirisch
-bestätigt (siehe FALLSTRICKE #58): GGGs Stash-API liefert neue Daten
-offenbar erst, nachdem der Server einen Zonenwechsel committet hat —
-Polling dazwischen ändert nichts an der Antwort. `ZoneWatcher`
-(`services/zone_watcher.py`) beobachtet dafür Peters eigene, lokale
-`Client.txt` (PoE schreibt dort bei jedem Zonenwechsel eine Zeile `... :
-You have entered <Zone>.`) und meldet jeden erkannten Wechsel über ein
-Qt-Signal — reines LESEN einer Text-Logdatei, von GGG ausdrücklich
-erlaubt (anders als Speicherzugriffe auf den laufenden Client-Prozess,
-die ein Bann-Risiko wären).
+erst aktualisiert, wenn wir die Zone gewechselt haben." Live beobachtet
+bestätigt: nach einem Zonenwechsel zeigt sich eine Änderung praktisch
+sofort. Ein LÄNGERER Beobachtungszeitraum zeigte aber (FALLSTRICKE #58,
+Nachtrag): der Zonenwechsel ist nicht der EINZIGE Auslöser — GGGs
+Stash-API liefert neue Daten offenbar auch unabhängig davon irgendwann,
+nur deutlich langsamer (Peters Schätzung: "alle 5 Minuten?", nicht exakt
+gemessen), vermutlich ein serverseitiger Cache mit eigener, vom
+Zonenwechsel unabhängiger Ablauffrist. Der Zonenwechsel-Trigger ist daher
+als BESCHLEUNIGER für den häufigen Fall zu verstehen, nicht als Ersatz
+für den bestehenden getakteten Refresh (§4.8) — der bleibt unverändert
+aktiv und deckt weiterhin Sessions ohne Zonenwechsel ab (z. B. lange
+Handwerks-Sessions im Hideout). `ZoneWatcher` (`services/zone_watcher.py`)
+beobachtet dafür Peters eigene, lokale `Client.txt` (PoE schreibt dort
+bei jedem Zonenwechsel eine Zeile `... : You have entered <Zone>.`) und
+meldet jeden erkannten Wechsel über ein Qt-Signal — reines LESEN einer
+Text-Logdatei, von GGG ausdrücklich erlaubt (anders als Speicherzugriffe
+auf den laufenden Client-Prozess, die ein Bann-Risiko wären).
 
 **Ereignisgesteuert statt Polling** (Peters Vorschlag, 2026-08-01: "Wir
 könnten auch den Windows-Watcher benutzen"): `QFileSystemWatcher` nutzt
