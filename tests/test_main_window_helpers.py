@@ -4124,9 +4124,10 @@ def test_settings_dialog_saves_entries_when_accepted(qapp, monkeypatch) -> None:
     # Voller Satz wie ihn der echte Dialog liefert (alle konfigurierbaren
     # Spalten, "Name" hier probeweise ausgeblendet) — kein Teil-Update.
     new_column_config = [(name, name != "Name") for name in CONFIGURABLE_COLUMNS]
+    new_zone_config = (True, r"C:\PoE")
 
     class _FakeDialog:
-        def __init__(self, entries, column_config, parent=None):
+        def __init__(self, entries, column_config, zone_watcher_enabled, zone_watcher_path, parent=None):
             pass
 
         def exec(self):
@@ -4138,10 +4139,14 @@ def test_settings_dialog_saves_entries_when_accepted(qapp, monkeypatch) -> None:
         def result_column_config(self):
             return new_column_config
 
+        def result_zone_watcher_config(self):
+            return new_zone_config
+
     monkeypatch.setattr("poe_view.ui.main_window.SettingsDialog", _FakeDialog)
     win._open_settings_dialog()
     assert win._load_tool_entries() == new_entries
     assert win._load_column_config() == new_column_config
+    assert win._load_zone_watcher_config() == new_zone_config
 
     win.worker.stop()
     win.worker.wait(5000)
@@ -4153,9 +4158,10 @@ def test_settings_dialog_does_not_save_when_cancelled(qapp, monkeypatch) -> None
     win = MainWindow()
     original = win._load_tool_entries()
     original_columns = win._load_column_config()
+    original_zone_config = win._load_zone_watcher_config()
 
     class _FakeDialog:
-        def __init__(self, entries, column_config, parent=None):
+        def __init__(self, entries, column_config, zone_watcher_enabled, zone_watcher_path, parent=None):
             pass
 
         def exec(self):
@@ -4167,13 +4173,14 @@ def test_settings_dialog_does_not_save_when_cancelled(qapp, monkeypatch) -> None
         def result_column_config(self):
             raise AssertionError("result_column_config darf bei Abbruch nicht abgefragt werden")
 
+        def result_zone_watcher_config(self):
+            raise AssertionError("result_zone_watcher_config darf bei Abbruch nicht abgefragt werden")
+
     monkeypatch.setattr("poe_view.ui.main_window.SettingsDialog", _FakeDialog)
     win._open_settings_dialog()
     assert win._load_tool_entries() == original
     assert win._load_column_config() == original_columns
-
-    win.worker.stop()
-    win.worker.wait(5000)
+    assert win._load_zone_watcher_config() == original_zone_config
 
     win.worker.stop()
     win.worker.wait(5000)
@@ -4316,6 +4323,230 @@ def test_window_has_a_minimum_size_that_keeps_the_search_field_visible(qapp) -> 
     win = MainWindow()
     assert win.minimumWidth() == 800
     assert win.minimumHeight() == 600
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+# --- Zonenwechsel-Trigger: gezielter Refresh statt Polling -------------- #
+# --- (Peter, 2026-08-01: "Erst nach Zonenwechsel gibt es einen Refresh") #
+
+def test_zone_watcher_config_persists_across_restart(qapp) -> None:
+    win = MainWindow()
+    win._save_zone_watcher_config(True, r"C:\PoE")
+    win.worker.stop()
+    win.worker.wait(5000)
+
+    win2 = MainWindow()  # "Neustart": liest ui-settings.ini (im Test: tmp_path)
+    assert win2._load_zone_watcher_config() == (True, r"C:\PoE")
+
+    win2.worker.stop()
+    win2.worker.wait(5000)
+
+
+def test_zone_watcher_config_defaults_to_disabled_with_no_stored_value(qapp) -> None:
+    win = MainWindow()
+    assert win._load_zone_watcher_config() == (False, "")
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_apply_zone_watcher_config_does_nothing_when_disabled(qapp) -> None:
+    win = MainWindow()
+    win._apply_zone_watcher_config(False, "irrelevant")
+    assert win._zone_watcher is None
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_apply_zone_watcher_config_does_nothing_for_an_unresolvable_path(qapp) -> None:
+    win = MainWindow()
+    win._apply_zone_watcher_config(True, r"Z:\does\not\exist")
+    assert win._zone_watcher is None
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_apply_zone_watcher_config_starts_a_watcher_for_a_valid_path(qapp, tmp_path) -> None:
+    log = tmp_path / "Client.txt"
+    log.write_text("", encoding="utf-8")
+    win = MainWindow()
+    win._apply_zone_watcher_config(True, str(tmp_path))
+    assert win._zone_watcher is not None
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_reapplying_zone_watcher_config_replaces_the_old_watcher(qapp, tmp_path) -> None:
+    log = tmp_path / "Client.txt"
+    log.write_text("", encoding="utf-8")
+    win = MainWindow()
+    win._apply_zone_watcher_config(True, str(tmp_path))
+    first = win._zone_watcher
+    win._apply_zone_watcher_config(True, str(tmp_path))
+    assert win._zone_watcher is not None
+    assert win._zone_watcher is not first
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def _ready_for_zone_refresh(win) -> None:
+    win._current_league = "Standard"
+    win._live_leagues = {"Standard"}
+    win._logged_in = True
+    win._current_stash_id = "t1"
+    win._current_tab_name = "Tab 1"
+
+
+def test_zone_changed_refreshes_the_currently_open_tab(qapp, monkeypatch) -> None:
+    win = MainWindow()
+    _ready_for_zone_refresh(win)
+    submitted = []
+    monkeypatch.setattr(win.worker, "submit", lambda job: submitted.append(job))
+
+    win._on_zone_changed("The Coast")
+
+    stash_jobs = [j for j in submitted if hasattr(j, "stash_id")]
+    assert len(stash_jobs) == 1
+    assert stash_jobs[0].stash_id == "t1"
+    assert stash_jobs[0].silent is True
+    assert "The Coast" in win._status_msg.text()
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_zone_changed_does_nothing_while_paused(qapp, monkeypatch) -> None:
+    win = MainWindow()
+    _ready_for_zone_refresh(win)
+    win._refresh_mode = "pause"
+    submitted = []
+    monkeypatch.setattr(win.worker, "submit", lambda job: submitted.append(job))
+
+    win._on_zone_changed("The Coast")
+
+    assert submitted == []
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_zone_changed_does_nothing_without_a_login(qapp, monkeypatch) -> None:
+    win = MainWindow()
+    _ready_for_zone_refresh(win)
+    win._logged_in = False
+    submitted = []
+    monkeypatch.setattr(win.worker, "submit", lambda job: submitted.append(job))
+
+    win._on_zone_changed("The Coast")
+
+    assert submitted == []
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_zone_changed_does_nothing_without_a_selected_league(qapp, monkeypatch) -> None:
+    win = MainWindow()
+    _ready_for_zone_refresh(win)
+    win._current_league = ""
+    submitted = []
+    monkeypatch.setattr(win.worker, "submit", lambda job: submitted.append(job))
+
+    win._on_zone_changed("The Coast")
+
+    assert submitted == []
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_zone_changed_does_nothing_for_an_archived_league(qapp, monkeypatch) -> None:
+    win = MainWindow()
+    _ready_for_zone_refresh(win)
+    win._live_leagues = {"SomeOtherLeague"}  # Standard nicht mehr live -> archiviert
+    submitted = []
+    monkeypatch.setattr(win.worker, "submit", lambda job: submitted.append(job))
+
+    win._on_zone_changed("The Coast")
+
+    assert submitted == []
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_zone_changed_does_nothing_while_load_all_tabs_is_running(qapp, monkeypatch) -> None:
+    win = MainWindow()
+    _ready_for_zone_refresh(win)
+    win._bulk_dialog = object()
+    submitted = []
+    monkeypatch.setattr(win.worker, "submit", lambda job: submitted.append(job))
+
+    win._on_zone_changed("The Coast")
+
+    assert submitted == []
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_zone_changed_does_nothing_when_the_rate_limit_window_is_too_full(qapp, monkeypatch) -> None:
+    win = MainWindow()
+    _ready_for_zone_refresh(win)
+    monkeypatch.setattr(win.worker.rate_limiter, "pacing_blocked", lambda *a, **kw: True)
+    submitted = []
+    monkeypatch.setattr(win.worker, "submit", lambda job: submitted.append(job))
+
+    win._on_zone_changed("The Coast")
+
+    assert submitted == []
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_zone_changed_shows_no_status_when_nothing_is_currently_open(qapp, monkeypatch) -> None:
+    win = MainWindow()
+    _ready_for_zone_refresh(win)
+    win._current_stash_id = None
+    win._current_character_name = None
+    win._status_msg.setText("previous status")
+    submitted = []
+    monkeypatch.setattr(win.worker, "submit", lambda job: submitted.append(job))
+
+    win._on_zone_changed("The Coast")
+
+    assert submitted == []
+    assert win._status_msg.text() == "previous status"
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_zone_watcher_end_to_end_triggers_a_refresh(qapp, tmp_path, monkeypatch) -> None:
+    """Volle Kette: Zeile an die beobachtete Datei anhängen, ``check_now()``
+    (statt auf ein echtes Datei-Ereignis zu warten) -> Signal -> Refresh."""
+    log = tmp_path / "Client.txt"
+    log.write_text("", encoding="utf-8")
+    win = MainWindow()
+    _ready_for_zone_refresh(win)
+    win._apply_zone_watcher_config(True, str(tmp_path))
+    submitted = []
+    monkeypatch.setattr(win.worker, "submit", lambda job: submitted.append(job))
+
+    with log.open("a", encoding="utf-8") as f:
+        f.write("2026/08/01 21:44:37 15181671 cffb0658 [INFO Client 18604] "
+               ": You have entered The Coast.\n")
+    win._zone_watcher.check_now()
+
+    stash_jobs = [j for j in submitted if hasattr(j, "stash_id")]
+    assert len(stash_jobs) == 1
 
     win.worker.stop()
     win.worker.wait(5000)

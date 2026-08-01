@@ -26,6 +26,7 @@ from poe_view.api.models import (Character, Item, StashTab,
                                  dominant_category, is_ggg_suffix)
 from poe_view.api.ninja import PriceIndex
 from poe_view.services import data_cache, icon_cache, price_cache
+from poe_view.services.zone_watcher import ZoneWatcher, resolve_client_log_path
 from poe_view.services.api_worker import (ApiWorker, BootstrapJob,
                                           BulkProgress, FetchAllItemsJob,
                                           FetchCharacterItemsJob,
@@ -227,6 +228,7 @@ class MainWindow(QMainWindow):
         # (§_prioritise_selection_in_refresh_mode) — vordrängeln statt sofort feuern.
         self._refresh_mode_priority_id: str | None = None
         self._raw_data_viewer: RawDataViewer | None = None
+        self._zone_watcher: ZoneWatcher | None = None
         self._offline = False  # GGG nicht erreichbar (Wartung am Patchday)
         self._live_leagues: set[str] | None = None  # letzte /account/leagues-Antwort; None = noch unbekannt
         self._restore_cached_data()
@@ -248,6 +250,7 @@ class MainWindow(QMainWindow):
         self._build_ui()
         self._connect_worker()
         self.worker.start()
+        self._apply_zone_watcher_config(*self._load_zone_watcher_config())
 
         self._auto_refresh_timer = QTimer(self)
         self._auto_refresh_timer.setInterval(self.AUTO_REFRESH_INTERVAL_MS)
@@ -2038,13 +2041,62 @@ class MainWindow(QMainWindow):
     def _save_tool_entries(self, entries: list[external_tools.ToolEntry]) -> None:
         self._settings().setValue("external_tools/entries", external_tools.tools_to_json(entries))
 
+    def _load_zone_watcher_config(self) -> tuple[bool, str]:
+        settings = self._settings()
+        enabled = str(settings.value("zone_watcher/enabled", "")).lower() in ("true", "1")
+        path = str(settings.value("zone_watcher/log_path", "") or "")
+        return enabled, path
+
+    def _save_zone_watcher_config(self, enabled: bool, path: str) -> None:
+        settings = self._settings()
+        settings.setValue("zone_watcher/enabled", enabled)
+        settings.setValue("zone_watcher/log_path", path)
+
+    def _apply_zone_watcher_config(self, enabled: bool, path: str) -> None:
+        """Ersetzt einen laufenden Watcher komplett statt ihn umzukonfigurieren
+        — einfacher als ein zweites Update-Codepfad und läuft nur beim
+        Programmstart bzw. nach dem Settings-Dialog, also selten genug,
+        dass der Neuaufbau nicht ins Gewicht fällt."""
+        if self._zone_watcher is not None:
+            self._zone_watcher.setParent(None)
+            self._zone_watcher.deleteLater()
+            self._zone_watcher = None
+        if not enabled:
+            return
+        resolved = resolve_client_log_path(path)
+        if resolved is None:
+            return  # ungültiger/leerer Pfad — Dialog zeigt das schon live an, keine weitere Fehlermeldung nötig
+        self._zone_watcher = ZoneWatcher(resolved, self)
+        self._zone_watcher.zone_changed.connect(self._on_zone_changed)
+
+    def _on_zone_changed(self, zone_name: str) -> None:
+        """Peter, 2026-08-01: "Erst nach Zonenwechsel gibt es einen
+        Refresh" — live bestätigt (FALLSTRICKE #58). Lädt NUR die gerade
+        offene Ansicht neu (wie der gezielte Teil von
+        ``_maybe_auto_refresh``), kein Sweep, kein Burst — ein einzelner
+        Request pro Zonenwechsel. Respektiert den Pause-Modus (explizite
+        Nutzerwahl "keine Hintergrund-Anfragen") und die harte
+        Rate-Limit-Obergrenze, sonst identisch zu jedem anderen stillen
+        Refresh."""
+        if (self._refresh_mode == "pause" or self._bulk_dialog is not None
+                or not self._logged_in or not self._current_league
+                or self._current_league_is_archived()
+                or self.worker.rate_limiter.pacing_blocked()):
+            return
+        if self._refresh_current_view():
+            self._on_status(f"Zone changed to {zone_name!r} — refreshing current view")
+
     def _open_settings_dialog(self) -> None:
-        dialog = SettingsDialog(self._load_tool_entries(), self._load_column_config(), self)
+        dialog = SettingsDialog(self._load_tool_entries(), self._load_column_config(),
+                                *self._load_zone_watcher_config(), self)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             self._save_tool_entries(dialog.result_entries())
             column_config = dialog.result_column_config()
             self._save_column_config(column_config)
             self._apply_column_config(column_config)
+            zone_enabled, zone_path = dialog.result_zone_watcher_config()
+            self._save_zone_watcher_config(zone_enabled, zone_path)
+            self._apply_zone_watcher_config(zone_enabled, zone_path)
 
     def _on_status(self, text: str) -> None:
         """Reiner Verlaufstext — Busy-Zustand kommt separat über busy_changed
@@ -2415,17 +2467,29 @@ class MainWindow(QMainWindow):
         if self._auto_refresh_blocked_reason() is not None:
             return
         current_id = self._current_stash_id
-        if current_id is not None:
-            self.worker.submit(FetchStashItemsJob(
-                self._current_league, current_id, self._current_tab_name,
-                parent_id=self._parent_id_of(current_id), silent=True))
-        elif self._current_character_name is not None:
-            self.worker.submit(FetchCharacterItemsJob(self._current_character_name, silent=True))
+        self._refresh_current_view()
         candidate = self._pick_auto_refresh_candidate()
         if candidate is not None and candidate.id != current_id:
             self.worker.submit(FetchStashItemsJob(
                 self._current_league, candidate.id, candidate.display_name,
                 parent_id=candidate.parent, silent=True))
+
+    def _refresh_current_view(self) -> bool:
+        """Lädt das gerade angezeigte Fach oder den gerade angezeigten
+        Charakter neu, unabhängig vom Alter der Daten — der gezielte
+        (nicht der Sweep-)Teil von ``_maybe_auto_refresh``, gemeinsam
+        genutzt mit ``_on_zone_changed`` (§ZoneWatcher). Gibt zurück, ob
+        überhaupt etwas angezeigt war, das sich neu laden ließ."""
+        current_id = self._current_stash_id
+        if current_id is not None:
+            self.worker.submit(FetchStashItemsJob(
+                self._current_league, current_id, self._current_tab_name,
+                parent_id=self._parent_id_of(current_id), silent=True))
+            return True
+        if self._current_character_name is not None:
+            self.worker.submit(FetchCharacterItemsJob(self._current_character_name, silent=True))
+            return True
+        return False
 
     def _update_auto_refresh_label(self) -> None:
         """Zähler rechts in der Statusleiste: „Auto-refresh: X of Y stash tabs updated“.

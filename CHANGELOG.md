@@ -68,6 +68,13 @@ nach [SemVer](https://semver.org/lang/de/).
 
 ### Hinzugefügt
 
+- Optionaler Zonenwechsel-Trigger für den Live-Refresh (Settings-Dialog,
+  Reiter "Zone Refresh", standardmäßig AUS): PoE-VIEW2 kann Peters lokale
+  Client.txt beobachten (rein lesend, Pfad muss selbst eingetragen
+  werden) und lädt die gerade offene Truhe/den Charakter sofort neu,
+  sobald PoE einen Zonenwechsel meldet — GGGs Stash-API liefert neue
+  Daten offenbar ohnehin erst danach, gezieltes Nachladen spart also
+  Rate-Limit-Budget gegenüber reinem Zeit-Takt.
 - Neuer Settings-Dialog (⚙-Button in der Toolbar) mit einem Reiter
   "Columns": welche Item-Tabellen-Spalten sichtbar sind und in welcher
   Reihenfolge lässt sich dort per Häkchen und Drag & Drop einstellen,

@@ -1,4 +1,4 @@
-"""Settings-Dialog mit zwei Reitern (Peter, 2026-08-01):
+"""Settings-Dialog mit drei Reitern (Peter, 2026-08-01):
 
 - "External Tools": das konfigurierbare Rechtsklick-Menü ("Das
   Rechtsklick-Menü ist variabel... dann kann man z.B. das Wiki selber
@@ -6,21 +6,29 @@
 - "Columns": welche Item-Tabellen-Spalten sichtbar sind und in welcher
   Reihenfolge ("Wir haben ja alle möglichen Attribute pro Item... die
   Möglichkeit, die angezeigten Spalten einzustellen").
+- "Zone Refresh": ob und über welchen Pfad PoE-VIEW2 Peters eigene
+  Client.txt beobachtet, um beim Zonenwechsel gezielt die gerade offene
+  Ansicht neu zu laden ("Erst nach Zonenwechsel gibt es einen Refresh").
+  Standardmäßig AUS, Pfad muss Peter selbst eintragen — kein Rätselraten
+  über Installationsorte.
 
 Bewusst schlichte Tabelle/Liste statt eigener Zeilen-Widgets — Peter ist
 kein Python-Programmierer und bearbeitet hier nur Text/Häkchen/
 Reihenfolge, keinen Code. Persistiert wird über ``main_window.py``
-(QSettings), dieser Dialog kennt nur die reinen Datenlisten rein/raus."""
+(QSettings), dieser Dialog kennt nur die reinen Datenlisten/-werte
+rein/raus."""
 
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import (QAbstractItemView, QDialog, QDialogButtonBox,
-                               QHBoxLayout, QHeaderView, QLabel, QListWidget,
+from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QDialog,
+                               QDialogButtonBox, QFileDialog, QHBoxLayout,
+                               QHeaderView, QLabel, QLineEdit, QListWidget,
                                QListWidgetItem, QPushButton, QTableWidget,
                                QTableWidgetItem, QTabWidget, QVBoxLayout,
                                QWidget)
 
+from poe_view.services.zone_watcher import resolve_client_log_path
 from poe_view.ui.external_tools import ToolEntry
 
 _COL_ENABLED, _COL_NAME, _COL_TEMPLATE = range(3)
@@ -28,6 +36,7 @@ _COL_ENABLED, _COL_NAME, _COL_TEMPLATE = range(3)
 
 class SettingsDialog(QDialog):
     def __init__(self, entries: list[ToolEntry], column_config: list[tuple[str, bool]],
+                zone_watcher_enabled: bool, zone_watcher_path: str,
                 parent=None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Einstellungen")
@@ -37,6 +46,8 @@ class SettingsDialog(QDialog):
         tabs = QTabWidget()
         tabs.addTab(self._build_tools_tab(entries), "External Tools")
         tabs.addTab(self._build_columns_tab(column_config), "Columns")
+        tabs.addTab(self._build_zone_refresh_tab(zone_watcher_enabled, zone_watcher_path),
+                    "Zone Refresh")
         layout.addWidget(tabs)
 
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok
@@ -134,3 +145,54 @@ class SettingsDialog(QDialog):
              self._column_list.item(row).checkState() == Qt.CheckState.Checked)
             for row in range(self._column_list.count())
         ]
+
+    # --- Reiter "Zone Refresh" ------------------------------------------ #
+
+    def _build_zone_refresh_tab(self, enabled: bool, path: str) -> QWidget:
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.addWidget(QLabel(
+            "PoE schreibt Zonenwechsel in seine eigene Client.txt (rein "
+            "lesend, von GGG erlaubt). Damit lässt sich die gerade "
+            "geöffnete Truhe/der Charakter gezielt neu laden, statt auf "
+            "gut Glück zu pollen."))
+
+        self._zone_enabled_check = QCheckBox("Bei Zonenwechsel die aktuelle Ansicht neu laden")
+        self._zone_enabled_check.setChecked(enabled)
+        layout.addWidget(self._zone_enabled_check)
+
+        path_row = QHBoxLayout()
+        self._zone_path_edit = QLineEdit(path)
+        self._zone_path_edit.setPlaceholderText(
+            r"z. B. D:\SteamLibrary\steamapps\common\Path of Exile (oder direkt ...\logs\Client.txt)")
+        self._zone_path_edit.textChanged.connect(self._update_zone_path_status)
+        browse_button = QPushButton("Durchsuchen…")
+        browse_button.clicked.connect(self._browse_for_poe_folder)
+        path_row.addWidget(self._zone_path_edit, stretch=1)
+        path_row.addWidget(browse_button)
+        layout.addLayout(path_row)
+
+        self._zone_path_status = QLabel()
+        layout.addWidget(self._zone_path_status)
+        self._update_zone_path_status(path)
+
+        layout.addStretch(1)
+        return tab
+
+    def _browse_for_poe_folder(self) -> None:
+        start_dir = self._zone_path_edit.text().strip() or ""
+        chosen = QFileDialog.getExistingDirectory(self, "Path-of-Exile-Ordner wählen", start_dir)
+        if chosen:
+            self._zone_path_edit.setText(chosen)
+
+    def _update_zone_path_status(self, path: str) -> None:
+        resolved = resolve_client_log_path(path)
+        if resolved is not None:
+            self._zone_path_status.setText(f"✓ Gefunden: {resolved}")
+        elif path.strip():
+            self._zone_path_status.setText("✗ Keine Client.txt an diesem Pfad gefunden")
+        else:
+            self._zone_path_status.setText("")
+
+    def result_zone_watcher_config(self) -> tuple[bool, str]:
+        return self._zone_enabled_check.isChecked(), self._zone_path_edit.text().strip()

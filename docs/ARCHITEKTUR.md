@@ -1652,6 +1652,60 @@ Tabs — bei typ-abhängigen Spalten müsste erst geklärt werden, was in
 so einer gemischten Ansicht gilt. Diese globale, typ-unabhängige
 Konfiguration ist bewusst der erste, einfachere Ausbauschritt.
 
+### 4.19 Zonenwechsel-Trigger für den Live-Refresh (`services/zone_watcher.py`)
+
+Peter, 2026-08-01: "Ich habe die Vermutung, dass sich der Stash-Inhalt
+erst aktualisiert, wenn wir die Zone gewechselt haben." Empirisch
+bestätigt (siehe FALLSTRICKE #58): GGGs Stash-API liefert neue Daten
+offenbar erst, nachdem der Server einen Zonenwechsel committet hat —
+Polling dazwischen ändert nichts an der Antwort. `ZoneWatcher`
+(`services/zone_watcher.py`) beobachtet dafür Peters eigene, lokale
+`Client.txt` (PoE schreibt dort bei jedem Zonenwechsel eine Zeile `... :
+You have entered <Zone>.`) und meldet jeden erkannten Wechsel über ein
+Qt-Signal — reines LESEN einer Text-Logdatei, von GGG ausdrücklich
+erlaubt (anders als Speicherzugriffe auf den laufenden Client-Prozess,
+die ein Bann-Risiko wären).
+
+**Ereignisgesteuert statt Polling** (Peters Vorschlag, 2026-08-01: "Wir
+könnten auch den Windows-Watcher benutzen"): `QFileSystemWatcher` nutzt
+die betriebssystem-eigene Änderungsbenachrichtigung und meldet sich erst,
+wenn PoE tatsächlich neue Zeilen anhängt — kein eigener Timer, kein
+Sekundentakt-Polling. `ZoneWatcher.check_now()` liest dann nur die seit
+dem letzten Aufruf neu angehängten Bytes (Byte-Offset gemerkt, nicht die
+ganze Datei neu eingelesen) und meldet jede erkannte Zonenwechsel-Zeile
+darin einzeln über `zone_changed(zone_name)`. Startet am AKTUELLEN
+Dateiende — frühere Zeilen (vor Programmstart) interessieren nicht, ein
+mehrere MB großes Log von Beginn an einzulesen wäre unnötig teuer. Wird
+die Datei kleiner als der zuletzt gemerkte Stand (PoE-Neustart mit
+frischer Client.txt), beobachtet `check_now()` wieder ab Position 0,
+statt hängen zu bleiben.
+
+**Peter gibt den Pfad explizit an, kein Rätselraten** (Peter, 2026-08-01:
+"Wir werden den User aber explizit über eine Pfadangabe die richtige
+Datei bzw. lediglich den PoE-Pfad angeben lassen"): Settings-Dialog (§4.15),
+dritter Reiter "Zone Refresh" — eine Checkbox (Feature standardmäßig AUS)
+und ein Pfadfeld samt "Durchsuchen…"-Button. `resolve_client_log_path()`
+akzeptiert entweder direkt die Client.txt oder nur den
+PoE-Installationsordner (probiert dann `<Ordner>/logs/Client.txt`, dann
+`<Ordner>/Client.txt`) und zeigt sofort eine Live-Rückmeldung
+("✓ Gefunden: …" / "✗ Keine Client.txt an diesem Pfad gefunden"), damit
+Peter nicht blind einen Pfad einträgt und hofft. Persistiert als
+`zone_watcher/enabled` + `zone_watcher/log_path` in `ui-settings.ini`.
+`MainWindow._apply_zone_watcher_config()` baut den `ZoneWatcher` bei
+aktivierter Funktion und gültigem Pfad komplett neu auf (einfacher als
+ein Update-Codepfad, läuft nur beim Programmstart bzw. nach dem
+Settings-Dialog) — ungültiger/leerer Pfad lässt das Feature bewusst
+inaktiv, ohne separate Fehlermeldung (der Dialog zeigt das ja schon live).
+
+**`_on_zone_changed()` lädt NUR die gerade offene Ansicht neu** — den
+gleichen gezielten Job wie der erste Teil von `_maybe_auto_refresh`
+(jetzt als gemeinsames `_refresh_current_view()` herausgezogen), kein
+Sweep, kein Burst, ein einzelner Request pro Zonenwechsel. Respektiert
+den Pause-Refresh-Modus (explizite Nutzerwahl "keine
+Hintergrund-Anfragen") und `rate_limiter.pacing_blocked()` als harte
+Obergrenze, sonst identisch zu jedem anderen stillen Refresh
+(`silent=True`).
+
 ---
 
 ## 5. UI-Konzept (Oberflächenvorschlag)
