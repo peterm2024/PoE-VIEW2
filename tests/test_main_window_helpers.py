@@ -3,6 +3,7 @@
 CSV-Dateiname-Vorschlag (Filtertext bzw. Tab-/Aggregat-Name).
 """
 
+import json
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -11,6 +12,8 @@ from poe_view.api.models import Character, Item, StashTab
 from poe_view.api.ninja import PriceIndex
 from poe_view.services import price_cache
 from poe_view.services.api_worker import FetchPricesJob, FetchStashListJob
+from poe_view.ui import external_tools
+from poe_view.ui.item_table import CONFIGURABLE_COLUMNS
 from poe_view.ui.main_window import MainWindow
 
 NESTED = [
@@ -2008,6 +2011,93 @@ def test_column_toggle_persists_across_restart(qapp) -> None:
     win2.worker.wait(5000)
 
 
+# --- Spalten-Reihenfolge über den Settings-Dialog (Peter, 2026-08-01) ---
+
+def test_default_column_config_has_every_configurable_column_visible_except_type(qapp) -> None:
+    win = MainWindow()
+    config = win._default_column_config()
+    assert [name for name, _ in config] == list(CONFIGURABLE_COLUMNS)
+    assert dict(config)["Type"] is False
+    assert all(visible for name, visible in config if name != "Type")
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_applying_a_column_config_reorders_the_header(qapp) -> None:
+    """Reihenfolge wird über die VISUELLE Header-Position umgesetzt, nicht
+    über die (fixen) logischen Spalten-Indizes — Sortierung/Filter greifen
+    weiter über den logischen Index."""
+    from poe_view.ui.item_table import COLUMNS
+
+    win = MainWindow()
+    reordered = [("Value", True), ("Name", True)] + [
+        (name, True) for name in CONFIGURABLE_COLUMNS if name not in ("Value", "Name")]
+    win._apply_column_config(reordered)
+
+    header = win.table.horizontalHeader()
+    value_visual = header.visualIndex(COLUMNS.index("Value"))
+    name_visual = header.visualIndex(COLUMNS.index("Name"))
+    assert value_visual == 1  # direkt nach der fix ersten Tab-Spalte (Index 0)
+    assert name_visual == 2
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_column_order_persists_across_restart(qapp) -> None:
+    from poe_view.ui.item_table import COLUMNS
+
+    win = MainWindow()
+    reordered = [("Value", True)] + [
+        (name, True) for name in CONFIGURABLE_COLUMNS if name != "Value"]
+    win._save_column_config(reordered)
+    win._apply_column_config(reordered)
+    win.worker.stop()
+    win.worker.wait(5000)
+
+    win2 = MainWindow()  # "Neustart": liest ui-settings.ini (im Test: tmp_path)
+    assert win2._load_column_config() == reordered
+    header = win2.table.horizontalHeader()
+    assert header.visualIndex(COLUMNS.index("Value")) == 1
+
+    win2.worker.stop()
+    win2.worker.wait(5000)
+
+
+def test_column_config_migrates_the_old_hidden_columns_setting(qapp) -> None:
+    """Vor der Reihenfolge-Funktion (Peter, 2026-08-01) gab es nur eine
+    reine Sichtbarkeits-Menge ("item_table/hidden_columns"). Bestehende
+    Installationen sollen diese Auswahl behalten, nur eben jetzt als
+    vollständige, geordnete Liste."""
+    win = MainWindow()
+    win._settings().setValue("item_table/hidden_columns", "Mods;Value")
+    config = win._load_column_config()
+    assert dict(config)["Mods"] is False
+    assert dict(config)["Value"] is False
+    assert dict(config)["Name"] is True
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_column_config_appends_columns_missing_from_a_stored_config(qapp) -> None:
+    """Falls künftig eine neue Spalte hinzukommt, die im gespeicherten
+    JSON-Stand noch nicht vorkommt, soll sie sichtbar auftauchen statt
+    stillschweigend zu verschwinden."""
+    win = MainWindow()
+    partial = [{"name": "Name", "visible": True}, {"name": "Value", "visible": False}]
+    win._settings().setValue("item_table/column_config", json.dumps(partial))
+    config = win._load_column_config()
+    names = [name for name, _ in config]
+    assert names[:2] == ["Name", "Value"]
+    assert set(names) == set(CONFIGURABLE_COLUMNS)
+    assert dict(config)["Type"] is True  # neu angehängt, sichtbar
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
 def test_tab_column_auto_hidden_for_single_tab_shown_for_aggregate(qapp) -> None:
     """Im Einzelfach ist die Herkunft redundant, im Aggregat
     ("Map"-Elternknoten, "Alle Tabs") ist sie die entscheidende Info."""
@@ -3972,25 +4062,118 @@ def test_row_context_menu_returns_early_for_an_empty_click(qapp) -> None:
     win.worker.wait(5000)
 
 
-def test_item_tools_menu_offers_ninja_link_only_for_currency(qapp) -> None:
+def test_item_tools_menu_offers_the_default_poedb_and_wiki_entries(qapp) -> None:
     win = MainWindow()
-    win._current_league = "Standard"
-    currency = Item.model_validate({"typeLine": "Chaos Orb", "baseType": "Chaos Orb", "frameType": 5})
-    labels = [a.text() for a in win._build_item_tools_menu(currency).actions()]
-    assert any("poe.ninja" in l for l in labels)
+    rare = Item.model_validate({"typeLine": "Vaal Regalia", "baseType": "Vaal Regalia", "frameType": 2})
+    labels = [a.text() for a in win._build_item_tools_menu(rare).actions()]
+    assert any("PoEDB" in l for l in labels)
+    assert any("Wiki" in l for l in labels)
 
     win.worker.stop()
     win.worker.wait(5000)
 
 
-def test_item_tools_menu_has_no_ninja_link_for_a_rare(qapp) -> None:
+def test_item_tools_menu_skips_disabled_entries(qapp) -> None:
+    """Peter, 2026-08-01: konfigurierbares Menü — deaktivierte Einträge
+    (z. B. weil ein Seitenbetreiber widerspricht) dürfen nicht auftauchen."""
     win = MainWindow()
-    win._current_league = "Standard"
+    win._save_tool_entries([
+        external_tools.ToolEntry("PoEDB", "https://poedb.tw/us/{slug}", enabled=True),
+        external_tools.ToolEntry("PoE Wiki", "https://www.poewiki.net/wiki/{slug}", enabled=False),
+    ])
     rare = Item.model_validate({"typeLine": "Vaal Regalia", "baseType": "Vaal Regalia", "frameType": 2})
     labels = [a.text() for a in win._build_item_tools_menu(rare).actions()]
-    assert not any("poe.ninja" in l for l in labels)
     assert any("PoEDB" in l for l in labels)
-    assert any("Wiki" in l for l in labels)
+    assert not any("Wiki" in l for l in labels)
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_item_tools_menu_uses_a_custom_configured_entry(qapp) -> None:
+    """Der eigentliche Sinn der Konfigurierbarkeit: ein eigenes Wiki o.ä.
+    eintragen, ohne Code zu ändern."""
+    win = MainWindow()
+    win._save_tool_entries([
+        external_tools.ToolEntry("Mein Wiki", "https://example.test/{slug}", enabled=True),
+    ])
+    item = Item.model_validate({"typeLine": "Chaos Orb", "baseType": "Chaos Orb", "frameType": 5})
+    actions = win._build_item_tools_menu(item).actions()
+    assert len(actions) == 1
+    assert actions[0].text() == "Mein Wiki öffnen"
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_settings_entries_round_trip_through_qsettings(qapp) -> None:
+    win = MainWindow()
+    entries = [external_tools.ToolEntry("Test Tool", "https://example.test/{slug}", enabled=False)]
+    win._save_tool_entries(entries)
+    assert win._load_tool_entries() == entries
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_settings_dialog_saves_entries_when_accepted(qapp, monkeypatch) -> None:
+    from PySide6.QtWidgets import QDialog
+
+    win = MainWindow()
+    new_entries = [external_tools.ToolEntry("Accepted Tool", "https://example.test/{slug}")]
+    # Voller Satz wie ihn der echte Dialog liefert (alle konfigurierbaren
+    # Spalten, "Name" hier probeweise ausgeblendet) — kein Teil-Update.
+    new_column_config = [(name, name != "Name") for name in CONFIGURABLE_COLUMNS]
+
+    class _FakeDialog:
+        def __init__(self, entries, column_config, parent=None):
+            pass
+
+        def exec(self):
+            return QDialog.DialogCode.Accepted
+
+        def result_entries(self):
+            return new_entries
+
+        def result_column_config(self):
+            return new_column_config
+
+    monkeypatch.setattr("poe_view.ui.main_window.SettingsDialog", _FakeDialog)
+    win._open_settings_dialog()
+    assert win._load_tool_entries() == new_entries
+    assert win._load_column_config() == new_column_config
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_settings_dialog_does_not_save_when_cancelled(qapp, monkeypatch) -> None:
+    from PySide6.QtWidgets import QDialog
+
+    win = MainWindow()
+    original = win._load_tool_entries()
+    original_columns = win._load_column_config()
+
+    class _FakeDialog:
+        def __init__(self, entries, column_config, parent=None):
+            pass
+
+        def exec(self):
+            return QDialog.DialogCode.Rejected
+
+        def result_entries(self):
+            raise AssertionError("result_entries darf bei Abbruch nicht abgefragt werden")
+
+        def result_column_config(self):
+            raise AssertionError("result_column_config darf bei Abbruch nicht abgefragt werden")
+
+    monkeypatch.setattr("poe_view.ui.main_window.SettingsDialog", _FakeDialog)
+    win._open_settings_dialog()
+    assert win._load_tool_entries() == original
+    assert win._load_column_config() == original_columns
+
+    win.worker.stop()
+    win.worker.wait(5000)
 
     win.worker.stop()
     win.worker.wait(5000)
@@ -4117,6 +4300,22 @@ def test_on_icon_ignores_unrelated_urls_for_pending_card_art(qapp) -> None:
 
     assert win._pending_card_art == (url, dialog)  # unverändert
     assert dialog._icon.pixmap().isNull()  # noch nicht aktualisiert
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+# --- Mindestfenstergröße: Suche darf nie hinter "…" verschwinden ---
+# --- (Peter, 2026-08-01) ---
+
+def test_window_has_a_minimum_size_that_keeps_the_search_field_visible(qapp) -> None:
+    """800x600 (Peter, 2026-08-01: "pragmatisch auf die bekannte Größe")
+    liegt mit Puffer über der real am Fenster gemessenen Breiten-Schwelle
+    (~740px), unterhalb der die zweite Toolbar-Zeile (Liga/Typ-Filter/
+    Suche) das Suchfeld hinter "…" versteckt."""
+    win = MainWindow()
+    assert win.minimumWidth() == 800
+    assert win.minimumHeight() == 600
 
     win.worker.stop()
     win.worker.wait(5000)

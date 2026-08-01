@@ -528,3 +528,63 @@ Der zweite Live-Test (nach dem Item-Class-Fix) zeigte aber: CoEs Import-Dialog l
 Der Abruf selbst läuft über die bestehende Icon-Infrastruktur (`FetchIconJob`, `icon_cache`, `icon_loaded`-Signal) — kein neuer Job-Typ nötig, da beide nur "URL rein, Bytes raus" sind.
 
 **Wie vermeiden:** Wenn eine Tool-Website (hier PoEDB) dieselben Assets einbettet wie das offizielle Spiel/CDN, lohnt der Blick auf die ROHE Seiten-HTML (`curl`/`grep`, nicht die KI-Zusammenfassung eines Fetch-Tools) nach der tatsächlichen Bild-URL — oft liegt die Original-Ressource direkt beim Hersteller, nicht beim Drittanbieter, und lässt sich dann ohne dessen Erlaubnis nutzen.
+
+## 53. Rechtsklick-Menü von fest verdrahteten Funktionen auf konfigurierbare Einträge umgestellt — poe.ninja passte nicht ins Ein-Platzhalter-Schema
+
+**Ausgangslage:** Die drei (später zwei, siehe #50) externen Tools aus dem Rechtsklick-Menü waren als eigene Funktionen (`poedb_url`, `wiki_url`, `ninja_url`) fest im Code verdrahtet. Peters Idee (2026-08-01): ein Settings-Dialog, über den er das Menü selbst konfiguriert — z. B. um ein eigenes Wiki einzutragen oder einen Eintrag abzuschalten, falls ein Seitenbetreiber der Verlinkung widerspricht (die ToDo.md-Auflage aus #50).
+
+**Entscheidung beim Umbau:** Alle Einträge auf ein gemeinsames Modell reduziert — `ToolEntry(name, url_template, enabled)` mit genau einem Platzhalter `{slug}` (Item-Name, Leerzeichen→Unterstrich). Das deckt PoEDB/Wiki exakt ab, aber NICHT poe.ninja: dessen URL braucht zwei Werte (Liga + Item) in einer eigenen Slug-Konvention (klein, Bindestrich statt Unterstrich) und war zusätzlich schon vorher nur für `frameType == 5` gültig. Peters Entscheidung: poe.ninja für den ersten Ausbau herausnehmen ("Wir nehmen poe.ninja einfach vorerst raus und probieren das so aus") statt das Platzhalter-Schema um einen Sonderfall zu erweitern, bevor sich das Konzept überhaupt bewährt hat.
+
+**Persistenz:** Liste als JSON-Array in derselben `ui-settings.ini` wie die übrigen UI-Einstellungen (`QSettings`, Schlüssel `external_tools/entries`) — `tools_to_json`/`tools_from_json` in `external_tools.py`. Fällt beim ersten Start (noch kein gespeicherter Wert) bzw. bei kaputtem JSON (z. B. von Hand editierte INI) auf `DEFAULT_TOOLS` zurück, statt mit einer Exception abzubrechen.
+
+**Wie vermeiden (für künftige Erweiterungen dieses Menüs):** Bevor poe.ninja oder ein ähnliches Zwei-Werte-Schema wieder aufgenommen wird, das Platzhalter-Modell bewusst erweitern (z. B. ein zweites `{league}`-Feld) statt eine Ausnahme fest im Code zu belassen — sonst bleibt die Konfigurierbarkeit nur für die Hälfte der Einträge tatsächlich nutzbar.
+
+## 54. PoEDB/Wiki-Rechtsklick-Links verlinkten Rares/Magics auf eine nie existierende Seite — der Eigenname ist nur bei Uniques such- und indexierbar
+
+**Ausgangslage:** `build_url()` (siehe #53) nutzte anfangs `item.display_name` (= `name` falls vorhanden, sonst `typeLine`, sonst `baseType`) für den `{slug}`-Platzhalter. Peter probierte das live gegen echte PoEDB-Seiten aus: "PoEdb findet viele Items nicht unter dem Eigennamen (Rare, Magic), das ist verständlich. Hier sollten wir nach dem Base gehen. Uniques können jedoch gezielt gesucht werden."
+
+**Problem, real an Peters Cache bestätigt:** `display_name` ist für Rares und Magics die FALSCHE Wahl.
+- Rare (`frameType == 2`): `item.name` ist gesetzt, aber eine zufällig gewürfelte Fantasiebezeichnung ohne eigene Wiki-Seite (Beispiel: ein Rare-Messer trug `name="Vortex Bane"`, `baseType="Gutting Knife"` — nur Letzteres hat eine PoEDB-Seite).
+- Magic (`frameType == 1`): `item.name` ist leer, `display_name` fiel deshalb auf `typeLine` zurück — das enthält aber die gewürfelten Präfix-/Suffix-Wörter mit im Text (`"Fleet Citrine Amulet of the Flatworm"`), ebenfalls keine echte Wiki-Seite. `baseType` liefert die bereinigte Fassung (`"Citrine Amulet"`).
+- Unique (`frameType == 3`): hier ist `item.name` dagegen genau der gesuchte, indexierte Name (`"Tabula Rasa"`) — für Uniques war `display_name` schon richtig.
+- Alle übrigen Rarities (Normal, Gems, Currency, Divination Cards, …): `baseType` ist ohnehin identisch mit dem bisherigen Anzeigenamen, keine Affixe möglich, also unverändert korrekt.
+
+**Lösung:** Neue Hilfsfunktion `_lookup_name(item)` in `external_tools.py`: liefert `item.name` NUR wenn `frameType == 3` (Unique), sonst `item.baseType` (mit `typeLine`/`name` als Sicherheitsnetz für den unwahrscheinlichen Fall eines leeren `baseType`). `build_url()` nutzt jetzt diese Funktion statt `item.display_name`.
+
+**Wie vermeiden:** `item.display_name` ist für die UI-Anzeige (Tabelle, Detail-Panel, Fenstertitel) genau richtig — dort soll ja der volle, spielinterne Anzeigename stehen. Für externe Nachschlage-Tools ist das aber ein anderes Problem: die Frage ist nicht "wie zeigt PoE das Item an", sondern "unter welchem Namen hat eine Wiki-Seite überhaupt einen Eintrag" — und das ist nur für Rarities mit einer festen, nicht zufällig gewürfelten Identität (hier: Uniques) derselbe Name. Bei neuen rarity-abhängigen Features immer prüfen, ob eine bestehende Property (wie `display_name`) wirklich für den NEUEN Zweck gedacht war, statt sie aus Bequemlichkeit wiederzuverwenden.
+
+## 55. Mindestfensterbreite für die Suche: Offscreen-Testrendering mit Ersatzfonts lieferte eine falsche Schwelle
+
+**Ausgangslage:** Nach der Toolbar-Aufteilung in zwei Zeilen (§5, Peter 2026-08-01) sollte die Suche nie mehr hinter dem Toolbar-Overflow-Pfeil "…" verschwinden — Peter schlug `setMinimumWidth(752)` vor, mit einem Fragezeichen ("752px?").
+
+**Erster Messversuch, verworfen:** Ein Skript baute `MainWindow` mit `QT_QPA_PLATFORM=offscreen` (wie in `conftest.py` für Tests) und maß per Screenshot, ab welcher Fensterbreite die zweite Toolbar-Zeile überläuft. Ergebnis: Schwelle ca. 838–842px — deutlich über Peters 752px, scheinbar ein Widerspruch. Grund: Die Offscreen-Plattform hat in dieser Umgebung KEINE echte Schriftart geladen, jedes Zeichen (auch reines ASCII wie "Mode:") wurde als Tofu-Box gerendert. Diese Ersatz-Boxen sind BREITER als echte proportionale Zeichen — die daraus gemessene Schwelle ist damit zu hoch und für die echte App auf Peters System nicht aussagekräftig.
+
+**Zweiter Messversuch, verwendet:** Dasselbe Skript ohne die `QT_QPA_PLATFORM=offscreen`-Umgebungsvariable ausgeführt — läuft dann über das echte Windows-Backend mit echten Fonts (auch ohne sichtbares Fenster nutzbar, `QApplication`/`QMainWindow.grab()` funktionieren unverändert). Damit gemessen: Suchfeld verschwindet unterhalb 740px, ist ab 745px wieder da. Peters vorgeschlagene 752px liegen knapp, aber sicher darüber — sein aus der Nutzung geschätzter Wert war treffender als die synthetische Offscreen-Messung.
+
+**Lösung:** `MainWindow.__init__` setzt zunächst `self.setMinimumWidth(752)`. Kurz darauf pragmatisch auf `self.setMinimumSize(800, 600)` erhöht (Peter, 2026-08-01: "einfach pragmatisch auf die bekannte Größe") — 800px liegt mit mehr Puffer über der gemessenen 740px-Schwelle, 600px Höhe ist der übliche Standard-Wert, ungemessen (kein bekanntes Abschneide-Problem).
+
+**Wie vermeiden:** Für Layout-/Breakpoint-Messungen an echten Pixelwerten (Toolbar-Overflow, Textumbruch, …) NICHT das `QT_QPA_PLATFORM=offscreen`-Test-Setup verwenden, wenn es um exakte Größen geht — das ist für Testlogik gedacht (schnell, kein Display nötig), nicht für Pixel-genaue Maße, weil ohne echte Fontmetriken alle Breiten verzerrt sind. Für solche Fragen das Skript stattdessen ohne die Umgebungsvariable laufen lassen (funktioniert auf einer echten Windows-Session auch ganz ohne sichtbares Fenster on-screen, `grab()` liefert trotzdem einen korrekten Screenshot).
+
+## 56. Item-Spalten konfigurierbar gemacht: Reihenfolge über die VISUELLE Header-Position statt über die logischen Spalten-Indizes
+
+**Ausgangslage:** Peter wollte die angezeigten Item-Spalten (von 16 möglichen Attributen) selbst wählen UND in eine eigene Reihenfolge bringen können ("Wir haben ja alle möglichen Attribute pro Item... die Möglichkeit, die angezeigten Spalten einzustellen"), über einen zweiten Reiter im bestehenden Settings-Dialog (§4.15). Die bisherige Lösung kannte nur eine reine Sichtbarkeits-MENGE (`item_table/hidden_columns`), keine Reihenfolge.
+
+**Entscheidung gegen den naheliegenden Ansatz:** Die logischen Spalten-Indizes (`COLUMNS.index(name)`, z. B. `VALUE_COL = 15`) ziehen sich durch den ganzen restlichen Code — Sortierung (`NUMERIC_SORT_ROLE`), Spalten-Filter, feste Spaltenbreiten (`setColumnWidth`), die automatische Tab-Spalten-Logik. Diese Indizes bei einer Nutzer-Umsortierung zu ÄNDERN hätte bedeutet, jeden dieser Code-Pfade auf eine neue, dynamische Zuordnung umzustellen — hohes Risiko für stille Folgefehler.
+
+**Lösung:** `QHeaderView` trennt ohnehin zwischen logischem Index (fix, Modell-Spalte) und visuellem Index (Position auf dem Bildschirm) — genau das nutzt Qt intern auch für sein eigenes Drag-Umsortieren im Header. `MainWindow._apply_column_config()` verschiebt nur die VISUELLE Position (`header.moveSection(header.visualIndex(col), target_visual)`), die logischen Indizes und damit jeder darauf aufbauende Code bleiben unverändert. Die Tab-Spalte bleibt zusätzlich fix auf visueller Position 0, unabhängig von der Nutzer-Konfiguration — ihre Sichtbarkeit hängt weiterhin an der Einzelfach-/Aggregat-Logik, nicht an Peters Auswahl.
+
+**Migration:** Damit ein bestehender Stand (nur Sichtbarkeit, keine Reihenfolge) beim Umstieg nicht verloren geht, übernimmt `_load_column_config()` eine vorhandene alte `item_table/hidden_columns`-Einstellung automatisch als Startreihenfolge, bevor auf den Standard (alles sichtbar außer "Type") zurückgefallen wird.
+
+**Wie vermeiden:** Bei "Nutzer soll Reihenfolge von X ändern können", wenn X (hier: Spalten-Index) an vielen Stellen im Code als stabiler Bezugspunkt verwendet wird, nicht die zugrundeliegende Nummerierung selbst dynamisch machen — stattdessen eine vom Framework ohnehin vorgesehene Trennung von "stabile Identität" und "Anzeige-Position" suchen (hier: Qt liefert sie mit `QHeaderView` bereits mit).
+
+## 57. PoEDB-Rechtsklick-Link für Map-Items gab einen 404 — Klammern müssen prozent-kodiert sein
+
+**Ausgangslage:** Peter meldete live per Screenshot: Rechtsklick → "PoEDB öffnen" auf einem "Map (Tier 16)"-Item landete auf `poedb.tw/us/Map_(Tier_16)` mit einem 404, während dieselbe Seite über PoEDBs eigene Seitensuche normal aufging.
+
+**Diagnose:** `curl` gegen die exakte generierte URL bestätigte den 404 auch von außerhalb des Browsers — kein Browser-/Cache-Artefakt. PoEDBs Header-JS (`poedb_header.*.js`) lädt für die eingebaute Suche eine eigene Autocomplete-Datei (`cdn.poedb.tw/json/autocomplete_us.*.json`, per jQuery-UI-`autocomplete`, `ui.item.value` ist die Navigationsziel-URL) — direkt abgerufen (mit `Referer: https://poedb.tw/us/`, sonst 403) und nach "Map (Tier 16)" durchsucht: der von PoEDB selbst verwendete Wert ist `Map_%28Tier_16%29`, NICHT `Map_(Tier_16)`. Live verifiziert: `.../Map_(Tier_16)` → 404, `.../Map_%28Tier_16%29` → 200. Gegen Peters echten Cache geprüft: das betrifft ausschließlich `baseType`-Werte nach dem Muster "… Map (Tier N)" (Normal/Magic/Rare, alle 16 Tiers, plus "Blighted Map (Tier N)" — Letzteres hat allerdings ohnehin keine eigene PoEDB-Seite, siehe unten) — kein anderes Item im Cache trägt Klammern.
+
+**Lösung:** `external_tools._underscore_name()` kodiert `(` → `%28` und `)` → `%29` zusätzlich zum bisherigen Leerzeichen→Unterstrich. Gegen poewiki.net geprüft, ob das dort schadet: nein — MediaWiki akzeptiert sowohl `Map_(Tier_16)` als auch `Map_%28Tier_16%29` (beide 200), die Kodierung ist dort also unschädlich.
+
+**Bewusst nicht gelöst:** "Blighted Map (Tier N)" hat auf PoEDB gar keine eigene Item-Seite (nur eine generische "Blighted map"-Wiki-Seite, Kleinschreibung, Mechanik-Konzept statt Item) — auch mit korrekter Klammer-Kodierung bliebe der Link falsch. Dieser Sonderfall ist nicht das, was Peter gemeldet hat (sein Screenshot zeigte die einfache "Map (Tier 16)"), deshalb nicht mitgelöst.
+
+**Wie vermeiden:** Bei einer gemeldeten "Seite X funktioniert über die eigene Suche, aber nicht über eine direkt gebaute URL" nicht raten, sondern die Client-seitige Suche des Ziel-Portals selbst als Quelle nehmen — hier führte der Blick in die Header-JS-Datei zur echten Autocomplete-JSON-Datei, die für JEDES Item den vom Betreiber selbst als korrekt erachteten URL-Wert enthält. Das ist zuverlässiger als eine URL-Konvention aus ein paar Stichproben abzuleiten.

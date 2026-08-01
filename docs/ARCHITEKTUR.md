@@ -1417,7 +1417,7 @@ sinnvoll (Chaos-Werte lassen sich aufaddieren, Stack-Größen
 unterschiedlicher Items nicht) — sie erscheint deshalb auch bei
 gemischten Treffern, nicht nur bei einheitlichem Item-Namen.
 
-### 4.15 Externe Tools per Rechtsklick (`ui/external_tools.py`)
+### 4.15 Externe Tools per Rechtsklick (`ui/external_tools.py`, `ui/settings_dialog.py`)
 
 Rechtsklick auf eine Item-Zeile öffnet ein Kontextmenü mit Links zu
 externen Nachschlage-Tools (ToDo.md: "andere Tools per Rechtsklick
@@ -1429,28 +1429,61 @@ einem eigenen, Qt-freien Modul (`external_tools.py`) —
 nicht sinnvoll direkt aufrufen, `_build_item_tools_menu()` dagegen liefert
 das fertige `QMenu`-Objekt ohne es anzuzeigen.
 
-Zwei Ziele, immer verfügbar:
+**Konfigurierbar statt fest verdrahtet** (Peter, 2026-08-01: "Das
+Rechtsklick-Menü ist variabel... dann kann man z.B. das Wiki selber
+einbinden"). Jeder Menüeintrag ist ein `ToolEntry(name, url_template,
+enabled)`; `url_template` enthält genau einen Platzhalter `{slug}`, den
+`build_url()` mit Leerzeichen→Unterstrich ersetzt (MediaWiki-Konvention,
+Original-Schreibweise inkl. Apostrophe bleibt erhalten). `DEFAULT_TOOLS`
+liefert die Startbelegung — PoEDB (`poedb.tw/us/{slug}`) und PoE Wiki
+(`poewiki.net/wiki/{slug}`) —, die `MainWindow._load_tool_entries()` beim
+ersten Start ohne gespeicherte Einstellung zurückgibt. Persistiert wird
+als JSON-Array (`tools_to_json`/`tools_from_json`) unter
+`external_tools/entries` in derselben `ui-settings.ini` wie die übrigen
+UI-Einstellungen (§ *_settings()*). Der Toolbar-Button "⚙ Settings" öffnet
+`SettingsDialog` (Tabelle mit Aktiv-Checkbox/Name/URL-Vorlage-Spalten,
+Hinzufügen/Entfernen-Buttons) — bei OK schreibt
+`MainWindow._open_settings_dialog()` die bearbeitete Liste zurück, bei
+Abbrechen bleibt der alte Stand unangetastet.
 
-- **PoEDB** (`poedb.tw/us/<Name>`) und **PoE Wiki**
-  (`poewiki.net/wiki/<Name>`) — beide MediaWiki-artig, Leerzeichen werden
-  zu Unterstrichen, Original-Schreibweise (inkl. Apostrophe) bleibt
-  erhalten. `item.display_name` (Unique-/Anzeigename, sonst Base) trifft
-  in beiden Fällen die richtige Wiki-Seite. Für jedes Item verfügbar.
+**Welcher Name für `{slug}` eingesetzt wird, hängt von der Rarity ab**
+(`_lookup_name()`, Peter 2026-08-01: "PoEdb findet viele Items nicht
+unter dem Eigennamen (Rare, Magic)... Hier sollten wir nach dem Base
+gehen. Uniques können jedoch gezielt gesucht werden"). Nur Uniques
+(`frameType == 3`) haben einen auf PoEDB/Wiki indexierten Eigennamen. Bei
+Rares trägt `item.name` zwar auch einen Namen, der ist aber zufällig
+gewürfelt und hat keine eigene Wiki-Seite (real geprüft: "Vortex Bane" für
+ein Rare-Messer, dessen `baseType` zuverlässig "Gutting Knife" liefert).
+Magic-Items haben gar keinen `name`, aber ihr `typeLine` enthält die
+gewürfelten Präfix-/Suffix-Wörter mit im Text ("Fleet Citrine Amulet of
+the Flatworm") — auch hier ist `baseType` die bereinigte Fassung
+("Citrine Amulet"). Für alle übrigen Rarities (Normal, Gems, Currency,
+Divination Cards, …) ist `baseType` ohnehin schon der Anzeigename (keine
+Affixe möglich). `_lookup_name()` liefert daher `item.name` nur für
+Uniques, sonst `item.baseType` (mit `typeLine`/`name` als Sicherheitsnetz,
+falls `baseType` einmal leer sein sollte).
 
-Ein drittes Ziel, nur unter einer Bedingung:
+**Klammern im `{slug}` werden prozent-kodiert** (`_underscore_name()`,
+FALLSTRICKE #57): Map-Items tragen als `baseType` z. B. "Map (Tier 16)" —
+PoEDBs Server lehnt literale Klammern im Pfad mit 404 ab und verlangt
+`%28`/`%29` (aus PoEDBs eigenem Autocomplete-Suchindex ausgelesen, live
+bestätigt). poewiki.net akzeptiert beide Schreibweisen, die Kodierung ist
+dort also unschädlich.
 
-- **poe.ninja** — NUR für Currency/Fragmente (`frameType == 5`): das ist
-  das einzige Deep-Link-Schema, das real bestätigt ist
-  (`https://poe.ninja/poe1/economy/<liga>/currency/<item>`, von Peter am
-  echten Link `.../allflame/currency/hinekoras-lock` verifiziert,
-  2026-07-30). Die Liga wird genauso wie der Item-Name klein geschrieben,
-  Satzzeichen entfernt, Leerzeichen zu Bindestrichen (`"Hinekora's Lock"`
-  → `"hinekoras-lock"`, NICHT `"hinekora-s-lock"` — das Apostroph
-  verschwindet ersatzlos). Für andere Kategorien (Uniques, Gems, …) ist
-  das Website-URL-Schema unbestätigt; lieber kein Eintrag im Menü als ein
-  Link, der ins Leere führt.
+**poe.ninja wurde dabei herausgenommen** (Peter, 2026-08-01): der
+Deep-Link (`https://poe.ninja/poe1/economy/<liga>/currency/<item>`, von
+Peter am echten Link `.../allflame/currency/hinekoras-lock` verifiziert,
+2026-07-30) braucht zwei Werte (Liga + Item) in einer eigenen
+Slug-Konvention (klein, Satzzeichen entfernt, Bindestrich statt
+Leerzeichen — anders als PoEDB/Wikis Unterstrich-Schema) und war zudem
+schon vorher auf Currency/Fragmente (`frameType == 5`) beschränkt, weil
+das URL-Schema für andere Kategorien unbestätigt ist. Passt nicht ins
+einfache Ein-Platzhalter-Modell der übrigen Tools — bleibt ein
+eigenständiges, späteres Vorhaben (z. B. über ein zweites `{league}`-Feld
+in der Vorlage), Peters bewusste Entscheidung, das für den ersten Ausbau
+lieber wegzulassen als das Menü-Modell zu verkomplizieren.
 
-Ein viertes, geplantes Ziel (**Craft of Exile**) wurde probeweise gebaut
+Ein weiteres, geplantes Ziel (**Craft of Exile**) wurde probeweise gebaut
 und wieder entfernt: CoE lehnt einen Item-Import ohne "Advanced mod
 descriptions" (Tag-Kopfzeile pro Mod plus Wertspanne statt Wälzwert, z. B.
 `+20(20-30)%` statt `+29%`) komplett ab, live gegen den echten CoE-Import
@@ -1567,6 +1600,58 @@ wichtig" — nur ein rein dekorativer Rahmen wurde umgesetzt
 Titel-Banner um `self._name`, dunkler umrandeter Rahmen um Titel+Icon).
 Reine Optik, keine neuen Daten — nur bei `frameType == 6` aktiv.
 
+### 4.18 Konfigurierbare Item-Spalten (`ui/item_table.py`, `ui/settings_dialog.py`)
+
+Peter, 2026-08-01: "Wir haben ja alle möglichen Attribute pro Item. Daher
+benötigen wir jetzt die Möglichkeit, die angezeigten Spalten
+einzustellen." Der Settings-Dialog (§4.15) bekam dafür einen zweiten
+Reiter "Columns" (`QTabWidget`, `SettingsDialog._build_columns_tab`):
+eine `QListWidget` mit einer Checkbox-Zeile pro konfigurierbarer Spalte
+(`item_table.CONFIGURABLE_COLUMNS` — alle `COLUMNS` außer "Tab", siehe
+unten), Reihenfolge per Drag&Drop (`setDragDropMode(InternalMove)`).
+`SettingsDialog.result_column_config()` liefert die editierte Liste als
+`list[tuple[name, visible]]` in der gewählten Reihenfolge zurück.
+
+**Reihenfolge über die VISUELLE Header-Position, nicht über die
+logischen Spalten-Indizes.** `MainWindow._apply_column_config()` ruft für
+jede Spalte `header.moveSection(header.visualIndex(col), target_visual)`
+auf — die logischen Indizes (`COLUMNS.index(name)`, worüber Sortierung,
+Spalten-Filter und `setColumnWidth` weiterhin arbeiten) bleiben dabei
+unverändert. Das entkoppelt "wo steht die Spalte" komplett von "welchen
+Index hat sie im Code" — genau wie Qt das eigene Drag-Umsortieren im
+Header selbst umsetzen würde (hier aber bewusst NICHT per Header-Drag,
+sondern nur über den Settings-Dialog, siehe unten).
+
+**Tab-Spalte bleibt fix an visueller Position 0** und ist nicht Teil der
+konfigurierbaren Liste — ihre Sichtbarkeit steuert weiterhin allein die
+Einzelfach-/Aggregat-Logik (§4.7.1 u. a.), unabhängig von Peters
+Spalten-Auswahl.
+
+**Persistenz + Migration:** Sichtbarkeit UND Reihenfolge zusammen als
+JSON-Array (`{"name":..., "visible":...}`) unter
+`item_table/column_config` in `ui-settings.ini` — dieselbe Datei wie die
+übrigen UI-Einstellungen. Ersetzt die alte, reine Sichtbarkeits-Menge
+(`item_table/hidden_columns`, ";"-getrennte Namen ohne Reihenfolge):
+`MainWindow._load_column_config()` übernimmt eine noch vorhandene alte
+Einstellung automatisch als Startreihenfolge, damit eine bestehende
+Auswahl beim Umstieg nicht verloren geht. Fehlt eine konfigurierbare
+Spalte im gespeicherten JSON (z. B. weil sie erst später hinzukam), wird
+sie sichtbar ans Ende angehängt statt zu verschwinden. Das
+Header-Rechtsklick-Menü (§4.11) bleibt als schneller Ein/Aus-Schalter für
+eine einzelne Spalte erhalten (`_toggle_column`) — beide Wege schreiben
+denselben JSON-Stand.
+
+**Bewusst nicht umgesetzt (Peters Idee, gemeinsam auf später vertagt):**
+je Stash-Tab-TYP eine eigene Standard-Spaltenauswahl/-Reihenfolge (z. B.
+Waffen-Tabs mit Sockets/Qualität vorn, Karten-Tabs mit Tier vorn), später
+sogar pro einzelnem Truhenfach — ursprünglich als Baum-Struktur im
+Settings-Dialog gedacht. Offene Frage dafür, noch ungeklärt: Die
+Item-Tabelle zeigt meist Items aus mehreren/allen Tabs gleichzeitig
+(liga-weite Suche, "Alle Tabs laden", §4.11) statt nur eines einzelnen
+Tabs — bei typ-abhängigen Spalten müsste erst geklärt werden, was in
+so einer gemischten Ansicht gilt. Diese globale, typ-unabhängige
+Konfiguration ist bewusst der erste, einfachere Ausbauschritt.
+
 ---
 
 ## 5. UI-Konzept (Oberflächenvorschlag)
@@ -1614,6 +1699,26 @@ am Fenster deaktiviert es). Ohne Menüleiste gäbe es dann keinen Weg mehr
 zurück — Login, Refresh, Liga-Wahl, Typ-Filter und Suche wären komplett
 verschwunden.
 
+**Zwei Toolbar-Zeilen** (Peter, 2026-08-01: die erste Zeile wurde bei
+schmalerem Fenster am rechten Rand abgeschnitten — Liga-Wahl, Typ-Filter
+und Suche waren dann unsichtbar). Zwei getrennte `QToolBar`-Instanzen,
+per `self.addToolBarBreak()` zwischen ihnen erzwungen auf zwei Zeilen:
+oben Login/Refresh/Mode/Load-All-Tabs/Export/Settings, darunter
+Liga-Wahl, Typ-Filter, Suchfeld und Regex-Umschalter — die Widgets, die am
+ehesten gleichzeitig gebraucht werden und am meisten horizontalen Platz
+beanspruchen.
+
+**Mindestfenstergröße 800x600** (`setMinimumSize`, Peter, 2026-08-01:
+"pragmatisch auf die bekannte Größe"), damit die zweite Zeile nie in den
+Toolbar-Overflow-Pfeil "…" kollabiert und die Suche verschwinden lässt.
+Die Breiten-Schwelle wurde real am Fenster gemessen (NICHT mit dem
+Offscreen-Test-Setup — dessen fehlende echte Schriftart verzerrt
+Pixelbreiten, siehe FALLSTRICKE #55): Suchfeld weg unterhalb 740px,
+wieder da ab 745px. 800px ist bewusst kein exaktes Mindestmaß, sondern
+der gängige Standard-Wert mit ordentlichem Puffer; die Höhe 600 ist
+ungemessen (kein bekanntes Abschneide-Problem), ebenfalls der übliche
+Standard.
+
 **Elemente & Verhalten:**
 
 | Bereich | Widget | Verhalten |
@@ -1621,7 +1726,7 @@ verschwunden.
 | Navigation: Charaktere | `CharacterList` (`QListWidget`) | Bewusst KEIN Tree — Charaktere haben keine Unterstruktur (spart eine Ebene samt Auf- und Zuklapp-Klick). Flach, absteigend nach Level, liga-gefiltert (`MainWindow._apply_character_league_filter`, siehe §5.1). Höhe begrenzt (`setMaximumHeight`), damit der Stash-Baum den meisten Platz bekommt. |
 | Navigation: Stash | `StashTree` (`QTreeWidget`), 3 Spalten, **Header sichtbar** | Kein umschließender "Stash"-Wurzelknoten mehr — die Tabs SIND die Top-Level-Einträge (spart eine weitere Ebene). Ordner rekursiv (children), Map-Fächer zusätzlich nach Sektion gruppiert (§4.10). Namensspalte per `QHeaderView.ResizeMode.Interactive` (NICHT `Stretch` — Stretch-Spalten lassen sich in Qt nicht per Maus verbreitern, das war ein echter Bug) mit großzügiger Startbreite, per Header-Rand manuell nachziehbar. Tab-Farbe aus API als kleines Icon-Quadrat VOR dem Namen, bewusst NICHT als Textfarbe (manche API-Farben sind auf dunklem Grund sonst unlesbar). Klick auf Tab → `FetchStashItems`-Job, sofern nicht bereits im Cache. Spalte 2 (**#**) zeigt die Item-Anzahl (eigene Spalte statt "(N Items)"-Text im Namen; Details §4.7.1). Spalte 3 zeigt GENAU EINEN von DREI sich gegenseitig ausschließenden Zuständen (§4.7.1, §4.12): **⬇**-Text, solange nie geladen; ein **⟳-Button mit Alters-Beschriftung** (exakte Uhrzeit "⟳ 14:32:46" bei heute geladenen Daten, sonst "⟳ vor 3d") sobald mindestens einmal geladen — Klick lädt genau diesen Tab bewusst AM Cache vorbei neu (`stash_refresh_requested`-Signal); oder **📴** statt ⟳, solange GGG nicht erreichbar ist (Offline-Modus, §4.12) — derselbe Button, nur die Beschriftung ändert sich, ein Klick versucht trotzdem ein Neuladen. Rechtsklick öffnet ein Kontextmenü mit "🔍 Rohdaten anzeigen" (`raw_data_requested`-Signal, §4.9) — öffnet/aktualisiert den nicht-modalen Rohdaten-Mini-Viewer — sowie "▸ Expand All"/"▾ Collapse All" für den ganzen Baum (§4.7.3), Letzteres unabhängig davon, worauf geklickt wurde. |
 | Typ-Filter (Toolbar, neben Liga) | 8× `_TypeFilterCheckBox` (eigene `QCheckBox`-Unterklasse) | Normal/Magic/Rare/Unique/Gem/Currency/Div Card + "Sonstige" (§4.11) — Farbe des Käschchens = Typ-Farbe (Pink für "Sonstige"), Name nur im Tooltip. Alle acht standardmäßig an. Drei Gesten statt reinem An/Aus (Peter, 2026-07-28): ein modifierloser Klick zeigt NUR diesen Typ (`solo_requested`-Signal → `_solo_type_filter`) — der weitaus häufigere Wunsch als "nur diesen einen abwählen"; Strg+Klick bleibt das native `QCheckBox`-Einzel-Umschalten (dazu-/wegnehmen aus einer bereits eingeschränkten Ansicht, per `super().mousePressEvent()` durchgereicht); Strg+Umschalt+Klick oder Doppelklick setzen über `reset_requested` wieder alle Typen an. Ein normaler Doppelklick würde von Qt sonst als zwei Einzelklicks gewertet (Haken am Ende unverändert) — deshalb eigene `mouseDoubleClickEvent`-Behandlung. |
-| Item-Tabelle rechts oben | `QTableView` + `QSortFilterProxyModel` | Spalten: Icon, Tab, **Position** ("#3 (4, 7)", Tab-Nummer plus Item-Koordinate, §4.11, unterscheidet gleichnamige Fächer), Name, **Base** (`item.baseType`, z. B. "Sun Plate", "Crimson Jewel" — anders als Name bei Uniques/Rares immer die reine Basis statt des Fantasienamens), Typ, Level, Quality, Stack, iLvl, **Anf.Lvl, Str, Dex, Int** (aus dem `requirements`-Array, §4.11), **Mods** (explicitMods, überwiegend Map-Modifikatoren, Tooltip zeilenweise) und **Value** (poe.ninja-Chaos-Wert × Stack, §4.14; leer bei unbekanntem Preis, unter 1 Chaos dezent Richtung Hintergrund abgeblendet). Klick auf den Spaltenkopf sortiert numerisch über `NUMERIC_SORT_ROLE`, also nach echten Zahlen statt nach Strings; Zeilen ohne Wert ("–") landen unten. Das Suchfeld sucht fächerübergreifend über die ganze Liga und schließt Item-Properties wie "Item Quantity" ein; ein eingebauter Clear-Button leert es, `*` zeigt alles an (gedacht für den Komplett-Export, §4.11). Je Spalte lässt sich über das Header-Rechtsklick-Menü zusätzlich ein Filter-Ausdruck setzen (`>=20`, `<45`, `=Text`, Teilstring), aktive Filter markiert ein 🔍 im Header. Sichtbare Spalten sind per Rechtsklick wählbar und werden in `%LOCALAPPDATA%/PoE-VIEW2/ui-settings.ini` gespeichert; "Typ" ist standardmäßig aus, da die Rarity bereits die Namensfarbe bestimmt. Die Tab-Spalte verwaltet die Anwendung selbst und blendet sie nicht ins Menü ein: aus bei Einzelfach-Auswahl, an in Aggregat-Ansichten ("Alle Tabs", Spezial-Tab-Elternknoten, liga-weite Suche), wo sie die Herkunft trägt ("Map (Tier 1)"). |
+| Item-Tabelle rechts oben | `QTableView` + `QSortFilterProxyModel` | Spalten: Icon, Tab, **Position** ("#3 (4, 7)", Tab-Nummer plus Item-Koordinate, §4.11, unterscheidet gleichnamige Fächer), Name, **Base** (`item.baseType`, z. B. "Sun Plate", "Crimson Jewel" — anders als Name bei Uniques/Rares immer die reine Basis statt des Fantasienamens), Typ, Level, Quality, Stack, iLvl, **Anf.Lvl, Str, Dex, Int** (aus dem `requirements`-Array, §4.11), **Mods** (explicitMods, überwiegend Map-Modifikatoren, Tooltip zeilenweise) und **Value** (poe.ninja-Chaos-Wert × Stack, §4.14; leer bei unbekanntem Preis, unter 1 Chaos dezent Richtung Hintergrund abgeblendet). Klick auf den Spaltenkopf sortiert numerisch über `NUMERIC_SORT_ROLE`, also nach echten Zahlen statt nach Strings; Zeilen ohne Wert ("–") landen unten. Das Suchfeld sucht fächerübergreifend über die ganze Liga und schließt Item-Properties wie "Item Quantity" ein; ein eingebauter Clear-Button leert es, `*` zeigt alles an (gedacht für den Komplett-Export, §4.11). Je Spalte lässt sich über das Header-Rechtsklick-Menü zusätzlich ein Filter-Ausdruck setzen (`>=20`, `<45`, `=Text`, Teilstring), aktive Filter markiert ein 🔍 im Header. Sichtbarkeit UND Reihenfolge sind konfigurierbar (§4.18) — schnelles Ein/Aus per Header-Rechtsklick, volle Kontrolle inkl. Drag&Drop-Reihenfolge über den Settings-Dialog (⚙-Toolbar-Button, Reiter "Columns") — und werden in `%LOCALAPPDATA%/PoE-VIEW2/ui-settings.ini` gespeichert; "Typ" ist standardmäßig aus, da die Rarity bereits die Namensfarbe bestimmt. Die Tab-Spalte verwaltet die Anwendung selbst und ist nicht konfigurierbar: aus bei Einzelfach-Auswahl, an in Aggregat-Ansichten ("Alle Tabs", Spezial-Tab-Elternknoten, liga-weite Suche), wo sie die Herkunft trägt ("Map (Tier 1)"). |
 | Item-Detail rechts unten | eigenes Widget | Großes Icon, Name in Rarity-Farbe (frameType) mit Tag-Suffix `[Unidentified, Corrupted]` (nur die zutreffenden Tags), eigene Zeile mit iLvl/Req.Lvl/Req.Str/Dex/Int (dieselben Helfer wie die Tabellenspalten, §4.11 — hier bewusst NUR im Detail-Panel, nicht zusätzlich in der Tabelle), Properties, Mods. Aktualisiert bei Zeilenauswahl. |
 | Rate-Limit-Dashboard | `QProgressBar` pro Regel + Status-LED + Countdown | Gefüttert über das Signal `rate_limit_changed` und den 1-Sekunden-Tick (§4.8). Farbe je Regel: grün < 60 %, gelb < 90 %, rot ab 90 %/Wartephase. Countdown zeigt verbleibende Wartezeit; `(Paused)` neben dem Policy-Namen, solange der Refresh-Modus "Pause" aktiv ist. Jedes Regel-Label nennt zusätzlich eine grobe Restzeit bis zur nächsten Absenkung des Zählers (`12/30 · 300 s · next in ~2:19`, §4.8, immer mit `~` — GGGs Zähler sinkt blockweise, nicht gleitend pro Treffer, FALLSTRICKE #45 Runde 6) — ohne sie sieht eine völlig normale Phase, in der noch gar nichts frei werden kann, wie ein Hänger aus. *Intention: Der User soll immer sehen, WARUM die App gerade wartet.* |
 | Statusbar | `QStatusBar` + `QProgressBar` (busy) | Login-Status, laufender Job, permanenter GGG-Disclaimer. Die `QProgressBar` läuft mit `setRange(0, 0)` im "busy"-Modus (Qt animiert das eingebaut, kein eigener Timer nötig). Sichtbarkeit hängt am eigenen `busy_changed`-Signal des Workers (`True` rund um jeden Job), NICHT am `status`-Text — siehe §4.5.1 zur Begründung. Ein permanentes **Offline-Banner** ("📴 Offline — GGG nicht erreichbar, zeige zwischengespeicherte Daten", §4.12) erscheint bei Konnektivitätsproblemen — als eigenes Label, damit die nächste "Lade …"-Statusmeldung es nicht überschreibt. Ein zweites permanentes Label (`_stack_sum_label`) zeigt die Summe der Stack-Größe über die aktuell sichtbaren (gefilterten) Zeilen ("Stack total: 12,345") — Items ohne Stack-Größe (Ausrüstung) zählen nicht mit, und die Zeile erscheint NUR, wenn alle stapelbaren Treffer denselben `display_name` tragen (FALLSTRICKE #39: bei "*" oder einer ungefilterten Truhe mit mehreren Currency-Sorten wäre eine Summe über verschiedene Item-Typen hinweg bedeutungslos). Ein drittes permanentes Label (`_value_sum_label`, §4.14) zeigt den Gesamt-Chaos-Wert derselben sichtbaren Zeilen ("Value: 1,234c") — anders als die Stack-Summe AUCH über verschiedene Item-Namen hinweg sinnvoll, erscheint also schon bei einem einzigen Item mit bekanntem Preis. Beide Summen-Labels hängen NUR an `proxy.modelReset` (`_update_summaries`, garantiert genau ein Signal pro `set_items()`) und werden zusätzlich an jeder Stelle, die den Filter ändert, GENAU EINMAL explizit aufgerufen (`_apply_debounced_search_filter`, `_on_type_toggled`, `_apply_column_filter`, `_clear_column_filters`) — NICHT an `layoutChanged`/`rowsInserted`/`-Removed` (FALLSTRICKE #39, zweiter Teil: genau das war der O(n²)-Bug). |

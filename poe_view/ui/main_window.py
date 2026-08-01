@@ -7,13 +7,14 @@ Die UI löst API-Arbeit ausschließlich über ``worker.submit(Job)`` aus.
 
 from __future__ import annotations
 
+import json
 import logging
 import time
 from datetime import datetime, timedelta, timezone
 
 from PySide6.QtCore import QSettings, Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import QAction, QDesktopServices, QMouseEvent, QPixmap
-from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox,
+from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog,
                                QFileDialog, QLabel, QLineEdit, QMainWindow,
                                QMenu, QMessageBox, QProgressBar,
                                QProgressDialog, QSizePolicy, QSplitter,
@@ -37,13 +38,14 @@ from poe_view.services.csv_export import export_items, sanitize_filename
 from poe_view.ui import external_tools
 from poe_view.ui.character_list import CharacterList
 from poe_view.ui.item_detail import ItemDetail
-from poe_view.ui.item_table import (COLUMNS, ICON_COL, MODS_COL,
-                                    POSITION_COL, TAB_COL, VALUE_COL,
-                                    ItemFilterProxy, ItemTableModel,
+from poe_view.ui.item_table import (COLUMNS, CONFIGURABLE_COLUMNS, ICON_COL,
+                                    MODS_COL, POSITION_COL, TAB_COL,
+                                    VALUE_COL, ItemFilterProxy, ItemTableModel,
                                     compile_search, format_chaos_value,
                                     matches_search)
 from poe_view.ui.item_zoom import ItemZoomDialog
 from poe_view.ui.paperdoll import PaperdollDialog
+from poe_view.ui.settings_dialog import SettingsDialog
 from poe_view.ui.rate_limit_dashboard import RateLimitDashboard
 from poe_view.ui.raw_data_viewer import RawDataViewer
 from poe_view.ui.stash_tree import StashTree
@@ -152,11 +154,15 @@ class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle(f"PoE-VIEW2 v{__version__}")
-        # Unter ~1186px klappt die Toolbar zusammen und versteckt das
-        # Suchfeld hinter "…" — mit der 340px-Baumbreite (statt 260px) reicht
-        # 1180px nicht mehr aus (Peter, 2026-07-28). 1200px als Puffer, nicht
-        # exakt an der gemessenen Schwelle.
         self.resize(1200, 700)
+        # Liga/Typ-Filter/Suche sitzen seit 2026-08-01 in einer eigenen
+        # zweiten Toolbar-Zeile (siehe _build_ui). Unter ~740px (real am
+        # Fenster gemessen, siehe FALLSTRICKE #55) klappt genau diese
+        # Zeile zusammen und versteckt das Suchfeld hinter "…". 800x600
+        # (Peter, 2026-08-01: "pragmatisch auf die bekannte Größe") liegt
+        # mit Puffer darüber — bewusst kein exaktes Mindestmaß, ein
+        # gängiger Standard-Wert für Mindestfenstergrößen.
+        self.setMinimumSize(800, 600)
 
         self._account_name: str = ""
         self._stash_trees: dict[str, list[StashTab]] = {}      # Liga → Baumstruktur
@@ -309,6 +315,15 @@ class MainWindow(QMainWindow):
         toolbar = QToolBar()
         toolbar.setMovable(False)
         self.addToolBar(toolbar)
+        # Liga/Typ-Filter/Suche in eine eigene zweite Zeile (Peter,
+        # 2026-08-01: die erste Zeile wurde bei schmalerem Fenster am
+        # rechten Rand abgeschnitten, Suche/Filter dadurch unsichtbar).
+        # addToolBarBreak() erzwingt den Zeilenumbruch vor der nächsten
+        # addToolBar()-Toolbar.
+        self.addToolBarBreak()
+        filter_toolbar = QToolBar()
+        filter_toolbar.setMovable(False)
+        self.addToolBar(filter_toolbar)
 
         self._login_action = QAction("🔑 Log in", self)
         self._login_action.triggered.connect(lambda: self.worker.submit(LoginJob()))
@@ -346,14 +361,18 @@ class MainWindow(QMainWindow):
         self._export_action.triggered.connect(self._export_csv)
         toolbar.addAction(self._export_action)
 
-        toolbar.addSeparator()
-        toolbar.addWidget(QLabel(" League: "))
+        self._settings_action = QAction("⚙ Settings", self)
+        self._settings_action.setToolTip("Configure the item right-click menu")
+        self._settings_action.triggered.connect(self._open_settings_dialog)
+        toolbar.addAction(self._settings_action)
+
+        filter_toolbar.addWidget(QLabel(" League: "))
         self._league_combo = QComboBox()
         self._league_combo.setMinimumWidth(160)
         self._league_combo.currentTextChanged.connect(self._on_league_changed)
-        toolbar.addWidget(self._league_combo)
+        filter_toolbar.addWidget(self._league_combo)
 
-        toolbar.addWidget(QLabel("  Type: "))
+        filter_toolbar.addWidget(QLabel("  Type: "))
         # 8 Checkboxen statt Namen (Namen wären zu lang) —
         # die Farbe des Käschchens IST das Label, Tooltip trägt den Namen.
         # Die letzte ("Sonstige", Pink) fängt alles ohne eigene Kategorie
@@ -375,16 +394,16 @@ class MainWindow(QMainWindow):
             box.solo_requested.connect(lambda tk=type_key: self._solo_type_filter(tk))
             box.reset_requested.connect(self._reset_type_filters)
             self._type_checks[type_key] = box
-            toolbar.addWidget(box)
+            filter_toolbar.addWidget(box)
 
         spacer = QWidget()
         spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-        toolbar.addWidget(spacer)
+        filter_toolbar.addWidget(spacer)
         self._filter_edit = QLineEdit()
         self._filter_edit.setPlaceholderText("🔍 Search all tabs of the league — * for everything")
         self._filter_edit.setFixedWidth(260)
         self._filter_edit.setClearButtonEnabled(True)  # eingebautes "x" zum Leeren
-        toolbar.addWidget(self._filter_edit)
+        filter_toolbar.addWidget(self._filter_edit)
         # Regex-Umschalter, standardmäßig AN: entspricht PoEs eigener
         # Truhensuche, sodass auf poe.re zusammengeklickte Muster
         # ("r-r-g|r-g-r|g-r-r", "-\w-.-") unverändert funktionieren. Wer
@@ -398,7 +417,7 @@ class MainWindow(QMainWindow):
         self._regex_toggle.setChecked(self._load_regex_enabled())
         self._regex_search_enabled = self._regex_toggle.isChecked()
         self._regex_toggle.toggled.connect(self._on_regex_toggled)
-        toolbar.addWidget(self._regex_toggle)
+        filter_toolbar.addWidget(self._regex_toggle)
 
         self._update_online_controls_enabled()
 
@@ -483,7 +502,7 @@ class MainWindow(QMainWindow):
         table_header = self.table.horizontalHeader()
         table_header.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         table_header.customContextMenuRequested.connect(self._on_table_header_menu)
-        self._apply_hidden_columns(self._load_hidden_columns())
+        self._apply_column_config(self._load_column_config())
 
         self.detail = ItemDetail()
         right = QWidget()
@@ -739,11 +758,12 @@ class MainWindow(QMainWindow):
         index = self._price_indexes.get(self._current_league)
         self._value_sum_label.setText(f"Value: {format_chaos_value(total, index)}")
 
-    # --- Spalten-Sichtbarkeit der Item-Tabelle --------- #
+    # --- Spalten-Sichtbarkeit + Reihenfolge der Item-Tabelle --------- #
 
     # "Type" ist standardmäßig aus: die Rarity steckt bereits in der
     # Namensfarbe. Die Tab-Spalte wird automatisch verwaltet (aus bei
-    # Einzelfach, an bei Aggregat) und ist deshalb nicht im Menü.
+    # Einzelfach, an bei Aggregat) und ist deshalb nicht konfigurierbar
+    # (CONFIGURABLE_COLUMNS, siehe item_table.py).
     DEFAULT_HIDDEN_COLUMNS = frozenset({"Type"})
 
     def _settings(self) -> QSettings:
@@ -751,11 +771,60 @@ class MainWindow(QMainWindow):
         return QSettings(str(config.APP_DATA_DIR / "ui-settings.ini"),
                          QSettings.Format.IniFormat)
 
-    def _load_hidden_columns(self) -> set[str]:
-        stored = self._settings().value("item_table/hidden_columns")
-        if stored is None:
-            return set(self.DEFAULT_HIDDEN_COLUMNS)
-        return {name for name in str(stored).split(";") if name}
+    def _default_column_config(self) -> list[tuple[str, bool]]:
+        return [(name, name not in self.DEFAULT_HIDDEN_COLUMNS) for name in CONFIGURABLE_COLUMNS]
+
+    def _load_column_config(self) -> list[tuple[str, bool]]:
+        """Reihenfolge + Sichtbarkeit als JSON-Liste (Peter, 2026-08-01:
+        Settings-Dialog mit Drag&Drop-Reihenfolge statt nur einer reinen
+        Sichtbarkeits-Menge). Fehlt eine konfigurierbare Spalte im
+        gespeicherten Stand (z. B. weil sie erst später hinzukam), wird sie
+        sichtbar ans Ende angehängt statt stillschweigend zu verschwinden."""
+        stored = self._settings().value("item_table/column_config")
+        if stored:
+            try:
+                raw = json.loads(str(stored))
+                order = [(str(d["name"]), bool(d["visible"])) for d in raw
+                        if str(d.get("name", "")) in CONFIGURABLE_COLUMNS]
+            except (ValueError, TypeError, KeyError):
+                order = []
+            if order:
+                seen = {name for name, _ in order}
+                order += [(name, True) for name in CONFIGURABLE_COLUMNS if name not in seen]
+                return order
+        # Migration von der alten reinen Sichtbarkeits-Einstellung (keine
+        # Reihenfolge) — sonst Standardreihenfolge, alles sichtbar außer "Type".
+        legacy = self._settings().value("item_table/hidden_columns")
+        if legacy is not None:
+            hidden = {name for name in str(legacy).split(";") if name}
+            return [(name, name not in hidden) for name in CONFIGURABLE_COLUMNS]
+        return self._default_column_config()
+
+    def _save_column_config(self, column_config: list[tuple[str, bool]]) -> None:
+        payload = json.dumps([{"name": name, "visible": visible} for name, visible in column_config])
+        self._settings().setValue("item_table/column_config", payload)
+
+    def _apply_column_config(self, column_config: list[tuple[str, bool]]) -> None:
+        """Setzt Sichtbarkeit UND visuelle Reihenfolge. Die Tab-Spalte
+        bleibt fix an erster Stelle (sie ist nicht Teil von
+        ``column_config``, ihre Sichtbarkeit steuert allein die
+        Einzelfach-/Aggregat-Logik andernorts)."""
+        header = self.table.horizontalHeader()
+        header.moveSection(header.visualIndex(TAB_COL), 0)
+        target_visual = 1
+        for name, visible in column_config:
+            col = COLUMNS.index(name)
+            self.table.setColumnHidden(col, not visible)
+            header.moveSection(header.visualIndex(col), target_visual)
+            target_visual += 1
+
+    def _toggle_column(self, name: str) -> None:
+        """Vom Header-Rechtsklickmenü genutzt: Sichtbarkeit EINER Spalte
+        umschalten, Reihenfolge bleibt unangetastet."""
+        column_config = [(n, (not visible) if n == name else visible)
+                         for n, visible in self._load_column_config()]
+        self._apply_column_config(column_config)
+        self._save_column_config(column_config)
 
     def _load_regex_enabled(self) -> bool:
         """Default AN — entspricht PoEs eigener Truhensuche (§4.11)."""
@@ -774,18 +843,6 @@ class MainWindow(QMainWindow):
             self._apply_debounced_search_filter()
         else:
             self._update_summaries()
-
-    def _apply_hidden_columns(self, hidden: set[str]) -> None:
-        for i, name in enumerate(COLUMNS):
-            if i == TAB_COL:
-                continue  # automatisch verwaltet (Einzelfach vs. Aggregat)
-            self.table.setColumnHidden(i, name in hidden)
-
-    def _toggle_column(self, name: str) -> None:
-        hidden = self._load_hidden_columns()
-        hidden.symmetric_difference_update({name})
-        self._apply_hidden_columns(hidden)
-        self._settings().setValue("item_table/hidden_columns", ";".join(sorted(hidden)))
 
     def _on_table_header_menu(self, pos) -> None:
         header = self.table.horizontalHeader()
@@ -809,13 +866,13 @@ class MainWindow(QMainWindow):
                 clear_action = menu.addAction("✕ Clear All Column Filters")
                 clear_action.triggered.connect(self._clear_column_filters)
             menu.addSeparator()
-        hidden = self._load_hidden_columns()
+        visible_names = {name for name, visible in self._load_column_config() if visible}
         for i, name in enumerate(COLUMNS):
             if i == TAB_COL:
                 continue
             action = menu.addAction(name)
             action.setCheckable(True)
-            action.setChecked(name not in hidden)
+            action.setChecked(name in visible_names)
             action.triggered.connect(lambda _=False, n=name: self._toggle_column(n))
         menu.exec(header.mapToGlobal(pos))
 
@@ -1959,22 +2016,35 @@ class MainWindow(QMainWindow):
     def _build_item_tools_menu(self, item: Item) -> QMenu:
         """Losgelöst von ``_on_table_row_menu``, damit Tests die
         Menü-Zusammenstellung prüfen können, ohne ``QMenu.exec()`` (blockiert
-        ohne echte Nutzerinteraktion) auszulösen. poe.ninja nur für Currency
-        (einziges real bestätigte Deep-Link-Schema, siehe
-        external_tools.ninja_url). Ein vierter Eintrag (Craft of Exile)
-        wurde probeweise gebaut und wieder entfernt — CoE lehnt den Import
-        ohne Mod-Tag/Tier-Daten komplett ab, die GGGs API nicht liefert,
-        siehe FALLSTRICKE #50."""
+        ohne echte Nutzerinteraktion) auszulösen. Einträge kommen aus den
+        konfigurierbaren ``ToolEntry``s (Peter, 2026-08-01: Settings-Dialog),
+        nicht mehr fest verdrahtet. Ein weiterer, ursprünglich geplanter
+        Eintrag (Craft of Exile) wurde probeweise gebaut und wieder entfernt
+        — CoE lehnt den Import ohne Mod-Tag/Tier-Daten komplett ab, die GGGs
+        API nicht liefert, siehe FALLSTRICKE #50."""
         menu = QMenu(self.table)
-        menu.addAction("PoEDB öffnen",
-                       lambda: QDesktopServices.openUrl(QUrl(external_tools.poedb_url(item))))
-        menu.addAction("PoE Wiki öffnen",
-                       lambda: QDesktopServices.openUrl(QUrl(external_tools.wiki_url(item))))
-        ninja_link = external_tools.ninja_url(item, self._current_league)
-        if ninja_link:
-            menu.addAction("poe.ninja öffnen",
-                           lambda: QDesktopServices.openUrl(QUrl(ninja_link)))
+        for entry in self._load_tool_entries():
+            if not entry.enabled:
+                continue
+            url = external_tools.build_url(entry, item)
+            menu.addAction(f"{entry.name} öffnen",
+                           lambda checked=False, u=url: QDesktopServices.openUrl(QUrl(u)))
         return menu
+
+    def _load_tool_entries(self) -> list[external_tools.ToolEntry]:
+        stored = self._settings().value("external_tools/entries")
+        return external_tools.tools_from_json(stored if isinstance(stored, str) else None)
+
+    def _save_tool_entries(self, entries: list[external_tools.ToolEntry]) -> None:
+        self._settings().setValue("external_tools/entries", external_tools.tools_to_json(entries))
+
+    def _open_settings_dialog(self) -> None:
+        dialog = SettingsDialog(self._load_tool_entries(), self._load_column_config(), self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self._save_tool_entries(dialog.result_entries())
+            column_config = dialog.result_column_config()
+            self._save_column_config(column_config)
+            self._apply_column_config(column_config)
 
     def _on_status(self, text: str) -> None:
         """Reiner Verlaufstext — Busy-Zustand kommt separat über busy_changed

@@ -68,6 +68,15 @@ nach [SemVer](https://semver.org/lang/de/).
 
 ### Hinzugefügt
 
+- Neuer Settings-Dialog (⚙-Button in der Toolbar) mit einem Reiter
+  "Columns": welche Item-Tabellen-Spalten sichtbar sind und in welcher
+  Reihenfolge lässt sich dort per Häkchen und Drag & Drop einstellen,
+  zusätzlich zum bisherigen schnellen Ein/Aus-Schalter im
+  Header-Rechtsklickmenü. Beide Wege teilen sich denselben gespeicherten
+  Stand.
+- Fenster lässt sich nicht mehr kleiner als 800x600 ziehen — darunter
+  wurden Bedienelemente in der Toolbar (u. a. das Suchfeld) hinter einem
+  Overflow-Pfeil versteckt.
 - Doppelklick auf ein Item öffnet eine vergrößerte Ansicht: großes Icon
   und der vollständige Property-/Mod-Text ohne die Zeilen-Kürzung des
   kompakten Detail-Panels. Bei Divination Cards zeigt sie das echte

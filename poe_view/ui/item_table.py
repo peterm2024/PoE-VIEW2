@@ -98,6 +98,13 @@ VALUE_COL = 15         # poe.ninja-Chaos-Wert × Stack — eigene Spalte NACH Mo
 # für den Zugriff _rows[row][col - _ROWS_OFFSET] in display_text().
 _ROWS_OFFSET = 3
 
+# Über den Settings-Dialog konfigurierbar (Sichtbarkeit + Reihenfolge,
+# Peter 2026-08-01) — alle Spalten außer "Tab", die MainWindow abhängig
+# von Einzelfach- vs. Aggregat-Ansicht automatisch ein-/ausblendet
+# (siehe Modul-Docstring) und die deshalb kein Nutzer-Konfigurationsziel
+# ist.
+CONFIGURABLE_COLUMNS = tuple(name for name in COLUMNS if name != "Tab")
+
 # Unterhalb dieser Chaos-Schwelle wird die Value-Zelle dezent Richtung
 # Hintergrund abgeblendet ("wahrscheinlich Schrott") — der von PoE-Spielern
 # gebräuchliche Richtwert "ist es mindestens einen Chaos wert" (ToDo.md:
