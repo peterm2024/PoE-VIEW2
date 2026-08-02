@@ -85,6 +85,16 @@ nach [SemVer](https://semver.org/lang/de/).
 
 ### Hinzugefügt
 
+- Charakter-Item-Verlauf: ein neues, aufziehbares Panel unterhalb der
+  Item-Tabelle protokolliert die letzten 120 Items, die neu im
+  Charakter-Inventar aufgetaucht oder daraus verschwunden sind (↑/↓) —
+  über alle Charaktere hinweg, unabhängig davon, welcher gerade angezeigt
+  wird. Damit lässt sich kurz nachschauen, was man gerade in die Truhe
+  gelegt, verkauft oder gehandelt hat. Eigenes, kompaktes Spaltenformat
+  (Zeit, Charakter, Ereignis, Icon, Name, Base, Stack, Value);
+  standardmäßig auf eine Zeile eingeklappt, per Ziehen am Splitter
+  aufziehbar. Rechtsklick/Doppelklick funktionieren wie in der
+  Haupttabelle (externe Tools, vergrößerte Ansicht).
 - Charakter-Ansicht: Beim Beobachten eines Charakter-Inventars (z. B. per
   Zonenwechsel-Trigger, siehe unten) werden Zeilen, die sich seit dem
   letzten Refresh geändert haben oder neu hinzugekommen sind, türkis

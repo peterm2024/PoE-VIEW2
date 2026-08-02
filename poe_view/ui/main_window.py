@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import logging
 import time
+from collections import deque
 from datetime import datetime, timedelta, timezone
 
 from PySide6.QtCore import QSettings, Qt, QTimer, QUrl, Signal
@@ -44,6 +45,7 @@ from poe_view.ui.item_table import (COLUMNS, CONFIGURABLE_COLUMNS, ICON_COL,
                                     VALUE_COL, ItemFilterProxy, ItemTableModel,
                                     compile_search, format_chaos_value,
                                     matches_search)
+from poe_view.ui.item_history import HistoryEntry, ItemHistoryModel
 from poe_view.ui.item_zoom import ItemZoomDialog
 from poe_view.ui.paperdoll import PaperdollDialog
 from poe_view.ui.settings_dialog import SettingsDialog
@@ -229,6 +231,11 @@ class MainWindow(QMainWindow):
         self._refresh_mode_priority_id: str | None = None
         self._raw_data_viewer: RawDataViewer | None = None
         self._zone_watcher: ZoneWatcher | None = None
+        # Charakter-Item-Verlauf (Peter, 2026-08-02): letzte 120 Items, die
+        # neu im Inventar aufgetaucht oder daraus verschwunden sind — über
+        # ALLE Charaktere hinweg, unabhängig davon, welcher gerade angezeigt
+        # wird (appendleft: Zeile 0 = jüngstes Ereignis, siehe item_history.py).
+        self._item_history: deque[HistoryEntry] = deque(maxlen=120)
         self._offline = False  # GGG nicht erreichbar (Wartung am Patchday)
         self._live_leagues: set[str] | None = None  # letzte /account/leagues-Antwort; None = noch unbekannt
         self._restore_cached_data()
@@ -507,11 +514,39 @@ class MainWindow(QMainWindow):
         table_header.customContextMenuRequested.connect(self._on_table_header_menu)
         self._apply_column_config(self._load_column_config())
 
+        # Charakter-Item-Verlauf (Peter, 2026-08-02): eigenes, schlankes
+        # Spaltenformat statt der Item-Tabelle (§item_history.py) — deshalb
+        # eigener Header, anders als ursprünglich angedacht ("Header ist
+        # der gleiche wie oben, deshalb nicht angezeigt" galt nur für die
+        # zunächst erwogene Wiederverwendung des Item-Tabellen-Formats).
+        self.history_model = ItemHistoryModel(
+            icon_requester=lambda url: self.worker.submit(FetchIconJob(url)))
+        self.history_table = QTableView()
+        self.history_table.setModel(self.history_model)
+        self.history_table.setSelectionBehavior(QTableView.SelectionBehavior.SelectRows)
+        self.history_table.verticalHeader().hide()
+        self.history_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.history_table.customContextMenuRequested.connect(self._on_history_row_menu)
+        self.history_table.doubleClicked.connect(self._on_history_row_double_clicked)
+
         self.detail = ItemDetail()
         right = QWidget()
         right_layout = QVBoxLayout(right)
         right_layout.setContentsMargins(0, 0, 0, 0)
-        right_layout.addWidget(self.table, stretch=1)
+        # Vertikaler Splitter statt fixer Höhe: standardmäßig auf eine
+        # Zeile kollabiert (nur das jüngste Verlaufs-Ereignis sichtbar),
+        # per Ziehen am Griff beliebig aufziehbar (Peter: "kann aufgezogen
+        # werden") — QSplitter bringt das ohne eigene Resize-Logik mit.
+        table_splitter = QSplitter(Qt.Orientation.Vertical)
+        table_splitter.addWidget(self.table)
+        table_splitter.addWidget(self.history_table)
+        table_splitter.setStretchFactor(0, 1)
+        table_splitter.setStretchFactor(1, 0)
+        one_row_height = (self.history_table.horizontalHeader().sizeHint().height()
+                          + self.history_table.verticalHeader().defaultSectionSize()
+                          + 2 * self.history_table.frameWidth())
+        table_splitter.setSizes([1000, one_row_height])
+        right_layout.addWidget(table_splitter, stretch=1)
         right_layout.addWidget(self.detail)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -1034,6 +1069,7 @@ class MainWindow(QMainWindow):
         # aufgerufen würde stets None sehen, auch wenn der Cache-Treffer
         # direkt danach eintrifft.
         self.table_model.set_price_index(self._price_indexes.get(league))
+        self.history_model.set_price_index(self._price_indexes.get(league))
         # Stash-Modus soll sofort auf die neue Liga umsteigen statt den
         # Rest-Takt der vorherigen Liga abzuwarten. NICHT zurückgesetzt:
         # _refresh_mode_policy — die Policy eines Fach-Abrufs
@@ -1070,6 +1106,7 @@ class MainWindow(QMainWindow):
             # §_ensure_prices_loaded) — Value-Spalte/-Summe füllen sich
             # dadurch nachträglich, ohne dass der Nutzer neu klicken muss.
             self.table_model.set_price_index(index)
+            self.history_model.set_price_index(index)
             self._update_value_sum()
         self._drive_refresh_mode()
 
@@ -1939,6 +1976,7 @@ class MainWindow(QMainWindow):
         previous_items = self._character_items.get(name)  # vor dem Überschreiben: Diff-Basis
         self._character_items[name] = items
         self._character_items_loaded[name] = datetime.now(timezone.utc).isoformat()
+        self._log_character_item_history(name, previous_items, items)
         self._persist_cache()
         if silent:
             # Policy-Name jetzt festhalten, siehe Kommentar in
@@ -1976,8 +2014,9 @@ class MainWindow(QMainWindow):
         self._paperdoll_dialog.show()
 
     @staticmethod
-    def _diff_character_items(previous_items: list[Item] | None,
-                              items: list[Item]) -> tuple[frozenset[str], list[Item]]:
+    def _diff_character_items(
+            previous_items: list[Item] | None,
+            items: list[Item]) -> tuple[frozenset[str], frozenset[str], list[Item]]:
         """Vergleicht den vorigen mit dem aktuellen Item-Stand eines
         Charakters (Peter 2026-08-01: "die Zeilen hervorgehoben (Türkis),
         welche sich geändert haben"; verschwundene Items grau/durchgestrichen
@@ -1991,23 +2030,59 @@ class MainWindow(QMainWindow):
         Kennung ist "gleiches Item, anderer Zustand" von "verschwunden +
         neues Item" nicht unterscheidbar.
 
-        Rückgabe: (changed_ids, removed_items). ``removed_items`` sind die
-        Item-Objekte aus ``previous_items``, die im aktuellen Stand fehlen —
-        der Aufrufer hängt sie ans Ende der Anzeige an, damit sie für GENAU
-        EINEN Refresh-Zyklus sichtbar bleiben (sie stecken nicht in
-        ``self._character_items``, der eigentlichen Diff-Basis, also fallen
-        sie beim nächsten Refresh von selbst wieder raus)."""
+        Rückgabe: (added_ids, changed_ids, removed_items).
+        - ``added_ids``: ``item.id`` kam in ``previous_items`` gar nicht
+          vor — ein echter Neuzugang (z. B. Loot, Handel).
+        - ``changed_ids``: ``item.id`` existierte schon, aber der Item-Wert
+          hat sich geändert (z. B. Stack-Größe) — bewusst GETRENNT von
+          ``added_ids``: ein neu aufgetauchtes Item ist etwas anderes als
+          ein vorhandenes, das sich nur verändert hat. Die Türkis-
+          Hervorhebung deckt beide Fälle gleich ab (``_show_character_
+          items``), der Charakter-Item-Verlauf (Peter, 2026-08-02:
+          ``_log_character_item_history``) dagegen NUR ``added_ids``, um
+          reine Stack-Größen-Änderungen nicht als "neues Item" zu loggen.
+        - ``removed_items``: Item-Objekte aus ``previous_items``, die im
+          aktuellen Stand fehlen — der Aufrufer der Türkis-/Grau-Anzeige
+          hängt sie ans Ende der angezeigten Liste an, damit sie für GENAU
+          EINEN Refresh-Zyklus sichtbar bleiben (sie stecken nicht in
+          ``self._character_items``, der eigentlichen Diff-Basis, also
+          fallen sie beim nächsten Refresh von selbst wieder raus)."""
         if previous_items is None:
-            return frozenset(), []
+            return frozenset(), frozenset(), []
         previous_by_id = {item.id: item for item in previous_items if item.id}
         current_ids = {item.id for item in items if item.id}
+        added_ids = frozenset(item.id for item in items
+                              if item.id and item.id not in previous_by_id)
         changed_ids = frozenset(
             item.id for item in items
-            if item.id and (item.id not in previous_by_id or item != previous_by_id[item.id])
+            if item.id and item.id in previous_by_id and item != previous_by_id[item.id]
         )
         removed_items = [item for item_id, item in previous_by_id.items()
                          if item_id not in current_ids]
-        return changed_ids, removed_items
+        return added_ids, changed_ids, removed_items
+
+    def _log_character_item_history(self, name: str, previous_items: list[Item] | None,
+                                    items: list[Item]) -> None:
+        """Protokolliert neu aufgetauchte/verschwundene Items eines
+        Charakters im globalen Verlauf (Peter, 2026-08-02: "eine Liste mit
+        den letzten 120 Items, die durchs Inventar gewandert sind ... was
+        du gerade in die Truhe getan hast oder verkauft hast oder
+        gehandelt hast"). Läuft für JEDEN Charakter, unabhängig davon, ob
+        er gerade angezeigt wird — anders als die Türkis-/Grau-Anzeige in
+        ``_show_character_items``, die nur die aktuell offene Ansicht
+        betrifft. ``previous_items=None`` (erster Ladevorgang dieses
+        Charakters) loggt bewusst nichts, sonst würde jeder erstmalige
+        Charakter-Load die komplette Ausrüstung als "neu" eintragen."""
+        added_ids, _changed_ids, removed_items = self._diff_character_items(previous_items, items)
+        if not added_ids and not removed_items:
+            return
+        now = datetime.now(timezone.utc)
+        for item in items:
+            if item.id in added_ids:
+                self._item_history.appendleft(HistoryEntry(now, "added", name, item))
+        for item in removed_items:
+            self._item_history.appendleft(HistoryEntry(now, "removed", name, item))
+        self.history_model.set_entries(list(self._item_history))
 
     def _show_character_items(self, name: str, items: list[Item],
                               previous_items: list[Item] | None = None) -> None:
@@ -2025,13 +2100,13 @@ class MainWindow(QMainWindow):
         self._large_search_items = None
         self._current_stash_id = None
         self.table.setColumnHidden(TAB_COL, False)
-        changed_ids, removed_items = self._diff_character_items(previous_items, items)
+        added_ids, changed_ids, removed_items = self._diff_character_items(previous_items, items)
         display_items = items + removed_items
         sources = [item.inventoryId or "?" for item in display_items]
         removed_ids = frozenset(item.id for item in removed_items if item.id)
         self.table_model.set_items(display_items, sources, [None] * len(display_items),
                                    [None] * len(display_items),
-                                   changed_ids=changed_ids, removed_ids=removed_ids)
+                                   changed_ids=added_ids | changed_ids, removed_ids=removed_ids)
         self._status_msg.setText(f"{name}: {len(items)} items (equipment + inventory)")
 
     def _on_icon(self, url: str, data: bytes) -> None:
@@ -2039,6 +2114,7 @@ class MainWindow(QMainWindow):
         if not pixmap.loadFromData(data):
             return
         self.table_model.set_icon(url, pixmap)
+        self.history_model.set_icon(url, pixmap)
         if self._pending_card_art and self._pending_card_art[0] == url:
             _, dialog = self._pending_card_art
             self._pending_card_art = None
@@ -2120,6 +2196,33 @@ class MainWindow(QMainWindow):
             menu.addAction(f"{entry.name} öffnen",
                            lambda checked=False, u=url: QDesktopServices.openUrl(QUrl(u)))
         return menu
+
+    def _on_history_row_double_clicked(self, index) -> None:
+        """Doppelklick auf einen Verlaufs-Eintrag: dieselbe vergrößerte
+        Ansicht wie in der Item-Tabelle (Peter, 2026-08-02: "nochmal kurz
+        nachschauen, was du gerade ... verkauft hast oder gehandelt
+        hast") — kein eigener Proxy, der Verlauf hat kein Filter/Sort."""
+        entry = self.history_model.entry_at(index.row())
+        if entry is None:
+            return
+        item = entry.item
+        self._item_zoom_dialog = ItemZoomDialog(item, self.history_model.pixmap_for(item),
+                                                parent=self)
+        self._item_zoom_dialog.show()
+        if item.frameType == 6:
+            self._request_card_art(item, self._item_zoom_dialog)
+
+    def _on_history_row_menu(self, pos) -> None:
+        """Rechtsklick auf einen Verlaufs-Eintrag: dieselben externen Tools
+        wie in der Item-Tabelle (§_build_item_tools_menu)."""
+        index = self.history_table.indexAt(pos)
+        if not index.isValid():
+            return
+        entry = self.history_model.entry_at(index.row())
+        if entry is None:
+            return
+        menu = self._build_item_tools_menu(entry.item)
+        menu.exec(self.history_table.viewport().mapToGlobal(pos))
 
     def _load_tool_entries(self) -> list[external_tools.ToolEntry]:
         stored = self._settings().value("external_tools/entries")

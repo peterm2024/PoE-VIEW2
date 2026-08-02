@@ -1765,14 +1765,19 @@ z. B. die Stack-Größe eines Currency-Stacks ändert. `MainWindow.
 _diff_character_items(previous_items, items)` (statische Methode, pures
 Set-basiertes Vergleichen, keine Model-Abhängigkeit — leicht isoliert
 testbar) vergleicht den Item-Stand VOR dem gerade eingetroffenen Refresh
-mit dem neuen:
+mit dem neuen und liefert `(added_ids, changed_ids, removed_items)`:
 
-- **Geändert** (`changed_ids`): `item.id` gab es vorher nicht (neu
-  hinzugekommen) ODER der komplette Item-Wert (Pydantic-Gleichheit,
-  erfasst auch `extra="allow"`-Zusatzfelder) unterscheidet sich vom
-  vorigen Stand mit derselben id — deckt Stack-Größen-, Mod- oder
-  Property-Änderungen gleichermaßen ab, ohne Feld für Feld selbst zu
-  vergleichen.
+- **Neu** (`added_ids`): `item.id` gab es in `previous_items` gar nicht —
+  ein echter Neuzugang (Loot, Handel).
+- **Geändert** (`changed_ids`): `item.id` existierte schon, aber der
+  komplette Item-Wert (Pydantic-Gleichheit, erfasst auch
+  `extra="allow"`-Zusatzfelder) unterscheidet sich vom vorigen Stand mit
+  derselben id — deckt Stack-Größen-, Mod- oder Property-Änderungen ab,
+  ohne Feld für Feld selbst zu vergleichen. Bewusst GETRENNT von
+  `added_ids` (Peter, 2026-08-02, §4.21): die Türkis-Hervorhebung hier
+  behandelt beide gleich (`added_ids | changed_ids`), der Charakter-Item-
+  Verlauf dagegen NUR `added_ids` — eine reine Stack-Größen-Änderung soll
+  dort nicht als "neues Item" auftauchen.
 - **Verschwunden** (`removed_items`): `item.id` gab es vorher, taucht im
   neuen Stand aber nicht mehr auf.
 - Items ganz ohne `id` (im echten Cache bislang nie beobachtet, laut
@@ -1802,6 +1807,68 @@ eine gedimmte Textfarbe (`theme.dimmed_text()`, derselbe Mischalgorithmus
 wie die "wahrscheinlich Schrott"-Dimmung der Value-Spalte, §4.14 — jetzt
 aus dieser Stelle herausgezogen und geteilt) sowie durchgestrichenen Text
 (`QFont.setStrikeOut`) statt der sonstigen Rarity-Färbung.
+
+### 4.21 Charakter-Item-Verlauf: die letzten 120 Items, die durchs Inventar gewandert sind
+
+Peter, 2026-08-02: "Ich überlege gerade, ob es sinnvoll ist, eine Liste
+mit den letzten 120 Items zu pflegen, die durchs Inventar gewandert sind.
+Intension dahinter ist, dass du nochmal kurz nachschauen kannst, was du
+gerade in die Truhe getan hast oder verkauft hast oder gehandelt hast."
+Baut direkt auf §4.20 auf: dieselbe Diff-Erkennung (`_diff_character_
+items`) liefert schon "neu"/"verschwunden" pro Charakter-Refresh — hier
+wird daraus zusätzlich ein rollierendes Protokoll statt nur einer
+Zeilen-Hervorhebung.
+
+**Global statt an die aktuell offene Ansicht gebunden** (Peter: "Wenn wir
+das Global machen") — `MainWindow._log_character_item_history()` läuft in
+`_on_character_items()` für JEDEN Charakter, dessen Daten eintreffen,
+unabhängig davon, ob er gerade angezeigt wird (anders als die Türkis-/
+Grau-Hervorhebung aus §4.20, die nur die offene Ansicht betrifft). Nur
+`added_ids` (echte Neuzugänge) und `removed_items` werden geloggt,
+NICHT `changed_ids` — eine reine Stack-Größen-Änderung ist kein
+"Item ist durchs Inventar gewandert". `previous_items=None` (erster
+Ladevorgang eines Charakters) loggt nichts, aus demselben Grund wie bei
+der Türkis-Hervorhebung: sonst wäre der komplette Startbestand beim
+ersten Laden fälschlich "neu".
+
+**Eigenes Spaltenformat statt Wiederverwendung der Item-Tabelle**
+(`ui/item_history.py`, `ItemHistoryModel`) — ursprünglich als "Header ist
+der gleiche wie oben, deshalb nicht angezeigt" angedacht, aber ein
+Log-Eintrag hat andere Bedürfnisse als eine Bestandsanzeige: Zeitpunkt und
+Ereignistyp (↑ neu / ↓ verschwunden) sind Pflicht, welcher Charakter
+betroffen war wird bei einem GLOBALEN Verlauf über mehrere Charaktere
+hinweg ebenfalls relevant, während Tab/Position (siehe FALLSTRICKE #59)
+hier komplett bedeutungslos wären. Spalten: Time, Character, Event, Icon,
+Name, Base, Stack, Value — bewusst ohne Mods/Req-Stats/Type, das bläht die
+kompakte Zeile unnötig auf (ein Doppelklick öffnet bei Bedarf die normale
+vergrößerte Item-Ansicht, §4.17). `HistoryEntry` (Zeitstempel, Ereignis,
+Charaktername, `Item`) ist eine eigene, unabhängige Datenklasse — das
+Model kennt nur fertige Einträge, keine Diff-Logik.
+
+**Rollierendes Log, 120 Einträge, neueste zuerst** — `MainWindow.
+_item_history: deque[HistoryEntry] = deque(maxlen=120)`. Neue Einträge
+kommen per `appendleft()` rein: `maxlen` verdrängt dadurch automatisch das
+ÄLTESTE Ende, ganz ohne eigene Aufräum-Logik, und Zeile 0 ist immer das
+jüngste Ereignis — wichtig für die standardmäßig kollabierte Anzeige (nur
+eine Zeile sichtbar, siehe unten). Icons und Preise teilen sich dieselbe
+Infrastruktur wie die Haupttabelle: `_on_icon()` reicht jedes geladene
+Icon zusätzlich an `history_model.set_icon()` weiter, `set_price_index()`
+wird an jeder Stelle mitgerufen, die auch `table_model.set_price_index()`
+aufruft.
+
+**UI: vertikaler `QSplitter` statt fixer Höhe** — `self.table` und
+`self.history_table` liegen übereinander in einem
+`QSplitter(Qt.Orientation.Vertical)`; die Starthöhe des Verlaufs
+entspricht Header + einer Datenzeile (`horizontalHeader().sizeHint().
+height() + verticalHeader().defaultSectionSize() + 2×frameWidth()`),
+kann per Ziehen am Splitter-Griff aber beliebig aufgezogen werden (Peter:
+"kann aufgezogen werden") — ganz ohne eigene Resize-Logik, das bringt
+`QSplitter` von Haus aus mit. Rechtsklick (externe Tools) und Doppelklick
+(vergrößerte Ansicht) funktionieren wie in der Haupttabelle, jeweils über
+eigene, parallele Handler (`_on_history_row_menu`/`_on_history_row_
+double_clicked`) — der Verlauf hat weder Proxy noch Sortierung/Filter,
+die bestehenden Handler der Haupttabelle sind zu eng an `self.proxy`/
+`self.table_model` gebunden, um sie direkt wiederzuverwenden.
 
 ---
 

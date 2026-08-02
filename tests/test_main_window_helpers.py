@@ -337,38 +337,48 @@ def test_diff_returns_nothing_when_there_is_no_previous_state(qapp) -> None:
     """Erstes Anzeigen eines Charakters (kein vorheriger Ladevorgang zum
     Vergleichen) — sonst wäre beim allerersten Öffnen sofort alles "neu"."""
     item = Item.model_validate({"id": "1", "typeLine": "Chaos Orb"})
-    changed_ids, removed_items = MainWindow._diff_character_items(None, [item])
+    added_ids, changed_ids, removed_items = MainWindow._diff_character_items(None, [item])
+    assert added_ids == frozenset()
     assert changed_ids == frozenset()
     assert removed_items == []
 
 
-def test_diff_marks_a_brand_new_item_as_changed(qapp) -> None:
+def test_diff_marks_a_brand_new_item_as_added_not_changed(qapp) -> None:
+    """Ein Item mit einer vorher nie gesehenen id ist ein echter Neuzugang
+    (``added_ids``), NICHT ``changed_ids`` — die Unterscheidung braucht der
+    Charakter-Item-Verlauf (Peter, 2026-08-02), der nur echte Neuzugänge
+    protokollieren soll, keine bloßen Werteänderungen."""
     old = Item.model_validate({"id": "1", "typeLine": "Chaos Orb"})
     new = Item.model_validate({"id": "2", "typeLine": "Exalted Orb"})
-    changed_ids, removed_items = MainWindow._diff_character_items([old], [old, new])
-    assert changed_ids == frozenset({"2"})
+    added_ids, changed_ids, removed_items = MainWindow._diff_character_items([old], [old, new])
+    assert added_ids == frozenset({"2"})
+    assert changed_ids == frozenset()
     assert removed_items == []
 
 
-def test_diff_marks_a_modified_item_as_changed(qapp) -> None:
-    """Gleiche id, aber z. B. Stack-Größe hat sich geändert."""
+def test_diff_marks_a_modified_item_as_changed_not_added(qapp) -> None:
+    """Gleiche id, aber z. B. Stack-Größe hat sich geändert — das ist
+    ``changed_ids``, nicht ``added_ids``."""
     old = Item.model_validate({"id": "1", "typeLine": "Chaos Orb", "stackSize": 5})
     new = Item.model_validate({"id": "1", "typeLine": "Chaos Orb", "stackSize": 9})
-    changed_ids, removed_items = MainWindow._diff_character_items([old], [new])
+    added_ids, changed_ids, removed_items = MainWindow._diff_character_items([old], [new])
+    assert added_ids == frozenset()
     assert changed_ids == frozenset({"1"})
     assert removed_items == []
 
 
 def test_diff_leaves_an_unchanged_item_alone(qapp) -> None:
     item = Item.model_validate({"id": "1", "typeLine": "Chaos Orb", "stackSize": 5})
-    changed_ids, removed_items = MainWindow._diff_character_items([item], [item])
+    added_ids, changed_ids, removed_items = MainWindow._diff_character_items([item], [item])
+    assert added_ids == frozenset()
     assert changed_ids == frozenset()
     assert removed_items == []
 
 
 def test_diff_reports_a_disappeared_item(qapp) -> None:
     gone = Item.model_validate({"id": "1", "typeLine": "Chaos Orb"})
-    changed_ids, removed_items = MainWindow._diff_character_items([gone], [])
+    added_ids, changed_ids, removed_items = MainWindow._diff_character_items([gone], [])
+    assert added_ids == frozenset()
     assert changed_ids == frozenset()
     assert removed_items == [gone]
 
@@ -378,7 +388,8 @@ def test_diff_ignores_items_without_an_id(qapp) -> None:
     neu" nicht unterscheidbar — solche Items bleiben unberücksichtigt."""
     old = Item.model_validate({"typeLine": "Chaos Orb"})
     new = Item.model_validate({"typeLine": "Chaos Orb", "stackSize": 3})
-    changed_ids, removed_items = MainWindow._diff_character_items([old], [new])
+    added_ids, changed_ids, removed_items = MainWindow._diff_character_items([old], [new])
+    assert added_ids == frozenset()
     assert changed_ids == frozenset()
     assert removed_items == []
 
@@ -429,6 +440,122 @@ def test_disappeared_item_is_only_shown_for_one_refresh_cycle(qapp) -> None:
     win._on_character_items("WitchOfPeter", [stays], False)          # zweiter Refresh ohne "gone"
     assert win.table_model.rowCount() == 1
     assert win.table_model.item_at(0).id == "stays"
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+# --- Charakter-Item-Verlauf: "was ist gerade durchs Inventar gewandert"
+# (Peter, 2026-08-02) ------------------------------------------------- #
+
+def test_a_new_item_is_logged_as_an_added_history_entry(qapp) -> None:
+    win = MainWindow()
+    win._current_character_name = "WitchOfPeter"
+    stays = Item.model_validate({"id": "stays", "typeLine": "Sword", "inventoryId": "Weapon"})
+    win._on_character_items("WitchOfPeter", [stays], False)
+    assert list(win._item_history) == []  # erster Ladevorgang: nichts zu vergleichen
+
+    new_item = Item.model_validate({"id": "new", "typeLine": "Chaos Orb",
+                                    "inventoryId": "MainInventory"})
+    win._on_character_items("WitchOfPeter", [stays, new_item], False)
+
+    assert len(win._item_history) == 1
+    entry = win._item_history[0]
+    assert entry.event == "added"
+    assert entry.character == "WitchOfPeter"
+    assert entry.item.id == "new"
+    assert win.history_model.rowCount() == 1
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_a_disappeared_item_is_logged_as_a_removed_history_entry(qapp) -> None:
+    """Peter: "was du gerade in die Truhe getan hast oder verkauft hast
+    oder gehandelt hast" — all das zeigt sich als verschwundenes Item."""
+    win = MainWindow()
+    win._current_character_name = "WitchOfPeter"
+    sold = Item.model_validate({"id": "sold", "typeLine": "Headhunter", "inventoryId": "Belt"})
+    win._on_character_items("WitchOfPeter", [sold], False)
+
+    win._on_character_items("WitchOfPeter", [], False)
+
+    assert len(win._item_history) == 1
+    assert win._item_history[0].event == "removed"
+    assert win._item_history[0].item.id == "sold"
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_a_pure_stack_size_change_is_not_logged(qapp) -> None:
+    """Eine Stack-Größen-Änderung ist "changed", kein "added" — sonst würde
+    jede kleine Mengenänderung fälschlich als Neuzugang im Verlauf landen."""
+    win = MainWindow()
+    win._current_character_name = "WitchOfPeter"
+    win._on_character_items("WitchOfPeter", [
+        Item.model_validate({"id": "1", "typeLine": "Chaos Orb", "stackSize": 5})], False)
+
+    win._on_character_items("WitchOfPeter", [
+        Item.model_validate({"id": "1", "typeLine": "Chaos Orb", "stackSize": 9})], False)
+
+    assert list(win._item_history) == []
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_history_logging_does_not_require_the_character_to_be_currently_displayed(qapp) -> None:
+    """Der Verlauf ist global (Peter: "Wenn wir das Global machen") — er
+    läuft für JEDEN Charakter mit, nicht nur den gerade angezeigten."""
+    win = MainWindow()
+    win._current_character_name = "SomeoneElse"
+    win._on_character_items("WitchOfPeter", [
+        Item.model_validate({"id": "1", "typeLine": "Sword"})], False)
+
+    win._on_character_items("WitchOfPeter", [
+        Item.model_validate({"id": "1", "typeLine": "Sword"}),
+        Item.model_validate({"id": "2", "typeLine": "Chaos Orb"}),
+    ], False)
+
+    assert len(win._item_history) == 1
+    assert win._item_history[0].character == "WitchOfPeter"
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_newest_history_entry_appears_first(qapp) -> None:
+    win = MainWindow()
+    win._current_character_name = "WitchOfPeter"
+    win._on_character_items("WitchOfPeter", [], False)  # Baseline, nichts geloggt
+
+    win._on_character_items("WitchOfPeter", [
+        Item.model_validate({"id": "first", "typeLine": "Chaos Orb"})], False)
+    win._on_character_items("WitchOfPeter", [
+        Item.model_validate({"id": "first", "typeLine": "Chaos Orb"}),
+        Item.model_validate({"id": "second", "typeLine": "Exalted Orb"})], False)
+
+    assert win._item_history[0].item.id == "second"  # jüngstes zuerst
+    assert win._item_history[1].item.id == "first"
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_history_log_is_capped_at_120_entries(qapp) -> None:
+    win = MainWindow()
+    win._current_character_name = "WitchOfPeter"
+    win._on_character_items("WitchOfPeter", [], False)  # Baseline
+
+    accumulated: list[Item] = []
+    for i in range(130):
+        accumulated = accumulated + [Item.model_validate({"id": f"item{i}", "typeLine": "Chaos Orb"})]
+        win._on_character_items("WitchOfPeter", accumulated, False)  # reines Hinzufügen, kein Entfernen
+
+    assert len(win._item_history) == 120
+    assert win._item_history[0].item.id == "item129"  # jüngstes noch drin
+    assert all(e.item.id != "item0" for e in win._item_history)  # ältestes verdrängt
 
     win.worker.stop()
     win.worker.wait(5000)
