@@ -2149,12 +2149,37 @@ zweite, rein lokale Gedächtnisstütze in `ui-settings.ini`
 bei jedem erfolgreichen `_on_logged_in`. Beim kalten Start liest
 `_restore_cached_data()` diesen Hinweis und lädt `path_for(hinweis)`
 spekulativ — der Normalfall (dieselbe Person startet neu) trifft damit
-sofort ins Schwarze. Fehlt der Hinweis (allererster Start nach diesem
-Feature, oder komplette Neuinstallation), fällt es auf den ALTEN
-gemeinsamen Pfad zurück und übernimmt dessen eingebetteten
-`account_name` — eine Migration ergibt sich dadurch von selbst, ganz
-ohne Kopier-/Umbenennungscode: der nächste `_persist_cache()`-Aufruf
-schreibt bereits unter dem neuen, kontospezifischen Pfad.
+sofort ins Schwarze.
+
+**Realer Bug, noch am selben Tag gefunden (Peter: "er zeigt mir
+momentan an, dass alles neu runtergeladen werden muss"):** der Fallback
+auf den ALTEN gemeinsamen Pfad griff ursprünglich NUR, wenn der Hinweis
+komplett FEHLTE. Sobald aber irgendeine — auch nur kurze — Sitzung
+erfolgreich eingeloggt hatte, schrieb `_on_logged_in` den Hinweis sofort
+(jeder Login tut das), UNABHÄNGIG davon, ob in dieser Sitzung je ein
+vollständiger `_persist_cache()` gelaufen war. Peters Fall exakt: eine
+kurze erste Sitzung mit dem neuen Code schrieb `account/last_active=
+Gandol#4338`, ohne dass die 52 MB große alte `data-cache.json` je unter
+dem neuen, kontospezifischen Pfad gesichert wurde. Jeder weitere Start
+versuchte danach NUR NOCH die (fehlende) kontospezifische Datei, gab
+auf und zeigte eine leere App — die reiche alte Datei lag unangetastet,
+aber unsichtbar daneben. Ein bisschen Browsen in der leeren Sitzung
+erzeugte dann sogar eine neue, aber winzige kontospezifische Datei (2
+von 10 Ligen, 1 von 2295 Fächern) — real beobachtet.
+
+**Fix:** Existiert die kontospezifische Datei nicht, wird zusätzlich die
+alte gemeinsame Datei versucht — aber NUR übernommen, wenn ihr eigener
+gespeicherter `account_name` zum Hinweis passt (oder gar kein Hinweis
+existiert). Diese Bedingung ist kein Detail: ohne sie würde ein ECHTER
+Kontowechsel, dessen neue Datei aus einer kurzen Sitzung noch fehlt,
+fälschlich wieder die Daten des VORHERIGEN Kontos zeigen — accountname-
+Gleichheit unterscheidet "meine eigene Migration" von "ein fremdes
+Konto überschreiben". Eine Migration ergibt sich dadurch von selbst,
+ganz ohne Kopier-/Umbenennungscode: der nächste `_persist_cache()`-
+Aufruf schreibt bereits unter dem neuen, kontospezifischen Pfad.
+Getestet: `test_restore_cached_data_falls_back_to_legacy_when_account_
+file_is_missing` (der reale Fall) und `test_restore_cached_data_does_
+not_leak_a_different_accounts_legacy_file` (die Schutzbedingung).
 
 **Mismatch-Erkennung in `_on_logged_in`.** Die Spekulation beim kalten
 Start kann danebenliegen — realistisches Beispiel, kein Konstrukt: das

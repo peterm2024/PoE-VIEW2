@@ -20,7 +20,10 @@ nach [SemVer](https://semver.org/lang/de/).
   Items und Charaktere eines vorherigen Kontos nach einem Kontowechsel
   im Speicher stehen und vermischten sich mit dem neuen. Nichts wird
   dabei gelöscht — jedes Konto behält seinen eigenen Stand, auch beim
-  Zurückwechseln.
+  Zurückwechseln. Existiert die kontospezifische Datei noch nicht (z. B.
+  gleich nach der Umstellung), wird die alte gemeinsame Datei automatisch
+  übernommen, sofern sie zum selben Konto gehört — die alte Datei bleibt
+  dabei unverändert erhalten.
 
 ## [0.4.0] - 2026-08-03
 

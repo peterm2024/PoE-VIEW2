@@ -318,16 +318,30 @@ class MainWindow(QMainWindow):
         keine Offline-Ansicht (die läuft komplett ohne Netzwerk, ein
         Warten auf den account-liefernden /profile-Aufruf würde sie
         kaputt machen). Die letzte bekannte Kontokennung kommt deshalb aus
-        `ui-settings.ini`, nicht aus einem API-Aufruf. Fehlt sie (erster
-        Start nach dieser Funktion, oder ganz neue Installation), fällt
-        das auf den alten, kontounabhängigen Pfad zurück — Migration einer
-        vorhandenen `data-cache.json` unter dem darin gespeicherten
-        `account_name`, ohne dass irgendetwas kopiert oder gelöscht werden
-        muss: der nächste `_persist_cache()`-Aufruf schreibt dann bereits
-        in die neue, kontospezifische Datei.
+        `ui-settings.ini`, nicht aus einem API-Aufruf.
+
+        Fehlt der Hinweis (erster Start nach dieser Funktion, oder ganz
+        neue Installation) ODER existiert die kontospezifische Datei noch
+        NICHT (real beobachtet, Peter 2026-08-02: eine kurze erste Sitzung
+        schrieb den Hinweis bereits über `_on_logged_in`, ohne dass
+        `_persist_cache()` je gelaufen wäre — jeder weitere Start versuchte
+        danach nur noch die fehlende Datei und gab auf, obwohl die alte,
+        52 MB große `data-cache.json` unverändert daneben lag), fällt das
+        auf den alten, kontounabhängigen Pfad zurück. Übernommen wird er
+        aber NUR, wenn sein eigener gespeicherter `account_name` zum
+        Hinweis passt (oder gar kein Hinweis existiert) — sonst würde ein
+        ECHTER Kontowechsel, dessen neue Datei aus einer kurzen Sitzung
+        noch fehlt, fälschlich wieder die Daten des VORHERIGEN Kontos
+        zeigen. Migration ohne Kopier-/Löschcode: der nächste
+        `_persist_cache()`-Aufruf schreibt bereits in die neue,
+        kontospezifische Datei; die alte bleibt unverändert liegen.
         """
         hint = str(self._settings().value(self._ACCOUNT_SETTING_KEY, ""))
-        cached = data_cache.load(data_cache.path_for(hint)) if hint else data_cache.load()
+        cached = data_cache.load(data_cache.path_for(hint)) if hint else None
+        if cached is None:
+            legacy = data_cache.load()
+            if legacy is not None and (not hint or legacy.account_name == hint):
+                cached = legacy
         if cached is None:
             return
         self._account_name = hint or cached.account_name

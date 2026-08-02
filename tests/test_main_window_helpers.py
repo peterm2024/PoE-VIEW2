@@ -2042,6 +2042,67 @@ def test_restore_cached_data_falls_back_to_legacy_file_without_a_hint(
     win.worker.wait(5000)
 
 
+def test_restore_cached_data_falls_back_to_legacy_when_account_file_is_missing(
+        qapp, monkeypatch) -> None:
+    """Real bei Peter beobachtet, 2026-08-02: eine kurze erste Sitzung
+    schrieb den 'last_active'-Hinweis bereits (jeder Login tut das), ohne
+    dass je ein vollständiger `_persist_cache()` gelaufen wäre. Jeder
+    weitere Start versuchte danach NUR NOCH die fehlende kontospezifische
+    Datei und gab auf — die reiche alte `data-cache.json` blieb
+    unangetastet daneben liegen, aber unsichtbar ("alles muss neu
+    heruntergeladen werden"). Existiert die kontospezifische Datei nicht,
+    muss die alte übernommen werden, SOFERN ihr eigener account_name zum
+    Hinweis passt."""
+    from poe_view import config
+    from poe_view.services import data_cache
+    from PySide6.QtCore import QSettings
+
+    legacy_data = data_cache.CachedData()
+    legacy_data.account_name = "Gandol#4338"
+    legacy_data.characters = [make_char("RichChar", "Standard")]
+    legacy_data.stash_trees = {"Standard": [_make_leaf("t1", "Currency 1")]}
+    data_cache.save(legacy_data)  # alter, gemeinsamer Pfad
+    QSettings(str(config.APP_DATA_DIR / "ui-settings.ini"),
+             QSettings.Format.IniFormat).setValue("account/last_active", "Gandol#4338")
+    assert not data_cache.path_for("Gandol#4338").exists()  # genau der beobachtete Zustand
+
+    win = MainWindow()
+
+    assert win._account_name == "Gandol#4338"
+    assert [c.name for c in win._all_characters] == ["RichChar"]
+    assert "Standard" in win._stash_trees
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_restore_cached_data_does_not_leak_a_different_accounts_legacy_file(
+        qapp, monkeypatch) -> None:
+    """Gegenstück zum Fallback: gehört die alte gemeinsame Datei einem
+    ANDEREN Konto als dem Hinweis, darf sie NICHT übernommen werden —
+    sonst würde ein echter Kontowechsel, dessen neue Datei aus einer
+    kurzen Sitzung noch fehlt, fälschlich die Daten des VORHERIGEN
+    Kontos zeigen."""
+    from poe_view import config
+    from poe_view.services import data_cache
+    from PySide6.QtCore import QSettings
+
+    legacy_data = data_cache.CachedData()
+    legacy_data.account_name = "Alice"
+    legacy_data.characters = [make_char("AliceChar", "Standard")]
+    data_cache.save(legacy_data)
+    QSettings(str(config.APP_DATA_DIR / "ui-settings.ini"),
+             QSettings.Format.IniFormat).setValue("account/last_active", "Bob")
+
+    win = MainWindow()
+
+    assert win._account_name == ""
+    assert win._all_characters == []
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
 def test_maybe_auto_refresh_also_refreshes_currently_displayed_tab(qapp, monkeypatch) -> None:
     """das gerade angezeigte Fach soll bei jedem Auto-Refresh-
     Tick ZUSÄTZLICH zum normalen Sweep-Kandidaten aktualisiert werden — auch
