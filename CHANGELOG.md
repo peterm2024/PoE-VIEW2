@@ -24,6 +24,11 @@ nach [SemVer](https://semver.org/lang/de/).
   auch im Rechtsklick-Menü des Stash-Baums (auf einem Fach, einem Ordner
   oder im leeren Bereich) und der Charakterliste (mit oder ohne
   Charakter unter dem Cursor) zur Verfügung.
+- Der vorgeschlagene CSV-Dateiname nennt jetzt zusätzlich die
+  exportierte Item-Anzahl und einen Zeitstempel (z. B.
+  `poe-view2-Settlers-Chaos-Orb-12items-2026-08-03_1542.csv`) — vorher
+  schlugen "Export selected items" und "Export visible items" aus
+  derselben Ansicht denselben Namen vor.
 - Mehrfachauswahl im Stash-Baum: Strg-/Umschalt-Klick auf mehrere Fächer
   oder einen Ordner (auch die "Tier N"-Gruppen im Map-Stash) zeigt deren
   Items zusammen an. Zeigt ausschließlich bereits gecachte Items — löst

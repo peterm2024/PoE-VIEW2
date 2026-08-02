@@ -2062,9 +2062,9 @@ brauchen:
   ohnehin auf `_league_wide_items()` unabhängig von der aktuellen
   Ansicht.
 - `_default_export_filename()` leitet daraus einen Dateinamen ab
-  ("poe-view2-Standard-3-tabs-selected.csv") statt des irreführenden
-  `_current_tab_name`, das ja weiterhin das zuletzt einzeln gewählte
-  Fach nennt.
+  ("poe-view2-Standard-3-tabs-selected-142items-2026-08-03_1542.csv")
+  statt des irreführenden `_current_tab_name`, das ja weiterhin das
+  zuletzt einzeln gewählte Fach nennt.
 
 `_current_stash_selection` wird bei jedem anderen View-Wechsel auf
 `None` zurückgesetzt (`_on_stash_selected`, `_on_stash_refresh`,
@@ -2251,10 +2251,21 @@ Spaltensatz und der zweite Export-Weg per Rechtsklick sind in §4.22
 beschrieben. Der Speicherdialog startet im echten Windows-Downloads-Ordner
 (`config.downloads_dir()`, per Registry ermittelt — respektiert eine vom User
 verschobene Downloads-Location) und schlägt einen Dateinamen vor
-(`MainWindow._default_export_filename`): **immer** die aktuelle Liga voran
-(Items sind nie liga-übergreifend gültig), danach aktiver Item-Filtertext,
-sonst der Name des Tabs bzw. "Alle Tabs" im Aggregat — z. B.
-`poe-view2-Settlers-Chaos-Orb.csv` oder `poe-view2-Settlers-Alle-Tabs.csv`.
+(`MainWindow._default_export_filename(count)`): **immer** die aktuelle
+Liga voran (Items sind nie liga-übergreifend gültig), danach aktiver
+Item-Filtertext, sonst der Name des Tabs bzw. "Alle Tabs" im Aggregat,
+danach die tatsächlich exportierte Item-Anzahl und ein Zeitstempel — z. B.
+`poe-view2-Settlers-Chaos-Orb-12items-2026-08-03_1542.csv`. Anzahl und
+Zeitstempel kamen dazu (Peter, 2026-08-03: "etwas aussagekräftiger"),
+weil "Export selected items" und "Export visible items" (§4.22) aus
+derselben Ansicht sonst denselben Namen vorschlugen — ein 5- und ein
+200-Item-Export derselben Truhe waren im Downloads-Ordner nicht mehr
+unterscheidbar, und ein zweiter Export überschrieb den ersten
+kommentarlos, sobald man den Speichern-Dialog nur bestätigte. Der Zähler
+kommt vom Aufrufer (`_export_rows(rows, ...)` kennt `len(rows)` bereits),
+nicht aus einem erneuten Blick auf die Tabelle — Auswahl- und
+Sichtbar-Export benutzen dieselbe Methode, aber mit unterschiedlicher
+Zählbasis.
 
 **Liga-Dropdown als einzige Quelle der Wahrheit:** Charaktere kommen von
 `/character` ligenübergreifend, werden aber NICHT mehr im Baum nach Liga

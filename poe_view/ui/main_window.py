@@ -2050,7 +2050,7 @@ class MainWindow(QMainWindow):
         if not rows:
             QMessageBox.information(self, "CSV Export", empty_hint)
             return
-        default_path = str(config.downloads_dir() / self._default_export_filename())
+        default_path = str(config.downloads_dir() / self._default_export_filename(len(rows)))
         path, selected_filter = QFileDialog.getSaveFileName(
             self, "Export Items as CSV", default_path,
             f"{self._CSV_FILTER};;{self._CSV_RAW_FILTER}")
@@ -2061,8 +2061,17 @@ class MainWindow(QMainWindow):
                              raw_json=selected_filter == self._CSV_RAW_FILTER)
         self._status_msg.setText(f"Exported {count} items to {path}.")
 
-    def _default_export_filename(self) -> str:
-        """Dateiname-Vorschlag: Liga + (aktiver Filtertext, sonst Tab-/Aggregat-Name).
+    def _default_export_filename(self, count: int) -> str:
+        """Dateiname-Vorschlag: Liga + Umfang (aktiver Filtertext, Mehrfach-
+        auswahl oder Tab-/Aggregat-Name) + Item-Anzahl + Zeitstempel.
+
+        Anzahl und Zeitstempel kamen dazu (Peter, 2026-08-03: "etwas
+        aussagekräftiger"), weil "Export selected items" und "Export
+        visible items" aus derselben Ansicht sonst denselben Namen
+        vorschlagen — ein 5- und ein 200-Item-Export derselben Truhe waren
+        im Downloads-Ordner nicht mehr auseinanderzuhalten, und ein
+        zweiter Export derselben Ansicht überschrieb den ersten
+        kommentarlos, sobald man den Dialog nur bestätigte.
 
         Die Liga gehört immer mit rein — Items sind nie liga-übergreifend
         gültig, das soll auch am Dateinamen erkennbar sein.
@@ -2080,7 +2089,9 @@ class MainWindow(QMainWindow):
             base = sanitize_filename(f"{len(self._current_stash_selection)}-tabs-selected")
         else:
             base = sanitize_filename(self._current_tab_name)
-        parts = [p for p in (sanitize_filename(self._current_league, ""), base) if p]
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H%M")
+        parts = [p for p in (sanitize_filename(self._current_league, ""), base,
+                             f"{count}items", timestamp) if p]
         return f"poe-view2-{'-'.join(parts)}.csv"
 
     def _visible_rows(self) -> list[tuple[str, Item]]:

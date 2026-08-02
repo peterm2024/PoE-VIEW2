@@ -4,6 +4,7 @@ CSV-Dateiname-Vorschlag (Filtertext bzw. Tab-/Aggregat-Name).
 """
 
 import json
+import re
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -58,11 +59,15 @@ def test_character_league_filter_only_shows_current_league(qapp) -> None:
     win.worker.wait(5000)
 
 
+_TIMESTAMP_RE = r"\d{4}-\d{2}-\d{2}_\d{4}"
+
+
 def test_default_export_filename_prefers_filter_text(qapp) -> None:
     win = MainWindow()
     win._current_tab_name = "Currency 1"
     win._filter_edit.setText("Chaos Orb")
-    assert win._default_export_filename() == "poe-view2-Chaos-Orb.csv"
+    assert re.fullmatch(rf"poe-view2-Chaos-Orb-7items-{_TIMESTAMP_RE}\.csv",
+                        win._default_export_filename(7))
 
     win.worker.stop()
     win.worker.wait(5000)
@@ -71,7 +76,8 @@ def test_default_export_filename_prefers_filter_text(qapp) -> None:
 def test_default_export_filename_falls_back_to_tab_name(qapp) -> None:
     win = MainWindow()
     win._current_tab_name = "Currency 1"
-    assert win._default_export_filename() == "poe-view2-Currency-1.csv"
+    assert re.fullmatch(rf"poe-view2-Currency-1-12items-{_TIMESTAMP_RE}\.csv",
+                        win._default_export_filename(12))
 
     win.worker.stop()
     win.worker.wait(5000)
@@ -81,10 +87,12 @@ def test_default_export_filename_includes_league(qapp) -> None:
     win = MainWindow()
     win._current_league = "Settlers"
     win._current_tab_name = "Currency 1"
-    assert win._default_export_filename() == "poe-view2-Settlers-Currency-1.csv"
+    assert re.fullmatch(rf"poe-view2-Settlers-Currency-1-3items-{_TIMESTAMP_RE}\.csv",
+                        win._default_export_filename(3))
 
     win._filter_edit.setText("Chaos Orb")
-    assert win._default_export_filename() == "poe-view2-Settlers-Chaos-Orb.csv"
+    assert re.fullmatch(rf"poe-view2-Settlers-Chaos-Orb-3items-{_TIMESTAMP_RE}\.csv",
+                        win._default_export_filename(3))
 
     win.worker.stop()
     win.worker.wait(5000)
@@ -5408,9 +5416,10 @@ def test_csv_export_filename_reflects_multi_selection(qapp, monkeypatch) -> None
     win = _three_tab_window(monkeypatch)
     win._show_stash_selection(["t1", "t2"])
 
-    filename = win._default_export_filename()
+    filename = win._default_export_filename(2)
 
-    assert filename == "poe-view2-Standard-2-tabs-selected.csv"
+    assert re.fullmatch(
+        rf"poe-view2-Standard-2-tabs-selected-2items-{_TIMESTAMP_RE}\.csv", filename)
 
     win.worker.stop()
     win.worker.wait(5000)
