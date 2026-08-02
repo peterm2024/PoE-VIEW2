@@ -7,6 +7,8 @@ import json
 from datetime import datetime, timedelta, timezone
 
 import pytest
+from PySide6.QtCore import QItemSelectionModel
+from PySide6.QtWidgets import QMenu
 
 from poe_view.api.models import Character, Item, StashTab
 from poe_view.api.ninja import PriceIndex
@@ -5051,6 +5053,145 @@ def test_zone_watcher_end_to_end_triggers_a_refresh(qapp, tmp_path, monkeypatch)
 
     stash_jobs = [j for j in submitted if hasattr(j, "stash_id")]
     assert len(stash_jobs) == 1
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+# --- CSV-Export aus dem Kontextmenü (Peter, 2026-08-02) ------------------- #
+
+class _NoExecMenu(QMenu):
+    """``QMenu.exec()`` blockiert ohne echte Nutzerinteraktion — im Test wird
+    nur das Verhalten DAVOR geprüft (welche Zeilen markiert bleiben)."""
+
+    def exec(self, *args, **kwargs):  # noqa: A003 (Qt-API)
+        return None
+
+
+def _window_with_two_items(monkeypatch) -> MainWindow:
+    win = MainWindow()
+    win._current_league = "Standard"
+    tab = _make_leaf("t1", "Currency 1")
+    win._stash_trees["Standard"] = [tab]
+    win._leaf_stashes = [tab]
+    items = [Item.model_validate({"typeLine": "Chaos Orb", "frameType": 5, "stackSize": 4}),
+             Item.model_validate({"typeLine": "Divine Orb", "frameType": 5, "stackSize": 1})]
+    win._items["Standard"] = {"t1": items}
+    monkeypatch.setattr(win.worker, "submit", lambda job: None)
+    win._show_items("t1", items, "Currency 1")
+    return win
+
+
+def test_selected_rows_export_only_the_marked_items(qapp, monkeypatch) -> None:
+    win = _window_with_two_items(monkeypatch)
+
+    win.table.selectRow(0)
+    rows = win._selected_rows()
+    assert [item.display_name for _, item in rows] == \
+        [win.table_model.item_at(win.proxy.mapToSource(win.proxy.index(0, 0)).row()).display_name]
+    assert len(rows) == 1
+    # Ohne Auswahl exportiert der Toolbar-Weg weiterhin alles Sichtbare.
+    assert len(win._visible_rows()) == 2
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_selected_rows_follow_display_order_not_click_order(qapp, monkeypatch) -> None:
+    """Erst Zeile 1, dann Zeile 0 anklicken — die Datei soll trotzdem in der
+    Reihenfolge stehen, die auf dem Bildschirm zu sehen ist."""
+    win = _window_with_two_items(monkeypatch)
+    selection = win.table.selectionModel()
+    flags = (QItemSelectionModel.SelectionFlag.Select
+             | QItemSelectionModel.SelectionFlag.Rows)
+    selection.select(win.proxy.index(1, 0), flags)
+    selection.select(win.proxy.index(0, 0), flags)
+
+    names = [item.display_name for _, item in win._selected_rows()]
+    visible = [item.display_name for _, item in win._visible_rows()]
+    assert names == visible
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_context_menu_offers_both_export_scopes_with_counts(qapp, monkeypatch) -> None:
+    win = _window_with_two_items(monkeypatch)
+    win.table.selectRow(0)
+
+    menu = win._build_item_tools_menu(win.table_model.item_at(0))
+    win._add_export_actions(menu)
+    labels = [a.text() for a in menu.actions() if a.text()]
+    assert "💾 Export selected items (1)…" in labels
+    assert "💾 Export visible items (2)…" in labels
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_right_click_inside_a_multi_selection_keeps_it(qapp, monkeypatch) -> None:
+    """Sonst könnte man mehrere markierte Zeilen nie exportieren: das
+    Kontextmenü hätte die Auswahl beim Öffnen auf eine Zeile reduziert."""
+    win = _window_with_two_items(monkeypatch)
+    win.table.selectAll()
+    assert len(win.table.selectionModel().selectedRows()) == 2
+
+    # Rechtsklick auf die zweite Zeile — sie ist Teil der Auswahl.
+    pos = win.table.visualRect(win.proxy.index(1, 0)).center()
+    monkeypatch.setattr(win, "_build_item_tools_menu", lambda item: _NoExecMenu(win.table))
+    win._on_table_row_menu(pos)
+    assert len(win.table.selectionModel().selectedRows()) == 2
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_right_click_outside_the_selection_selects_that_row(qapp, monkeypatch) -> None:
+    win = _window_with_two_items(monkeypatch)
+    win.table.selectRow(0)
+
+    pos = win.table.visualRect(win.proxy.index(1, 0)).center()
+    monkeypatch.setattr(win, "_build_item_tools_menu", lambda item: _NoExecMenu(win.table))
+    win._on_table_row_menu(pos)
+    selected = [idx.row() for idx in win.table.selectionModel().selectedRows()]
+    assert selected == [1]
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_export_passes_the_leagues_price_index(qapp, monkeypatch, tmp_path) -> None:
+    """Ohne den Index bliebe die ValueChaos-Spalte leer, obwohl die
+    Value-Spalte im Fenster Preise zeigt."""
+    win = _window_with_two_items(monkeypatch)
+    win._price_indexes["Standard"] = _price_index(**{"Chaos Orb": 1.0, "Divine Orb": 200.0})
+    target = tmp_path / "out.csv"
+    monkeypatch.setattr("poe_view.ui.main_window.QFileDialog.getSaveFileName",
+                        staticmethod(lambda *a, **k: (str(target), "CSV files (*.csv)")))
+
+    win._export_csv()
+
+    import csv as _csv
+    with open(target, encoding="utf-8-sig", newline="") as f:
+        rows = list(_csv.DictReader(f, delimiter=";"))
+    assert {r["Name"]: r["ValueChaos"] for r in rows} == \
+        {"Chaos Orb": "4.00", "Divine Orb": "200.00"}
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_raw_json_filter_adds_the_raw_column(qapp, monkeypatch, tmp_path) -> None:
+    """Der zweite Dateityp im Speichern-Dialog steuert die Roh-Spalte."""
+    win = _window_with_two_items(monkeypatch)
+    target = tmp_path / "raw.csv"
+    monkeypatch.setattr("poe_view.ui.main_window.QFileDialog.getSaveFileName",
+                        staticmethod(lambda *a, **k: (str(target),
+                                                      "CSV with raw JSON column (*.csv)")))
+
+    win._export_csv()
+
+    assert "RawJSON" in target.read_text(encoding="utf-8-sig").splitlines()[0]
 
     win.worker.stop()
     win.worker.wait(5000)

@@ -1923,17 +1923,36 @@ class MainWindow(QMainWindow):
 
     # --- CSV-Export ------------------------------------------------------ #
 
+    # Zweiter Dateityp statt eines eigenen Dialogs mit Häkchen: Der
+    # Speichern-Dialog hat die Auswahlliste ohnehin, und die Roh-JSON-
+    # Variante ist genau das — dieselbe Datei mit einer Zusatzspalte
+    # (siehe csv_export.py, warum sie nicht die Voreinstellung ist).
+    _CSV_FILTER = "CSV files (*.csv)"
+    _CSV_RAW_FILTER = "CSV with raw JSON column (*.csv)"
+
     def _export_csv(self) -> None:
-        rows = self._visible_rows()
+        """Toolbar-Knopf: alle aktuell sichtbaren (gefilterten) Zeilen."""
+        self._export_rows(self._visible_rows(), "No items loaded to export.")
+
+    def _export_selected_csv(self) -> None:
+        """Rechtsklick-Menü (Peter, 2026-08-02): nur die markierten Zeilen.
+        Die Item-Tabelle erlaubt Mehrfachauswahl (Qt-Vorgabe
+        ``ExtendedSelection``), Strg-/Umschalt-Klick funktioniert also."""
+        self._export_rows(self._selected_rows(), "No items selected to export.")
+
+    def _export_rows(self, rows: list[tuple[str, Item]], empty_hint: str) -> None:
         if not rows:
-            QMessageBox.information(self, "CSV Export", "No items loaded to export.")
+            QMessageBox.information(self, "CSV Export", empty_hint)
             return
         default_path = str(config.downloads_dir() / self._default_export_filename())
-        path, _ = QFileDialog.getSaveFileName(
-            self, "Export Items as CSV", default_path, "CSV files (*.csv)")
+        path, selected_filter = QFileDialog.getSaveFileName(
+            self, "Export Items as CSV", default_path,
+            f"{self._CSV_FILTER};;{self._CSV_RAW_FILTER}")
         if not path:
             return
-        count = export_items(path, rows)
+        count = export_items(path, rows,
+                             price_index=self._price_indexes.get(self._current_league),
+                             raw_json=selected_filter == self._CSV_RAW_FILTER)
         self._status_msg.setText(f"Exported {count} items to {path}.")
 
     def _default_export_filename(self) -> str:
@@ -1950,9 +1969,22 @@ class MainWindow(QMainWindow):
 
     def _visible_rows(self) -> list[tuple[str, Item]]:
         """(Tab-Name, Item)-Paare für die AKTUELL sichtbaren (gefilterten) Zeilen."""
+        return self._rows_for([self.proxy.index(row, 0)
+                               for row in range(self.proxy.rowCount())])
+
+    def _selected_rows(self) -> list[tuple[str, Item]]:
+        """(Tab-Name, Item)-Paare der markierten Zeilen, in Anzeige-
+        Reihenfolge. ``selectedRows`` liefert je Zeile genau einen Index
+        (nicht je Zelle), sortiert wird nach der sichtbaren Position statt
+        nach Auswahl-Reihenfolge — sonst hinge die Reihenfolge im Export
+        daran, in welcher Folge geklickt wurde."""
+        indexes = self.table.selectionModel().selectedRows()
+        return self._rows_for(sorted(indexes, key=lambda idx: idx.row()))
+
+    def _rows_for(self, indexes: list) -> list[tuple[str, Item]]:
         rows: list[tuple[str, Item]] = []
-        for row in range(self.proxy.rowCount()):
-            source_idx = self.proxy.mapToSource(self.proxy.index(row, 0))
+        for index in indexes:
+            source_idx = self.proxy.mapToSource(index)
             item = self.table_model.item_at(source_idx.row())
             if item is not None:
                 rows.append((self.table_model.source_at(source_idx.row()), item))
@@ -2183,17 +2215,36 @@ class MainWindow(QMainWindow):
 
     def _on_table_row_menu(self, pos) -> None:
         """Rechtsklick auf ein Item: externe Tools dazu öffnen (ToDo.md,
-        Peter 2026-07-30)."""
+        Peter 2026-07-30) und CSV-Export (Peter, 2026-08-02)."""
         index = self.table.indexAt(pos)
         if not index.isValid():
             return
-        self.table.selectRow(index.row())
+        # Eine bestehende Mehrfachauswahl NICHT zerstören: Rechtsklick
+        # INNERHALB der Auswahl lässt sie stehen (sonst könnte man 20
+        # markierte Zeilen nie exportieren — das Öffnen des Menüs hätte die
+        # Auswahl gerade auf eine Zeile zusammengestrichen), Rechtsklick
+        # außerhalb wählt wie gewohnt die angeklickte Zeile.
+        if not self.table.selectionModel().isRowSelected(index.row()):
+            self.table.selectRow(index.row())
         source_idx = self.proxy.mapToSource(index)
         item = self.table_model.item_at(source_idx.row())
         if item is None:
             return
         menu = self._build_item_tools_menu(item)
+        self._add_export_actions(menu)
         menu.exec(self.table.viewport().mapToGlobal(pos))
+
+    def _add_export_actions(self, menu: QMenu) -> None:
+        """Export-Einträge ans Ende eines Item-Kontextmenüs. Die Anzahl steht
+        im Text, damit vor dem Speichern-Dialog klar ist, was gleich in der
+        Datei landet."""
+        menu.addSeparator()
+        selected = len(self.table.selectionModel().selectedRows())
+        export_selected = menu.addAction(f"💾 Export selected items ({selected})…")
+        export_selected.triggered.connect(self._export_selected_csv)
+        export_visible = menu.addAction(
+            f"💾 Export visible items ({self.proxy.rowCount()})…")
+        export_visible.triggered.connect(self._export_csv)
 
     def _build_item_tools_menu(self, item: Item) -> QMenu:
         """Losgelöst von ``_on_table_row_menu``, damit Tests die
