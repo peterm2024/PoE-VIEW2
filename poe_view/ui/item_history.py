@@ -26,9 +26,9 @@ from poe_view.api.ninja import PriceIndex
 from poe_view.ui.item_table import format_chaos_value
 from poe_view.ui.theme import RARITY_COLORS
 
-HistoryEventType = Literal["added", "removed"]
+HistoryEventType = Literal["added", "removed", "changed"]
 
-_EVENT_SYMBOLS: dict[HistoryEventType, str] = {"added": "↑", "removed": "↓"}
+_EVENT_SYMBOLS: dict[HistoryEventType, str] = {"added": "↑", "removed": "↓", "changed": "±"}
 
 
 @dataclass(frozen=True)
@@ -37,6 +37,11 @@ class HistoryEntry:
     event: HistoryEventType
     character: str
     item: Item
+    # Nur bei event="changed" gesetzt: Differenz der Stack-Groesse seit dem
+    # letzten Ladevorgang (Peter, 2026-08-03: "sobald sich Currency aendert,
+    # wandert diese wieder ganz oben ... mit Vermerk, wieviel sich geaendert
+    # hat"). Vorzeichenbehaftet, damit Zu-/Abnahme unterscheidbar bleibt.
+    stack_delta: int | None = None
 
 
 COLUMNS = ("Time", "Character", "Event", "Icon", "Name", "Base", "Stack", "Value")
@@ -134,6 +139,9 @@ class ItemHistoryModel(QAbstractTableModel):
             if col == BASE_COL:
                 return item.baseType or "–"
             if col == STACK_COL:
+                if entry.event == "changed" and entry.stack_delta:
+                    sign = "+" if entry.stack_delta > 0 else ""
+                    return f"{item.stackSize} ({sign}{entry.stack_delta})"
                 return str(item.stackSize) if item.stackSize else "–"
             if col == VALUE_COL:
                 return self._value_text(item)

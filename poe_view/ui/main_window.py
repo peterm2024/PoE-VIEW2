@@ -2400,25 +2400,62 @@ class MainWindow(QMainWindow):
                          if item_id not in current_ids]
         return added_ids, changed_ids, removed_items
 
+    @staticmethod
+    def _stack_size_changes(previous_items: list[Item] | None,
+                            items: list[Item]) -> list[tuple[Item, int]]:
+        """Items, deren Stack-Größe sich seit dem letzten Ladevorgang
+        geändert hat (Peter, 2026-08-03: "In unserer Item-History-Liste
+        berücksichtigen wir keine Items die sich ändern, wie Currency ...
+        sobald sich Currency ändert, wandert diese wieder ganz oben auf die
+        Liste mit Vermerk, wieviel sich geändert hat" — bewusst nicht auf
+        Currency beschränkt, jedes stapelbare Item zählt, Currency ist nur
+        das häufigste Beispiel; und bewusst nur Charakter-Inventar, siehe
+        Peters Antwort "Nur die im Charakter-Inventar").
+
+        GETRENNT von ``changed_ids`` in ``_diff_character_items`` (die auch
+        auf beliebige andere Feldänderungen anschlägt, z. B. Identifizieren)
+        — hier zählt ausschließlich eine tatsächliche Stack-Größen-Differenz,
+        sonst würde z. B. ein gerade identifiziertes Item fälschlich als
+        "Menge geändert" geloggt. Items, die gerade erst neu aufgetaucht
+        sind, haben keinen Vorgänger und tauchen hier nicht auf (die zählen
+        als ``added``, nicht als ``changed``)."""
+        if previous_items is None:
+            return []
+        previous_by_id = {item.id: item for item in previous_items if item.id}
+        changes = []
+        for item in items:
+            previous = previous_by_id.get(item.id) if item.id else None
+            if previous is None:
+                continue
+            delta = (item.stackSize or 0) - (previous.stackSize or 0)
+            if delta != 0:
+                changes.append((item, delta))
+        return changes
+
     def _log_character_item_history(self, name: str, previous_items: list[Item] | None,
                                     items: list[Item]) -> None:
-        """Protokolliert neu aufgetauchte/verschwundene Items eines
-        Charakters im globalen Verlauf (Peter, 2026-08-02: "eine Liste mit
-        den letzten 120 Items, die durchs Inventar gewandert sind ... was
-        du gerade in die Truhe getan hast oder verkauft hast oder
-        gehandelt hast"). Läuft für JEDEN Charakter, unabhängig davon, ob
-        er gerade angezeigt wird — anders als die Türkis-/Grau-Anzeige in
+        """Protokolliert neu aufgetauchte/verschwundene/mengenmäßig
+        veränderte Items eines Charakters im globalen Verlauf (Peter,
+        2026-08-02: "eine Liste mit den letzten 120 Items, die durchs
+        Inventar gewandert sind ... was du gerade in die Truhe getan hast
+        oder verkauft hast oder gehandelt hast"; Stack-Änderungen wie bei
+        Currency ergänzt am 2026-08-03, siehe ``_stack_size_changes``).
+        Läuft für JEDEN Charakter, unabhängig davon, ob er gerade angezeigt
+        wird — anders als die Türkis-/Grau-Anzeige in
         ``_show_character_items``, die nur die aktuell offene Ansicht
         betrifft. ``previous_items=None`` (erster Ladevorgang dieses
         Charakters) loggt bewusst nichts, sonst würde jeder erstmalige
         Charakter-Load die komplette Ausrüstung als "neu" eintragen."""
         added_ids, _changed_ids, removed_items = self._diff_character_items(previous_items, items)
-        if not added_ids and not removed_items:
+        stack_changes = self._stack_size_changes(previous_items, items)
+        if not added_ids and not removed_items and not stack_changes:
             return
         now = datetime.now(timezone.utc)
         for item in items:
             if item.id in added_ids:
                 self._item_history.appendleft(HistoryEntry(now, "added", name, item))
+        for item, delta in stack_changes:
+            self._item_history.appendleft(HistoryEntry(now, "changed", name, item, delta))
         for item in removed_items:
             self._item_history.appendleft(HistoryEntry(now, "removed", name, item))
         self.history_model.set_entries(list(self._item_history))

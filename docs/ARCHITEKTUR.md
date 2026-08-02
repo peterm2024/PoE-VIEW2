@@ -2251,6 +2251,33 @@ automatisch mit (`modelReset` → `_update_summaries`, siehe FALLSTRICKE
 #39). Gegenprobe: Fix entfernt, `test_league_change_clears_the_visible_
 item_list` schlägt fehl, restauriert wieder grün.
 
+### 4.26 Item-Verlauf: Mengenänderungen (Currency)
+
+Peter, 2026-08-03: "In unserer Item-History-
+Liste berücksichtigen wir keine Items die sich ändern, wie Currency ...
+sobald sich Currency ändert, wandert diese wieder ganz oben auf die
+Liste mit Vermerk, wieviel sich geändert hat." Auf Nachfrage bewusst nur
+Charakter-Inventar ("Nur die im Charakter-Inventar") — Stash-Fächer
+laufen gar nicht durch diese Diff-Logik und blieben unangetastet.
+
+Die Grundlage stand schon halb: `_diff_character_items` (§4.21) liefert
+bereits `changed_ids`, die aber bislang bewusst verworfen wurden ("um
+reine Stack-Größen-Änderungen nicht als 'neues Item' zu loggen"). Neu
+ist `MainWindow._stack_size_changes()`, eine EIGENE, engere Prüfung als
+`changed_ids`: nur eine tatsächliche `stackSize`-Differenz zählt, nicht
+jede beliebige Feldänderung (`changed_ids` schlägt z. B. auch bei einem
+gerade identifizierten Item an — das wäre fälschlich als
+Mengenänderung geloggt worden). `HistoryEntry` bekam ein neues Feld
+`stack_delta` (vorzeichenbehaftet) und `HistoryEventType` ein drittes
+Mitglied `"changed"` (Symbol `±`); `ItemHistoryModel` hängt die Differenz
+in der Stack-Spalte an, z. B. `53 (+3)`. Da neue Einträge per
+`appendleft` vorne einsortiert werden (§Modul-Docstring
+`item_history.py`), "wandert" ein sich änderndes Item automatisch ganz
+nach oben — kein Sonderfall nötig. Gegenprobe: `_stack_size_changes()`
+kurzgeschlossen, `test_a_stack_size_change_is_logged_as_a_changed_
+history_entry_with_the_delta` und die Abnahme-Variante schlagen fehl,
+restauriert wieder grün.
+
 ---
 
 ## 5. UI-Konzept (Oberflächenvorschlag)

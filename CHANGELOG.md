@@ -24,6 +24,12 @@ nach [SemVer](https://semver.org/lang/de/).
   gleich nach der Umstellung), wird die alte gemeinsame Datei automatisch
   übernommen, sofern sie zum selben Konto gehört — die alte Datei bleibt
   dabei unverändert erhalten.
+- Item-Verlauf: reine Mengenänderungen (z. B. Currency-Stacks) tauchen
+  jetzt als eigenes Ereignis auf und wandern dabei ganz nach oben, mit
+  Vermerk, wie viel sich geändert hat (z. B. "53 (+3)"). Vorher wurden
+  solche Änderungen komplett ignoriert — nur echte Neuzugänge und
+  verschwundene Items landeten im Verlauf. Gilt nur für das
+  Charakter-Inventar, nicht für Stash-Fächer.
 
 ### Behoben
 

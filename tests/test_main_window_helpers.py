@@ -498,9 +498,13 @@ def test_a_disappeared_item_is_logged_as_a_removed_history_entry(qapp) -> None:
     win.worker.wait(5000)
 
 
-def test_a_pure_stack_size_change_is_not_logged(qapp) -> None:
-    """Eine Stack-Größen-Änderung ist "changed", kein "added" — sonst würde
-    jede kleine Mengenänderung fälschlich als Neuzugang im Verlauf landen."""
+def test_a_stack_size_change_is_logged_as_a_changed_history_entry_with_the_delta(qapp) -> None:
+    """Peter, 2026-08-03: "In unserer Item-History-Liste berücksichtigen
+    wir keine Items die sich ändern, wie Currency ... sobald sich Currency
+    ändert, wandert diese wieder ganz oben auf die Liste mit Vermerk,
+    wieviel sich geändert hat" — "changed", kein "added" (sonst würde jede
+    kleine Mengenänderung fälschlich als Neuzugang im Verlauf landen), mit
+    der Differenz im ``stack_delta``-Feld."""
     win = MainWindow()
     win._current_character_name = "WitchOfPeter"
     win._on_character_items("WitchOfPeter", [
@@ -508,6 +512,45 @@ def test_a_pure_stack_size_change_is_not_logged(qapp) -> None:
 
     win._on_character_items("WitchOfPeter", [
         Item.model_validate({"id": "1", "typeLine": "Chaos Orb", "stackSize": 9})], False)
+
+    assert len(win._item_history) == 1
+    entry = win._item_history[0]
+    assert entry.event == "changed"
+    assert entry.item.id == "1"
+    assert entry.stack_delta == 4
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_a_stack_size_decrease_is_logged_with_a_negative_delta(qapp) -> None:
+    win = MainWindow()
+    win._current_character_name = "WitchOfPeter"
+    win._on_character_items("WitchOfPeter", [
+        Item.model_validate({"id": "1", "typeLine": "Chaos Orb", "stackSize": 9})], False)
+
+    win._on_character_items("WitchOfPeter", [
+        Item.model_validate({"id": "1", "typeLine": "Chaos Orb", "stackSize": 5})], False)
+
+    assert len(win._item_history) == 1
+    assert win._item_history[0].event == "changed"
+    assert win._item_history[0].stack_delta == -4
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_a_non_stack_field_change_is_not_logged_as_changed(qapp) -> None:
+    """GETRENNT von ``changed_ids`` in ``_diff_character_items`` — nur eine
+    tatsächliche Stack-Größen-Differenz zählt hier, sonst würde z. B. ein
+    gerade identifiziertes Item fälschlich als Mengenänderung geloggt."""
+    win = MainWindow()
+    win._current_character_name = "WitchOfPeter"
+    win._on_character_items("WitchOfPeter", [
+        Item.model_validate({"id": "1", "typeLine": "Ring", "identified": False})], False)
+
+    win._on_character_items("WitchOfPeter", [
+        Item.model_validate({"id": "1", "typeLine": "Ring", "identified": True})], False)
 
     assert list(win._item_history) == []
 
