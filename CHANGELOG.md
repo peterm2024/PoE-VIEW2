@@ -25,6 +25,14 @@ nach [SemVer](https://semver.org/lang/de/).
   übernommen, sofern sie zum selben Konto gehört — die alte Datei bleibt
   dabei unverändert erhalten.
 
+### Behoben
+
+- Ein Liga-Wechsel im Dropdown leerte die Itemliste bisher nicht — der
+  zuletzt angezeigte Fach- oder Charakterinhalt der vorherigen Liga blieb
+  sichtbar stehen, obwohl keine Auswahl mehr dazu passte. Die Liste wird
+  jetzt beim Liga-Wechsel geleert, bis erneut ein Tab oder Charakter
+  ausgewählt wird.
+
 ## [0.4.0] - 2026-08-03
 
 ### Hinzugefügt

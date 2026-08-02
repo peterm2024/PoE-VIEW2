@@ -2231,6 +2231,26 @@ Hintergrund (`_current_stash_id`) — das bleibt nach einem Logout
 laufen also einfach ins Leere, bis der Nutzer wieder etwas auswählt.
 Kein Sonderfall nötig.
 
+### 4.25 Liga-Wechsel leert die Itemliste
+
+Peter, 2026-08-03, direkt nach dem 0.4.0-Release: "Wenn ich die League
+wechsle bleibt der aktuelle Inhalt der Itemliste erhalten. Das sollte
+denke ich nicht sein."
+
+`_on_league_changed` setzte bereits `_current_stash_id`,
+`_current_character_name` und `_current_stash_selection` auf `None` und
+löste bei vorhandenem Baum-Cache sogar `_activate_stash_tree` aus —
+aber `table_model`/`history_model` selbst blieben unangetastet. Die
+zuvor gezeigten Items einer anderen Liga standen also weiter in der
+Tabelle, obwohl keine der zurückgesetzten Auswahl-Variablen mehr dazu
+passte. Fix: `table_model.set_items([])` und
+`history_model.set_entries([])` direkt beim Zurücksetzen der
+Auswahl-Variablen, plus ein Platzhalter-Statustext ("select a tab or
+character to view items") — Wert- und Stack-Summe leeren sich darüber
+automatisch mit (`modelReset` → `_update_summaries`, siehe FALLSTRICKE
+#39). Gegenprobe: Fix entfernt, `test_league_change_clears_the_visible_
+item_list` schlägt fehl, restauriert wieder grün.
+
 ---
 
 ## 5. UI-Konzept (Oberflächenvorschlag)

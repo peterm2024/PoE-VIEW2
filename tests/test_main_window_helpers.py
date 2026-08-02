@@ -5768,6 +5768,27 @@ def test_league_change_clears_a_multi_selection(qapp, monkeypatch) -> None:
     win.worker.wait(5000)
 
 
+def test_league_change_clears_the_visible_item_list(qapp, monkeypatch) -> None:
+    """Peter, 2026-08-03: "Wenn ich die League wechsle bleibt der aktuelle
+    Inhalt der Itemliste erhalten. Das sollte denke ich nicht sein." — vor
+    dem Fix leerte ``_on_league_changed`` nur die Auswahl-Variablen, nicht
+    aber ``table_model``/``history_model`` selbst."""
+    win = _three_tab_window(monkeypatch)
+    win._show_stash_selection(["t1"])
+    assert win._visible_rows() != []
+    win._live_leagues = {"Standard", "Hardcore"}
+    monkeypatch.setattr(win, "_apply_character_league_filter", lambda: None)
+    monkeypatch.setattr(win, "_stash_trees", {"Standard": win._stash_trees["Standard"],
+                                              "Hardcore": []})
+
+    win._on_league_changed("Hardcore")
+
+    assert win._visible_rows() == []
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
 def test_multi_selection_with_nothing_cached_shows_zero_items(qapp, monkeypatch) -> None:
     win = _three_tab_window(monkeypatch)
 

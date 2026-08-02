@@ -1218,6 +1218,12 @@ class MainWindow(QMainWindow):
         self._current_stash_id = None  # Fach-IDs gelten nur innerhalb einer Liga
         self._current_character_name = None
         self._current_stash_selection = None
+        # Itemliste gehoerte zur vorigen Liga (Fach/Charakter dort ausgewaehlt) —
+        # ohne dieses Leeren blieb sie nach einem Liga-Wechsel sichtbar stehen,
+        # obwohl keine Auswahl mehr dazu passt (Peter, 2026-08-03).
+        self.table_model.set_items([])
+        self.history_model.set_entries([])
+        self._status_msg.setText(f"{league}: select a tab or character to view items")
         self._apply_character_league_filter()
         cached_tree = self._stash_trees.get(league)
         if cached_tree is not None:
