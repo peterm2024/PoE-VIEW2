@@ -260,6 +260,59 @@ def test_context_menu_omits_raw_data_for_folder_node(qapp, monkeypatch) -> None:
     assert tree.topLevelItem(0).isExpanded()  # "Alle öffnen" hat trotzdem gegriffen
 
 
+def test_context_menu_export_visible_items_available_on_a_leaf(qapp, monkeypatch) -> None:
+    """Peter, 2026-08-03: "im Stash-Tree das 'Export visible Items'-
+    Rechtsklick menu auch aufnehmen" — unabhängig vom angeklickten Knoten,
+    genau wie der Toolbar-Button."""
+    data = [{"id": "root1", "name": "Currency 1", "type": "QuadStash", "metadata": {}}]
+    stashes = [StashTab.model_validate(d) for d in data]
+    tree = StashTree()
+    tree.set_stashes(stashes)
+    pos = tree.visualItemRect(tree._stash_nodes["root1"]).center()
+
+    monkeypatch.setattr(stash_tree_module, "QMenu", _FakeMenu)
+    received = []
+    tree.export_visible_requested.connect(lambda: received.append(True))
+
+    tree._on_context_menu(pos)
+    _FakeMenu.last.trigger("💾 Export visible items")
+
+    assert received == [True]
+
+
+def test_context_menu_export_visible_items_available_on_a_folder(qapp, monkeypatch) -> None:
+    data = [{"id": "folder1", "name": "Folder", "type": "Folder", "metadata": {"folder": True},
+            "children": [{"id": "child1", "name": "Sub", "type": "CurrencyStash", "metadata": {}}]}]
+    stashes = [StashTab.model_validate(d) for d in data]
+    tree = StashTree()
+    tree.set_stashes(stashes)
+    pos = tree.visualItemRect(tree.topLevelItem(0)).center()
+
+    monkeypatch.setattr(stash_tree_module, "QMenu", _FakeMenu)
+    received = []
+    tree.export_visible_requested.connect(lambda: received.append(True))
+
+    tree._on_context_menu(pos)
+
+    assert "💾 Export visible items" in _FakeMenu.last.texts()
+    _FakeMenu.last.trigger("💾 Export visible items")
+    assert received == [True]
+
+
+def test_context_menu_export_visible_items_available_on_empty_area(qapp, monkeypatch) -> None:
+    tree = StashTree()
+    tree.set_stashes([])
+
+    monkeypatch.setattr(stash_tree_module, "QMenu", _FakeMenu)
+    received = []
+    tree.export_visible_requested.connect(lambda: received.append(True))
+
+    tree._on_context_menu(tree.rect().center())
+    _FakeMenu.last.trigger("💾 Export visible items")
+
+    assert received == [True]
+
+
 def test_context_menu_expand_and_collapse_all_available_everywhere(qapp, monkeypatch) -> None:
     """"Alle öffnen"/"Alle schließen" steht auch im leeren Bereich zur
     Verfügung (kein Fach unter dem Cursor) — es betrifft den ganzen Baum,

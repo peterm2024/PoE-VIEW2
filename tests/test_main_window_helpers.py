@@ -5480,3 +5480,24 @@ def test_multi_selection_with_nothing_cached_shows_zero_items(qapp, monkeypatch)
 
     win.worker.stop()
     win.worker.wait(5000)
+
+
+# --- "Export visible items" auch im Stash-Baum-Kontextmenue -------------- #
+
+def test_tree_export_visible_requested_reaches_export_csv(qapp, monkeypatch, tmp_path) -> None:
+    """Peter, 2026-08-03: "im Stash-Tree das 'Export visible Items'-
+    Rechtsklick menu auch aufnehmen" — Verdrahtungstest wie beim
+    Toolbar-Knopf, nur ueber das neue Baum-Signal ausgeloest."""
+    win = _three_tab_window(monkeypatch)
+    win._show_items("t1", win._items["Standard"]["t1"], "Currency 1")
+    target = tmp_path / "out.csv"
+    monkeypatch.setattr("poe_view.ui.main_window.QFileDialog.getSaveFileName",
+                        staticmethod(lambda *a, **k: (str(target), "CSV files (*.csv)")))
+
+    win.tree.export_visible_requested.emit()
+
+    assert target.exists()
+    assert "Chaos Orb" in target.read_text(encoding="utf-8-sig")
+
+    win.worker.stop()
+    win.worker.wait(5000)

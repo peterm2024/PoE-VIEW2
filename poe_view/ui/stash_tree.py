@@ -46,7 +46,11 @@ seine reguläre Alters-Farbe.
 Rechtsklick öffnet ein Kontextmenü: auf einem Fach zusätzlich "Rohdaten
 anzeigen" (``raw_data_requested``, speist den Viewer in
 ``ui/raw_data_viewer.py``), überall (auch auf Ordnern oder im leeren
-Bereich) "Alle öffnen"/"Alle schließen" für den kompletten Baum
+Bereich) "Export visible items" (``export_visible_requested`` — exportiert
+das, was gerade in der Item-Tabelle zu sehen ist, unabhängig vom
+angeklickten Knoten, genau wie der Toolbar-Button; Peter, 2026-08-03: "im
+Stash-Tree das 'Export visible Items'-Rechtsklick menu auch aufnehmen")
+sowie "Alle öffnen"/"Alle schließen" für den kompletten Baum
 (``expandAll``/``collapseAll``) — bei über 100 Fächern in tief
 verschachtelten Ordnern (Map-/Unique-Sektionen) sonst mühsames
 Knoten-für-Knoten-Aufklappen.
@@ -201,6 +205,7 @@ class StashTree(QTreeWidget):
     selection_changed = Signal(list)           # list[str] Blatt-Fach-IDs — Mehrfachauswahl/Ordner/Gruppe
     stash_refresh_requested = Signal(str, str)  # stash_id, name
     raw_data_requested = Signal(str, str)       # stash_id, name
+    export_visible_requested = Signal()         # Rechtsklick-Kontextmenü, wie der Toolbar-Button
 
     def __init__(self) -> None:
         super().__init__()
@@ -565,9 +570,12 @@ class StashTree(QTreeWidget):
 
     def _on_context_menu(self, pos) -> None:
         """"Rohdaten anzeigen" nur für Fächer mit eigenen Daten (kein
-        Ordner-/Gruppenknoten); "Alle öffnen"/"Alle schließen" gilt für den
-        ganzen Baum und steht deshalb immer zur Verfügung, auch auf einem
-        Ordner oder im leeren Bereich unterhalb der letzten Zeile."""
+        Ordner-/Gruppenknoten); "Export visible items" (Peter, 2026-08-03)
+        und "Alle öffnen"/"Alle schließen" gelten für den ganzen Baum bzw.
+        die Item-Tabelle und stehen deshalb immer zur Verfügung, auch auf
+        einem Ordner oder im leeren Bereich unterhalb der letzten Zeile —
+        der Export bezieht sich auf das, was gerade in der Tabelle zu sehen
+        ist, unabhängig vom angeklickten Knoten."""
         item = self.itemAt(pos)
         stash: StashTab | None = item.data(0, _DATA_ROLE) if item is not None else None
         menu = QMenu(self)
@@ -575,6 +583,9 @@ class StashTree(QTreeWidget):
             action = menu.addAction("🔍 View Raw Data")
             action.triggered.connect(lambda: self.raw_data_requested.emit(stash.id, stash.display_name))
             menu.addSeparator()
+        menu.addAction("💾 Export visible items").triggered.connect(
+            self.export_visible_requested.emit)
+        menu.addSeparator()
         menu.addAction("▸ Expand All").triggered.connect(self.expandAll)
         menu.addAction("▾ Collapse All").triggered.connect(self.collapseAll)
         menu.exec(self.viewport().mapToGlobal(pos))

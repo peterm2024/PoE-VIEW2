@@ -20,7 +20,9 @@ nach [SemVer](https://semver.org/lang/de/).
 - Export per Rechtsklick auf ein Item: "Export selected items" (die
   markierten Zeilen, Mehrfachauswahl per Strg-/Umschalt-Klick möglich)
   und "Export visible items" (identisch zum bisherigen Toolbar-Knopf),
-  jeweils mit der Anzahl im Menütext.
+  jeweils mit der Anzahl im Menütext. "Export visible items" steht jetzt
+  auch im Rechtsklick-Menü des Stash-Baums zur Verfügung (auf einem
+  Fach, einem Ordner oder im leeren Bereich).
 - Mehrfachauswahl im Stash-Baum: Strg-/Umschalt-Klick auf mehrere Fächer
   oder einen Ordner (auch die "Tier N"-Gruppen im Map-Stash) zeigt deren
   Items zusammen an. Zeigt ausschließlich bereits gecachte Items — löst

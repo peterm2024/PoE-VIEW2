@@ -1948,6 +1948,19 @@ wenn die geklickte Zeile NICHT schon Teil der Auswahl ist
 (`selectionModel().isRowSelected`); ein Rechtsklick außerhalb wählt wie
 gewohnt die angeklickte Zeile.
 
+**Export auch im Stash-Baum-Kontextmenü** (Peter, 2026-08-03: "im
+Stash-Tree das 'Export visible Items'-Rechtsklick menu auch aufnehmen") —
+`StashTree.export_visible_requested` (parameterloses Signal, `ui/
+stash_tree.py`) ist an `MainWindow._export_csv` verdrahtet, exakt
+dieselbe Methode wie der Toolbar-Button. Der Eintrag steht überall im
+Kontextmenü zur Verfügung (Fach, Ordner, leerer Bereich) — er bezieht
+sich auf das, was gerade in der Item-Tabelle sichtbar ist, unabhängig
+vom angeklickten Knoten, genau wie "Alle öffnen"/"Alle schließen" sich
+auf den ganzen Baum statt auf einen einzelnen Knoten beziehen. Bewusst
+OHNE Item-Anzahl im Menütext (anders als die beiden Export-Einträge im
+Item-Tabellen-Kontextmenü, §oben) — das würde `StashTree` an
+`MainWindow.proxy.rowCount()` koppeln, für eine rein kosmetische Zahl.
+
 ### 4.23 Stash-Baum-Mehrfachauswahl + Suchfeld-Verhalten
 
 Peter, 2026-08-02, im Anschluss an den CSV-Export: "Wenn ich im

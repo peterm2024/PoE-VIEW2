@@ -469,6 +469,7 @@ class MainWindow(QMainWindow):
         self.tree = StashTree()
         self.tree.stash_selected.connect(self._on_stash_selected)
         self.tree.selection_changed.connect(self._show_stash_selection)
+        self.tree.export_visible_requested.connect(self._export_csv)
         self.tree.stash_refresh_requested.connect(self._on_stash_refresh)
         self.tree.raw_data_requested.connect(self._on_raw_data_requested)
 
