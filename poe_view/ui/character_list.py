@@ -18,6 +18,7 @@ class CharacterList(QListWidget):
     character_selected = Signal(object)           # Character
     character_refresh_requested = Signal(object)   # Character — Rechtsklick "Aktualisieren"
     character_paperdoll_requested = Signal(object)  # Character — Doppelklick
+    export_visible_requested = Signal()            # Rechtsklick-Kontextmenü, wie StashTree
 
     def __init__(self) -> None:
         super().__init__()
@@ -45,12 +46,19 @@ class CharacterList(QListWidget):
         """Analog StashTree._on_context_menu: manuelles Neuladen, da es (anders
         als bei Stash-Tabs) keinen Auto-Refresh-Sweep für Charaktere gibt —
         das aktuell angezeigte Inventar hält sich selbst aktuell, alle
-        anderen brauchen einen expliziten Weg."""
+        anderen brauchen einen expliziten Weg. "Export visible items"
+        (Peter, 2026-08-03: "Sollen wir das in der Character-Liste auch in
+        den Rechtsklick mit aufnehmen?") steht — wie schon im Stash-Baum —
+        IMMER zur Verfügung, auch im leeren Bereich ohne Charakter unter
+        dem Cursor: es bezieht sich auf das aktuell in der Item-Tabelle
+        Sichtbare, unabhängig vom angeklickten Eintrag."""
         item = self.itemAt(pos)
-        if item is None:
-            return
-        char: Character = item.data(_DATA_ROLE)
         menu = QMenu(self)
-        action = menu.addAction("⟳ Refresh")
-        action.triggered.connect(lambda: self.character_refresh_requested.emit(char))
+        if item is not None:
+            char: Character = item.data(_DATA_ROLE)
+            action = menu.addAction("⟳ Refresh")
+            action.triggered.connect(lambda: self.character_refresh_requested.emit(char))
+            menu.addSeparator()
+        menu.addAction("💾 Export visible items").triggered.connect(
+            self.export_visible_requested.emit)
         menu.exec(self.viewport().mapToGlobal(pos))

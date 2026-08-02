@@ -462,6 +462,7 @@ class MainWindow(QMainWindow):
         self.character_list.character_refresh_requested.connect(self._on_character_refresh)
         self.character_list.character_paperdoll_requested.connect(
             self._on_character_paperdoll_requested)
+        self.character_list.export_visible_requested.connect(self._export_csv)
         self.character_list.setMaximumHeight(220)
 
         stash_label = QLabel("Stash")

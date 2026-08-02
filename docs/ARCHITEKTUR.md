@@ -1961,6 +1961,22 @@ OHNE Item-Anzahl im Menütext (anders als die beiden Export-Einträge im
 Item-Tabellen-Kontextmenü, §oben) — das würde `StashTree` an
 `MainWindow.proxy.rowCount()` koppeln, für eine rein kosmetische Zahl.
 
+Dieselbe Ergänzung folgt direkt danach für die Charakterliste (Peter,
+2026-08-03: "Sollen wir das in der Character-Liste auch in den
+Rechtsklick mit aufnehmen?") — `CharacterList.export_visible_requested`
+(`ui/character_list.py`), ebenfalls an `MainWindow._export_csv`
+verdrahtet. Dabei eine bewusste Verhaltensänderung: Das Kontextmenü der
+Charakterliste zeigte bislang GAR NICHTS ohne einen Charakter unter dem
+Cursor (`_on_context_menu` brach mit `if item is None: return` sofort
+ab, da "⟳ Refresh" ohne Charakter-Bezug sinnlos ist). "Export visible
+items" hat aber gar keinen Charakter-Bezug — es exportiert das, was
+gerade in der Item-Tabelle sichtbar ist — und steht deshalb jetzt analog
+zum Stash-Baum auch im leeren Bereich der Liste zur Verfügung. Die
+zugehörige alte Regression-Sicherung
+(`test_context_menu_does_nothing_without_an_item_under_cursor`) prüfte
+genau das alte, jetzt bewusst aufgehobene Verhalten und wurde durch zwei
+neue Tests ersetzt (mit/ohne Charakter unter dem Cursor).
+
 ### 4.23 Stash-Baum-Mehrfachauswahl + Suchfeld-Verhalten
 
 Peter, 2026-08-02, im Anschluss an den CSV-Export: "Wenn ich im

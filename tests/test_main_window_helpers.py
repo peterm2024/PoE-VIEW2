@@ -5501,3 +5501,23 @@ def test_tree_export_visible_requested_reaches_export_csv(qapp, monkeypatch, tmp
 
     win.worker.stop()
     win.worker.wait(5000)
+
+
+def test_character_list_export_visible_requested_reaches_export_csv(
+        qapp, monkeypatch, tmp_path) -> None:
+    """Peter, 2026-08-03: "Sollen wir das in der Character-Liste auch in
+    den Rechtsklick mit aufnehmen?" — dieselbe Verdrahtung wie beim
+    Stash-Baum, nur ueber CharacterList.export_visible_requested."""
+    win = _three_tab_window(monkeypatch)
+    win._show_items("t1", win._items["Standard"]["t1"], "Currency 1")
+    target = tmp_path / "out.csv"
+    monkeypatch.setattr("poe_view.ui.main_window.QFileDialog.getSaveFileName",
+                        staticmethod(lambda *a, **k: (str(target), "CSV files (*.csv)")))
+
+    win.character_list.export_visible_requested.emit()
+
+    assert target.exists()
+    assert "Chaos Orb" in target.read_text(encoding="utf-8-sig")
+
+    win.worker.stop()
+    win.worker.wait(5000)
