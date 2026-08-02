@@ -451,3 +451,27 @@ def test_position_column_sorts_by_coordinates_within_same_tab(qapp) -> None:
     order = [proxy.data(proxy.index(r, POSITION_COL), Qt.ItemDataRole.DisplayRole)
              for r in range(proxy.rowCount())]
     assert order == ["#1 (1, 5)", "#1 (9, 0)"]
+
+
+# --- distinct_values (Autovervollständigen im Spalten-Filter, Peter 2026-08-02) --- #
+
+def test_distinct_values_returns_sorted_unique_texts(qapp) -> None:
+    model = ItemTableModel()
+    items = [
+        Item.model_validate({"typeLine": "Chaos Orb", "baseType": "Chaos Orb"}),
+        Item.model_validate({"typeLine": "Exalted Orb", "baseType": "Exalted Orb"}),
+        Item.model_validate({"typeLine": "Chaos Orb", "baseType": "Chaos Orb"}),  # Duplikat
+    ]
+    model.set_items(items)
+    assert model.distinct_values(BASE_COL) == ["Chaos Orb", "Exalted Orb"]
+
+
+def test_distinct_values_excludes_the_dash_placeholder(qapp) -> None:
+    model = ItemTableModel()
+    model.set_items([Item.model_validate({"typeLine": "Chaos Orb", "baseType": ""})])
+    assert model.distinct_values(BASE_COL) == []
+
+
+def test_distinct_values_is_empty_for_an_empty_table(qapp) -> None:
+    model = ItemTableModel()
+    assert model.distinct_values(BASE_COL) == []

@@ -1340,6 +1340,92 @@ def test_stash_mode_schedules_a_list_refresh_even_without_any_empty_tabs(qapp, m
     win.worker.wait(5000)
 
 
+def test_stash_mode_never_repicks_a_loaded_remove_only_tab_while_others_are_filled(
+        qapp, monkeypatch) -> None:
+    """Peter, 2026-08-02: Remove-only-Fächer können nur schrumpfen, nie
+    wachsen — sobald einmal geladen, sollen sie beim Stash-Modus-Rundlauf
+    nicht mehr regulär mitlaufen. Trotz eines viel älteren Ladezeitpunkts
+    bleibt "ro" hier über mehrere Runden hinweg unberührt, solange "regular"
+    noch existiert."""
+    win = MainWindow()
+    win._current_league = "Standard"
+    win._leaf_stashes = [_make_leaf("ro", "Guild Tab (Remove-only)"),
+                         _make_leaf("regular", "Tab 2")]
+    now = datetime.now(timezone.utc)
+    win._items["Standard"] = {
+        "ro": [Item.model_validate({"typeLine": "Chaos Orb", "frameType": 5})],
+        "regular": [Item.model_validate({"typeLine": "Chaos Orb", "frameType": 5})],
+    }
+    win._last_loaded["Standard"] = {
+        "ro": (now - timedelta(days=30)).isoformat(),   # viel älter, aber Remove-only
+        "regular": (now - timedelta(days=1)).isoformat(),
+    }
+    submitted = []
+    monkeypatch.setattr(win.worker, "submit", lambda job: submitted.append(job))
+    monkeypatch.setattr(win.worker.rate_limiter, "steady_pace_interval_s", lambda *a, **k: 10.0)
+    fake_now = [1000.0]
+    monkeypatch.setattr("poe_view.ui.main_window.time.monotonic", lambda: fake_now[0])
+
+    win._on_refresh_mode_changed("Stash")  # Pick #1
+    picks = [submitted[-1].stash_id]
+    for _ in range(5):
+        pick = _drive_stash_mode_pick(win, fake_now, submitted)
+        if pick is not None:
+            picks.append(pick)
+
+    assert set(picks) == {"regular"}
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_stash_mode_falls_back_to_a_remove_only_tab_when_nothing_else_is_filled(
+        qapp, monkeypatch) -> None:
+    """Ist ein bereits geladenes Remove-only-Fach das EINZIGE gefüllte Fach,
+    muss es trotzdem irgendwann drankommen — "nachrangig" heißt nicht "nie"."""
+    win = MainWindow()
+    win._current_league = "Standard"
+    win._leaf_stashes = [_make_leaf("ro", "Guild Tab (Remove-only)")]
+    win._items["Standard"] = {
+        "ro": [Item.model_validate({"typeLine": "Chaos Orb", "frameType": 5})],
+    }
+    submitted = []
+    monkeypatch.setattr(win.worker, "submit", lambda job: submitted.append(job))
+
+    win._on_refresh_mode_changed("Stash")
+
+    assert len(submitted) == 1
+    assert submitted[0].stash_id == "ro"
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_stash_mode_still_loads_a_never_loaded_remove_only_tab_once(qapp, monkeypatch) -> None:
+    """Vor dem ersten Laden ist das Fach für den Refresh-Modus nicht von
+    einem normalen leeren Fach zu unterscheiden (item_counts kennt es noch
+    nicht) — es nimmt ganz normal am Leer-Fach-Rundlauf teil und bekommt so
+    trotzdem einmal seine Erstladung."""
+    win = MainWindow()
+    win._current_league = "Standard"
+    win._leaf_stashes = [_make_leaf("full", "Full"), _make_leaf("ro", "Guild Tab (Remove-only)")]
+    win._items["Standard"] = {"full": [Item.model_validate({"typeLine": "Chaos Orb", "frameType": 5})]}
+    submitted = []
+    monkeypatch.setattr(win.worker, "submit", lambda job: submitted.append(job))
+    monkeypatch.setattr(win.worker.rate_limiter, "steady_pace_interval_s", lambda *a, **k: 10.0)
+    fake_now = [1000.0]
+    monkeypatch.setattr("poe_view.ui.main_window.time.monotonic", lambda: fake_now[0])
+
+    win._on_refresh_mode_changed("Stash")  # Pick #1: "full"
+    win._on_stash_items("Standard", "full", "x", win._items["Standard"]["full"], silent=True)
+    second = _drive_stash_mode_pick(win, fake_now, submitted)  # Pick #2: Runde fertig -> Coverage-Pick
+
+    assert second == "ro"
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
 def test_stash_mode_round_state_resets_on_league_change(qapp, monkeypatch) -> None:
     win = MainWindow()
     win._current_league = "Standard"
@@ -2776,6 +2862,59 @@ def test_apply_column_filter_updates_status_and_header(qapp) -> None:
     win.worker.wait(5000)
 
 
+def test_column_filter_edit_offers_the_columns_distinct_values(qapp) -> None:
+    """Peter, 2026-08-02: "eine Art Autovervollständigen mit Combobox über
+    die Items in der Spalte" — das Eingabefeld im Header-Rechtsklick-Menü
+    bekommt einen QCompleter über die tatsächlich vorkommenden Werte."""
+    from PySide6.QtCore import Qt
+    from poe_view.ui.item_table import BASE_COL
+    win = MainWindow()
+    win.table_model.set_items([
+        Item.model_validate({"typeLine": "Chaos Orb", "baseType": "Chaos Orb"}),
+        Item.model_validate({"typeLine": "Exalted Orb", "baseType": "Exalted Orb"}),
+    ])
+
+    edit = win._build_column_filter_edit(BASE_COL)
+
+    completer = edit.completer()
+    assert completer is not None
+    model = completer.model()
+    values = {model.index(r, 0).data() for r in range(model.rowCount())}
+    assert values == {"Chaos Orb", "Exalted Orb"}
+    assert completer.caseSensitivity() == Qt.CaseSensitivity.CaseInsensitive
+    assert completer.filterMode() == Qt.MatchFlag.MatchContains
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_column_filter_edit_has_no_completer_for_an_empty_table(qapp) -> None:
+    """Keine Werte -> kein leerer/nutzloser Completer am Feld."""
+    from poe_view.ui.item_table import BASE_COL
+    win = MainWindow()
+
+    edit = win._build_column_filter_edit(BASE_COL)
+
+    assert edit.completer() is None
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_column_filter_edit_keeps_the_currently_active_filter_text(qapp) -> None:
+    from poe_view.ui.item_table import BASE_COL
+    win = MainWindow()
+    win.table_model.set_items([Item.model_validate({"typeLine": "Chaos Orb", "baseType": "Chaos Orb"})])
+    win._apply_column_filter(BASE_COL, "Chaos")
+
+    edit = win._build_column_filter_edit(BASE_COL)
+
+    assert edit.text() == "Chaos"
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
 def test_clear_column_filters_resets_all(qapp) -> None:
     from poe_view.ui.item_table import COLUMNS
     win = MainWindow()
@@ -2787,6 +2926,115 @@ def test_clear_column_filters_resets_all(qapp) -> None:
     win._clear_column_filters()
     assert win.proxy.rowCount() == 2
     assert win.proxy.filtered_columns() == set()
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+# --- View-relative Spalten-Filter (Tab/Position) beim View-Wechsel löschen
+# (Peter, 2026-08-02: "Tab->MainInventory gibt es im Stash nicht und es
+# werden deshalb keine Items angezeigt") ------------------------------- #
+
+def test_switching_from_character_to_stash_clears_a_stale_tab_filter(qapp, monkeypatch) -> None:
+    """Der genaue von Peter gemeldete Fall: ein Tab-Spalten-Filter auf
+    einen Charakter-Slot-Namen ("MainInventory") überlebte bisher den
+    Wechsel zu einer Truhe, in der kein Fach je so heißt — alle Items
+    verschwanden lautlos."""
+    from poe_view.ui.item_table import TAB_COL
+    win = MainWindow()
+    win._current_league = "Standard"
+    win._character_items["WitchOfPeter"] = [
+        Item.model_validate({"typeLine": "Chaos Orb", "inventoryId": "MainInventory"})]
+    win._on_character_selected(make_char("WitchOfPeter", "Standard"))
+    win._apply_column_filter(TAB_COL, "MainInventory")
+    assert win.proxy.rowCount() == 1  # Filter passt hier noch
+
+    t1 = _make_leaf("t1", "Currency 1")
+    win._leaf_stashes = [t1]
+    win._items["Standard"] = {"t1": [Item.model_validate({"typeLine": "Exalted Orb"})]}
+    monkeypatch.setattr(win.worker, "submit", lambda job: None)
+
+    win._on_stash_selected("t1", "Currency 1")
+
+    assert win.proxy.filtered_columns() == set()
+    assert win.proxy.rowCount() == 1  # Item ist wieder sichtbar
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_switching_between_stash_tabs_also_clears_a_stale_tab_filter(qapp, monkeypatch) -> None:
+    """Dieselbe Falle tritt auch zwischen zwei Truhenfächern auf, nicht nur
+    Charakter->Stash: ein Tab-Filter auf den Namen von Fach A passt bei
+    Fach B im Zweifel nicht."""
+    from poe_view.ui.item_table import TAB_COL
+    win = MainWindow()
+    win._current_league = "Standard"
+    t1 = _make_leaf("t1", "Currency 1")
+    t2 = _make_leaf("t2", "Currency 2")
+    win._leaf_stashes = [t1, t2]
+    win._items["Standard"] = {
+        "t1": [Item.model_validate({"typeLine": "Chaos Orb"})],
+        "t2": [Item.model_validate({"typeLine": "Exalted Orb"})],
+    }
+    monkeypatch.setattr(win.worker, "submit", lambda job: None)
+    win._on_stash_selected("t1", "Currency 1")
+    win._apply_column_filter(TAB_COL, "Currency 1")
+
+    win._on_stash_selected("t2", "Currency 2")
+
+    assert win.proxy.filtered_columns() == set()
+    assert win.proxy.rowCount() == 1
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_view_switch_does_not_clear_item_intrinsic_filters(qapp, monkeypatch) -> None:
+    """Ein Filter auf einer item-eigenen Spalte (Name, Base, Value, …) ist
+    NICHT view-relativ und soll beim Fach-/Charakter-Wechsel absichtlich
+    bestehen bleiben — sonst verliert man ihn beim Vergleichen mehrerer
+    Fächer nach jedem Klick."""
+    from poe_view.ui.item_table import COLUMNS
+    win = MainWindow()
+    win._current_league = "Standard"
+    t1 = _make_leaf("t1", "Currency 1")
+    t2 = _make_leaf("t2", "Currency 2")
+    win._leaf_stashes = [t1, t2]
+    win._items["Standard"] = {
+        "t1": [Item.model_validate({"typeLine": "Chaos Orb"})],
+        "t2": [Item.model_validate({"typeLine": "Exalted Orb"})],
+    }
+    monkeypatch.setattr(win.worker, "submit", lambda job: None)
+    win._on_stash_selected("t1", "Currency 1")
+    win._apply_column_filter(COLUMNS.index("Name"), "Chaos")
+
+    win._on_stash_selected("t2", "Currency 2")
+
+    assert win.proxy.filtered_columns() == {COLUMNS.index("Name")}
+    assert win.proxy.rowCount() == 0  # "Exalted Orb" passt nicht zu "Chaos" — Filter wirkt weiter
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_entering_the_aggregate_view_clears_a_stale_tab_filter(qapp, monkeypatch) -> None:
+    from poe_view.ui.item_table import TAB_COL
+    win = MainWindow()
+    win._current_league = "Standard"
+    win._all_characters = [make_char("WitchOfPeter", "Standard")]
+    win._character_items["WitchOfPeter"] = [
+        Item.model_validate({"typeLine": "Chaos Orb", "inventoryId": "MainInventory"})]
+    win._on_character_selected(make_char("WitchOfPeter", "Standard"))
+    win._apply_column_filter(TAB_COL, "MainInventory")
+
+    win._leaf_stashes = [_make_leaf("t1", "Currency 1")]
+    win._items["Standard"] = {"t1": [Item.model_validate({"typeLine": "Exalted Orb"})]}
+
+    win._show_aggregate()
+
+    assert win.proxy.filtered_columns() == set()
+    assert win.proxy.rowCount() == 2
 
     win.worker.stop()
     win.worker.wait(5000)

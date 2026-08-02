@@ -647,6 +647,19 @@ Toolbar ("Mode: Auto / Single / Stash / Pause", additiv neben dem normalen
   Charakteren gibt es hier KEINE getrennte Listen-Policy), also derselbe
   Budget-Topf.
 
+  **Remove-only-Fächer** (`MainWindow._is_remove_only_tab`, Namensmuster
+  wie bei §4.10) fallen, sobald einmal geladen, aus dem normalen Rundlauf
+  der gefüllten Fächer raus (Peter, 2026-08-02: "da hier niemals neue
+  Items hinzukommen und nur herausgenommen werden können") — sie kommen
+  nur noch dran, wenn es sonst KEIN anderes gefülltes Fach gibt. Das
+  bestimmt auch die Rundenlänge: sie zählen nicht mehr zu den Picks, nach
+  denen der Coverage-/Listen-Refresh-Tick fällig wird. Vor dem ersten
+  Laden sind sie von einem normalen leeren Fach nicht zu unterscheiden
+  (`item_counts` kennt sie noch nicht) und laufen ganz regulär im
+  Leer-Fach-Rundlauf mit — dieselbe Nachrangigkeit gilt schon länger für
+  `_pick_auto_refresh_candidate` im Auto-Modus (oben), war für den
+  Stash-Modus aber ein offener ToDo-Punkt.
+
 - **Pause** — gar keine Hintergrund-Anfragen (Peter, 2026-07-30). Weder die
   Takt-Kette (Single/Stash) noch der 40s-Timer (Auto) feuern; manuelle
   Klicks, die ⟳-Buttons im Baum und "Load All Tabs" funktionieren
@@ -972,7 +985,28 @@ Header-Rechtsklick zeigt oben ein Eingabefeld für die angeklickte Spalte
 Zelle eine Zahl hergeben. Aktive Filter markieren den Header mit 🔍
 (`ItemFilterProxy.headerData`-Override), sind UND-verknüpft untereinander
 und mit dem globalen Suchfeld, und die Statuszeile nennt Treffer/Gesamt.
-Bewusst NICHT persistiert (wie in Excel: Filter sind Arbeitszustand).
+Bewusst NICHT persistiert (wie in Excel: Filter sind Arbeitszustand). Das
+Eingabefeld trägt zusätzlich einen `QCompleter` über
+`ItemTableModel.distinct_values(col)` — sortierte, eindeutige
+Anzeigewerte der Spalte über alle geladenen Zeilen, contains-Matching
+(passend zum Filter selbst) — Peter, 2026-08-02: "eine Art
+Autovervollständigen mit Combobox über die Items in der Spalte"
+(`MainWindow._build_column_filter_edit`).
+
+**View-relative Filter (Tab/Position) werden beim View-Wechsel gelöscht.**
+Tab- und Position-Spalte sind relativ zur gerade angezeigten Quelle
+(Charakter-Slot- vs. Truhenfach-Namen; Fach-Position vs. gar keine) — ein
+Filter darauf verliert beim Wechsel zu einer anderen Quelle seinen Sinn
+und kann dort ALLE Items unsichtbar machen, ohne erkennbaren Grund, wenn
+die Spalte in der neuen Ansicht sogar automatisch ausgeblendet ist (Peter,
+2026-08-02: "Tab->MainInventory gibt es im Stash nicht und es werden
+deshalb keine Items angezeigt"). `MainWindow._clear_view_relative_column_
+filters()` löscht deshalb genau diese zwei Filter an jeder Stelle, die auf
+eine ANDERE Quelle umschaltet (Baum-Klick, Charakter-Klick, Aggregat/Suche
+betreten) — nicht bei einem stillen Refresh derselben Ansicht. Filter auf
+item-eigenen Spalten (Name, Base, Value, …) bleiben davon unberührt und
+überleben einen View-Wechsel bewusst, sonst ginge der "mehrere Fächer
+vergleichen"-Workflow bei jedem Klick verloren.
 
 **Liga-weite Suche:** Tippen ins
 Suchfeld schaltet die Tabelle auf ALLE gecachten Items der aktuellen Liga

@@ -14,9 +14,9 @@ from datetime import datetime, timedelta, timezone
 
 from PySide6.QtCore import QSettings, Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import QAction, QDesktopServices, QMouseEvent, QPixmap
-from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog,
-                               QFileDialog, QLabel, QLineEdit, QMainWindow,
-                               QMenu, QMessageBox, QProgressBar,
+from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QCompleter,
+                               QDialog, QFileDialog, QLabel, QLineEdit,
+                               QMainWindow, QMenu, QMessageBox, QProgressBar,
                                QProgressDialog, QSizePolicy, QSplitter,
                                QTableView, QToolBar, QVBoxLayout, QWidget,
                                QWidgetAction)
@@ -847,6 +847,25 @@ class MainWindow(QMainWindow):
         else:
             self._update_summaries()
 
+    def _build_column_filter_edit(self, col: int) -> QLineEdit:
+        """Eingabefeld für den Spalten-Filter im Header-Rechtsklick-Menü,
+        inklusive Autovervollständigen über die tatsächlich in dieser
+        Spalte vorkommenden Werte (Peter, 2026-08-02: "eine Art
+        Autovervollständigen mit Combobox über die Items in der Spalte").
+        Eigene Methode statt inline in ``_on_table_header_menu``, damit sie
+        ohne den blockierenden ``QMenu.exec()`` testbar ist."""
+        edit = QLineEdit(self.proxy.column_filter(col))
+        edit.setPlaceholderText("e.g. >=20, <45, =text, substring")
+        values = self.table_model.distinct_values(col)
+        if values:
+            completer = QCompleter(values, edit)
+            completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+            # Contains statt StartsWith: passt zum Filter selbst, der auch
+            # ohne Operator eine reine Teilstring-Suche ist (_expression_matches).
+            completer.setFilterMode(Qt.MatchFlag.MatchContains)
+            edit.setCompleter(completer)
+        return edit
+
     def _on_table_header_menu(self, pos) -> None:
         header = self.table.horizontalHeader()
         clicked_col = header.logicalIndexAt(pos)
@@ -857,8 +876,7 @@ class MainWindow(QMainWindow):
         if clicked_col > ICON_COL:
             title = menu.addAction(f"Filter \"{COLUMNS[clicked_col]}\" (Enter applies):")
             title.setEnabled(False)
-            edit = QLineEdit(self.proxy.column_filter(clicked_col))
-            edit.setPlaceholderText("e.g. >=20, <45, =text, substring")
+            edit = self._build_column_filter_edit(clicked_col)
             edit.returnPressed.connect(
                 lambda c=clicked_col, e=edit, m=menu: (
                     self._apply_column_filter(c, e.text()), m.close()))
@@ -1218,7 +1236,25 @@ class MainWindow(QMainWindow):
         stash = self._find_stash(self._stash_trees.get(self._current_league, []), stash_id)
         return stash.parent if stash is not None else None
 
+    def _clear_view_relative_column_filters(self) -> None:
+        """Tab- und Position-Spalte sind relativ zur gerade angezeigten
+        Ansicht (Charakter-Slot- vs. Truhenfach-Namen, Fach-Position vs.
+        gar keine Position) — ein Filter darauf verliert beim Wechsel zu
+        einer anderen Ansicht seinen Sinn und kann dort ALLE Items
+        unsichtbar machen, ohne dass der Grund erkennbar ist, wenn die
+        Spalte in der neuen Ansicht sogar automatisch ausgeblendet ist
+        (Peter, 2026-08-02: "Tab->MainInventory gibt es im Stash nicht und
+        es werden deshalb keine Items angezeigt"). Aufgerufen an jeder
+        Stelle, die auf eine tatsächlich ANDERE Quelle umschaltet (Baum-
+        Klick, Charakter-Klick, Aggregat/Suche betreten) — NICHT bei einem
+        stillen Refresh derselben Ansicht, dort soll ein aktiver Filter auf
+        anderen Spalten (Name, Value, …) bestehen bleiben."""
+        if self.proxy.filtered_columns() & {TAB_COL, POSITION_COL}:
+            self.proxy.set_column_filter(TAB_COL, "")
+            self.proxy.set_column_filter(POSITION_COL, "")
+
     def _on_stash_selected(self, stash_id: str, name: str) -> None:
+        self._clear_view_relative_column_filters()
         self._showing_aggregate = False
         self._search_all_active = False  # Baum-Klick beendet die liga-weite Suchansicht
         self._large_search_items = None
@@ -1256,6 +1292,7 @@ class MainWindow(QMainWindow):
 
     def _on_stash_refresh(self, stash_id: str, name: str) -> None:
         """Klick auf den Refresh-Button eines Tabs — bewusst AM Cache vorbei."""
+        self._clear_view_relative_column_filters()
         self._showing_aggregate = False
         if self._archived_league_guard(f"{name}: league ended — refresh no longer possible."):
             return
@@ -1675,6 +1712,7 @@ class MainWindow(QMainWindow):
     def _show_aggregate(self) -> None:
         """Items aller bereits geladenen Tabs und Charaktere dieser Liga
         zusammen anzeigen (lokal filter-/exportierbar), siehe `_league_wide_items`."""
+        self._clear_view_relative_column_filters()
         self._showing_aggregate = True
         self._search_all_active = False
         self._large_search_items = None
@@ -1750,6 +1788,7 @@ class MainWindow(QMainWindow):
             self._update_summaries()
 
     def _enter_search_all(self) -> None:
+        self._clear_view_relative_column_filters()
         self._search_all_active = True
         self._showing_aggregate = True  # späte Einzel-Ergebnisse nicht reinfunken lassen
         self._current_character_name = None
@@ -1871,6 +1910,7 @@ class MainWindow(QMainWindow):
         wie bei Stash-Fächern: Cache-Treffer zeigen sofort an, sonst wird
         einmalig nachgeladen (kein automatisches Neuladen bei jedem Klick,
         Doku §4.4/§5)."""
+        self._clear_view_relative_column_filters()
         self._current_character_name = char.name
         cached = self._character_items.get(char.name)
         if cached is not None:
@@ -1886,6 +1926,7 @@ class MainWindow(QMainWindow):
         """Rechtsklick → "Aktualisieren" — bewusst AM Cache vorbei, analog
         `_on_stash_refresh`. Schaltet die Ansicht (wie beim Stash-Refresh
         auch) auf diesen Charakter um, sobald das Ergebnis eintrifft."""
+        self._clear_view_relative_column_filters()
         self._current_character_name = char.name
         self._status_msg.setText(f"Loading equipment: {char.name}…")
         self.worker.submit(FetchCharacterItemsJob(char.name))
@@ -2367,7 +2408,14 @@ class MainWindow(QMainWindow):
         (`_stash_mode_coverage_cursor`) folgt der FÄCHERREIHENFOLGE, nicht
         dem Alter: verschiebt der Nutzer im Spiel ein Fach weiter nach
         vorne, rückt es in `_leaf_stashes` ebenso weiter nach vorne und ist
-        dadurch beim Rundlauf schneller wieder dran."""
+        dadurch beim Rundlauf schneller wieder dran.
+
+        Einmal geladene Remove-only-Fächer (`_is_remove_only_tab`) fallen aus
+        diesem Rundlauf raus (Peter, 2026-08-02: "da hier niemals neue Items
+        hinzukommen und nur herausgenommen werden können") — sie kommen nur
+        noch dran, wenn es sonst KEIN anderes gefülltes Fach gibt. Vor dem
+        ersten Laden sind sie ganz normal in ``empty`` und werden über den
+        üblichen Rundlauf durch die leeren Fächer trotzdem einmal geladen."""
         if not self._leaf_stashes:
             return None
         # Ein bewusst angeklicktes Fach drängelt sich einmalig nach vorn,
@@ -2383,8 +2431,10 @@ class MainWindow(QMainWindow):
         item_counts = self._item_counts_for_current_league()
         non_empty = [s for s in self._leaf_stashes if item_counts.get(s.id)]
         empty = [s for s in self._leaf_stashes if not item_counts.get(s.id)]
+        regular = [s for s in non_empty if not self._is_remove_only_tab(s)]
+        cycle_pool = regular or non_empty
 
-        if non_empty and self._stash_mode_round_picks >= len(non_empty):
+        if cycle_pool and self._stash_mode_round_picks >= len(cycle_pool):
             self._stash_mode_round_picks = 0
             self._stash_mode_list_refresh_due = True
             if empty:
@@ -2402,7 +2452,7 @@ class MainWindow(QMainWindow):
             return (is_empty, age)
 
         self._stash_mode_round_picks += 1
-        return min(self._leaf_stashes, key=sort_key)
+        return min(cycle_pool or self._leaf_stashes, key=sort_key)
 
     def _drive_refresh_mode(self) -> None:
         """Hält Single-/Stash-Modus am Laufen: ein GLEICHMÄSSIGER Takt,
@@ -2557,6 +2607,17 @@ class MainWindow(QMainWindow):
     # jedem tatsächlich datierten Tab dran (siehe _pick_auto_refresh_candidate).
     _NEVER_LOADED = datetime.min.replace(tzinfo=timezone.utc)
 
+    @staticmethod
+    def _is_remove_only_tab(stash: StashTab) -> bool:
+        """GGGs Zusatz-Hinweis " (Remove-only)" steckt im `name`-Feld selbst
+        (siehe `models.is_ggg_suffix`), sowohl bei Top-Level-Fächern als auch
+        bei Unique-Stash-Kindern — ein solches Fach kann nur noch schrumpfen,
+        nie wachsen (Peter, 2026-08-02: "da hier niemals neue Items
+        hinzukommen und nur herausgenommen werden können"). Genutzt von
+        `_pick_auto_refresh_candidate` UND `_pick_stash_mode_candidate`, um
+        solche Fächer beim Refresh nachrangig zu behandeln."""
+        return "remove-only" in stash.name.lower()
+
     def _pick_auto_refresh_candidate(self) -> StashTab | None:
         """Ältester Tab der aktuellen Liga — inkl. noch nie geladener Tabs (⬇).
 
@@ -2565,7 +2626,7 @@ class MainWindow(QMainWindow):
         bekannte Daten — es gibt nichts zu schonen, wenn noch gar keine
         Daten da sind). So füllt sich der Stash über die Zeit von selbst,
         ohne dass 391 Tabs einzeln angeklickt werden müssen.
-        Tabs, deren Name "Remove-only" enthält, werden nachrangig behandelt
+        Remove-only-Fächer (`_is_remove_only_tab`) werden nachrangig behandelt
         — nur falls es sonst keinen anderen Kandidaten gibt, kommen sie doch dran.
         """
         league_loaded = self._last_loaded.get(self._current_league, {})
@@ -2581,7 +2642,7 @@ class MainWindow(QMainWindow):
                 candidates.append((loaded_at, stash))
         if not candidates:
             return None
-        preferred = [pair for pair in candidates if "remove-only" not in pair[1].name.lower()]
+        preferred = [pair for pair in candidates if not self._is_remove_only_tab(pair[1])]
         pool = preferred or candidates
         return min(pool, key=lambda pair: pair[0])[1]  # älteste (bzw. nie geladene) zuerst
 

@@ -269,6 +269,19 @@ class ItemTableModel(QAbstractTableModel):
     def search_haystack_at(self, row: int) -> str:
         return self._search_haystacks[row] if 0 <= row < len(self._search_haystacks) else ""
 
+    def distinct_values(self, col: int) -> list[str]:
+        """Sortierte, eindeutige Anzeigewerte einer Spalte über ALLE
+        geladenen Zeilen (nicht nur die gerade sichtbaren/gefilterten) —
+        Grundlage der Autovervollständigung im Spalten-Filter
+        (Header-Rechtsklick, Peter 2026-08-02: "eine Art
+        Autovervollständigen mit Combobox über die Items in der Spalte").
+        Der Platzhalter "–" (kein Wert) taugt nicht als Filter-Ziel und
+        wird ausgeklammert."""
+        values = {self.display_text(row, col) for row in range(len(self._items))}
+        values.discard("–")
+        values.discard("")
+        return sorted(values)
+
     def stash_id_at(self, row: int) -> str | None:
         return self._stash_ids[row] if 0 <= row < len(self._stash_ids) else None
 

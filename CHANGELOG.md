@@ -66,6 +66,23 @@ nach [SemVer](https://semver.org/lang/de/).
   gesperrt, solange kein Login besteht; Stash-Baum, Charakterliste und
   Liga-Auswahl bleiben zum Durchsuchen des Caches weiter nutzbar.
 
+### Behoben
+
+- Ein Spalten-Filter auf der Tab-Spalte (Header-Rechtsklick) überlebte
+  bisher den Wechsel von der Charakter- zur Truhen-Ansicht (oder zwischen
+  zwei Truhenfächern) — passte der Filterwert dort auf keinen einzigen
+  Fach-/Slot-Namen, verschwanden alle Items kommentarlos, ohne sichtbaren
+  Hinweis (die Tab-Spalte ist im Einzelfach-View automatisch ausgeblendet,
+  der 🔍-Marker also unsichtbar). Ein solcher Filter wird jetzt beim
+  tatsächlichen Wechsel der angezeigten Quelle automatisch entfernt.
+  Filter auf anderen Spalten (Name, Base, Value, …) bleiben unverändert
+  über einen View-Wechsel hinweg erhalten.
+- Refresh-Modus "Stash": bereits geladene Remove-only-Fächer (können nur
+  schrumpfen, nie wachsen) wurden im Rundlauf wie jedes andere gefüllte
+  Fach behandelt und damit unnötig oft neu geladen. Sie kommen jetzt nur
+  noch dran, wenn es sonst kein anderes gefülltes Fach gibt — die gleiche
+  Nachrangigkeit, die der Auto-Refresh-Modus schon hatte.
+
 ### Hinzugefügt
 
 - Charakter-Ansicht: Beim Beobachten eines Charakter-Inventars (z. B. per
