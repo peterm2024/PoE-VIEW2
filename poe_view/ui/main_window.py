@@ -45,7 +45,15 @@ from poe_view.ui.item_table import (COLUMNS, CONFIGURABLE_COLUMNS, ICON_COL,
                                     VALUE_COL, ItemFilterProxy, ItemTableModel,
                                     compile_search, format_chaos_value,
                                     matches_search)
-from poe_view.ui.item_history import HistoryEntry, ItemHistoryModel
+from poe_view.ui.item_history import (BASE_COL as HISTORY_BASE_COL,
+                                      CHARACTER_COL as HISTORY_CHARACTER_COL,
+                                      EVENT_COL as HISTORY_EVENT_COL,
+                                      ICON_COL as HISTORY_ICON_COL,
+                                      NAME_COL as HISTORY_NAME_COL,
+                                      STACK_COL as HISTORY_STACK_COL,
+                                      TIME_COL as HISTORY_TIME_COL,
+                                      VALUE_COL as HISTORY_VALUE_COL,
+                                      HistoryEntry, ItemHistoryModel)
 from poe_view.ui.item_zoom import ItemZoomDialog
 from poe_view.ui.paperdoll import PaperdollDialog
 from poe_view.ui.settings_dialog import SettingsDialog
@@ -525,6 +533,14 @@ class MainWindow(QMainWindow):
         self.history_table.setModel(self.history_model)
         self.history_table.setSelectionBehavior(QTableView.SelectionBehavior.SelectRows)
         self.history_table.verticalHeader().hide()
+        # Spaltenbreiten wie bei der Item-Tabelle von Hand: die Qt-Vorgabe
+        # (überall 100px) verschenkt Platz an Icon/Event und schneidet
+        # dafür lange Item-Namen ab ("Awakened Deadly Ailments Support").
+        for col, width in ((HISTORY_ICON_COL, 36), (HISTORY_TIME_COL, 70),
+                           (HISTORY_CHARACTER_COL, 130), (HISTORY_EVENT_COL, 50),
+                           (HISTORY_NAME_COL, 220), (HISTORY_BASE_COL, 160),
+                           (HISTORY_STACK_COL, 60), (HISTORY_VALUE_COL, 90)):
+            self.history_table.setColumnWidth(col, width)
         self.history_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.history_table.customContextMenuRequested.connect(self._on_history_row_menu)
         self.history_table.doubleClicked.connect(self._on_history_row_double_clicked)

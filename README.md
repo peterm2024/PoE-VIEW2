@@ -15,11 +15,13 @@ The access token is stored in the Windows Credential Manager.
 
 ## Screenshots
 
-*Both screenshots show synthetic demo data, not a real account.*
+*All screenshots show synthetic demo data, not a real account.*
 
 League-wide search with `*`: stash tabs and characters appear together
 in one table, with the Tab column showing where each item came from.
-Type filters are above, the rate-limit dashboard below.
+Type filters are above, the rate-limit dashboard below. The Value column
+holds the poe.ninja price; the table starts sorted by it, cheapest
+first.
 
 ![League-wide search across tabs and characters](docs/screenshots/uebersicht.png)
 
@@ -27,6 +29,14 @@ A single stash tab with an item selected; its mods are shown in the
 detail panel below.
 
 ![Single tab with a selected item and its mods](docs/screenshots/item-details.png)
+
+A character inventory right after a refresh: rows that are new or
+changed are highlighted, items that disappeared stay visible for one
+cycle in grey and struck through. The panel underneath logs what moved
+through the inventory of every character — pulled open here, collapsed
+to a single line by default.
+
+![Character inventory with refresh highlighting and the item history](docs/screenshots/charakter-verlauf.png)
 
 ## Features
 
