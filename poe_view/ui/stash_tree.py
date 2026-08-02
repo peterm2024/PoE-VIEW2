@@ -51,6 +51,31 @@ Bereich) "Alle öffnen"/"Alle schließen" für den kompletten Baum
 verschachtelten Ordnern (Map-/Unique-Sektionen) sonst mühsames
 Knoten-für-Knoten-Aufklappen.
 
+**Mehrfachauswahl** (Peter, 2026-08-02: "Wenn ich im Stash-Tree ein oder
+mehrere Stashs bzw. Überordner auswähle, soll die Itemliste dies
+wiederspiegeln und nur Items aus diesen Ordnern/Tabs anzeigen") —
+``ExtendedSelection`` statt ``SingleSelection``, Strg-/Umschalt-Klick
+markiert mehrere Knoten. ``_on_click`` löst je nach Auswahl eines von
+zwei Signalen aus: ist genau EIN Knoten ausgewählt UND ist er selbst ein
+Blatt-Fach, feuert weiterhin das alte ``stash_selected`` — Einzelauswahl
+verhält sich also in jeder Hinsicht unverändert, inklusive automatischem
+Nachladen bei Cache-Miss. Das ist eine STRUKTURELLE Unterscheidung (was
+wurde angeklickt), keine inhaltliche (worauf löst es sich auf): ein
+Ordner mit zufällig nur einem Kind zählt trotzdem als Mehrfachauswahl,
+sonst wäre für den Nutzer nicht vorhersehbar, ob ein Ordner-Klick einen
+Abruf auslöst. In jedem anderen Fall (0, 2+ Knoten oder ein einzelner
+Ordner/eine Gruppe) feuert stattdessen ``selection_changed`` mit der
+Liste aller betroffenen Blatt-Fach-IDs (rekursiv aufgelöst,
+dedupliziert) — ``MainWindow`` zeigt dafür NUR bereits gecachte Items an
+und löst NIE einen API-Abruf aus
+(ein Shift-Klick über 20 nie geladene Fächer würde sonst 20 Requests auf
+einmal abfeuern und das Rate-Limit sprengen). Ordner UND die
+synthetischen Map-Sektionsgruppen ("Tier 6") werden dabei gleich
+behandelt: ``_leaf_ids_under`` sammelt einfach alle Kind-Knoten mit
+``_DATA_ROLE`` unter einem Knoten ein, unabhängig davon, ob er ein
+echter Ordner oder eine reine Anzeige-Gruppe ist — beide sind im
+Widget-Baum strukturell identisch.
+
 ``highlight_stash(stash_id)`` hebt einen Knoten hervor, wenn in einer
 Aggregat- oder Suchansicht eine Zeile ausgewählt wird
 (``MainWindow._on_row_selected``). Die Methode klappt die nötigen
@@ -74,8 +99,8 @@ from datetime import datetime, timezone
 
 from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import QBrush, QColor, QIcon, QPainter, QPalette, QPixmap
-from PySide6.QtWidgets import (QHeaderView, QMenu, QToolButton, QTreeWidget,
-                               QTreeWidgetItem)
+from PySide6.QtWidgets import (QAbstractItemView, QHeaderView, QMenu, QToolButton,
+                               QTreeWidget, QTreeWidgetItem)
 
 from poe_view.api.models import StashTab
 from poe_view.ui.theme import blend as _blend
@@ -172,12 +197,14 @@ def grouped_leaf_label(child: StashTab) -> str:
 
 
 class StashTree(QTreeWidget):
-    stash_selected = Signal(str, str)          # stash_id, name
+    stash_selected = Signal(str, str)          # stash_id, name — GENAU EIN Blatt-Fach
+    selection_changed = Signal(list)           # list[str] Blatt-Fach-IDs — Mehrfachauswahl/Ordner/Gruppe
     stash_refresh_requested = Signal(str, str)  # stash_id, name
     raw_data_requested = Signal(str, str)       # stash_id, name
 
     def __init__(self) -> None:
         super().__init__()
+        self.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.setColumnCount(4)
         self.setHeaderLabels(["Name", "#", "", "Pos."])
         self.setIconSize(QSize(12, 12))
@@ -458,10 +485,66 @@ class StashTree(QTreeWidget):
         button.clicked.connect(lambda: self.stash_refresh_requested.emit(stash_id, name))
         self.setItemWidget(node, _COL_STATUS, button)
 
-    def _on_click(self, item: QTreeWidgetItem) -> None:
+    def _leaf_ids_under(self, item: QTreeWidgetItem) -> list[str]:
+        """Alle Blatt-Fach-IDs unter ``item`` — es selbst, falls es schon ein
+        Blatt ist, sonst rekursiv über seine Kinder. Funktioniert für echte
+        Ordner UND die synthetischen Map-Sektionsgruppen ("Tier 6")
+        gleichermaßen: beide sind im Widget-Baum einfach Knoten mit Kindern,
+        ohne eigene ``_DATA_ROLE`` — kein Sonderfall nötig."""
         stash: StashTab | None = item.data(0, _DATA_ROLE)
         if stash is not None:
-            self.stash_selected.emit(stash.id, stash.display_name)
+            return [stash.id]
+        ids: list[str] = []
+        for i in range(item.childCount()):
+            ids.extend(self._leaf_ids_under(item.child(i)))
+        return ids
+
+    def _collect_leaf_ids(self, items: list[QTreeWidgetItem]) -> list[str]:
+        """Blatt-Fach-IDs aller übergebenen Knoten, dedupliziert (Klick auf
+        einen Ordner UND gleichzeitig eines seiner eigenen Kinder per
+        Strg-Klick würde dessen ID sonst doppelt liefern), Reihenfolge
+        stabil nach erstem Auftreten."""
+        ids: list[str] = []
+        seen: set[str] = set()
+        for item in items:
+            for leaf_id in self._leaf_ids_under(item):
+                if leaf_id not in seen:
+                    seen.add(leaf_id)
+                    ids.append(leaf_id)
+        return ids
+
+    def _on_click(self, item: QTreeWidgetItem) -> None:
+        """Wertet die aktuelle Auswahl aus (``selectedItems()``), nicht nur
+        den angeklickten Knoten — bei Strg-/Umschalt-Klick-Sequenzen hat Qt
+        die Auswahl schon aktualisiert, bevor dieser Slot läuft.
+
+        Der alte Einzelauswahl-Pfad (``stash_selected``, inklusive
+        automatischem Nachladen bei Cache-Miss, siehe
+        ``MainWindow._on_stash_selected``) gilt NUR, wenn genau EIN Knoten
+        ausgewählt ist UND dieser Knoten selbst ein Blatt-Fach ist — nicht
+        etwa, wenn sich die Auswahl zufällig auf ein einziges Fach AUFLÖST
+        (z. B. ein Ordner mit genau einem Kind). Diese strukturelle statt
+        inhaltliche Unterscheidung ist bewusst: Ordner/Gruppen sollen sich
+        unabhängig davon, wie viele Kinder sie gerade haben, immer gleich
+        verhalten (kein Auto-Nachladen), sonst wäre für den Nutzer nicht
+        vorhersehbar, ob ein Ordner-Klick einen Abruf auslöst oder nicht.
+        Ein Strg-Klick, der eine Mehrfachauswahl auf ein einzelnes FACH
+        zurückstutzt, fällt dagegen zurecht auf den alten Pfad zurück — der
+        verbleibende Knoten IST dann wieder ein direkt ausgewähltes Blatt.
+
+        In jedem anderen Fall (0, 2+ Knoten, oder ein einzelner Ordner/eine
+        Gruppe) übernimmt ``selection_changed`` mit allen betroffenen
+        Blatt-IDs (rekursiv aufgelöst); MainWindow zeigt dafür NUR bereits
+        Gecachtes an und löst nie selbst einen Abruf aus."""
+        selected = self.selectedItems()
+        if len(selected) == 1:
+            stash: StashTab | None = selected[0].data(0, _DATA_ROLE)
+            if stash is not None:
+                self.stash_selected.emit(stash.id, stash.display_name)
+                return
+        leaf_ids = self._collect_leaf_ids(selected)
+        if leaf_ids:
+            self.selection_changed.emit(leaf_ids)
 
     def highlight_stash(self, stash_id: str) -> None:
         """Hebt den Knoten eines Fachs hervor (Klick auf ein

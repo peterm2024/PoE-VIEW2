@@ -21,6 +21,18 @@ nach [SemVer](https://semver.org/lang/de/).
   markierten Zeilen, Mehrfachauswahl per Strg-/Umschalt-Klick möglich)
   und "Export visible items" (identisch zum bisherigen Toolbar-Knopf),
   jeweils mit der Anzahl im Menütext.
+- Mehrfachauswahl im Stash-Baum: Strg-/Umschalt-Klick auf mehrere Fächer
+  oder einen Ordner (auch die "Tier N"-Gruppen im Map-Stash) zeigt deren
+  Items zusammen an. Zeigt ausschließlich bereits gecachte Items — löst
+  nie selbst einen Abruf aus, nicht gecachte Fächer werden in der
+  Statuszeile genannt ("3 tabs selected: 2 loaded, 1 never loaded").
+  Einzelauswahl eines Fachs verhält sich unverändert, inklusive
+  automatischem Nachladen bei Cache-Miss.
+- Das Suchfeld wird beim Auswählen eines Stash-Tabs, Ordners oder
+  Charakters jetzt automatisch geleert und die globale Suche beendet —
+  vorher blieb ein Suchtext stehen und filterte unbemerkt weiter, sobald
+  man in eine andere Ansicht wechselte. Die globale Suche selbst bleibt
+  von jeder Ansicht aus uneingeschränkt nutzbar.
 
 ## [0.3.0] - 2026-08-02
 

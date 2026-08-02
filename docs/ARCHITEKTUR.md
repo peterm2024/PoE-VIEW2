@@ -1948,6 +1948,110 @@ wenn die geklickte Zeile NICHT schon Teil der Auswahl ist
 (`selectionModel().isRowSelected`); ein Rechtsklick außerhalb wählt wie
 gewohnt die angeklickte Zeile.
 
+### 4.23 Stash-Baum-Mehrfachauswahl + Suchfeld-Verhalten
+
+Peter, 2026-08-02, im Anschluss an den CSV-Export: "Wenn ich im
+Stash-Tree ein oder mehrere Stashs bzw. Überordner auswähle, soll die
+Itemliste dies wiederspiegeln und nur Items aus diesen Ordnern/Tabs
+anzeigen. Die Suche sollte meiner Meinung nach Global weiter
+funktionieren und beim Auswählen eines Stash-Tabs oder Ordners oder
+Characters evtl. sogar gelöscht werden."
+
+**Suchfeld-Teil zuerst umgesetzt, unabhängig von der Mehrfachauswahl.**
+`MainWindow._clear_search_field_on_selection()` leert das Suchfeld und
+beendet `_search_all_active`, aufgerufen von `_on_stash_selected` und
+`_on_character_selected` (nach dem Setzen von `_search_all_active =
+False`, NIE davor — sonst würde `.clear()` über
+`_on_filter_text_changed` einen Re-Entry in `_leave_search_all()`
+auslösen, die selbst wieder eine Ansicht aufbaut, mitten im Aufruf, der
+diese Ansicht gerade erst festlegt). Nur bei vorhandenem Text geleert,
+sonst löst jeder Klick unnötig den Such-Debounce aus. Bewusst NICHT an
+den Refresh-Buttons (Rechtsklick → "Aktualisieren") verdrahtet — Peter
+sprach ausdrücklich von "Auswählen", nicht "Aktualisieren".
+
+**Ordner-Klicks waren zuvor komplett wirkungslos** — `_build_node`
+(§Modul-Docstring `stash_tree.py`) setzt `_DATA_ROLE` nur auf
+Blatt-Knoten, ein Ordner-Klick löste also gar kein `stash_selected`-Signal
+aus. Das erklärte einen scheinbar zweiten Bug ("Suchfeld leert sich beim
+Special-Ordner nicht") — es war derselbe fehlende Anschluss, nicht ein
+zusätzlicher Fehler im Suchfeld-Fix.
+
+**Mehrfachauswahl, `ui/stash_tree.py`:** `ExtendedSelection` statt
+`SingleSelection`. `_on_click` liest die AKTUELLE Auswahl
+(`selectedItems()`), nicht nur den angeklickten Knoten — bei
+Strg-/Umschalt-Klick-Sequenzen hat Qt die Auswahl bereits aktualisiert,
+bevor der Slot läuft. Der alte Einzelpfad (`stash_selected`, inklusive
+automatischem Nachladen bei Cache-Miss) gilt NUR, wenn genau EIN Knoten
+ausgewählt ist UND er selbst ein Blatt-Fach ist — eine STRUKTURELLE,
+keine inhaltliche Unterscheidung: ein Ordner mit zufällig nur einem Kind
+zählt trotzdem als Mehrfachauswahl (neues Signal `selection_changed`),
+sonst wäre für den Nutzer nicht vorhersehbar, ob ein Ordner-Klick einen
+Abruf auslöst oder nicht. Ein Strg-Klick, der eine Mehrfachauswahl auf
+ein einzelnes Fach zurückstutzt, fällt dagegen zurecht auf den alten Pfad
+zurück — der verbleibende Knoten IST dann wieder ein direkt
+ausgewähltes Blatt.
+
+`_leaf_ids_under(item)` löst Ordner UND die synthetischen
+Map-Sektionsgruppen ("Tier 6", §`group_map_children`) gleich auf: beide
+sind im Widget-Baum strukturell identisch (ein Knoten mit Kindern, ohne
+eigene `_DATA_ROLE`) — kein Sonderfall für Gruppen nötig, die Rekursion
+über den Widget-Baum reicht. `_collect_leaf_ids` dedupliziert (Strg-Klick
+auf einen Ordner UND eines seiner eigenen Kinder würde dessen ID sonst
+doppelt liefern).
+
+**`MainWindow._show_stash_selection(stash_ids)`, verdrahtet an
+`selection_changed`:** zeigt NUR bereits gecachte Items der übergebenen
+Fächer — löst NIE selbst einen API-Abruf aus. Kritisch: ein Shift-Klick
+über 20 nie geladene Fächer würde sonst 20 Requests auf einmal
+abfeuern und das Rate-Limit sprengen (§2, Policy-Fenster). Nicht
+gecachte Fächer werden gezählt und in der Statuszeile genannt ("3 tabs
+selected: 2 loaded, 1 never loaded … — 142 items"), nicht automatisch
+nachgeladen; Laden bleibt eine ausdrückliche Handlung (⟳ oder "Load All
+Tabs"). `_showing_aggregate = True` verhindert wie bei den bestehenden
+Aggregat-Ansichten, dass ein stiller Hintergrund-Refresh eines EINZELNEN
+Fachs (§4.8) die Mehrfachauswahl-Ansicht überschreibt.
+
+**`_current_stash_id`/`_current_character_name`/`_current_tab_name`
+bleiben beim Aufruf ABSICHTLICH unverändert** — sie zeigen weiter auf
+das zuletzt EINZELN angeklickte Fach bzw. den zuletzt angeklickten
+Charakter. Die Refresh-Modi "Single"/"Stash", "Auto" (§_refresh_
+current_view) und der Zonenwechsel-Trigger (§4.19) hängen an genau
+diesen Feldern und laufen dadurch unbeeinflusst von einer
+Mehrfachauswahl im Hintergrund weiter — bewusste Entscheidung
+("Mehrfachauswahl ändert daran nichts"), keine Lücke: der zuletzt
+individuell gewählte Kontext bleibt so lange "aktuell", bis der Nutzer
+wieder etwas EINZELN auswählt. Ein neues Feld
+`_current_stash_selection: list[str] | None` trägt stattdessen die
+WAS-WIRD-GERADE-ANGEZEIGT-Information für zwei Stellen, die sie
+brauchen:
+
+- `_leave_search_all()` prüft `_current_stash_selection` VOR
+  `_current_stash_id` — sonst würde das Verlassen einer globalen Suche
+  fälschlich zum zuletzt einzeln angeklickten Fach zurückspringen statt
+  zur Mehrfachauswahl. Die globale Suche selbst (Peter: "sollte …
+  Global weiter funktionieren") bleibt davon unberührt, sie arbeitet
+  ohnehin auf `_league_wide_items()` unabhängig von der aktuellen
+  Ansicht.
+- `_default_export_filename()` leitet daraus einen Dateinamen ab
+  ("poe-view2-Standard-3-tabs-selected.csv") statt des irreführenden
+  `_current_tab_name`, das ja weiterhin das zuletzt einzeln gewählte
+  Fach nennt.
+
+`_current_stash_selection` wird bei jedem anderen View-Wechsel auf
+`None` zurückgesetzt (`_on_stash_selected`, `_on_stash_refresh`,
+`_show_items`, `_show_special_parent_aggregate`, `_show_aggregate`,
+`_show_character_items`, `_on_character_selected`,
+`_on_character_refresh`, `_on_league_changed`) — symmetrisch zum
+bestehenden Muster bei `_current_stash_id`/`_current_character_name`.
+
+**Bewusst nicht gelöst:** Der Zonenwechsel-Trigger und der gezielte Teil
+von "Auto" refreshen weiterhin nur das zuletzt einzeln gewählte Fach im
+Hintergrund, nicht alle Fächer einer aktiven Mehrfachauswahl — das wäre
+zusätzliche Komplexität für einen Randfall, den Peter nicht angefragt
+hat, und die Auswirkung ist harmlos (`_showing_aggregate` verhindert ein
+sichtbares Überschreiben, das Fach wird nur im Hintergrund/Cache
+aktueller).
+
 ---
 
 ## 5. UI-Konzept (Oberflächenvorschlag)

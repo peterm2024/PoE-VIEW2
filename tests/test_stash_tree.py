@@ -498,11 +498,19 @@ def test_highlight_stash_does_not_emit_stash_selected(qapp) -> None:
     tree = StashTree()
     tree.set_stashes(stashes)
     received = []
+    selection_events = []
     tree.stash_selected.connect(lambda sid, name: received.append((sid, name)))
+    tree.selection_changed.connect(selection_events.append)
 
     tree.highlight_stash("root1")
 
     assert received == []
+    # setCurrentItem() SELEKTIERT den Knoten technisch (Qt-Standardverhalten)
+    # und würde bei einer Kopplung an itemSelectionChanged fälschlich auch
+    # das neue Mehrfachauswahl-Signal auslösen — deshalb hängt _on_click
+    # weiterhin an itemClicked (echte Mausklicks), nicht an
+    # itemSelectionChanged.
+    assert selection_events == []
 
 
 def test_highlight_stash_unknown_id_is_noop(qapp) -> None:
@@ -646,3 +654,180 @@ def test_set_stashes_clears_a_stale_highlight_from_a_previous_tree(qapp) -> None
 
     text, _base = _text_and_base(tree)
     assert tree._stash_nodes["root1"].foreground(_COL_NAME).color() == text
+
+
+# --- Mehrfachauswahl (Peter, 2026-08-02) ---------------------------------- #
+
+def _two_tab_tree() -> tuple[StashTree, list[StashTab]]:
+    data = [
+        {"id": "t1", "name": "Currency 1", "type": "QuadStash", "metadata": {}},
+        {"id": "t2", "name": "Essence", "type": "QuadStash", "metadata": {}},
+    ]
+    stashes = [StashTab.model_validate(d) for d in data]
+    tree = StashTree()
+    tree.set_stashes(stashes)
+    return tree, stashes
+
+
+def test_selection_mode_is_extended(qapp) -> None:
+    from PySide6.QtWidgets import QAbstractItemView
+    tree = StashTree()
+    assert tree.selectionMode() == QAbstractItemView.SelectionMode.ExtendedSelection
+
+
+def test_plain_click_on_a_single_tab_still_emits_stash_selected(qapp) -> None:
+    """Regression: Einzelauswahl bleibt unverändert, inklusive des alten
+    Signals mit allem, was MainWindow daran hängt (Auto-Nachladen etc.)."""
+    tree, stashes = _two_tab_tree()
+    stash_selected, selection_changed = [], []
+    tree.stash_selected.connect(lambda sid, name: stash_selected.append((sid, name)))
+    tree.selection_changed.connect(selection_changed.append)
+    node = tree._stash_nodes["t1"]
+    node.setSelected(True)
+
+    tree._on_click(node)
+
+    assert stash_selected == [("t1", "Currency 1")]
+    assert selection_changed == []
+
+
+def test_ctrl_clicking_two_tabs_emits_selection_changed(qapp) -> None:
+    tree, stashes = _two_tab_tree()
+    stash_selected, selection_changed = [], []
+    tree.stash_selected.connect(lambda sid, name: stash_selected.append((sid, name)))
+    tree.selection_changed.connect(selection_changed.append)
+    node1, node2 = tree._stash_nodes["t1"], tree._stash_nodes["t2"]
+    node1.setSelected(True)
+    node2.setSelected(True)
+
+    tree._on_click(node2)
+
+    assert stash_selected == []
+    assert selection_changed == [["t1", "t2"]]
+
+
+def test_selecting_a_folder_resolves_to_all_its_leaf_children(qapp) -> None:
+    data = [
+        {"id": "folder1", "name": "Special", "type": "Folder", "metadata": {"folder": True},
+         "children": [
+             {"id": "child1", "name": "Div", "type": "DivinationCardStash", "metadata": {}},
+             {"id": "child2", "name": "Jwl", "type": "JewelStash", "metadata": {}},
+         ]},
+    ]
+    tree = StashTree()
+    tree.set_stashes([StashTab.model_validate(d) for d in data])
+    folder_node = tree.topLevelItem(0)
+    selection_changed = []
+    tree.selection_changed.connect(selection_changed.append)
+    folder_node.setSelected(True)
+
+    tree._on_click(folder_node)
+
+    assert selection_changed == [["child1", "child2"]]
+
+
+def test_selecting_a_map_section_group_resolves_to_its_members(qapp) -> None:
+    """Die synthetischen "Tier N"-Gruppenknoten sind keine echten Ordner
+    (kein StashTab, keine metadata.folder) — trotzdem soll eine Auswahl
+    genauso funktionieren wie bei einem Ordner."""
+    data = [
+        {"id": "maps", "name": "Maps", "type": "MapStash", "metadata": {},
+         "children": [
+             {"id": "m1", "name": "1", "type": "MapStash",
+              "metadata": {"map": {"section": "tier1", "index": 0}}},
+             {"id": "m2", "name": "2", "type": "MapStash",
+              "metadata": {"map": {"section": "tier1", "index": 1}}},
+         ]},
+    ]
+    tree = StashTree()
+    tree.set_stashes([StashTab.model_validate(d) for d in data])
+    maps_node = tree.topLevelItem(0)
+    tier_group = maps_node.child(0)
+    assert tier_group.text(_COL_NAME) == "🗂 Tier 1"
+    selection_changed = []
+    tree.selection_changed.connect(selection_changed.append)
+    tier_group.setSelected(True)
+
+    tree._on_click(tier_group)
+
+    assert selection_changed == [["m1", "m2"]]
+
+
+def test_selecting_a_folder_with_a_single_child_still_uses_selection_changed(qapp) -> None:
+    """Bewusste Abgrenzung: ein Ordner zählt als Mehrfachauswahl-Pfad, auch
+    wenn er zufällig nur ein Kind hat — nur ein direkt angeklicktes Fach
+    nutzt den alten Einzelauswahl-Pfad mit Auto-Nachladen."""
+    data = [
+        {"id": "folder1", "name": "Special", "type": "Folder", "metadata": {"folder": True},
+         "children": [{"id": "child1", "name": "Div", "type": "DivinationCardStash",
+                       "metadata": {}}]},
+    ]
+    tree = StashTree()
+    tree.set_stashes([StashTab.model_validate(d) for d in data])
+    folder_node = tree.topLevelItem(0)
+    stash_selected, selection_changed = [], []
+    tree.stash_selected.connect(lambda sid, name: stash_selected.append((sid, name)))
+    tree.selection_changed.connect(selection_changed.append)
+    folder_node.setSelected(True)
+
+    tree._on_click(folder_node)
+
+    assert stash_selected == []
+    assert selection_changed == [["child1"]]
+
+
+def test_ctrl_clicking_a_folder_and_its_own_child_deduplicates(qapp) -> None:
+    data = [
+        {"id": "folder1", "name": "Special", "type": "Folder", "metadata": {"folder": True},
+         "children": [
+             {"id": "child1", "name": "Div", "type": "DivinationCardStash", "metadata": {}},
+             {"id": "child2", "name": "Jwl", "type": "JewelStash", "metadata": {}},
+         ]},
+    ]
+    tree = StashTree()
+    tree.set_stashes([StashTab.model_validate(d) for d in data])
+    folder_node = tree.topLevelItem(0)
+    child1_node = tree._stash_nodes["child1"]
+    selection_changed = []
+    tree.selection_changed.connect(selection_changed.append)
+    folder_node.setSelected(True)
+    child1_node.setSelected(True)
+
+    tree._on_click(child1_node)
+
+    assert selection_changed == [["child1", "child2"]]
+
+
+def test_deselecting_down_to_one_leaf_falls_back_to_stash_selected(qapp) -> None:
+    """Strg-Klick, der eine Mehrfachauswahl auf ein einzelnes Fach
+    zurückstutzt: das Ergebnis zählt, nicht der Klick-Verlauf."""
+    tree, stashes = _two_tab_tree()
+    node1, node2 = tree._stash_nodes["t1"], tree._stash_nodes["t2"]
+    node1.setSelected(True)
+    node2.setSelected(True)
+    stash_selected, selection_changed = [], []
+    tree.stash_selected.connect(lambda sid, name: stash_selected.append((sid, name)))
+    tree.selection_changed.connect(selection_changed.append)
+    node2.setSelected(False)  # simuliert das Strg-Abwählen von t2
+
+    tree._on_click(node2)
+
+    assert stash_selected == [("t1", "Currency 1")]
+    assert selection_changed == []
+
+
+def test_selecting_an_empty_folder_emits_nothing(qapp) -> None:
+    data = [{"id": "folder1", "name": "Empty", "type": "Folder", "metadata": {"folder": True},
+            "children": []}]
+    tree = StashTree()
+    tree.set_stashes([StashTab.model_validate(d) for d in data])
+    folder_node = tree.topLevelItem(0)
+    stash_selected, selection_changed = [], []
+    tree.stash_selected.connect(lambda sid, name: stash_selected.append((sid, name)))
+    tree.selection_changed.connect(selection_changed.append)
+    folder_node.setSelected(True)
+
+    tree._on_click(folder_node)
+
+    assert stash_selected == []
+    assert selection_changed == []

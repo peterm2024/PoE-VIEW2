@@ -199,6 +199,14 @@ class MainWindow(QMainWindow):
         self._large_search_items: tuple[list[Item], list[str],
                                         list[int | None], list[str | None]] | None = None
         self._current_stash_id: str | None = None  # zuletzt gewähltes Fach (Rückkehrziel)
+        # Mehrfachauswahl im Stash-Baum (Peter, 2026-08-02): Liste der
+        # ausgewählten Blatt-Fach-IDs, solange diese Ansicht aktiv ist, sonst
+        # None. BEWUSST getrennt von `_current_stash_id`/`_current_tab_name`
+        # — die bleiben bei einer Mehrfachauswahl unverändert (zeigen weiter
+        # auf das zuletzt EINZELN angeklickte Fach), damit die Refresh-Modi
+        # "Single"/"Stash" und der Zonenwechsel-Trigger unbeeinflusst davon
+        # weiterlaufen (ToDo.md). Siehe `_show_stash_selection`.
+        self._current_stash_selection: list[str] | None = None
         self._character_items: dict[str, list[Item]] = {}       # Charaktername → Ausrüstung+Inventar
         self._character_items_loaded: dict[str, str] = {}       # Charaktername → ISO-Zeitstempel
         self._current_character_name: str | None = None         # gerade angezeigter Charakter
@@ -460,6 +468,7 @@ class MainWindow(QMainWindow):
         stash_label.setStyleSheet("font-weight: 600; padding: 2px 4px;")
         self.tree = StashTree()
         self.tree.stash_selected.connect(self._on_stash_selected)
+        self.tree.selection_changed.connect(self._show_stash_selection)
         self.tree.stash_refresh_requested.connect(self._on_stash_refresh)
         self.tree.raw_data_requested.connect(self._on_raw_data_requested)
 
@@ -1053,6 +1062,7 @@ class MainWindow(QMainWindow):
         self._showing_aggregate = False
         self._current_stash_id = None  # Fach-IDs gelten nur innerhalb einer Liga
         self._current_character_name = None
+        self._current_stash_selection = None
         self._apply_character_league_filter()
         cached_tree = self._stash_trees.get(league)
         if cached_tree is not None:
@@ -1311,6 +1321,8 @@ class MainWindow(QMainWindow):
         self._showing_aggregate = False
         self._search_all_active = False  # Baum-Klick beendet die liga-weite Suchansicht
         self._large_search_items = None
+        self._current_stash_selection = None  # Einzelauswahl beendet eine evtl. Mehrfachauswahl
+        self._clear_search_field_on_selection()
         stash = self._find_stash(self._stash_trees.get(self._current_league, []), stash_id)
         if stash is not None and stash.type in self.SPECIAL_TAB_TYPES and stash.parent is None:
             if stash.children:
@@ -1347,6 +1359,7 @@ class MainWindow(QMainWindow):
         """Klick auf den Refresh-Button eines Tabs — bewusst AM Cache vorbei."""
         self._clear_view_relative_column_filters()
         self._showing_aggregate = False
+        self._current_stash_selection = None  # Refresh eines Einzelfachs beendet eine Mehrfachauswahl
         if self._archived_league_guard(f"{name}: league ended — refresh no longer possible."):
             return
         self.worker.submit(FetchStashItemsJob(self._current_league, stash_id, name,
@@ -1594,6 +1607,7 @@ class MainWindow(QMainWindow):
         self._current_tab_name = name
         self._current_stash_id = stash_id  # Rückkehrziel nach liga-weiter Suche
         self._current_character_name = None
+        self._current_stash_selection = None
         tab_index = self._tab_positions().get(stash_id)
         self.table.setColumnHidden(TAB_COL, True)  # redundant bei Einzelfach
         self.table_model.set_items(items, [name] * len(items), [tab_index] * len(items),
@@ -1609,6 +1623,7 @@ class MainWindow(QMainWindow):
         self._current_tab_name = name
         self._current_stash_id = stash.id  # Rückkehrziel nach liga-weiter Suche
         self._current_character_name = None
+        self._current_stash_selection = None
         league_items = self._items.get(self._current_league, {})
         positions = self._tab_positions()
         items: list[Item] = []
@@ -1632,6 +1647,68 @@ class MainWindow(QMainWindow):
             f"{name}: {len(items)} items from {loaded} of {len(stash.children)} "
             "loaded sub-tabs")
         self._update_raw_viewer(stash.id, name)
+
+    def _show_stash_selection(self, stash_ids: list[str]) -> None:
+        """Mehrfachauswahl im Stash-Baum (Peter, 2026-08-02: "Wenn ich im
+        Stash-Tree ein oder mehrere Stashs bzw. Überordner auswähle, soll
+        die Itemliste dies wiederspiegeln und nur Items aus diesen
+        Ordnern/Tabs anzeigen"), verdrahtet an ``StashTree.selection_
+        changed``. ``stash_ids`` sind bereits rekursiv aufgelöste
+        Blatt-Fach-IDs — Ordner/Gruppen sind für diese Methode nicht mehr
+        sichtbar.
+
+        NUR aus dem Cache — eine Mehrfachauswahl darf NIE selbst einen
+        API-Abruf auslösen: ein Shift-Klick über 20 nie geladene Fächer
+        würde sonst 20 Requests auf einmal abfeuern und das Rate-Limit
+        sprengen. Nicht gecachte Fächer werden in der Statuszeile benannt,
+        nicht automatisch nachgeladen — Laden bleibt eine ausdrückliche
+        Handlung (⟳ oder "Load All Tabs").
+
+        ``_current_stash_id``/``_current_character_name``/
+        ``_current_tab_name`` bleiben ABSICHTLICH unverändert: sie zeigen
+        weiter auf das zuletzt EINZELN angeklickte Fach bzw. den zuletzt
+        angeklickten Charakter, damit die Refresh-Modi "Single"/"Stash",
+        der Zonenwechsel-Trigger und "Auto" unbeeinflusst von einer
+        Mehrfachauswahl weiterlaufen (ToDo.md-Entscheidung — "eine
+        Mehrfachauswahl ändert daran nichts"). ``_current_stash_selection``
+        trägt stattdessen die WAS-WIRD-GERADE-ANGEZEIGT-Information für
+        ``_leave_search_all`` (Rückkehr nach dem Verlassen einer globalen
+        Suche) und ``_default_export_filename`` (CSV-Dateiname)."""
+        self._clear_view_relative_column_filters()
+        self._showing_aggregate = True  # blockiert stille Einzelfach-Overwrites (§_on_stash_items)
+        self._search_all_active = False
+        self._large_search_items = None
+        self._current_stash_selection = stash_ids
+        self._clear_search_field_on_selection()
+        league_items = self._items.get(self._current_league, {})
+        positions = self._tab_positions()
+        tree = self._stash_trees.get(self._current_league, [])
+        items: list[Item] = []
+        sources: list[str] = []
+        tab_indices: list[int | None] = []
+        result_stash_ids: list[str | None] = []
+        loaded = 0
+        for stash_id in stash_ids:
+            cached = league_items.get(stash_id)
+            if cached is None:
+                continue
+            loaded += 1
+            stash = self._find_stash(tree, stash_id)
+            name = stash.display_name if stash is not None else stash_id
+            items.extend(cached)
+            sources.extend([name] * len(cached))
+            tab_indices.extend([positions.get(stash_id)] * len(cached))
+            result_stash_ids.extend([stash_id] * len(cached))
+        self.table.setColumnHidden(TAB_COL, False)  # mehrere Fächer: Herkunft zeigen
+        self.table_model.set_items(items, sources, tab_indices, result_stash_ids,
+                                   request_icons=False)  # lazy
+        tabs_word = "tab" if len(stash_ids) == 1 else "tabs"
+        status = f"{len(stash_ids)} {tabs_word} selected: {loaded} loaded"
+        not_loaded = len(stash_ids) - loaded
+        if not_loaded:
+            status += f", {not_loaded} never loaded (select ⟳ or Load All Tabs to fetch)"
+        status += f" — {len(items)} items"
+        self._status_msg.setText(status)
 
     # --- Alle Tabs laden (Bulk) ----------------------------------------- #
 
@@ -1772,6 +1849,7 @@ class MainWindow(QMainWindow):
         self._current_tab_name = "All Tabs"
         self._current_stash_id = None  # Rückkehr aus der Suche landet wieder hier
         self._current_character_name = None
+        self._current_stash_selection = None
         items, sources, tab_indices, stash_ids = self._league_wide_items()
         self.table.setColumnHidden(TAB_COL, False)  # Aggregat: Herkunft zeigen
         self.table_model.set_items(items, sources, tab_indices, stash_ids,
@@ -1914,12 +1992,38 @@ class MainWindow(QMainWindow):
     def _leave_search_all(self) -> None:
         self._search_all_active = False
         self._large_search_items = None
-        if self._current_stash_id is not None:
+        # Mehrfachauswahl zuerst prüfen: `_current_stash_id` bleibt während
+        # einer Mehrfachauswahl unverändert (siehe `_show_stash_selection`),
+        # zeigt hier also noch auf das zuletzt EINZELN angeklickte Fach —
+        # ohne diese Reihenfolge würde das Verlassen der Suche fälschlich
+        # dorthin zurückspringen statt zur Mehrfachauswahl.
+        if self._current_stash_selection is not None:
+            self._show_stash_selection(self._current_stash_selection)
+        elif self._current_stash_id is not None:
             self._on_stash_selected(self._current_stash_id, self._current_tab_name)
         elif self._leaf_stashes:
             self._show_aggregate()
         else:
             self.table_model.set_items([])
+
+    def _clear_search_field_on_selection(self) -> None:
+        """Auswahl eines Stash-Tabs/Ordners oder Charakters leert das
+        Suchfeld (Peter, 2026-08-02: "Die Suche sollte meiner Meinung nach
+        Global weiter funktionieren und beim Auswählen eines Stash-Tabs
+        oder Ordners oder Characters evtl. sogar gelöscht werden") —
+        Auswahl bestimmt den angezeigten Umfang, das Suchfeld bleibt für
+        das globale Muster reserviert statt unsichtbar weiterzufiltern.
+
+        Nur bei vorhandenem Text leeren, sonst löst jeder Klick unnötig
+        ``_on_filter_text_changed``/den Such-Debounce aus. MUSS aufgerufen
+        werden, NACHDEM ``_search_all_active`` bereits auf ``False`` steht
+        (bei ``_on_stash_selected``/``_on_character_selected`` der Fall):
+        sonst würde ``.clear()`` über ``_on_filter_text_changed`` einen
+        Re-Entry in ``_leave_search_all()`` auslösen, die selbst wieder
+        eine Ansicht aufbaut — mitten im Aufruf, der diese Ansicht gerade
+        erst festlegt."""
+        if self._filter_edit.text():
+            self._filter_edit.clear()
 
     # --- CSV-Export ------------------------------------------------------ #
 
@@ -1960,10 +2064,20 @@ class MainWindow(QMainWindow):
 
         Die Liga gehört immer mit rein — Items sind nie liga-übergreifend
         gültig, das soll auch am Dateinamen erkennbar sein.
+
+        Mehrfachauswahl-Sonderfall: `_current_tab_name` bleibt während einer
+        Mehrfachauswahl UNVERÄNDERT (zeigt weiter auf das zuletzt einzeln
+        angeklickte Fach, siehe `_show_stash_selection`) — für den
+        Dateinamen wird deshalb hier direkt aus `_current_stash_selection`
+        abgeleitet, statt den irreführenden alten Namen zu verwenden.
         """
         filter_text = self._filter_edit.text().strip()
-        base = sanitize_filename(filter_text) if filter_text \
-            else sanitize_filename(self._current_tab_name)
+        if filter_text:
+            base = sanitize_filename(filter_text)
+        elif self._current_stash_selection is not None:
+            base = sanitize_filename(f"{len(self._current_stash_selection)}-tabs-selected")
+        else:
+            base = sanitize_filename(self._current_tab_name)
         parts = [p for p in (sanitize_filename(self._current_league, ""), base) if p]
         return f"poe-view2-{'-'.join(parts)}.csv"
 
@@ -1996,6 +2110,10 @@ class MainWindow(QMainWindow):
         einmalig nachgeladen (kein automatisches Neuladen bei jedem Klick,
         Doku §4.4/§5)."""
         self._clear_view_relative_column_filters()
+        self._search_all_active = False  # Charakter-Klick beendet die liga-weite Suchansicht
+        self._large_search_items = None
+        self._current_stash_selection = None  # Charakter-Auswahl beendet eine Mehrfachauswahl
+        self._clear_search_field_on_selection()
         self._current_character_name = char.name
         cached = self._character_items.get(char.name)
         if cached is not None:
@@ -2012,6 +2130,7 @@ class MainWindow(QMainWindow):
         `_on_stash_refresh`. Schaltet die Ansicht (wie beim Stash-Refresh
         auch) auf diesen Charakter um, sobald das Ergebnis eintrifft."""
         self._clear_view_relative_column_filters()
+        self._current_stash_selection = None  # Charakter-Refresh beendet eine Mehrfachauswahl
         self._current_character_name = char.name
         self._status_msg.setText(f"Loading equipment: {char.name}…")
         self.worker.submit(FetchCharacterItemsJob(char.name))
@@ -2147,6 +2266,7 @@ class MainWindow(QMainWindow):
         self._search_all_active = False
         self._large_search_items = None
         self._current_stash_id = None
+        self._current_stash_selection = None
         self.table.setColumnHidden(TAB_COL, False)
         added_ids, changed_ids, removed_items = self._diff_character_items(previous_items, items)
         display_items = items + removed_items

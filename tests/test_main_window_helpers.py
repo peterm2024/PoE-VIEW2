@@ -5195,3 +5195,288 @@ def test_raw_json_filter_adds_the_raw_column(qapp, monkeypatch, tmp_path) -> Non
 
     win.worker.stop()
     win.worker.wait(5000)
+
+
+# --- Suchfeld wird bei Auswahl geleert (Peter, 2026-08-02) ---------------- #
+
+def test_selecting_a_stash_tab_clears_the_search_field(qapp, monkeypatch) -> None:
+    """"Die Suche sollte ... beim Auswählen eines Stash-Tabs ... evtl. sogar
+    gelöscht werden" — ein stehen gebliebener Suchtext filterte bisher
+    unsichtbar weiter, sobald man in ein anderes Fach wechselte."""
+    win = MainWindow()
+    win._current_league = "Standard"
+    t1, t2 = _make_leaf("t1", "Currency 1"), _make_leaf("t2", "Essence")
+    win._stash_trees["Standard"] = [t1, t2]
+    win._leaf_stashes = [t1, t2]
+    win._items["Standard"] = {
+        "t1": [Item.model_validate({"typeLine": "Chaos Orb"})],
+        "t2": [Item.model_validate({"typeLine": "Deafening Essence of Greed"})],
+    }
+    monkeypatch.setattr(win.worker, "submit", lambda job: None)
+    win._show_items("t1", win._items["Standard"]["t1"], "Currency 1")
+    win._filter_edit.setText("chaos")
+
+    win._on_stash_selected("t2", "Essence")
+
+    assert win._filter_edit.text() == ""
+    assert not win._search_all_active
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_selecting_a_character_clears_the_search_field(qapp, monkeypatch) -> None:
+    win = MainWindow()
+    char = make_char("WitchOfPeter", "Standard")
+    win._character_items["WitchOfPeter"] = [
+        Item.model_validate({"id": "1", "typeLine": "Chaos Orb", "frameType": 5})]
+    win._filter_edit.setText("*")
+    win._search_all_active = True  # Zustand einer laufenden globalen Suche
+
+    win._on_character_selected(char)
+
+    assert win._filter_edit.text() == ""
+    assert not win._search_all_active
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_search_field_untouched_without_prior_text(qapp, monkeypatch) -> None:
+    """Ohne Text im Feld darf die Auswahl keinen unnötigen
+    textChanged/Debounce-Zyklus auslösen."""
+    win = MainWindow()
+    t1 = _make_leaf("t1", "Currency 1")
+    win._current_league = "Standard"
+    win._stash_trees["Standard"] = [t1]
+    win._leaf_stashes = [t1]
+    win._items["Standard"] = {"t1": [Item.model_validate({"typeLine": "Chaos Orb"})]}
+    monkeypatch.setattr(win.worker, "submit", lambda job: None)
+
+    fired = []
+    win._filter_edit.textChanged.connect(lambda text: fired.append(text))
+    win._on_stash_selected("t1", "Currency 1")
+
+    assert fired == []
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_typing_a_new_search_after_selection_still_works(qapp, monkeypatch) -> None:
+    """Die globale Suche selbst bleibt uneingeschränkt nutzbar — nur die
+    vorherige Session wird beim Auswählen beendet, nicht die Fähigkeit,
+    danach neu zu suchen."""
+    win = MainWindow()
+    win._current_league = "Standard"
+    t1, t2 = _make_leaf("t1", "Currency 1"), _make_leaf("t2", "Essence")
+    win._stash_trees["Standard"] = [t1, t2]
+    win._leaf_stashes = [t1, t2]
+    win._items["Standard"] = {
+        "t1": [Item.model_validate({"typeLine": "Chaos Orb"})],
+        "t2": [Item.model_validate({"typeLine": "Deafening Essence of Greed"})],
+    }
+    monkeypatch.setattr(win.worker, "submit", lambda job: None)
+    win._filter_edit.setText("chaos")
+    win._on_stash_selected("t2", "Essence")
+
+    win._filter_edit.setText("*")
+    win._apply_debounced_search_filter()
+
+    assert win._search_all_active
+    assert win.proxy.rowCount() == 2
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+# --- Stash-Baum-Mehrfachauswahl (Peter, 2026-08-02) ----------------------- #
+
+def _three_tab_window(monkeypatch) -> MainWindow:
+    win = MainWindow()
+    win._current_league = "Standard"
+    t1, t2, t3 = (_make_leaf("t1", "Currency 1"), _make_leaf("t2", "Essence"),
+                 _make_leaf("t3", "Rares"))
+    win._stash_trees["Standard"] = [t1, t2, t3]
+    win._leaf_stashes = [t1, t2, t3]
+    win._items["Standard"] = {
+        "t1": [Item.model_validate({"typeLine": "Chaos Orb"})],
+        "t2": [Item.model_validate({"typeLine": "Deafening Essence of Greed"})],
+        # t3 bewusst nie geladen — testet den "never loaded"-Zweig
+    }
+    monkeypatch.setattr(win.worker, "submit", lambda job: None)
+    return win
+
+
+def test_multi_selection_shows_only_cached_items_from_selected_tabs(qapp, monkeypatch) -> None:
+    win = _three_tab_window(monkeypatch)
+
+    win._show_stash_selection(["t1", "t2", "t3"])
+
+    names = {item.display_name for _, item in win._visible_rows()}
+    assert names == {"Chaos Orb", "Deafening Essence of Greed"}
+    assert "3 tabs selected: 2 loaded, 1 never loaded" in win._status_msg.text()
+    assert "2 items" in win._status_msg.text()
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_multi_selection_never_triggers_a_fetch(qapp, monkeypatch) -> None:
+    """Kritische Regel: eine Auswahl im Baum darf NIE selbst einen
+    API-Abruf auslösen — ein Shift-Klick über viele nie geladene Fächer
+    würde sonst das Rate-Limit sprengen."""
+    win = _three_tab_window(monkeypatch)
+    submitted = []
+    monkeypatch.setattr(win.worker, "submit", lambda job: submitted.append(job))
+
+    win._show_stash_selection(["t1", "t2", "t3"])
+
+    assert submitted == []
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_tree_selection_changed_signal_reaches_show_stash_selection(qapp, monkeypatch) -> None:
+    """Verdrahtungstest: das neue Baum-Signal ist tatsächlich angeschlossen."""
+    win = _three_tab_window(monkeypatch)
+
+    win.tree.selection_changed.emit(["t1", "t2"])
+
+    names = {item.display_name for _, item in win._visible_rows()}
+    assert names == {"Chaos Orb", "Deafening Essence of Greed"}
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_multi_selection_clears_the_search_field(qapp, monkeypatch) -> None:
+    win = _three_tab_window(monkeypatch)
+    win._filter_edit.setText("chaos")
+
+    win._show_stash_selection(["t1", "t2"])
+
+    assert win._filter_edit.text() == ""
+    assert not win._search_all_active
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_leaving_search_after_multi_selection_restores_it(qapp, monkeypatch) -> None:
+    """"Die Suche sollte ... Global weiter funktionieren" — nach dem Leeren
+    des Suchfelds landet man wieder auf der Mehrfachauswahl, nicht auf dem
+    zuvor einzeln angeklickten Fach."""
+    win = _three_tab_window(monkeypatch)
+    win._on_stash_selected("t1", "Currency 1")  # zuletzt einzeln angeklicktes Fach
+    win._show_stash_selection(["t2", "t3"])
+
+    win._filter_edit.setText("*")
+    win._apply_debounced_search_filter()
+    assert win._search_all_active
+
+    win._filter_edit.setText("")
+    win._apply_debounced_search_filter()
+
+    names = {item.display_name for _, item in win._visible_rows()}
+    assert names == {"Deafening Essence of Greed"}  # t2+t3, t3 ungeladen
+    assert win._current_stash_selection == ["t2", "t3"]
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_single_refresh_mode_keeps_the_last_individual_tab_during_multi_selection(
+        qapp, monkeypatch) -> None:
+    """ToDo.md-Entscheidung: die Refresh-Modi hängen weiterhin am zuletzt
+    EINZELN angeklickten Fach — eine Mehrfachauswahl ändert daran nichts."""
+    win = _three_tab_window(monkeypatch)
+    win._on_stash_selected("t1", "Currency 1")
+    assert win._current_stash_id == "t1"
+
+    win._show_stash_selection(["t2", "t3"])
+
+    assert win._current_stash_id == "t1"
+    assert win._pick_single_target() == ("stash", "t1", None)
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_csv_export_filename_reflects_multi_selection(qapp, monkeypatch) -> None:
+    win = _three_tab_window(monkeypatch)
+    win._show_stash_selection(["t1", "t2"])
+
+    filename = win._default_export_filename()
+
+    assert filename == "poe-view2-Standard-2-tabs-selected.csv"
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_selecting_a_single_tab_ends_a_previous_multi_selection(qapp, monkeypatch) -> None:
+    win = _three_tab_window(monkeypatch)
+    win._show_stash_selection(["t1", "t2"])
+    assert win._current_stash_selection == ["t1", "t2"]
+
+    win._on_stash_selected("t1", "Currency 1")
+
+    assert win._current_stash_selection is None
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_selecting_a_character_ends_a_previous_multi_selection(qapp, monkeypatch) -> None:
+    win = _three_tab_window(monkeypatch)
+    win._show_stash_selection(["t1", "t2"])
+    char = make_char("WitchOfPeter", "Standard")
+
+    win._on_character_selected(char)
+
+    assert win._current_stash_selection is None
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_full_aggregate_ends_a_previous_multi_selection(qapp, monkeypatch) -> None:
+    win = _three_tab_window(monkeypatch)
+    win._show_stash_selection(["t1", "t2"])
+
+    win._show_aggregate()
+
+    assert win._current_stash_selection is None
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_league_change_clears_a_multi_selection(qapp, monkeypatch) -> None:
+    win = _three_tab_window(monkeypatch)
+    win._show_stash_selection(["t1", "t2"])
+    win._live_leagues = {"Standard", "Hardcore"}
+    monkeypatch.setattr(win, "_apply_character_league_filter", lambda: None)
+    monkeypatch.setattr(win, "_stash_trees", {"Standard": win._stash_trees["Standard"],
+                                              "Hardcore": []})
+
+    win._on_league_changed("Hardcore")
+
+    assert win._current_stash_selection is None
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_multi_selection_with_nothing_cached_shows_zero_items(qapp, monkeypatch) -> None:
+    win = _three_tab_window(monkeypatch)
+
+    win._show_stash_selection(["t3"])  # nie geladen
+
+    assert win._visible_rows() == []
+    assert "0 loaded, 1 never loaded" in win._status_msg.text()
+
+    win.worker.stop()
+    win.worker.wait(5000)
