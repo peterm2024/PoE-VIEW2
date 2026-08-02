@@ -5282,6 +5282,24 @@ def test_zone_changed_does_nothing_while_paused(qapp, monkeypatch) -> None:
     win.worker.wait(5000)
 
 
+def test_zone_changed_updates_the_zone_label_even_while_paused(qapp, monkeypatch) -> None:
+    """Peter, 2026-08-03: "Momentan bin ich mir nicht sicher ob wir das
+    überhaupt machen" — die Anzeige bestätigt, dass die Client.txt-Änderung
+    erkannt wurde, unabhängig davon, ob ein Refresh danach tatsächlich
+    ausgelöst wird (Pause-Modus blockiert hier bewusst nur den Refresh)."""
+    win = MainWindow()
+    _ready_for_zone_refresh(win)
+    win._refresh_mode = "pause"
+    assert win._zone_label.text() == "–"
+
+    win._on_zone_changed("The Coast")
+
+    assert win._zone_label.text() == "The Coast"
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
 def test_zone_changed_does_nothing_without_a_login(qapp, monkeypatch) -> None:
     win = MainWindow()
     _ready_for_zone_refresh(win)

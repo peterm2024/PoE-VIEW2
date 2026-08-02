@@ -2251,9 +2251,12 @@ automatisch mit (`modelReset` → `_update_summaries`, siehe FALLSTRICKE
 #39). Gegenprobe: Fix entfernt, `test_league_change_clears_the_visible_
 item_list` schlägt fehl, restauriert wieder grün.
 
-### 4.26 Item-Verlauf: Mengenänderungen (Currency)
+### 4.26 Item-Verlauf: Mengenänderungen (Currency) + Live-Zonenanzeige
 
-Peter, 2026-08-03: "In unserer Item-History-
+Zwei kleine, unabhängige Anschlüsse aus demselben Gespräch (Peter,
+2026-08-03).
+
+**Mengenänderungen im Item-Verlauf.** Peter: "In unserer Item-History-
 Liste berücksichtigen wir keine Items die sich ändern, wie Currency ...
 sobald sich Currency ändert, wandert diese wieder ganz oben auf die
 Liste mit Vermerk, wieviel sich geändert hat." Auf Nachfrage bewusst nur
@@ -2277,6 +2280,30 @@ nach oben — kein Sonderfall nötig. Gegenprobe: `_stack_size_changes()`
 kurzgeschlossen, `test_a_stack_size_change_is_logged_as_a_changed_
 history_entry_with_the_delta` und die Abnahme-Variante schlagen fehl,
 restauriert wieder grün.
+
+**Live-Zonenanzeige.** Peter zunächst: "Kannst du so eine Art LED oben
+in die 'Menü'-Zeile einbauen, die kurz aufblinkt, wenn wir auf ein
+Change-Ereignis der Client.txt reagieren? Momentan bin ich mir nicht
+sicher ob wir das überhaupt machen." — beim Live-Test blinkte nichts
+sichtbar (vermutlich lief noch der alte Prozess von vor dem Fix, Qt-Apps
+laden Code nicht zur Laufzeit nach). Statt die Blink-LED zu debuggen,
+Kurswechsel auf Peters eigenen, besseren Vorschlag: "Wir machen das
+nicht mit einer LED, sondern geben dort Live die aktuelle Position des
+Characters wieder, das ist denke ich noch besser."
+
+Ein `QLabel` (`self._zone_label`, Startwert "–") in der Toolbar zeigt
+IMMER die zuletzt aus der Client.txt erkannte Zone an — kein Blinken,
+kein Timer, `_on_zone_changed` schreibt den Zonennamen direkt hinein.
+Bewusst VOR den frühen Rückgaben der Methode platziert (Pause-Modus,
+kein Login, archivierte Liga, Rate-Limit) — die Anzeige bestätigt "wir
+haben einen Zonenwechsel in der Client.txt erkannt", nicht "wir haben
+deswegen auch tatsächlich neu geladen". Genau diese Trennung ist der
+Zweck: bleibt die Anzeige dauerhaft bei "–", weiß Peter, dass entweder
+der Zonen-Beobachter deaktiviert ist oder die Client.txt keine
+erkennbaren Zonenwechsel-Zeilen liefert — unabhängig davon, ob ein
+Refresh geblockt wäre. Tooltip verweist auf "Settings > Zone Refresh".
+Gegenprobe: Zuweisung entfernt, `test_zone_changed_updates_the_zone_
+label_even_while_paused` schlägt fehl, restauriert wieder grün.
 
 ---
 

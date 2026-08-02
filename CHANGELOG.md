@@ -30,6 +30,11 @@ nach [SemVer](https://semver.org/lang/de/).
   solche Änderungen komplett ignoriert — nur echte Neuzugänge und
   verschwundene Items landeten im Verlauf. Gilt nur für das
   Charakter-Inventar, nicht für Stash-Fächer.
+- Live-Zonenanzeige in der Toolbar: zeigt die zuletzt aus der Client.txt
+  erkannte Zone an — unabhängig davon, ob danach tatsächlich ein Refresh
+  folgt (Pause-Modus/Rate-Limit können das weiterhin verhindern). Auch
+  eine Diagnose-Anzeige nebenbei: bleibt sie leer, war der Zonen-
+  Beobachter entweder deaktiviert oder hat nichts erkannt.
 
 ### Behoben
 

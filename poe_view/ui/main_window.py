@@ -453,6 +453,26 @@ class MainWindow(QMainWindow):
         self._settings_action.triggered.connect(self._open_settings_dialog)
         toolbar.addAction(self._settings_action)
 
+        # Live-Anzeige der zuletzt aus der Client.txt erkannten Zone (Peter,
+        # 2026-08-03: erst als kurz aufblinkende LED vorgeschlagen, dann
+        # verworfen zugunsten dieser Positionsanzeige — "das ist denke ich
+        # noch besser"). Reine Diagnose-/Komfort-Anzeige ohne eigene
+        # Wirkung: zeigt IMMER die zuletzt erkannte Zone an, unabhängig
+        # davon, ob ein Refresh danach tatsächlich folgt (Pause-Modus/
+        # Rate-Limit können das weiterhin verhindern, siehe
+        # ``_on_zone_changed``). Bleibt leer, solange der Zonen-Beobachter
+        # deaktiviert ist oder noch keine Zeile erkannt hat — das ALLEIN
+        # ist für Peter schon die gesuchte Aussage ("ob wir das überhaupt
+        # machen").
+        toolbar.addWidget(QLabel(" Zone: "))
+        self._zone_label = QLabel("–")
+        self._zone_label.setToolTip(
+            "Last zone change detected in Client.txt — confirms the zone "
+            "watcher is actually reacting, independent of whether a "
+            "refresh follows. Stays empty if the zone watcher is disabled "
+            "or the log shows no activity (Settings > Zone Refresh).")
+        toolbar.addWidget(self._zone_label)
+
         filter_toolbar.addWidget(QLabel(" League: "))
         self._league_combo = QComboBox()
         self._league_combo.setMinimumWidth(160)
@@ -2670,6 +2690,7 @@ class MainWindow(QMainWindow):
         Nutzerwahl "keine Hintergrund-Anfragen") und die harte
         Rate-Limit-Obergrenze, sonst identisch zu jedem anderen stillen
         Refresh."""
+        self._zone_label.setText(zone_name)
         if (self._refresh_mode == "pause" or self._bulk_dialog is not None
                 or not self._logged_in or not self._current_league
                 or self._current_league_is_archived()
