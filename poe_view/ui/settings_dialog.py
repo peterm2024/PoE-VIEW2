@@ -61,7 +61,10 @@ class SettingsDialog(QDialog):
     def _build_tools_tab(self, entries: list[ToolEntry]) -> QWidget:
         tab = QWidget()
         layout = QVBoxLayout(tab)
-        layout.addWidget(QLabel("Rechtsklick-Menü für Items:"))
+        layout.addWidget(QLabel(
+            "Rechtsklick-Menü für Items — hier eigene Nachschlagewerke "
+            "eintragen.\nAb Werk ist die Liste leer: PoE-VIEW2 bringt "
+            "bewusst keine fremde Seite mit."))
 
         self._table = QTableWidget(0, 3)
         self._table.setHorizontalHeaderLabels(["Aktiv", "Name", "URL-Vorlage"])
@@ -74,7 +77,8 @@ class SettingsDialog(QDialog):
 
         layout.addWidget(QLabel(
             "Platzhalter {slug} wird durch den Item-Namen ersetzt "
-            "(Leerzeichen -> Unterstrich), z. B. https://poedb.tw/us/{slug}"))
+            "(Leerzeichen -> Unterstrich),\nz. B. "
+            "https://<deine-seite>/wiki/{slug}"))
 
         row_buttons = QHBoxLayout()
         add_button = QPushButton("Hinzufügen")

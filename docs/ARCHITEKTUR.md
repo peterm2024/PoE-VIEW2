@@ -1452,82 +1452,89 @@ sinnvoll (Chaos-Werte lassen sich aufaddieren, Stack-Größen
 unterschiedlicher Items nicht) — sie erscheint deshalb auch bei
 gemischten Treffern, nicht nur bei einheitlichem Item-Namen.
 
-### 4.15 Externe Tools per Rechtsklick (`ui/external_tools.py`, `ui/settings_dialog.py`)
+### 4.15 Eigene Item-Nachschlagewerke per Rechtsklick (`ui/external_tools.py`, `ui/settings_dialog.py`)
 
 Rechtsklick auf eine Item-Zeile öffnet ein Kontextmenü mit Links zu
-externen Nachschlage-Tools (ToDo.md: "andere Tools per Rechtsklick
-anbinden?", Peter 2026-07-30). Die reine URL-Erzeugung sitzt bewusst in
-einem eigenen, Qt-freien Modul (`external_tools.py`) —
-`MainWindow._build_item_tools_menu(item)` verkabelt sie nur noch an
-`QDesktopServices.openUrl`. Diese Trennung war auch für die Tests nötig:
-`QMenu.exec()` öffnet eine blockierende Nested-Event-Loop und lässt sich
-nicht sinnvoll direkt aufrufen, `_build_item_tools_menu()` dagegen liefert
-das fertige `QMenu`-Objekt ohne es anzuzeigen.
+Nachschlagewerken, die der Nutzer selbst einträgt. Die reine
+URL-Erzeugung sitzt bewusst in einem eigenen, Qt-freien Modul
+(`external_tools.py`) — `MainWindow._build_item_tools_menu(item)`
+verkabelt sie nur noch an `QDesktopServices.openUrl`. Diese Trennung war
+auch für die Tests nötig: `QMenu.exec()` öffnet eine blockierende
+Nested-Event-Loop und lässt sich nicht sinnvoll direkt aufrufen,
+`_build_item_tools_menu()` dagegen liefert das fertige `QMenu`-Objekt
+ohne es anzuzeigen.
 
-**Konfigurierbar statt fest verdrahtet** (Peter, 2026-08-01: "Das
-Rechtsklick-Menü ist variabel... dann kann man z.B. das Wiki selber
-einbinden"). Jeder Menüeintrag ist ein `ToolEntry(name, url_template,
-enabled)`; `url_template` enthält genau einen Platzhalter `{slug}`, den
-`build_url()` mit Leerzeichen→Unterstrich ersetzt (MediaWiki-Konvention,
-Original-Schreibweise inkl. Apostrophe bleibt erhalten). `DEFAULT_TOOLS`
-liefert die Startbelegung — PoEDB (`poedb.tw/us/{slug}`) und PoE Wiki
-(`poewiki.net/wiki/{slug}`) —, die `MainWindow._load_tool_entries()` beim
-ersten Start ohne gespeicherte Einstellung zurückgibt. Persistiert wird
+**Ab Werk ist die Liste LEER** (Peter, 2026-08-02: "Wir nehmen das
+komplett raus und verallgemeinern die Benutzung in der Anleitung, ohne
+Bezug auf die Wiki und PoEDB. Damit sind wir hier komplett unabhängig von
+Internetseiten und jeder Benutzer hat individuell die Möglichkeit, eine
+Seite einzubinden"). Vorher waren zwei konkrete Nachschlagewerke
+vorbelegt; ob deren Betreiber damit einverstanden sind, aus einer fremden
+Anwendung heraus direkt geöffnet zu werden, war nie geklärt (ToDo.md:
+"Seitenbetreiber unbedingt fragen") und hätte den Release blockiert. Mit
+leerer Vorbelegung entfällt die Frage: die Anwendung kontaktiert von sich
+aus keine Drittanbieter-Seite, und wer einen Eintrag anlegt, trifft diese
+Entscheidung bewusst selbst. Zeigt das Menü dadurch gar keinen Eintrag,
+steht dort statt eines leeren Popups (sähe wie ein Fehler aus) ein
+deaktivierter Hinweis auf den Settings-Dialog.
+
+Jeder Menüeintrag ist ein `ToolEntry(name, url_template, enabled)`;
+`url_template` enthält genau einen Platzhalter `{slug}`, den `build_url()`
+mit Leerzeichen→Unterstrich ersetzt (MediaWiki-Konvention,
+Original-Schreibweise inkl. Apostrophe bleibt erhalten). Persistiert wird
 als JSON-Array (`tools_to_json`/`tools_from_json`) unter
 `external_tools/entries` in derselben `ui-settings.ini` wie die übrigen
 UI-Einstellungen (§ *_settings()*). Der Toolbar-Button "⚙ Settings" öffnet
 `SettingsDialog` (Tabelle mit Aktiv-Checkbox/Name/URL-Vorlage-Spalten,
 Hinzufügen/Entfernen-Buttons) — bei OK schreibt
 `MainWindow._open_settings_dialog()` die bearbeitete Liste zurück, bei
-Abbrechen bleibt der alte Stand unangetastet.
+Abbrechen bleibt der alte Stand unangetastet. Eine bewusst geleerte Liste
+wird als `"[]"` gespeichert und bleibt leer; nur ein fehlender oder
+kaputter Wert fällt auf `DEFAULT_TOOLS` zurück.
 
 **Welcher Name für `{slug}` eingesetzt wird, hängt von der Rarity ab**
-(`_lookup_name()`, Peter 2026-08-01: "PoEdb findet viele Items nicht
-unter dem Eigennamen (Rare, Magic)... Hier sollten wir nach dem Base
+(`_lookup_name()`, Peter 2026-08-01: "Hier sollten wir nach dem Base
 gehen. Uniques können jedoch gezielt gesucht werden"). Nur Uniques
-(`frameType == 3`) haben einen auf PoEDB/Wiki indexierten Eigennamen. Bei
-Rares trägt `item.name` zwar auch einen Namen, der ist aber zufällig
-gewürfelt und hat keine eigene Wiki-Seite (real geprüft: "Vortex Bane" für
-ein Rare-Messer, dessen `baseType` zuverlässig "Gutting Knife" liefert).
-Magic-Items haben gar keinen `name`, aber ihr `typeLine` enthält die
-gewürfelten Präfix-/Suffix-Wörter mit im Text ("Fleet Citrine Amulet of
-the Flatworm") — auch hier ist `baseType` die bereinigte Fassung
-("Citrine Amulet"). Für alle übrigen Rarities (Normal, Gems, Currency,
-Divination Cards, …) ist `baseType` ohnehin schon der Anzeigename (keine
-Affixe möglich). `_lookup_name()` liefert daher `item.name` nur für
-Uniques, sonst `item.baseType` (mit `typeLine`/`name` als Sicherheitsnetz,
-falls `baseType` einmal leer sein sollte).
+(`frameType == 3`) haben einen Eigennamen, unter dem sich ein Item
+überhaupt gezielt nachschlagen lässt. Bei Rares trägt `item.name` zwar
+auch einen Namen, der ist aber zufällig gewürfelt und hat nirgends eine
+eigene Seite (real geprüft: "Vortex Bane" für ein Rare-Messer, dessen
+`baseType` zuverlässig "Gutting Knife" liefert). Magic-Items haben gar
+keinen `name`, aber ihr `typeLine` enthält die gewürfelten
+Präfix-/Suffix-Wörter mit im Text ("Fleet Citrine Amulet of the
+Flatworm") — auch hier ist `baseType` die bereinigte Fassung ("Citrine
+Amulet"). Für alle übrigen Rarities (Normal, Gems, Currency, Divination
+Cards, …) ist `baseType` ohnehin schon der Anzeigename (keine Affixe
+möglich). `_lookup_name()` liefert daher `item.name` nur für Uniques,
+sonst `item.baseType` (mit `typeLine`/`name` als Sicherheitsnetz, falls
+`baseType` einmal leer sein sollte).
 
 **Klammern im `{slug}` werden prozent-kodiert** (`_underscore_name()`,
-FALLSTRICKE #57): Map-Items tragen als `baseType` z. B. "Map (Tier 16)" —
-PoEDBs Server lehnt literale Klammern im Pfad mit 404 ab und verlangt
-`%28`/`%29` (aus PoEDBs eigenem Autocomplete-Suchindex ausgelesen, live
-bestätigt). poewiki.net akzeptiert beide Schreibweisen, die Kodierung ist
-dort also unschädlich.
+FALLSTRICKE #57): Map-Items tragen als `baseType` z. B. "Map (Tier 16)".
+Mindestens ein real getestetes Nachschlagewerk lehnt literale Klammern im
+Pfad mit 404 ab und verlangt `%28`/`%29`; MediaWiki akzeptiert beide
+Schreibweisen, die Kodierung ist dort also unschädlich und deshalb
+generell aktiv.
 
-**poe.ninja wurde dabei herausgenommen** (Peter, 2026-08-01): der
-Deep-Link (`https://poe.ninja/poe1/economy/<liga>/currency/<item>`, von
-Peter am echten Link `.../allflame/currency/hinekoras-lock` verifiziert,
-2026-07-30) braucht zwei Werte (Liga + Item) in einer eigenen
-Slug-Konvention (klein, Satzzeichen entfernt, Bindestrich statt
-Leerzeichen — anders als PoEDB/Wikis Unterstrich-Schema) und war zudem
-schon vorher auf Currency/Fragmente (`frameType == 5`) beschränkt, weil
-das URL-Schema für andere Kategorien unbestätigt ist. Passt nicht ins
-einfache Ein-Platzhalter-Modell der übrigen Tools — bleibt ein
-eigenständiges, späteres Vorhaben (z. B. über ein zweites `{league}`-Feld
-in der Vorlage), Peters bewusste Entscheidung, das für den ersten Ausbau
-lieber wegzulassen als das Menü-Modell zu verkomplizieren.
+**Ein Zwei-Werte-Schema passt bewusst nicht hinein.** Ein zwischenzeitlich
+gebauter Deep-Link auf eine Preis-Seite brauchte Liga UND Item in einer
+eigenen Slug-Konvention (klein, Satzzeichen entfernt, Bindestrich statt
+Unterstrich) und war zudem auf Currency/Fragmente (`frameType == 5`)
+beschränkt, weil das Schema für andere Kategorien unbestätigt blieb. Das
+Ein-Platzhalter-Modell dafür zu verkomplizieren war Peters bewusste
+Entscheidung dagegen — bliebe ein eigenes Vorhaben (z. B. ein zweites
+`{league}`-Feld in der Vorlage).
 
-Ein weiteres, geplantes Ziel (**Craft of Exile**) wurde probeweise gebaut
-und wieder entfernt: CoE lehnt einen Item-Import ohne "Advanced mod
-descriptions" (Tag-Kopfzeile pro Mod plus Wertspanne statt Wälzwert, z. B.
-`+20(20-30)%` statt `+29%`) komplett ab, live gegen den echten CoE-Import
-bestätigt. Diese Daten (Mod-ID/Tier/Spannen) liefert GGGs API nachweislich
-nie — echte Stash-Cache-Dumps geprüft, kein Item trägt je ein
-"extended"-Feld dafür. Ohne externe Mod-Datenbank (z. B. RePoE) ist der
-Import dauerhaft kaputt, nicht nur ungenau; Peters Entscheidung war daher,
-den Menüpunkt komplett zu entfernen statt einen wissentlich fehlschlagenden
-Import anzubieten. Siehe FALLSTRICKE #50.
+Ein weiterer, geplanter Sonderfall (Item als Text in die Zwischenablage
+statt eines Links) wurde probeweise gebaut und wieder entfernt: das
+Zielwerkzeug lehnt einen Import ohne "Advanced mod descriptions"
+(Tag-Kopfzeile pro Mod plus Wertspanne statt Wälzwert, z. B.
+`+20(20-30)%` statt `+29%`) komplett ab, live bestätigt. Diese Daten
+(Mod-ID/Tier/Spannen) liefert GGGs API nachweislich nie — echte
+Stash-Cache-Dumps geprüft, kein Item trägt je ein "extended"-Feld dafür.
+Ohne externe Mod-Datenbank (z. B. RePoE) wäre der Import dauerhaft kaputt,
+nicht nur ungenau; deshalb komplett entfernt statt einen wissentlich
+fehlschlagenden Weg anzubieten. Siehe FALLSTRICKE #50.
 
 ### 4.16 Charakter-Paperdoll (`ui/paperdoll.py`)
 

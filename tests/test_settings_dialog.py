@@ -1,8 +1,8 @@
-"""Tests für den Settings-Dialog: Reiter "External Tools" (Peter,
-2026-08-01: "Rechtsklick-Menü ist variabel... Settings-Dialog, in dem man
-u.a. das Menü konfigurieren kann"), "Columns" (Peter, 2026-08-01: "die
-Möglichkeit, die angezeigten Spalten einzustellen") und "Zone Refresh"
-(Peter, 2026-08-01: "Erst nach Zonenwechsel gibt es einen Refresh")."""
+"""Tests für den Settings-Dialog: Reiter "External Tools" (frei
+konfigurierbare Nachschlagewerke, ab Werk leer — Peter, 2026-08-02),
+"Columns" (Peter, 2026-08-01: "die Möglichkeit, die angezeigten Spalten
+einzustellen") und "Zone Refresh" (Peter, 2026-08-01: "Erst nach
+Zonenwechsel gibt es einen Refresh")."""
 
 from PySide6.QtCore import Qt
 
@@ -15,8 +15,8 @@ def _dialog(entries=None, columns=None, zone_enabled=False, zone_path=""):
 
 
 def test_loads_the_given_entries_into_the_table(qapp) -> None:
-    entries = [ToolEntry("PoEDB", "https://poedb.tw/us/{slug}"),
-              ToolEntry("PoE Wiki", "https://www.poewiki.net/wiki/{slug}", enabled=False)]
+    entries = [ToolEntry("Wiki A", "https://a.example.test/{slug}"),
+              ToolEntry("Wiki B", "https://b.example.test/{slug}", enabled=False)]
     dialog = _dialog(entries=entries)
     assert dialog.result_entries() == entries
 
@@ -28,18 +28,18 @@ def test_add_button_appends_an_empty_row_that_is_skipped_until_filled(qapp) -> N
 
 
 def test_remove_button_deletes_the_selected_row(qapp) -> None:
-    entries = [ToolEntry("PoEDB", "https://poedb.tw/us/{slug}"),
-              ToolEntry("PoE Wiki", "https://www.poewiki.net/wiki/{slug}")]
+    entries = [ToolEntry("Wiki A", "https://a.example.test/{slug}"),
+              ToolEntry("Wiki B", "https://b.example.test/{slug}")]
     dialog = _dialog(entries=entries)
     dialog._table.selectRow(0)
     dialog._remove_selected_row()
     remaining = dialog.result_entries()
     assert len(remaining) == 1
-    assert remaining[0].name == "PoE Wiki"
+    assert remaining[0].name == "Wiki B"
 
 
 def test_unchecking_the_checkbox_disables_the_entry(qapp) -> None:
-    dialog = _dialog(entries=[ToolEntry("PoEDB", "https://poedb.tw/us/{slug}", enabled=True)])
+    dialog = _dialog(entries=[ToolEntry("Wiki A", "https://a.example.test/{slug}", enabled=True)])
     dialog._table.item(0, 0).setCheckState(Qt.CheckState.Unchecked)
     assert dialog.result_entries()[0].enabled is False
 

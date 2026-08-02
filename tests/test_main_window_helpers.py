@@ -4562,29 +4562,33 @@ def test_row_context_menu_returns_early_for_an_empty_click(qapp) -> None:
     win.worker.wait(5000)
 
 
-def test_item_tools_menu_offers_the_default_poedb_and_wiki_entries(qapp) -> None:
+def test_item_tools_menu_is_empty_out_of_the_box_and_points_to_settings(qapp) -> None:
+    """Peter, 2026-08-02: ab Werk ist keine Seite vorbelegt. Statt eines
+    leeren Popups (sieht wie ein Fehler aus) steht dann ein deaktivierter
+    Hinweis auf den Settings-Dialog im Menü."""
     win = MainWindow()
     rare = Item.model_validate({"typeLine": "Vaal Regalia", "baseType": "Vaal Regalia", "frameType": 2})
-    labels = [a.text() for a in win._build_item_tools_menu(rare).actions()]
-    assert any("PoEDB" in l for l in labels)
-    assert any("Wiki" in l for l in labels)
+    actions = win._build_item_tools_menu(rare).actions()
+    assert len(actions) == 1
+    assert not actions[0].isEnabled()
+    assert "Settings" in actions[0].text()
 
     win.worker.stop()
     win.worker.wait(5000)
 
 
 def test_item_tools_menu_skips_disabled_entries(qapp) -> None:
-    """Peter, 2026-08-01: konfigurierbares Menü — deaktivierte Einträge
-    (z. B. weil ein Seitenbetreiber widerspricht) dürfen nicht auftauchen."""
+    """Konfigurierbares Menü — abgeschaltete Einträge dürfen nicht
+    auftauchen, ohne dass man sie gleich löschen muss."""
     win = MainWindow()
     win._save_tool_entries([
-        external_tools.ToolEntry("PoEDB", "https://poedb.tw/us/{slug}", enabled=True),
-        external_tools.ToolEntry("PoE Wiki", "https://www.poewiki.net/wiki/{slug}", enabled=False),
+        external_tools.ToolEntry("Wiki A", "https://a.example.test/{slug}", enabled=True),
+        external_tools.ToolEntry("Wiki B", "https://b.example.test/{slug}", enabled=False),
     ])
     rare = Item.model_validate({"typeLine": "Vaal Regalia", "baseType": "Vaal Regalia", "frameType": 2})
     labels = [a.text() for a in win._build_item_tools_menu(rare).actions()]
-    assert any("PoEDB" in l for l in labels)
-    assert not any("Wiki" in l for l in labels)
+    assert any("Wiki A" in l for l in labels)
+    assert not any("Wiki B" in l for l in labels)
 
     win.worker.stop()
     win.worker.wait(5000)

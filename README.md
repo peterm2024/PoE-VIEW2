@@ -10,8 +10,8 @@ API rate limit. If the GGG API is unreachable, PoE-VIEW2 keeps working
 from the local cache.
 
 Login runs via OAuth2 directly against `api.pathofexile.com`. PoE-VIEW2
-never sees your password, and no third party is involved. The access
-token is stored in the Windows Credential Manager.
+never sees your password, and no third party is involved in the login.
+The access token is stored in the Windows Credential Manager.
 
 ## Screenshots
 
@@ -30,36 +30,103 @@ detail panel below.
 
 ## Features
 
+### Browsing and searching
+
 - **OAuth2 login (PKCE)** against the official GGG API. The access
   token is stored in the Windows Credential Manager, not in plain text
   on disk.
 - **Stash tree** with folders; special tabs (map and unique stash) are
   automatically grouped by section or category.
 - **Item table** with icon, source tab, position (tab number and grid
-  coordinate, distinguishing tabs with the same name), name, type,
+  coordinate, distinguishing tabs with the same name), name, base type,
   level, quality, stack size, item level, requirements (level, Str,
-  Dex, Int), and mods.
+  Dex, Int), mods, and value.
+- **Configurable columns**: which columns are shown and in what order is
+  set either in the settings dialog (checkboxes and drag & drop) or via
+  a quick toggle in the header's right-click menu. The choice is saved
+  between sessions.
 - **Column filters** via right-click on a column header, supporting
   comparison expressions such as `>=20` for quality or `<45` for item
-  level.
+  level, with autocomplete over the values actually present in that
+  column.
+- **Regex search** (toggle `.*` next to the search field, on by
+  default), matching how Path of Exile's own stash search works — so
+  patterns built on sites like poe.re work unchanged. Sockets are
+  indexed in the in-game notation (`R-R-G`), making link patterns such
+  as `r-r-g|r-g-r|g-r-r` work directly.
 - **League-wide search** across all loaded tabs and characters at once.
   `*` as the search text lists the entire holdings, useful for
   exporting a whole league.
 - **Type filters** for Normal, Magic, Rare, Unique, Gem, Currency,
   Divination Card, and Other, shown as color-coded checkboxes next to
   the league selector.
+- **CSV export** of the currently visible, filtered items.
+
+### Item and character views
+
 - **Character view**: equipment and inventory appear in the same table
   as stash items and are just as searchable and filterable.
-- **CSV export** of the currently visible, filtered items.
-- **Automatic background refresh**: keeps the open tab or displayed
-  character up to date and gradually reloads the remaining tabs,
-  without spending the rate-limit budget reserved for manual requests.
+- **Character paperdoll** (double-click a character): equipment laid out
+  as a doll instead of flat table rows, including the jewels socketed in
+  the passive tree.
+- **Enlarged item view** (double-click an item): large icon and the full
+  property and mod text without the compact detail panel's line
+  clipping. Divination cards show their real artwork from GGG's own CDN
+  instead of the generic icon the stash API returns for every card.
+- **Item value** via poe.ninja prices: a Value column (chaos or divine
+  depending on magnitude) plus the total for the visible items in the
+  status bar. Covers currency, fragments, uniques (including 5- and
+  6-link pricing), gems (matched exactly by level, quality, and
+  corruption), divination cards, scarabs, essences, and fossils. Unknown
+  prices stay empty rather than showing 0.
+- **Configurable item lookups**: right-clicking an item can open it in
+  reference sites you define yourself (name plus a URL template with a
+  `{slug}` placeholder). Nothing is preconfigured — see
+  [Data sources](#data-sources).
+
+### Staying up to date
+
+- **Refresh modes** (toolbar dropdown), all sharing the rate-limit
+  budget without exhausting it: *Auto* keeps the open view fresh and
+  gradually fills in the rest of the stash, *Single* focuses only on the
+  current selection, *Stash* cycles continuously through the whole
+  league, and *Pause* stops all background requests.
+- **Change highlighting** in the character view: rows that appeared or
+  changed since the last refresh are highlighted, and items that
+  disappeared stay visible for one cycle in grey and struck through.
+- **Item history**: a collapsible panel below the table logs the last
+  120 items that entered or left any character's inventory — a quick way
+  to check what you just stashed, sold, or traded.
+- **Optional zone-change trigger** (off by default): PoE-VIEW2 can watch
+  the game's own `Client.txt` (read-only, path entered by you) and
+  reload the open view as soon as the game reports a zone change, which
+  is when GGG's API tends to publish new stash contents.
 - **Offline mode**: during GGG maintenance or a lost connection, the
   app shows the last known state from the cache, clearly marked as such
   (📴).
 - **Rate-limit dashboard** with rules, current usage, and active locks.
 - **Raw data viewer** per stash tab, showing the unmodified API
   response.
+
+## Data sources
+
+PoE-VIEW2 contacts these hosts, and no others:
+
+- **`api.pathofexile.com`** — the official GGG API: login, characters,
+  stash tabs, and items.
+- **`web.poecdn.com`** — GGG's own CDN, for item icons and divination
+  card artwork.
+- **`poe.ninja`** — for the optional price display (roughly 1.2 MB per
+  league, cached for up to 6 hours). Prices are unofficial community
+  data. Note that SSF leagues are not tracked there at all: without
+  player trading there is no market activity to derive prices from, so
+  the Value column stays empty in those leagues.
+
+Beyond that, the item lookups in the right-click menu are **empty out of
+the box**. PoE-VIEW2 deliberately ships without any preconfigured
+reference site, so it never opens a third-party page on its own. If you
+add an entry in the settings dialog, that is your own decision — please
+check that the site's operator is fine with being opened this way.
 
 ## Download (Windows, no Python required)
 
@@ -135,8 +202,8 @@ the worker, and the UI logic. It requires no network access.
 ## Status
 
 PoE-VIEW2 is in daily use. Login, stash and character views, search,
-filters, CSV export, auto-refresh, and offline mode all work. The
-project is developed by a single person and makes no claim to
+filters, CSV export, refresh modes, price display, and offline mode all
+work. The project is developed by a single person and makes no claim to
 completeness compared to the official PoE website. Bug reports and
 pull requests are welcome.
 
@@ -147,4 +214,6 @@ pull requests are welcome.
 ## Disclaimer
 
 This product isn't affiliated with or endorsed by **Grinding Gear Games**
-in any way.
+in any way. It is likewise not affiliated with or endorsed by
+**poe.ninja**, whose publicly available price data the optional value
+display builds on.

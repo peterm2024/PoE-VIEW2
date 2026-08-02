@@ -1,34 +1,36 @@
-"""Rechtsklick-Verlinkung zu externen Item-Tools (ToDo.md: "andere Tools
-per Rechtsklick anbinden? PoEdb.tw, poe.ninja, craftofexile").
+"""Rechtsklick-Verlinkung zu frei konfigurierbaren Item-Nachschlagewerken.
 
 Reine URL-Bausteine ohne Qt-Abhängigkeit — ``main_window.py`` verkabelt
 sie an das Rechtsklick-Kontextmenü der Item-Tabelle.
 
-Die Menüeinträge sind seit Peters Idee (2026-08-01, "Rechtsklick-Menü ist
-variabel") konfigurierbar: statt fest verdrahteter Funktionen pro Anbieter
-gibt es eine Liste von ``ToolEntry`` (Name + URL-Vorlage mit ``{slug}``-
-Platzhalter), die Peter über den Settings-Dialog (``settings_dialog.py``)
-bearbeiten kann — z. B. um ein eigenes Wiki einzutragen oder einen
-Eintrag zu deaktivieren, falls ein Seitenbetreiber widerspricht (ToDo.md:
-"Seitenbetreiber unbedingt fragen"). ``DEFAULT_TOOLS`` liefert die
-bisherigen zwei Einträge (PoEDB, PoE Wiki) als Startbelegung.
+Die Menüeinträge sind eine Liste von ``ToolEntry`` (Name + URL-Vorlage mit
+``{slug}``-Platzhalter), die der Nutzer über den Settings-Dialog
+(``settings_dialog.py``) selbst pflegt.
 
-poe.ninja (frameType-5-Deep-Link) wurde dabei erst einmal herausgenommen
-(Peter, 2026-08-01): das URL-Schema braucht zwei Werte (Liga + Item-Slug
-in einer anderen Slug-Konvention als PoEDB/Wiki) und passt nicht ins
-einfache Ein-Platzhalter-Schema der übrigen Tools. Bleibt ein eigenes,
-späteres Vorhaben, falls das generische Schema um ein zweites Feld
-erweitert wird.
+**Ab Werk ist die Liste LEER** (Peters Entscheidung, 2026-08-02: "Wir
+nehmen das komplett raus ... Damit sind wir hier komplett unabhängig von
+Internetseiten und jeder Benutzer hat individuell die Möglichkeit, eine
+Seite einzubinden"). Vorher waren zwei Nachschlagewerke vorbelegt; die
+Frage, ob deren Betreiber mit dem direkten Öffnen aus einer fremden
+Anwendung heraus einverstanden sind, war nie geklärt (ToDo.md:
+"Seitenbetreiber unbedingt fragen"). Mit leerer Vorbelegung stellt sich
+die Frage gar nicht mehr: PoE-VIEW2 selbst kontaktiert keine
+Drittanbieter-Seite, und wer einen Eintrag anlegt, trifft diese
+Entscheidung bewusst für sich.
 
-Ein vierter, ursprünglich geplanter Eintrag (Craft of Exile) wurde wieder
-entfernt (FALLSTRICKE #50): CoE erwartet fürs Item-Import "Advanced mod
-descriptions" mit einer Tag-Kopfzeile pro Mod und einer Wertspanne statt
-des Wälzwerts — Daten, die GGGs API nachweislich nie liefert (echte
-Stash-Cache-Dumps geprüft: kein Item trägt je ein "extended"-Feld mit
-Mod-Tags/Tier/Spanne). Ohne die Kopfzeile lehnt CoE den Import komplett
-ab, nicht nur ungenau. Peters Entscheidung (2026-07-31): Eintrag raus,
-bis eine externe Mod-Datenbank (z. B. RePoE) als eigenes, größeres
-Vorhaben ansteht.
+Das Ein-Platzhalter-Schema (nur ``{slug}``) deckt Nachschlagewerke ab, die
+ein Item über genau einen Namen im Pfad adressieren — das ist bei
+MediaWiki-artigen Seiten der Normalfall. Seiten, die zusätzlich einen
+zweiten Wert brauchen (etwa eine Liga), passen bewusst nicht hinein;
+dafür müsste das Schema erst um ein zweites Feld erweitert werden.
+
+Ein ursprünglich geplanter Sonderfall (Zwischenablage-Export statt Link)
+wurde wieder entfernt (FALLSTRICKE #50): das Zielwerkzeug erwartete
+Mod-Tags, Tier und Wertspannen, die GGGs API nachweislich nie liefert
+(echte Stash-Cache-Dumps geprüft: kein Item trägt je ein "extended"-Feld
+damit) und lehnte den Import ohne sie komplett ab statt nur ungenau zu
+sein. Kommt frühestens mit einer externen Mod-Datenbank (z. B. RePoE)
+wieder in Frage — ein eigenes, größeres Vorhaben.
 """
 
 from __future__ import annotations
@@ -38,10 +40,10 @@ from dataclasses import dataclass
 
 from poe_view.api.models import Item
 
-# GGGs eigene CDN — kein Drittanbieter, deshalb ohne die "Seitenbetreiber
-# fragen"-Vorsicht der konfigurierbaren Tools (ToDo.md). Muster live an
-# poedb.tw-Kartenseiten verifiziert (2026-07-31): jede Div-Card-Seite
-# bettet ihr Artwork von genau hier ein.
+# GGGs eigenes CDN — dieselbe Quelle, aus der die App ohnehin schon jedes
+# Item-Icon lädt, also kein zusätzlicher Drittanbieter (deshalb von der
+# leeren Tool-Vorbelegung oben nicht betroffen). Muster 2026-07-31 an zehn
+# echten Karten verifiziert.
 _DIVINATION_CARD_ART_BASE = "https://web.poecdn.com/image/divination-card"
 
 
@@ -56,37 +58,31 @@ class ToolEntry:
     enabled: bool = True
 
 
-# Startbelegung des Settings-Dialogs bzw. Fallback, solange QSettings noch
-# keinen eigenen Stand gespeichert hat.
-DEFAULT_TOOLS: tuple[ToolEntry, ...] = (
-    ToolEntry("PoEDB", "https://poedb.tw/us/{slug}"),
-    ToolEntry("PoE Wiki", "https://www.poewiki.net/wiki/{slug}"),
-)
+# Bewusst LEER: PoE-VIEW2 bringt keine Seite ab Werk mit (siehe
+# Modul-Docstring). Der Nutzer legt seine Nachschlagewerke selbst im
+# Settings-Dialog an.
+DEFAULT_TOOLS: tuple[ToolEntry, ...] = ()
 
 
 def _underscore_name(text: str) -> str:
     """MediaWiki-Konvention — real geprüft: "Essence_Drain", "Chaos_Bolt".
     Apostrophe & Co. bleiben erhalten, das sind gültige URL-Zeichen.
-    Klammern werden dagegen prozent-kodiert (Peter, 2026-08-01: Karten wie
-    "Map (Tier 16)" gaben über unser Menü einen 404, obwohl PoEDBs eigene
-    Suche dieselbe Seite fand) — PoEDBs Server verlangt "%28"/"%29" statt
-    literaler Klammern im Pfad, live bestätigt: poedb.tw/us/Map_(Tier_16)
-    → 404, poedb.tw/us/Map_%28Tier_16%29 → 200 (aus PoEDBs eigenem
-    Autocomplete-Suchindex ausgelesen). poewiki.net akzeptiert dagegen
-    BEIDE Schreibweisen, die Kodierung schadet also dort nicht. Siehe
-    FALLSTRICKE #57."""
+    Klammern werden dagegen prozent-kodiert: Items mit Klammern im Namen
+    ("Map (Tier 16)") liefen bei einem real getesteten Nachschlagewerk in
+    einen 404, weil dessen Server "%28"/"%29" statt literaler Klammern im
+    Pfad verlangt; MediaWiki akzeptiert BEIDE Schreibweisen, die Kodierung
+    ist dort also unschädlich. Siehe FALLSTRICKE #57."""
     slug = text.strip().replace(" ", "_")
     return slug.replace("(", "%28").replace(")", "%29")
 
 
 def _lookup_name(item: Item) -> str:
-    """Nur Uniques (frameType 3) haben einen auf PoEDB/Wiki gezielt
-    such- und verlinkbaren Eigennamen (Peter, 2026-08-01: "Uniques können
-    jedoch gezielt gesucht werden"). Rares TRAGEN zwar auch einen
-    ``name``, aber der ist eine zufällig gewürfelte Fantasiebezeichnung
-    ohne eigene Wiki-Seite ("PoEdb findet viele Items nicht unter dem
-    Eigennamen (Rare, Magic)") — real an Peters Cache geprüft: ``name``
-    z. B. "Vortex Bane" für ein Rare-Messer, während ``baseType``
+    """Nur Uniques (frameType 3) haben einen Eigennamen, unter dem sich ein
+    Item in einem Nachschlagewerk gezielt finden lässt (Peter, 2026-08-01:
+    "Uniques können jedoch gezielt gesucht werden"). Rares TRAGEN zwar auch
+    einen ``name``, aber der ist eine zufällig gewürfelte
+    Fantasiebezeichnung ohne eigene Seite — real an Peters Cache geprüft:
+    ``name`` z. B. "Vortex Bane" für ein Rare-Messer, während ``baseType``
     zuverlässig den Basis-Typ trägt ("Gutting Knife"). Magic-Items haben
     gar keinen ``name``, aber ihr ``typeLine`` enthält die gewürfelten
     Präfix-/Suffix-Wörter mit im Text ("Fleet Citrine Amulet of the
@@ -102,8 +98,8 @@ def _lookup_name(item: Item) -> str:
 def build_url(entry: ToolEntry, item: Item) -> str:
     """``{slug}`` in der Vorlage durch den (nach Rarity passenden, siehe
     ``_lookup_name``) Item-Namen ersetzen (Leerzeichen -> Unterstrich).
-    Weitere Platzhalter gibt es bewusst nicht — das deckt PoEDB/
-    Wiki-artige Ein-Wert-Schemas ab, siehe Modul-Docstring."""
+    Weitere Platzhalter gibt es bewusst nicht — das deckt Ein-Wert-Schemas
+    ab, wie sie MediaWiki-artige Seiten nutzen, siehe Modul-Docstring."""
     return entry.url_template.replace("{slug}", _underscore_name(_lookup_name(item)))
 
 

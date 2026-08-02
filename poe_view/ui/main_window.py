@@ -500,8 +500,8 @@ class MainWindow(QMainWindow):
             self.table.setColumnWidth(COLUMNS.index(name), 58)
         self.table.setColumnWidth(MODS_COL, 320)
         self.table.selectionModel().currentRowChanged.connect(self._on_row_selected)
-        # Rechtsklick auf eine Zeile: externe Tools zum markierten Item
-        # (PoEDB, Wiki, poe.ninja — ToDo.md, Peter 2026-07-30).
+        # Rechtsklick auf eine Zeile: die selbst konfigurierten
+        # Nachschlagewerke zum markierten Item (§external_tools.py).
         self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self._on_table_row_menu)
         # Doppelklick auf eine Zeile: vergrößerte Item-Ansicht (ToDo.md:
@@ -2183,11 +2183,14 @@ class MainWindow(QMainWindow):
         """Losgelöst von ``_on_table_row_menu``, damit Tests die
         Menü-Zusammenstellung prüfen können, ohne ``QMenu.exec()`` (blockiert
         ohne echte Nutzerinteraktion) auszulösen. Einträge kommen aus den
-        konfigurierbaren ``ToolEntry``s (Peter, 2026-08-01: Settings-Dialog),
-        nicht mehr fest verdrahtet. Ein weiterer, ursprünglich geplanter
-        Eintrag (Craft of Exile) wurde probeweise gebaut und wieder entfernt
-        — CoE lehnt den Import ohne Mod-Tag/Tier-Daten komplett ab, die GGGs
-        API nicht liefert, siehe FALLSTRICKE #50."""
+        konfigurierbaren ``ToolEntry``s (Settings-Dialog), es gibt keine
+        fest verdrahteten und ab Werk auch keine vorbelegten — siehe
+        ``external_tools``-Modul-Docstring.
+
+        Ohne einen einzigen aktiven Eintrag (Auslieferungszustand) zeigt das
+        Menü statt eines leeren Popups einen deaktivierten Hinweis auf den
+        Settings-Dialog — ein leeres Kontextmenü sieht sonst wie ein Fehler
+        aus."""
         menu = QMenu(self.table)
         for entry in self._load_tool_entries():
             if not entry.enabled:
@@ -2195,6 +2198,9 @@ class MainWindow(QMainWindow):
             url = external_tools.build_url(entry, item)
             menu.addAction(f"{entry.name} öffnen",
                            lambda checked=False, u=url: QDesktopServices.openUrl(QUrl(u)))
+        if menu.isEmpty():
+            hint = menu.addAction("No item tools configured — see Settings")
+            hint.setEnabled(False)
         return menu
 
     def _on_history_row_double_clicked(self, index) -> None:
