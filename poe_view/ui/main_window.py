@@ -1895,6 +1895,7 @@ class MainWindow(QMainWindow):
         ein spät eintreffender Job Daten eines inzwischen abgewählten
         Charakters in die aktuelle Ansicht einsickern lassen (analog
         `_on_stash_items`)."""
+        previous_items = self._character_items.get(name)  # vor dem Überschreiben: Diff-Basis
         self._character_items[name] = items
         self._character_items_loaded[name] = datetime.now(timezone.utc).isoformat()
         self._persist_cache()
@@ -1911,7 +1912,7 @@ class MainWindow(QMainWindow):
             self._open_paperdoll(name, items)
         if name != self._current_character_name:
             return
-        self._show_character_items(name, items)
+        self._show_character_items(name, items, previous_items)
 
     def _on_character_paperdoll_requested(self, char: Character) -> None:
         """Doppelklick auf einen Charakter (ToDo.md: "Doppelklick auf einen
@@ -1933,18 +1934,63 @@ class MainWindow(QMainWindow):
                                                  parent=self)
         self._paperdoll_dialog.show()
 
-    def _show_character_items(self, name: str, items: list[Item]) -> None:
+    @staticmethod
+    def _diff_character_items(previous_items: list[Item] | None,
+                              items: list[Item]) -> tuple[frozenset[str], list[Item]]:
+        """Vergleicht den vorigen mit dem aktuellen Item-Stand eines
+        Charakters (Peter 2026-08-01: "die Zeilen hervorgehoben (Türkis),
+        welche sich geändert haben"; verschwundene Items grau/durchgestrichen
+        statt sofort zu verschwinden). ``previous_items=None`` heißt "kein
+        vorheriger Ladevorgang zum Vergleichen" (erstes Öffnen dieses
+        Charakters) — dann bewusst KEIN Hervorheben, sonst wäre beim
+        allerersten Anzeigen sofort alles "neu".
+
+        Items ohne ``id`` (in echten Daten bislang nicht beobachtet, laut
+        Modell aber möglich) bleiben unberücksichtigt — ohne stabile
+        Kennung ist "gleiches Item, anderer Zustand" von "verschwunden +
+        neues Item" nicht unterscheidbar.
+
+        Rückgabe: (changed_ids, removed_items). ``removed_items`` sind die
+        Item-Objekte aus ``previous_items``, die im aktuellen Stand fehlen —
+        der Aufrufer hängt sie ans Ende der Anzeige an, damit sie für GENAU
+        EINEN Refresh-Zyklus sichtbar bleiben (sie stecken nicht in
+        ``self._character_items``, der eigentlichen Diff-Basis, also fallen
+        sie beim nächsten Refresh von selbst wieder raus)."""
+        if previous_items is None:
+            return frozenset(), []
+        previous_by_id = {item.id: item for item in previous_items if item.id}
+        current_ids = {item.id for item in items if item.id}
+        changed_ids = frozenset(
+            item.id for item in items
+            if item.id and (item.id not in previous_by_id or item != previous_by_id[item.id])
+        )
+        removed_items = [item for item_id, item in previous_by_id.items()
+                         if item_id not in current_ids]
+        return changed_ids, removed_items
+
+    def _show_character_items(self, name: str, items: list[Item],
+                              previous_items: list[Item] | None = None) -> None:
         """Slot (``inventoryId``, z. B. "Weapon"/"BodyArmour"/"MainInventory")
         übernimmt die Rolle der Tab-Spalte — analog zu den Aggregat-Ansichten
         der Stash-Tabs. Kein Truhenfach beteiligt: Position-Spalte zeigt nur
-        die Item-Koordinate (falls vorhanden), Baum-Hervorhebung entfällt."""
+        die Item-Koordinate (falls vorhanden), Baum-Hervorhebung entfällt.
+
+        ``previous_items`` ist der Item-Stand VOR diesem Refresh (``None``
+        beim ersten Anzeigen bzw. aus dem Cache, siehe
+        ``_on_character_selected``) — Grundlage der Türkis-/Grau-Diff-
+        Hervorhebung, siehe ``_diff_character_items``."""
         self._showing_aggregate = False
         self._search_all_active = False
         self._large_search_items = None
         self._current_stash_id = None
         self.table.setColumnHidden(TAB_COL, False)
-        sources = [item.inventoryId or "?" for item in items]
-        self.table_model.set_items(items, sources, [None] * len(items), [None] * len(items))
+        changed_ids, removed_items = self._diff_character_items(previous_items, items)
+        display_items = items + removed_items
+        sources = [item.inventoryId or "?" for item in display_items]
+        removed_ids = frozenset(item.id for item in removed_items if item.id)
+        self.table_model.set_items(display_items, sources, [None] * len(display_items),
+                                   [None] * len(display_items),
+                                   changed_ids=changed_ids, removed_ids=removed_ids)
         self._status_msg.setText(f"{name}: {len(items)} items (equipment + inventory)")
 
     def _on_icon(self, url: str, data: bytes) -> None:

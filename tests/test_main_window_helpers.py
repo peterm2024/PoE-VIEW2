@@ -330,6 +330,131 @@ def test_on_character_items_ignores_late_result_for_deselected_character(qapp) -
     win.worker.wait(5000)
 
 
+# --- Charakter-Refresh-Diff: geändert türkis, verschwunden grau/durchgestrichen
+# (Peter 2026-08-01) ------------------------------------------------------- #
+
+def test_diff_returns_nothing_when_there_is_no_previous_state(qapp) -> None:
+    """Erstes Anzeigen eines Charakters (kein vorheriger Ladevorgang zum
+    Vergleichen) — sonst wäre beim allerersten Öffnen sofort alles "neu"."""
+    item = Item.model_validate({"id": "1", "typeLine": "Chaos Orb"})
+    changed_ids, removed_items = MainWindow._diff_character_items(None, [item])
+    assert changed_ids == frozenset()
+    assert removed_items == []
+
+
+def test_diff_marks_a_brand_new_item_as_changed(qapp) -> None:
+    old = Item.model_validate({"id": "1", "typeLine": "Chaos Orb"})
+    new = Item.model_validate({"id": "2", "typeLine": "Exalted Orb"})
+    changed_ids, removed_items = MainWindow._diff_character_items([old], [old, new])
+    assert changed_ids == frozenset({"2"})
+    assert removed_items == []
+
+
+def test_diff_marks_a_modified_item_as_changed(qapp) -> None:
+    """Gleiche id, aber z. B. Stack-Größe hat sich geändert."""
+    old = Item.model_validate({"id": "1", "typeLine": "Chaos Orb", "stackSize": 5})
+    new = Item.model_validate({"id": "1", "typeLine": "Chaos Orb", "stackSize": 9})
+    changed_ids, removed_items = MainWindow._diff_character_items([old], [new])
+    assert changed_ids == frozenset({"1"})
+    assert removed_items == []
+
+
+def test_diff_leaves_an_unchanged_item_alone(qapp) -> None:
+    item = Item.model_validate({"id": "1", "typeLine": "Chaos Orb", "stackSize": 5})
+    changed_ids, removed_items = MainWindow._diff_character_items([item], [item])
+    assert changed_ids == frozenset()
+    assert removed_items == []
+
+
+def test_diff_reports_a_disappeared_item(qapp) -> None:
+    gone = Item.model_validate({"id": "1", "typeLine": "Chaos Orb"})
+    changed_ids, removed_items = MainWindow._diff_character_items([gone], [])
+    assert changed_ids == frozenset()
+    assert removed_items == [gone]
+
+
+def test_diff_ignores_items_without_an_id(qapp) -> None:
+    """Ohne stabile Kennung ist "gleiches Item anders" von "verschwunden +
+    neu" nicht unterscheidbar — solche Items bleiben unberücksichtigt."""
+    old = Item.model_validate({"typeLine": "Chaos Orb"})
+    new = Item.model_validate({"typeLine": "Chaos Orb", "stackSize": 3})
+    changed_ids, removed_items = MainWindow._diff_character_items([old], [new])
+    assert changed_ids == frozenset()
+    assert removed_items == []
+
+
+def test_character_refresh_highlights_changed_and_greys_out_removed_rows(qapp) -> None:
+    from PySide6.QtCore import Qt
+    from poe_view.ui.item_table import _NAME_COL
+
+    win = MainWindow()
+    win._current_character_name = "WitchOfPeter"
+    stays = Item.model_validate({"id": "stays", "typeLine": "Sword", "frameType": 2,
+                                 "inventoryId": "Weapon"})
+    gone = Item.model_validate({"id": "gone", "typeLine": "Old Ring", "frameType": 2,
+                                "inventoryId": "Ring"})
+    win._on_character_items("WitchOfPeter", [stays, gone], False)
+
+    new_item = Item.model_validate({"id": "new", "typeLine": "Chaos Orb", "frameType": 5,
+                                    "inventoryId": "MainInventory"})
+    win._on_character_items("WitchOfPeter", [stays, new_item], False)
+
+    # 3 Zeilen: die zwei aktuellen + das (für einen Zyklus) nachgezogene "gone"
+    assert win.table_model.rowCount() == 3
+    ids_in_view = {win.table_model.item_at(row).id for row in range(3)}
+    assert ids_in_view == {"stays", "new", "gone"}
+
+    def role_for(item_id: str, role) -> object:
+        row = next(r for r in range(3) if win.table_model.item_at(r).id == item_id)
+        return win.table_model.data(win.table_model.index(row, _NAME_COL), role)
+
+    assert role_for("new", Qt.ItemDataRole.BackgroundRole) is not None    # neu -> türkis
+    assert role_for("stays", Qt.ItemDataRole.BackgroundRole) is None       # unverändert -> nichts
+    assert role_for("gone", Qt.ItemDataRole.FontRole).strikeOut()          # verschwunden -> durchgestrichen
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_disappeared_item_is_only_shown_for_one_refresh_cycle(qapp) -> None:
+    win = MainWindow()
+    win._current_character_name = "WitchOfPeter"
+    stays = Item.model_validate({"id": "stays", "typeLine": "Sword", "inventoryId": "Weapon"})
+    gone = Item.model_validate({"id": "gone", "typeLine": "Old Ring", "inventoryId": "Ring"})
+
+    win._on_character_items("WitchOfPeter", [stays, gone], False)
+    win._on_character_items("WitchOfPeter", [stays], False)          # "gone" fehlt jetzt -> 1x nachgezogen
+    assert win.table_model.rowCount() == 2
+
+    win._on_character_items("WitchOfPeter", [stays], False)          # zweiter Refresh ohne "gone"
+    assert win.table_model.rowCount() == 1
+    assert win.table_model.item_at(0).id == "stays"
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_showing_a_cached_character_has_no_diff_highlighting(qapp) -> None:
+    """_on_character_selected zeigt Cache-Treffer direkt an — kein Refresh,
+    also auch kein Vergleichswert und keine Hervorhebung."""
+    from PySide6.QtCore import Qt
+    from poe_view.ui.item_table import _NAME_COL
+
+    win = MainWindow()
+    char = make_char("WitchOfPeter", "Standard")
+    win._character_items["WitchOfPeter"] = [
+        Item.model_validate({"id": "1", "typeLine": "Chaos Orb", "frameType": 5})]
+
+    win._on_character_selected(char)
+
+    idx = win.table_model.index(0, _NAME_COL)
+    assert win.table_model.data(idx, Qt.ItemDataRole.BackgroundRole) is None
+    assert win.table_model.data(idx, Qt.ItemDataRole.FontRole) is None
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
 # --- Charakter-Paperdoll: Doppelklick (ToDo.md, Peter 2026-07-31) ---
 
 def test_paperdoll_opens_immediately_for_a_cached_character(qapp) -> None:

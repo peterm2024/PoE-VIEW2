@@ -1391,8 +1391,9 @@ erreicht (Divine-Kurs kommt aus `PriceIndex.divine_rate`, keine feste
 Konstante). Unbekannt bleibt immer LEER, nie `0` — dieselbe Lehre wie bei
 der Stack-Summe (FALLSTRICKE #39): ein unbekannter Preis ist etwas
 anderes als ein wertloses Item. Werte unter einem Chaos werden dezent
-Richtung Hintergrund abgeblendet (`theme.blend`, dieselbe Funktion wie
-die Alters-Abblendung im Stash-Baum, §4.7) — ein optischer Hinweis auf
+Richtung Hintergrund abgeblendet (`theme.dimmed_text()`, seit §4.20 aus
+dieser Stelle herausgezogen — dieselbe Mischung wie die
+Alters-Abblendung im Stash-Baum, §4.7) — ein optischer Hinweis auf
 wahrscheinlichen Schrott, ohne eine feste Grautönung, die auf hellem wie
 dunklem Theme falsch aussähe.
 
@@ -1712,6 +1713,61 @@ den Pause-Refresh-Modus (explizite Nutzerwahl "keine
 Hintergrund-Anfragen") und `rate_limiter.pacing_blocked()` als harte
 Obergrenze, sonst identisch zu jedem anderen stillen Refresh
 (`silent=True`).
+
+### 4.20 Charakter-Refresh-Diff: geänderte/verschwundene Items hervorheben
+
+Peter, 2026-08-01: "Wenn ich das Character-Inventar beobachte hätte ich
+gerne die Zeilen hervorgehoben (Türkis), welche sich geändert haben. Die
+Items die seit dem letzten Mal verschwunden sind, könnten wir in Grau und
+durchgestrichen darstellen." Direkte Ergänzung zum Zonenwechsel-Trigger
+(§4.19) — der sorgt für häufigere Charakter-Refreshes, aber ohne
+Hervorhebung ließe sich das kaum ablesen: die Tabelle sortiert bei jedem
+`set_items()` neu auf, ein neu hinzugekommenes/verändertes Item geht in
+20+ unveränderten Zeilen unter.
+
+**Identität über `item.id`, nicht Objektgleichheit** — GGGs Item-ID ist
+über Refreshes hinweg stabil (real geprüft, Peters Cache), auch wenn sich
+z. B. die Stack-Größe eines Currency-Stacks ändert. `MainWindow.
+_diff_character_items(previous_items, items)` (statische Methode, pures
+Set-basiertes Vergleichen, keine Model-Abhängigkeit — leicht isoliert
+testbar) vergleicht den Item-Stand VOR dem gerade eingetroffenen Refresh
+mit dem neuen:
+
+- **Geändert** (`changed_ids`): `item.id` gab es vorher nicht (neu
+  hinzugekommen) ODER der komplette Item-Wert (Pydantic-Gleichheit,
+  erfasst auch `extra="allow"`-Zusatzfelder) unterscheidet sich vom
+  vorigen Stand mit derselben id — deckt Stack-Größen-, Mod- oder
+  Property-Änderungen gleichermaßen ab, ohne Feld für Feld selbst zu
+  vergleichen.
+- **Verschwunden** (`removed_items`): `item.id` gab es vorher, taucht im
+  neuen Stand aber nicht mehr auf.
+- Items ganz ohne `id` (im echten Cache bislang nie beobachtet, laut
+  Pydantic-Modell aber möglich) bleiben unberücksichtigt — ohne stabile
+  Kennung ist "gleiches Item, neuer Zustand" von "verschwunden + neues
+  Item zufällig an derselben Stelle" nicht unterscheidbar.
+- `previous_items=None` (erstes Anzeigen dieses Charakters, kein
+  Vergleichswert vorhanden — auch ein Cache-Treffer in
+  `_on_character_selected` zeigt ohne Diff an) liefert bewusst leere
+  Ergebnisse, sonst wäre beim allerersten Öffnen sofort die komplette
+  Ausrüstung "neu".
+
+**Verschwundene Items bleiben für GENAU EINEN Refresh-Zyklus sichtbar**
+statt sofort aus der Tabelle zu fallen — `_show_character_items()` hängt
+sie ans Ende der angezeigten Liste an (`items + removed_items`), OHNE sie
+in `self._character_items[name]` (der eigentlichen Diff-Basis fürs
+nächste Mal) mit zu speichern. Sie fallen beim übernächsten Refresh
+deshalb von selbst wieder raus, ohne eigene Aufräum-Logik.
+
+**Rendering in `ItemTableModel`** (`item_table.py`): `set_items()` nimmt
+zusätzlich `changed_ids`/`removed_ids` entgegen (Default: leere Menge —
+Stash-Ansichten kennen kein Refresh-Diff und färben dadurch nie versehentlich
+nach). Geänderte Zeilen bekommen einen türkis getönten Zeilenhintergrund
+(`theme.ROW_CHANGED_COLOR`, zur Palette-Hintergrundfarbe gemischt —
+hell wie dunkel lesbar). Verschwundene Zeilen bekommen für ALLE Spalten
+eine gedimmte Textfarbe (`theme.dimmed_text()`, derselbe Mischalgorithmus
+wie die "wahrscheinlich Schrott"-Dimmung der Value-Spalte, §4.14 — jetzt
+aus dieser Stelle herausgezogen und geteilt) sowie durchgestrichenen Text
+(`QFont.setStrikeOut`) statt der sonstigen Rarity-Färbung.
 
 ---
 

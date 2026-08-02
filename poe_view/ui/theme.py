@@ -3,7 +3,7 @@
 Quelle Rarity ↔ frameType: docs/ARCHITEKTUR.md §5.
 """
 
-from PySide6.QtGui import QColor
+from PySide6.QtGui import QColor, QPalette
 
 
 def blend(colour: QColor, towards: QColor, factor: float) -> QColor:
@@ -40,3 +40,17 @@ TYPE_FILTER_COLOR = "#e05fae"
 DASH_OK = "#6fae5c"
 DASH_WARN = "#d3a94e"
 DASH_BAD = "#c05b4d"
+
+# Zeilen-Hervorhebung beim Beobachten des Charakter-Inventars (Peter
+# 2026-08-01: "die Zeilen hervorgehoben (Türkis), welche sich geändert
+# haben" seit dem vorigen Refresh) — item_table.py.
+ROW_CHANGED_COLOR = "#1fa8a8"
+
+
+def dimmed_text(palette: QPalette) -> QColor:
+    """Textfarbe zu 50% Richtung Hintergrund gemischt — "wahrscheinlich
+    Schrott" (Value-Spalte) bzw. "aus dem Inventar verschwunden" (Zeilen im
+    Charakter-Refresh-Diff, item_table.py) statt eines festen Grautons, der
+    auf hellem wie dunklem Theme falsch aussähe."""
+    return blend(palette.color(QPalette.ColorRole.Text),
+                palette.color(QPalette.ColorRole.Base), 0.5)

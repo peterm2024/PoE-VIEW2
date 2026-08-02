@@ -68,6 +68,12 @@ nach [SemVer](https://semver.org/lang/de/).
 
 ### Hinzugefügt
 
+- Charakter-Ansicht: Beim Beobachten eines Charakter-Inventars (z. B. per
+  Zonenwechsel-Trigger, siehe unten) werden Zeilen, die sich seit dem
+  letzten Refresh geändert haben oder neu hinzugekommen sind, türkis
+  hervorgehoben. Aus dem Inventar verschwundene Items werden nicht
+  sofort entfernt, sondern für einen Refresh-Zyklus grau und
+  durchgestrichen angezeigt.
 - Optionaler Zonenwechsel-Trigger für den Live-Refresh (Settings-Dialog,
   Reiter "Zone Refresh", standardmäßig AUS): PoE-VIEW2 kann Peters lokale
   Client.txt beobachten (rein lesend, Pfad muss selbst eingetragen

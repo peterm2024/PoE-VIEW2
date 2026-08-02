@@ -67,12 +67,14 @@ from typing import Callable
 
 from PySide6.QtCore import (QAbstractTableModel, QModelIndex,
                             QSortFilterProxyModel, Qt)
-from PySide6.QtGui import QBrush, QColor, QGuiApplication, QPalette, QPixmap
+from PySide6.QtGui import (QBrush, QColor, QFont, QGuiApplication, QPalette,
+                           QPixmap)
 
 from poe_view.api.models import (Item, gem_level, gem_quality, req_attribute,
                                  req_level)
 from poe_view.api.ninja import PriceIndex
-from poe_view.ui.theme import OTHER_TYPE, RARITY_COLORS, blend
+from poe_view.ui.theme import (OTHER_TYPE, RARITY_COLORS, ROW_CHANGED_COLOR,
+                               blend, dimmed_text)
 
 # frameTypes mit eigener Checkbox (MainWindow.TYPE_FILTER_ENTRIES) — alles
 # andere läuft für den Typ-Filter unter OTHER_TYPE ("Sonstige").
@@ -150,13 +152,17 @@ class ItemTableModel(QAbstractTableModel):
         self._requested: set[str] = set()
         self._icon_requester = icon_requester
         self._price_index: PriceIndex | None = None
+        self._changed_ids: frozenset[str] = frozenset()
+        self._removed_ids: frozenset[str] = frozenset()
 
     # --- Daten setzen -------------------------------------------------- #
 
     def set_items(self, items: list[Item], sources: list[str] | None = None,
                   tab_indices: list[int | None] | None = None,
                   stash_ids: list[str | None] | None = None,
-                  request_icons: bool = True) -> None:
+                  request_icons: bool = True,
+                  changed_ids: frozenset[str] = frozenset(),
+                  removed_ids: frozenset[str] = frozenset()) -> None:
         """``sources[i]`` ist der Tab-Name von ``items[i]``. Ohne Angabe leer.
         ``tab_indices[i]`` ist die 1-basierte Position des Herkunfts-Tabs in
         der aktuellen API-Antwort (``MainWindow._tab_positions``, bewusst
@@ -172,12 +178,22 @@ class ItemTableModel(QAbstractTableModel):
         ``request_icons=False`` für große Aggregate (liga-weite Suche,
         "Alle Tabs laden"): Icons werden dann lazy in ``data()`` angefordert,
         sobald Qt die Zeile tatsächlich malt — nur Sichtbares kostet Jobs.
-        """
+
+        ``changed_ids``/``removed_ids`` (``item.id``, Peter 2026-08-01: "die
+        Zeilen hervorgehoben (Türkis), welche sich geändert haben") kommen
+        vom Charakter-Refresh-Diff (MainWindow._show_character_items) — hier
+        nur zum Rendern durchgereicht, die Diff-Logik selbst kennt das Model
+        nicht. ``removed_ids`` referenziert Items, die zwar noch in
+        ``items`` stehen (damit sie sichtbar bleiben), aber im aktuellen
+        Inventar nicht mehr existieren — Grau/Durchgestrichen statt Löschen,
+        damit man sieht, was gerade verschwunden ist."""
         self.beginResetModel()
         self._items = items
         self._sources = sources if sources is not None else [""] * len(items)
         self._tab_indices = tab_indices if tab_indices is not None else [None] * len(items)
         self._stash_ids = stash_ids if stash_ids is not None else [None] * len(items)
+        self._changed_ids = changed_ids
+        self._removed_ids = removed_ids
         self._rows = [self._precompute(item) for item in items]
         # Einmal pro Ladevorgang statt bei JEDEM Tastendruck neu zusammengebaut
         # (filterAcceptsRow lief vorher pro Zeile UND pro Tastendruck über
@@ -345,6 +361,12 @@ class ItemTableModel(QAbstractTableModel):
                 return pm.scaled(24, 24, Qt.AspectRatioMode.KeepAspectRatio,
                                  Qt.TransformationMode.SmoothTransformation)
             self._request_icon(item)  # lazy: erst wenn die Zeile sichtbar wird
+        is_removed = bool(item.id) and item.id in self._removed_ids
+        if role == Qt.ItemDataRole.ForegroundRole and is_removed:
+            # Aus dem Inventar verschwunden (Charakter-Refresh-Diff) — grau
+            # statt der sonstigen Rarity-/Value-Färbung, gilt für die ganze
+            # Zeile, nicht nur einzelne Spalten.
+            return QBrush(dimmed_text(QGuiApplication.palette()))
         if role == Qt.ItemDataRole.ForegroundRole and col == _NAME_COL:
             colour = RARITY_COLORS.get(item.frameType)
             if colour:
@@ -352,10 +374,17 @@ class ItemTableModel(QAbstractTableModel):
         if role == Qt.ItemDataRole.ForegroundRole and col == VALUE_COL:
             value = self.value_at(index.row())
             if value is not None and value < _JUNK_THRESHOLD_CHAOS:
-                palette = QGuiApplication.palette()
-                dimmed = blend(palette.color(QPalette.ColorRole.Text),
-                              palette.color(QPalette.ColorRole.Base), 0.5)
-                return QBrush(dimmed)
+                return QBrush(dimmed_text(QGuiApplication.palette()))
+        if role == Qt.ItemDataRole.FontRole and is_removed:
+            font = QFont()
+            font.setStrikeOut(True)
+            return font
+        if role == Qt.ItemDataRole.BackgroundRole and bool(item.id) and item.id in self._changed_ids:
+            # Seit dem letzten Refresh geändert oder neu hinzugekommen
+            # (Charakter-Refresh-Diff) — Türkis-Tönung des Zeilenhintergrunds,
+            # zur Basisfarbe des Themes gemischt (hell wie dunkel lesbar).
+            palette = QGuiApplication.palette()
+            return QBrush(blend(QColor(ROW_CHANGED_COLOR), palette.color(QPalette.ColorRole.Base), 0.55))
         if role == Qt.ItemDataRole.TextAlignmentRole and (
                 (_NUMERIC_FROM_COL <= col < MODS_COL) or col == VALUE_COL):
             return int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
