@@ -6,6 +6,8 @@ nach [SemVer](https://semver.org/lang/de/).
 
 ## [Unveröffentlicht]
 
+## [0.3.0] - 2026-08-02
+
 ### Behoben
 
 - Ein Spalten-Filter auf der Tab-Spalte (Header-Rechtsklick) überlebte
@@ -158,7 +160,6 @@ nach [SemVer](https://semver.org/lang/de/).
   rohen X-Rate-Limit-Werten je Regel plus dem gelernten Absenkungs-Takt.
   Diese Rohdaten haben belegt, dass GGGs Zähler blockweise statt gleitend
   sinkt, siehe FALLSTRICKE_UND_WORKAROUNDS.md #45.
-
 - Preis-Anzeige über poe.ninja: neue **Value**-Spalte in der Item-Tabelle
   (Chaos-Wert × Stack, Anzeige in Chaos oder Divine je nach Höhe) sowie
   Gesamtwert der sichtbaren Items in der Statuszeile. Umfasst Currency,
@@ -334,6 +335,7 @@ Erste veröffentlichte Version.
 Die technischen Hintergründe einzelner Entscheidungen stehen in
 [FALLSTRICKE_UND_WORKAROUNDS.md](FALLSTRICKE_UND_WORKAROUNDS.md).
 
-[Unveröffentlicht]: https://github.com/peterm2024/PoE-VIEW2/compare/v0.2.0...HEAD
+[Unveröffentlicht]: https://github.com/peterm2024/PoE-VIEW2/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/peterm2024/PoE-VIEW2/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/peterm2024/PoE-VIEW2/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/peterm2024/PoE-VIEW2/releases/tag/v0.1.0
