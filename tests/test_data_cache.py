@@ -124,3 +124,57 @@ def test_save_ignores_write_errors(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(data_cache, "_CACHE_FILE", tmp_path / "no" / "such" / "dir" / "cache.json")
     monkeypatch.setattr(data_cache.config, "ensure_dirs", lambda: None)  # verhindert Auto-Erstellung
     data_cache.save(data_cache.CachedData())  # darf nicht raisen
+
+
+# --- Cache pro Konto (Peter, 2026-08-02) ---------------------------------- #
+
+def test_path_for_builds_an_account_specific_filename() -> None:
+    path = data_cache.path_for("PeterM")
+    assert path.name == "data-cache-PeterM.json"
+
+
+def test_path_for_sanitizes_unsafe_characters() -> None:
+    """GGG-Kontonamen können ein '#1234'-Suffix tragen, aber theoretisch
+    auch andere Sonderzeichen -- der Dateiname muss trotzdem gueltig sein."""
+    path = data_cache.path_for("Weird:Name*?")
+    assert path.name == "data-cache-Weird_Name__.json"
+
+
+def test_path_for_empty_account_falls_back_to_a_fixed_name() -> None:
+    path = data_cache.path_for("")
+    assert path.name == "data-cache-account.json"
+
+
+def test_two_accounts_get_independent_cache_files(tmp_path, monkeypatch) -> None:
+    """Kern der Konto-Trennung: Konto A darf Konto Bs Datei nicht anfassen."""
+    monkeypatch.setattr(data_cache.config, "APP_DATA_DIR", tmp_path)
+    path_a, path_b = data_cache.path_for("Alice"), data_cache.path_for("Bob")
+    assert path_a != path_b
+
+    data_a = data_cache.CachedData()
+    data_a.account_name = "Alice"
+    data_a.characters = [Character.model_validate(
+        {"name": "AliceChar", "class": "Witch", "level": 90, "league": "Standard"})]
+    data_cache.save(data_a, path_a)
+
+    data_b = data_cache.CachedData()
+    data_b.account_name = "Bob"
+    data_cache.save(data_b, path_b)
+
+    restored_a = data_cache.load(path_a)
+    restored_b = data_cache.load(path_b)
+    assert restored_a.characters[0].name == "AliceChar"
+    assert restored_b.characters == []
+
+
+def test_save_and_load_with_explicit_path_ignore_the_legacy_cache_file(
+        tmp_path, monkeypatch) -> None:
+    """Ein expliziter ``path`` wird verwendet, ohne die alte gemeinsame
+    ``_CACHE_FILE`` zu beruehren -- die bleibt unangetastet auf der Platte."""
+    monkeypatch.setattr(data_cache, "_CACHE_FILE", tmp_path / "legacy.json")
+    account_path = tmp_path / "data-cache-PeterM.json"
+
+    data_cache.save(data_cache.CachedData(), account_path)
+
+    assert account_path.exists()
+    assert not (tmp_path / "legacy.json").exists()  # nicht angelegt/veraendert

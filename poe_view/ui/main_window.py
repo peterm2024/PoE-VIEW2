@@ -19,8 +19,8 @@ from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QCompleter,
                                QDialog, QFileDialog, QLabel, QLineEdit,
                                QMainWindow, QMenu, QMessageBox, QProgressBar,
                                QProgressDialog, QSizePolicy, QSplitter,
-                               QTableView, QToolBar, QVBoxLayout, QWidget,
-                               QWidgetAction)
+                               QTableView, QToolBar, QToolButton, QVBoxLayout,
+                               QWidget, QWidgetAction)
 
 from poe_view import __version__, config
 from poe_view.api.models import (Character, Item, StashTab,
@@ -175,6 +175,11 @@ class MainWindow(QMainWindow):
         # gängiger Standard-Wert für Mindestfenstergrößen.
         self.setMinimumSize(800, 600)
 
+        # Konto-Trennung (Peter, 2026-08-02: "Wenn ich den Account wechsle,
+        # habe ich dann meine eigenen Daten?"): `_account_name` ist doppelt
+        # belegt — Anzeigename UND Schlüssel, unter dem `_persist_cache`
+        # sichert (`data_cache.path_for`). "" bedeutet "kein Konto aktiv",
+        # sowohl direkt nach dem Start als auch nach einem Logout.
         self._account_name: str = ""
         self._stash_trees: dict[str, list[StashTab]] = {}      # Liga → Baumstruktur
         self._items: dict[str, dict[str, list[Item]]] = {}     # Liga → {stash_id: Items}
@@ -294,16 +299,38 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------------------------ #
 
+    # Settings-Schlüssel: welches Konto war zuletzt aktiv (siehe
+    # _restore_cached_data/_on_logged_in) — persistiert in ui-settings.ini,
+    # NICHT im Daten-Cache selbst, weil er schon vor dem allerersten
+    # Cache-Zugriff gebraucht wird (kalter Start kennt den Account-Namen
+    # sonst erst nach dem asynchronen /profile-Aufruf, siehe unten).
+    _ACCOUNT_SETTING_KEY = "account/last_active"
+
     def _restore_cached_data(self) -> None:
         """Lädt den letzten Daten-Cache (überlebt einen Neustart) — rein in-memory.
 
         Das Rendern übernimmt der normale Ablauf, sobald eine Liga aktiv
         wird (_on_league_changed → _activate_stash_tree), genau wie bei
         frisch von der API geladenen Daten.
+
+        Konto-Trennung (Peter, 2026-08-02): welches Konto geladen wird,
+        muss VOR dem Bootstrap/Login feststehen, sonst gäbe es beim Start
+        keine Offline-Ansicht (die läuft komplett ohne Netzwerk, ein
+        Warten auf den account-liefernden /profile-Aufruf würde sie
+        kaputt machen). Die letzte bekannte Kontokennung kommt deshalb aus
+        `ui-settings.ini`, nicht aus einem API-Aufruf. Fehlt sie (erster
+        Start nach dieser Funktion, oder ganz neue Installation), fällt
+        das auf den alten, kontounabhängigen Pfad zurück — Migration einer
+        vorhandenen `data-cache.json` unter dem darin gespeicherten
+        `account_name`, ohne dass irgendetwas kopiert oder gelöscht werden
+        muss: der nächste `_persist_cache()`-Aufruf schreibt dann bereits
+        in die neue, kontospezifische Datei.
         """
-        cached = data_cache.load()
+        hint = str(self._settings().value(self._ACCOUNT_SETTING_KEY, ""))
+        cached = data_cache.load(data_cache.path_for(hint)) if hint else data_cache.load()
         if cached is None:
             return
+        self._account_name = hint or cached.account_name
         self._all_characters = cached.characters
         # Ältere Caches liegen noch flach vor (Ordner-Inhalte auf oberster
         # Ebene, teils zusätzlich im Ordner) — beim Laden einmal aufräumen,
@@ -319,6 +346,12 @@ class MainWindow(QMainWindow):
                  len(cached.characters), len(cached.stash_trees))
 
     def _persist_cache(self) -> None:
+        """Kein aktives Konto (frisch ausgeloggt) → nichts zu sichern, UND
+        insbesondere keine leere Datei über einen bestehenden Kontostand
+        schreiben (könnte sonst passieren, wenn ein noch laufender Job kurz
+        nach einem Logout sein Ergebnis liefert, siehe _on_logout_clicked)."""
+        if not self._account_name:
+            return
         data = data_cache.CachedData()
         data.account_name = self._account_name
         data.characters = self._all_characters
@@ -327,7 +360,7 @@ class MainWindow(QMainWindow):
         data.last_loaded = self._last_loaded
         data.character_items = self._character_items
         data.character_items_loaded = self._character_items_loaded
-        data_cache.save(data)
+        data_cache.save(data, data_cache.path_for(self._account_name))
 
     # ------------------------------------------------------------------ #
 
@@ -351,9 +384,23 @@ class MainWindow(QMainWindow):
         filter_toolbar.setMovable(False)
         self.addToolBar(filter_toolbar)
 
-        self._login_action = QAction("🔑 Log in", self)
-        self._login_action.triggered.connect(lambda: self.worker.submit(LoginJob()))
-        toolbar.addAction(self._login_action)
+        # Ein QToolButton statt einer schlichten QAction (Peter, 2026-08-02:
+        # "Wer sich mit einem ANDEREN GGG-Konto anmelden will, muss den
+        # Eintrag ... von Hand löschen ... Sackgasse") — nach dem Login
+        # bekommt derselbe Button ein Menü mit "Log out" statt einfach nur
+        # deaktiviert zu werden. Ausgeloggt bleibt das Verhalten identisch
+        # zur alten QAction: ein Klick startet direkt den Login (kein Menü
+        # im Weg), da `_account_menu` erst in `_on_logged_in` angehängt
+        # wird. `InstantPopup` sorgt dafür, dass ein Klick mit Menü das
+        # Menü öffnet statt `clicked` auszulösen — ein einziger Button und
+        # ein einziger Klick-Handler genügen für beide Zustände.
+        self._login_button = QToolButton()
+        self._login_button.setText("🔑 Log in")
+        self._login_button.setAutoRaise(True)
+        self._login_button.clicked.connect(lambda: self.worker.submit(LoginJob()))
+        toolbar.addWidget(self._login_button)
+        self._account_menu = QMenu(self._login_button)
+        self._account_menu.addAction("🚪 Log out").triggered.connect(self._on_logout_clicked)
 
         self._refresh_action = QAction("⟳ Refresh", self)
         self._refresh_action.triggered.connect(self._refresh)
@@ -1011,10 +1058,27 @@ class MainWindow(QMainWindow):
         self._rate_limit_wait_until = (time.monotonic() + wait_s) if wait_s > 0 else 0.0
 
     def _on_logged_in(self, account_name: str) -> None:
+        """``account_name`` kommt aus einem frischen ``/profile``-Aufruf
+        (§ApiWorker._after_auth) — sowohl nach einem interaktiven Login als
+        auch nach einem kalten Start mit noch gültigem gespeichertem Token.
+
+        Weicht es vom Konto ab, dessen Daten gerade im Speicher stehen
+        (``self._account_name``, gesetzt von ``_restore_cached_data`` beim
+        kalten Start oder einem vorherigen Login in dieser Session), ist
+        das ein Kontowechsel: der spekulativ geladene oder noch übrige
+        Stand des ALTEN Kontos wird verworfen, nicht vermischt (Peter,
+        2026-08-02: "Wenn ich den Account wechsle, habe ich dann meine
+        eigenen Daten?"). Der Normalfall — dieselbe Person startet neu
+        oder loggt sich erneut mit demselben Konto ein — durchläuft diesen
+        Zweig gar nicht (`self._account_name` stimmt schon überein)."""
+        if self._account_name and account_name != self._account_name:
+            self._switch_active_account_data(account_name)
         self._account_name = account_name
+        self._settings().setValue(self._ACCOUNT_SETTING_KEY, account_name)
         self._logged_in = True
-        self._login_action.setText(f"⚷ {account_name}")
-        self._login_action.setEnabled(False)
+        self._login_button.setText(f"⚷ {account_name}")
+        self._login_button.setMenu(self._account_menu)
+        self._login_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         self._update_online_controls_enabled()
         self.worker.submit(FetchLeaguesJob())
         self.worker.submit(FetchCharactersJob())
@@ -1028,12 +1092,87 @@ class MainWindow(QMainWindow):
         real beobachtet: mehrere Minuten lang HTTP 401 im Log, alle exakt
         AUTO_REFRESH_INTERVAL_MS auseinander, bis der Nutzer den Login-Button
         von Hand bemerkt (Rückfrage "Automatik hat nicht hingehauen").
-        """
+
+        Ändert BEWUSST NICHTS an ``self._account_name`` oder den geladenen
+        Fach-/Item-/Charakterdaten — ein unfreiwilliger Token-Ablauf soll
+        die gerade sichtbare (Cache-)Ansicht nicht wegreißen. Ein echter
+        Kontowechsel läuft stattdessen über ``_on_logout_clicked`` (bewusst
+        vom Nutzer ausgelöst) oder wird in ``_on_logged_in`` erkannt."""
         self._logged_in = False
-        self._login_action.setEnabled(True)
-        self._login_action.setText("🔑 Log in")
+        self._login_button.setText("🔑 Log in")
+        self._login_button.setMenu(None)
+        self._login_button.setPopupMode(QToolButton.ToolButtonPopupMode.DelayedPopup)
         self._status_msg.setText(reason)
         self._update_online_controls_enabled()
+
+    def _on_logout_clicked(self) -> None:
+        """Nutzer wählt "Log out" im Konto-Menü (Peter, 2026-08-02, zum
+        fehlenden Logout: "Für ein öffentliches Werkzeug eine Sackgasse").
+
+        Anders als ein unfreiwilliger Token-Ablauf (``_on_login_required``,
+        der die sichtbare Ansicht bewusst NICHT anfasst) ist das ein
+        gewollter Session-Schnitt: die im Speicher gehaltenen Fach-/Item-/
+        Charakterdaten dieses Kontos werden geleert, NICHT von der Platte
+        gelöscht (Peters Entscheidung: "zu gefährlich, das kann der Nutzer
+        über den Explorer erledigen") — nach einem Login mit einem ANDEREN
+        Konto bleibt dadurch nichts vom alten sichtbar oder vermischt sich
+        damit. Das eigentliche Token-Löschen + der UI-Rücksprung auf
+        "🔑 Log in" laufen über den Worker (``LogoutJob`` → ``login_
+        required``-Signal → ``_on_login_required``), exakt wie bei jedem
+        anderen Abmelde-Grund."""
+        self.worker.submit(LogoutJob())
+        self._reset_session_data()
+        self._account_name = ""
+        self._rebuild_league_combo(None)
+
+    def _reset_session_data(self) -> None:
+        """Leert alle konto-/liga-gebundenen Daten im Speicher UND die
+        sichtbaren Widgets — geteilt von ``_on_logout_clicked`` und
+        ``_switch_active_account_data``. Absichtlich NICHT betroffen:
+        ``_price_indexes`` (poe.ninja-Preise gelten pro Liga, nicht pro
+        Konto, ein Neuabruf nur wegen des Kontowechsels wäre verschwendet)
+        und ``_offline``/``_live_leagues`` (Spielzustand, kein Konto-Bezug).
+        """
+        self._all_characters = []
+        self._stash_trees = {}
+        self._items = {}
+        self._last_loaded = {}
+        self._character_items = {}
+        self._character_items_loaded = {}
+        self._leaf_stashes = []
+        self._current_league = ""
+        self._current_tab_name = ""
+        self._current_stash_id = None
+        self._current_character_name = None
+        self._current_stash_selection = None
+        self._showing_aggregate = False
+        self._search_all_active = False
+        self._large_search_items = None
+        self._item_history.clear()
+        self._filter_edit.clear()
+        self.tree.set_stashes([])
+        self.character_list.set_characters([])
+        self.table_model.set_items([])
+        self.history_model.set_entries([])
+
+    def _switch_active_account_data(self, account_name: str) -> None:
+        """Von ``_on_logged_in`` gerufen, wenn das gerade bestätigte Konto
+        NICHT dem entspricht, dessen Daten im Speicher stehen (siehe dort).
+        Leert zunächst alles (``_reset_session_data``), lädt danach den
+        eigenen Cache-Stand des neuen Kontos (falls vorhanden — ein noch
+        nie auf diesem Rechner genutztes Konto startet einfach leer, wird
+        aber nicht mit dem alten vermischt)."""
+        self._reset_session_data()
+        cached = data_cache.load(data_cache.path_for(account_name))
+        if cached is not None:
+            self._all_characters = cached.characters
+            self._stash_trees = {league: self._nest_folder_members(tree)
+                                 for league, tree in cached.stash_trees.items()}
+            self._items = cached.items_by_league
+            self._last_loaded = cached.last_loaded
+            self._character_items = cached.character_items
+            self._character_items_loaded = cached.character_items_loaded
+        self._rebuild_league_combo(None)
 
     def _update_online_controls_enabled(self) -> None:
         """Sperrt Online-Funktionen, solange kein gültiger Login besteht.

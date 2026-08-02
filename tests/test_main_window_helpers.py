@@ -1814,6 +1814,234 @@ def test_online_actions_disabled_while_not_logged_in(qapp) -> None:
     win.worker.wait(5000)
 
 
+# --- Logout + Konto-Trennung (Peter, 2026-08-02/03) ----------------------- #
+
+def test_login_button_shows_account_name_and_gains_a_logout_menu(qapp) -> None:
+    from PySide6.QtWidgets import QToolButton
+
+    win = MainWindow()
+    assert win._login_button.text() == "🔑 Log in"
+    assert win._login_button.menu() is None
+
+    win._on_logged_in("PeterM")
+
+    assert win._login_button.text() == "⚷ PeterM"
+    assert win._login_button.menu() is win._account_menu
+    assert [a.text() for a in win._account_menu.actions()] == ["🚪 Log out"]
+    assert win._login_button.popupMode() == QToolButton.ToolButtonPopupMode.InstantPopup
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_login_button_reverts_after_logout(qapp) -> None:
+    win = MainWindow()
+    win._on_logged_in("PeterM")
+
+    win._on_login_required("Logged out.")
+
+    assert win._login_button.text() == "🔑 Log in"
+    assert win._login_button.menu() is None
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_logout_clears_in_memory_session_data(qapp, monkeypatch) -> None:
+    """Peter, 2026-08-02: fehlender Logout war "für ein öffentliches
+    Werkzeug eine Sackgasse". Ein Logout muss die im Speicher gehaltenen
+    Fach-/Item-/Charakterdaten leeren, damit nach einem Login mit einem
+    ANDEREN Konto nichts vom alten sichtbar bleibt oder sich vermischt."""
+    win = MainWindow()
+    win._on_logged_in("PeterM")
+    win._current_league = "Standard"
+    t1 = _make_leaf("t1", "Currency 1")
+    win._stash_trees["Standard"] = [t1]
+    win._leaf_stashes = [t1]
+    win._items["Standard"] = {"t1": [Item.model_validate({"typeLine": "Chaos Orb"})]}
+    win._all_characters = [make_char("WitchOfPeter", "Standard")]
+    win._character_items["WitchOfPeter"] = [Item.model_validate({"typeLine": "Chaos Orb"})]
+    win._filter_edit.setText("chaos")
+    monkeypatch.setattr(win.worker, "submit", lambda job: None)
+
+    win._on_logout_clicked()
+
+    assert win._stash_trees == {}
+    assert win._items == {}
+    assert win._all_characters == []
+    assert win._character_items == {}
+    assert win._leaf_stashes == []
+    assert win._current_league == ""
+    assert win._account_name == ""
+    assert win._filter_edit.text() == ""
+    assert win.tree.topLevelItemCount() == 0
+    assert win.character_list.count() == 0
+    assert win.table_model.rowCount() == 0
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_logout_submits_a_logout_job(qapp, monkeypatch) -> None:
+    from poe_view.services.api_worker import LogoutJob
+
+    win = MainWindow()
+    win._on_logged_in("PeterM")
+    submitted = []
+    monkeypatch.setattr(win.worker, "submit", lambda job: submitted.append(job))
+
+    win._on_logout_clicked()
+
+    assert any(isinstance(j, LogoutJob) for j in submitted)
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_persist_cache_is_a_noop_without_an_active_account(qapp, monkeypatch) -> None:
+    """Verhindert, dass ein spät eintreffender Job kurz nach einem Logout
+    eine leere Datei über einen bestehenden Kontostand schreibt."""
+    from poe_view.services import data_cache
+
+    win = MainWindow()
+    saved = []
+    monkeypatch.setattr(data_cache, "save", lambda data, path=None: saved.append(path))
+
+    win._persist_cache()
+
+    assert saved == []
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_persist_cache_writes_to_the_accounts_own_file(qapp, monkeypatch) -> None:
+    from poe_view.services import data_cache
+
+    win = MainWindow()
+    win._on_logged_in("PeterM")
+    saved = []
+    monkeypatch.setattr(data_cache, "save", lambda data, path=None: saved.append((data, path)))
+
+    win._persist_cache()
+
+    assert len(saved) == 1
+    data, path = saved[0]
+    assert data.account_name == "PeterM"
+    assert path == data_cache.path_for("PeterM")
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_logging_in_with_a_different_account_discards_the_old_data(qapp, monkeypatch) -> None:
+    """Kern der Konto-Trennung: ein kalter Start laedt spekulativ das
+    zuletzt bekannte Konto, ein Login mit einem ANDEREN Konto darf dessen
+    Daten nicht mit dem alten Stand vermischen."""
+    win = MainWindow()
+    win._account_name = "Alice"  # spekulativ geladen, wie beim kalten Start
+    win._stash_trees["Standard"] = [_make_leaf("t1", "Alice's Tab")]
+    win._items["Standard"] = {"t1": [Item.model_validate({"typeLine": "Chaos Orb"})]}
+    win._all_characters = [make_char("AliceChar", "Standard")]
+    monkeypatch.setattr(win.worker, "submit", lambda job: None)
+
+    win._on_logged_in("Bob")
+
+    assert win._account_name == "Bob"
+    assert win._stash_trees == {}
+    assert win._items == {}
+    assert win._all_characters == []
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_logging_in_with_a_different_account_loads_its_own_cache(qapp, monkeypatch) -> None:
+    from poe_view.services import data_cache
+
+    win = MainWindow()
+    win._account_name = "Alice"
+    bob_data = data_cache.CachedData()
+    bob_data.account_name = "Bob"
+    bob_data.characters = [make_char("BobChar", "Standard")]
+    data_cache.save(bob_data, data_cache.path_for("Bob"))
+    monkeypatch.setattr(win.worker, "submit", lambda job: None)
+
+    win._on_logged_in("Bob")
+
+    assert [c.name for c in win._all_characters] == ["BobChar"]
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_logging_in_with_the_same_account_keeps_the_data(qapp, monkeypatch) -> None:
+    """Der Normalfall (Neustart oder erneuter Login mit demselben Konto)
+    darf NICHT wie ein Kontowechsel behandelt werden."""
+    win = MainWindow()
+    win._account_name = "PeterM"
+    t1 = _make_leaf("t1", "Currency 1")
+    win._stash_trees["Standard"] = [t1]
+    win._items["Standard"] = {"t1": [Item.model_validate({"typeLine": "Chaos Orb"})]}
+    monkeypatch.setattr(win.worker, "submit", lambda job: None)
+
+    win._on_logged_in("PeterM")
+
+    assert "Standard" in win._stash_trees
+    assert win._items["Standard"]["t1"][0].display_name == "Chaos Orb"
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_restore_cached_data_uses_the_last_active_account_hint(qapp) -> None:
+    """`config.APP_DATA_DIR` ist über die autouse-Fixture in conftest.py
+    schon pro Test isoliert — `_settings()` baut ihren Pfad daraus, ein
+    Schreiben unter demselben Pfad genügt, kein Monkeypatch von `_settings`
+    nötig."""
+    from poe_view import config
+    from poe_view.services import data_cache
+    from PySide6.QtCore import QSettings
+
+    peter_data = data_cache.CachedData()
+    peter_data.account_name = "PeterM"
+    peter_data.characters = [make_char("WitchOfPeter", "Standard")]
+    data_cache.save(peter_data, data_cache.path_for("PeterM"))
+    QSettings(str(config.APP_DATA_DIR / "ui-settings.ini"),
+             QSettings.Format.IniFormat).setValue("account/last_active", "PeterM")
+
+    win = MainWindow()
+
+    assert win._account_name == "PeterM"
+    assert [c.name for c in win._all_characters] == ["WitchOfPeter"]
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_restore_cached_data_falls_back_to_legacy_file_without_a_hint(
+        qapp, monkeypatch, tmp_path) -> None:
+    """Migration: erster Start nach dieser Funktion kennt noch kein
+    'last_active'-Setting, findet aber evtl. die alte gemeinsame
+    data-cache.json -- deren eigener account_name wird uebernommen."""
+    from poe_view.services import data_cache
+
+    legacy_path = tmp_path / "legacy.json"
+    monkeypatch.setattr(data_cache, "_CACHE_FILE", legacy_path)
+    legacy_data = data_cache.CachedData()
+    legacy_data.account_name = "OldAccount"
+    legacy_data.characters = [make_char("LegacyChar", "Standard")]
+    data_cache.save(legacy_data)  # kein path -> alter, gemeinsamer Pfad
+
+    win = MainWindow()
+
+    assert win._account_name == "OldAccount"
+    assert [c.name for c in win._all_characters] == ["LegacyChar"]
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
 def test_maybe_auto_refresh_also_refreshes_currently_displayed_tab(qapp, monkeypatch) -> None:
     """das gerade angezeigte Fach soll bei jedem Auto-Refresh-
     Tick ZUSÄTZLICH zum normalen Sweep-Kandidaten aktualisiert werden — auch

@@ -6,6 +6,22 @@ nach [SemVer](https://semver.org/lang/de/).
 
 ## [Unveröffentlicht]
 
+### Hinzugefügt
+
+- Logout: der Konto-Button in der Toolbar öffnet nach dem Login jetzt ein
+  Menü mit "Log out", statt einfach nur deaktiviert zu sein. Vorher gab
+  es keinen Weg, sich mit einem anderen GGG-Konto anzumelden, ohne den
+  gespeicherten Eintrag von Hand aus dem Windows-Anmeldeinformations-
+  manager zu löschen. Ein Logout widerruft nur lokal die Anmeldung bei
+  PoE-VIEW2 — die Freigabe auf der GGG-Kontoseite bleibt davon
+  unberührt, dort lässt sie sich bei Bedarf separat entziehen.
+- Cache-Trennung pro Konto: jedes GGG-Konto bekommt jetzt seine eigene
+  lokale Datendatei statt einer gemeinsamen. Vorher blieben Stash-Baum,
+  Items und Charaktere eines vorherigen Kontos nach einem Kontowechsel
+  im Speicher stehen und vermischten sich mit dem neuen. Nichts wird
+  dabei gelöscht — jedes Konto behält seinen eigenen Stand, auch beim
+  Zurückwechseln.
+
 ## [0.4.0] - 2026-08-03
 
 ### Hinzugefügt

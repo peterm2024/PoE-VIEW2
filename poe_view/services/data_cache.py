@@ -5,6 +5,19 @@ hundert Items und einigen Dutzend Charakteren rechtfertigt keine.
 Struktur und Items werden getrennt gehalten (``stash_trees`` und
 ``items_by_league``), weil die Stash-Liste der API grundsätzlich keine
 Items enthält; diese kommen ausschließlich vom Einzel-Tab-Endpunkt.
+
+Eine Cache-Datei JE KONTO (``path_for``), nicht mehr eine einzige
+gemeinsame (Peter, 2026-08-02: "Wenn ich den Account wechsle, habe ich
+dann meine eigenen Daten?"). Vorher wurde ``account_name`` zwar
+gespeichert, aber nirgends verglichen — nach einem Kontowechsel blieben
+Stash-Baum, Items und Charaktere des alten Kontos stehen und mischten
+sich mit denen des neuen. ``save``/``load`` bleiben absichtlich auf den
+ALTEN, kontounabhängigen ``_CACHE_FILE``-Pfad voreingestellt (kein
+Pflicht-Parameter) — bestehende Aufrufer/Tests funktionieren dadurch
+unverändert weiter; ``MainWindow`` übergibt seit der Konto-Trennung
+immer explizit ``path_for(account_name)``. Die alte gemeinsame Datei
+wird dadurch nie gelöscht, nur nicht mehr beschrieben (Migration siehe
+``MainWindow._restore_cached_data``).
 """
 
 from __future__ import annotations
@@ -12,13 +25,21 @@ from __future__ import annotations
 import json
 import logging
 from datetime import datetime, timezone
+from pathlib import Path
 
 from poe_view import config
 from poe_view.api.models import Character, Item, StashTab
+from poe_view.services.csv_export import sanitize_filename
 
 log = logging.getLogger(__name__)
 
 _CACHE_FILE = config.APP_DATA_DIR / "data-cache.json"
+
+
+def path_for(account_name: str) -> Path:
+    """Cache-Datei-Pfad für EIN Konto."""
+    safe = sanitize_filename(account_name, fallback="account")
+    return config.APP_DATA_DIR / f"data-cache-{safe}.json"
 
 
 class CachedData:
@@ -34,8 +55,11 @@ class CachedData:
         self.character_items_loaded: dict[str, str] = {}         # Charaktername → ISO-Zeitstempel
 
 
-def save(data: CachedData) -> None:
-    """Schreibt einen vollständigen Snapshot; Fehler werden nur geloggt (kein Crash)."""
+def save(data: CachedData, path: Path | None = None) -> None:
+    """Schreibt einen vollständigen Snapshot; Fehler werden nur geloggt (kein Crash).
+
+    ``path`` fehlt → ``_CACHE_FILE`` (siehe Modul-Docstring, Konto-Trennung)."""
+    path = path if path is not None else _CACHE_FILE
     payload = {
         "account_name": data.account_name,
         "characters": [c.model_dump(mode="json") for c in data.characters],
@@ -57,17 +81,20 @@ def save(data: CachedData) -> None:
     }
     try:
         config.ensure_dirs()
-        _CACHE_FILE.write_text(json.dumps(payload), encoding="utf-8")
+        path.write_text(json.dumps(payload), encoding="utf-8")
     except OSError:
         log.exception("Daten-Cache: Schreiben fehlgeschlagen")
 
 
-def load() -> CachedData | None:
-    """None bei fehlender/kaputter Datei (z. B. allererster Start) — kein Fehler."""
-    if not _CACHE_FILE.is_file():
+def load(path: Path | None = None) -> CachedData | None:
+    """None bei fehlender/kaputter Datei (z. B. allererster Start) — kein Fehler.
+
+    ``path`` fehlt → ``_CACHE_FILE`` (siehe Modul-Docstring, Konto-Trennung)."""
+    path = path if path is not None else _CACHE_FILE
+    if not path.is_file():
         return None
     try:
-        payload = json.loads(_CACHE_FILE.read_text(encoding="utf-8"))
+        payload = json.loads(path.read_text(encoding="utf-8"))
         data = CachedData()
         data.account_name = payload.get("account_name", "")
         data.characters = [Character.model_validate(c) for c in payload["characters"]]
@@ -88,14 +115,14 @@ def load() -> CachedData | None:
             for name, items in payload.get("character_items", {}).items()
         }
         data.character_items_loaded = payload.get("character_items_loaded", {})
-        _backfill_last_loaded(data)
+        _backfill_last_loaded(data, path)
         return data
     except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError):
         log.exception("Daten-Cache: Lesen fehlgeschlagen — ignoriere Cache-Datei")
         return None
 
 
-def _backfill_last_loaded(data: CachedData) -> None:
+def _backfill_last_loaded(data: CachedData, path: Path) -> None:
     """Migration für Cache-Dateien von vor dem last_loaded-Feature (FALLSTRICKE #12).
 
     Tabs, deren Items im Cache liegen, aber keinen Zeitstempel haben, bekommen
@@ -103,7 +130,7 @@ def _backfill_last_loaded(data: CachedData) -> None:
     letzter Schreibvorgang. Ohne Backfill blieben solche Tabs für immer als
     "nie geladen" (⬇) markiert und für den Auto-Refresh unsichtbar.
     """
-    mtime_iso = datetime.fromtimestamp(_CACHE_FILE.stat().st_mtime,
+    mtime_iso = datetime.fromtimestamp(path.stat().st_mtime,
                                        tz=timezone.utc).isoformat()
     for league, stashes in data.items_by_league.items():
         league_loaded = data.last_loaded.setdefault(league, {})

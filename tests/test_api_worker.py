@@ -8,7 +8,27 @@ from poe_view.api.models import Item, StashTab
 from poe_view.api.ninja import PriceIndex
 from poe_view.services.api_worker import (ApiWorker, FetchCharacterItemsJob,
                                           FetchLeaguesJob, FetchPricesJob,
-                                          FetchStashItemsJob)
+                                          FetchStashItemsJob, LogoutJob)
+
+
+def test_logout_dispatch_deletes_the_token_and_requests_login(qapp, monkeypatch) -> None:
+    """Peter, 2026-08-02: fehlender Logout war "für ein öffentliches
+    Werkzeug eine Sackgasse". Der Worker-seitige Teil (Token löschen,
+    login_required melden) stand als LogoutJob bereits im Code, wurde
+    aber nirgends ausgelöst — dieser Test deckte das bisher nicht ab."""
+    from poe_view.services import api_worker as api_worker_module
+    worker = ApiWorker()
+    deleted = []
+    monkeypatch.setattr(api_worker_module.token_store, "delete_token",
+                        lambda: deleted.append(True))
+    required = []
+    worker.login_required.connect(required.append)
+
+    worker._dispatch(LogoutJob())
+
+    assert deleted == [True]
+    assert required == ["Logged out."]
+    worker.client.close()
 
 
 def test_stash_items_dispatch_does_not_emit_bereit_after_result(qapp, monkeypatch) -> None:

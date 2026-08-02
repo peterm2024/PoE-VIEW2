@@ -11,7 +11,11 @@ from the local cache.
 
 Login runs via OAuth2 directly against `api.pathofexile.com`. PoE-VIEW2
 never sees your password, and no third party is involved in the login.
-The access token is stored in the Windows Credential Manager.
+The access token is stored in the Windows Credential Manager. The
+account button in the toolbar offers "Log out" once you're signed in —
+this only removes the locally stored token; it does not revoke the
+authorization on GGG's side. To fully revoke it, do that from your GGG
+account settings.
 
 ## Screenshots
 

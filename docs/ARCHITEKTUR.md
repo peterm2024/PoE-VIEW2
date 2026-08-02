@@ -2081,6 +2081,131 @@ hat, und die Auswirkung ist harmlos (`_showing_aggregate` verhindert ein
 sichtbares Überschreiben, das Fach wird nur im Hintergrund/Cache
 aktueller).
 
+### 4.24 Logout + Konto-Trennung
+
+Zwei zusammengehörige Themen aus demselben Gespräch (Peter, 2026-08-02):
+(1) fehlender Logout ("Wer sich mit einem ANDEREN GGG-Konto anmelden
+will, muss den Eintrag 'PoE-VIEW2' im Windows-Anmeldeinformations-
+manager von Hand löschen ... für ein öffentliches Werkzeug eine
+Sackgasse"), und (2) seine Rückfrage "Wenn ich den Account wechsle,
+habe ich dann meine eigenen Daten?", die einen echten, bis dahin
+unbemerkten Fehler aufdeckte.
+
+**Logout-UI: derselbe Button, jetzt ein `QToolButton` mit Menü.** Vorher
+war der nach dem Login auf `⚷ Kontoname` gesetzte Button (`QAction`)
+schlicht DEAKTIVIERT — nach dem Login gab es keine Interaktion mehr.
+Jetzt ein `QToolButton` (`self._login_button`): ausgeloggt verhält er
+sich exakt wie die alte `QAction` (ein Klick löst direkt `LoginJob` aus,
+kein Menü im Weg, da `self._login_button.menu()` dann `None` ist).
+Eingeloggt hängt `_on_logged_in` das vorgefertigte `self._account_menu`
+("🚪 Log out") an und schaltet `ToolButtonPopupMode.InstantPopup` ein —
+derselbe Klick öffnet jetzt das Menü statt `clicked` auszulösen. Ein
+einziger Button, ein einziger `clicked`-Handler für beide Zustände;
+`_on_login_required` hängt das Menü wieder ab (`setMenu(None)`,
+`DelayedPopup`) und setzt den Text zurück auf "🔑 Log in".
+
+**Logout ist bewusst ein ANDERER Codepfad als ein unfreiwilliger
+Token-Ablauf**, obwohl beide am Ende `_on_login_required` durchlaufen
+(über `LogoutJob` → `token_store.delete_token()` → `login_required`-
+Signal — dieser Worker-seitige Teil existierte als totes, nie
+ausgelöstes Gerüst schon vor diesem Feature, siehe `api_worker.py`
+`LogoutJob`/`_dispatch`). Ein Token-Ablauf MITTEN in der Session (z. B.
+ein stiller Auto-Refresh-Tick, der auf einmal 401 bekommt) darf die
+sichtbare Ansicht NICHT wegreißen — der Nutzer hat ja nichts getan, der
+Cache-Stand bleibt so lange gültig, bis er sich aktiv neu anmeldet.
+Ein bewusster Klick auf "Log out" ist dagegen ein Session-SCHNITT: der
+Nutzer will explizit weg von diesem Konto, potenziell um sich mit einem
+anderen anzumelden. `_on_logout_clicked` submitted `LogoutJob` (Token
+weg) UND ruft sofort, synchron, `_reset_session_data()` (siehe unten) —
+nicht erst wenn das `login_required`-Signal vom Worker-Thread
+zurückkommt, sonst wäre die sichtbare Ansicht für einen Wimpernschlag
+noch die alte.
+
+**Cache-Trennung: eine Datei je Konto statt einer gemeinsamen**
+(`services/data_cache.py`, `path_for(account_name)` —
+`data-cache-<konto>.json`). Vorher gab es nur die eine `data-cache.json`
+für alle Konten; `CachedData.account_name` wurde zwar gespeichert und
+geladen, aber NIRGENDS verglichen (Peters Rückfrage deckte das auf).
+Nach einem Kontowechsel blieben Stash-Baum, Items und Charaktere des
+ALTEN Kontos im Speicher stehen — GGG antwortet dem neuen Konto mit
+eigenen Fach-IDs, die alten Einträge wurden nie überschrieben, nur
+ergänzt. `save()`/`load()` bleiben absichtlich auf den alten,
+kontounabhängigen `_CACHE_FILE`-Pfad voreingestellt (optionaler `path`-
+Parameter, `None` → alter Pfad) — bestehende Aufrufer/Tests
+funktionieren unverändert weiter, nur `MainWindow` übergibt seit diesem
+Feature immer explizit `path_for(...)`. Die alte gemeinsame Datei wird
+dadurch nie gelöscht (Peters Entscheidung: "zu gefährlich, das kann der
+Nutzer über den Explorer erledigen" — siehe unten), nur nicht mehr
+beschrieben.
+
+**Welches Konto beim kalten Start laden?** Ein echtes Henne-Ei-Problem:
+`_restore_cached_data()` läuft in `MainWindow.__init__`, BEVOR der
+Worker startet — der Kontoname kommt aber erst aus einem `/profile`-
+Aufruf (`ApiWorker._after_auth`), der Netzwerk braucht. Ein Warten
+darauf würde die Offline-Ansicht kaputt machen, die ja gerade OHNE jedes
+Netzwerk funktionieren soll (Kernfeature, §4.12). Die Lösung: eine
+zweite, rein lokale Gedächtnisstütze in `ui-settings.ini`
+(`MainWindow._ACCOUNT_SETTING_KEY = "account/last_active"`), geschrieben
+bei jedem erfolgreichen `_on_logged_in`. Beim kalten Start liest
+`_restore_cached_data()` diesen Hinweis und lädt `path_for(hinweis)`
+spekulativ — der Normalfall (dieselbe Person startet neu) trifft damit
+sofort ins Schwarze. Fehlt der Hinweis (allererster Start nach diesem
+Feature, oder komplette Neuinstallation), fällt es auf den ALTEN
+gemeinsamen Pfad zurück und übernimmt dessen eingebetteten
+`account_name` — eine Migration ergibt sich dadurch von selbst, ganz
+ohne Kopier-/Umbenennungscode: der nächste `_persist_cache()`-Aufruf
+schreibt bereits unter dem neuen, kontospezifischen Pfad.
+
+**Mismatch-Erkennung in `_on_logged_in`.** Die Spekulation beim kalten
+Start kann danebenliegen — realistisches Beispiel, kein Konstrukt: das
+gespeicherte Token ist über Nacht abgelaufen (10h Gültigkeit), der
+Nutzer meldet sich am nächsten Tag über den "🔑 Log in"-Button neu an,
+diesmal aber mit einem ANDEREN Konto (z. B. einem Zweitaccount). Dieser
+Weg läuft NICHT über `_on_logout_clicked` (kein Logout fand statt), muss
+den Kontowechsel also selbst erkennen: weicht das gerade bestätigte
+Konto vom Konto ab, dessen Daten im Speicher stehen
+(`self._account_name`, gesetzt entweder spekulativ beim kalten Start
+oder von einem vorherigen Login in dieser Session), verwirft
+`_switch_active_account_data` den alten Stand (`_reset_session_data`)
+und lädt stattdessen den eigenen Cache-Stand des neuen Kontos (falls
+vorhanden, sonst leer). Der ÜBERWIEGEND häufige Fall — dieselbe Person,
+dasselbe Konto — durchläuft diesen Zweig gar nicht, `account_name`
+stimmt schon überein.
+
+**`_reset_session_data()`** ist der gemeinsame Kern für Logout UND
+Mismatch-Kontowechsel: leert alle konto-/liga-gebundenen Felder
+(`_stash_trees`, `_items`, `_last_loaded`, `_all_characters`,
+`_character_items`, `_character_items_loaded`, `_leaf_stashes`,
+`_current_league`/`_current_stash_id`/`_current_character_name`/
+`_current_stash_selection`, Such- und Aggregat-Zustand, den
+Item-Verlauf) UND die sichtbaren Widgets (Baum, Charakterliste,
+Item-Tabelle, Verlaufs-Tabelle). Absichtlich NICHT betroffen:
+`_price_indexes` (poe.ninja-Preise gelten pro LIGA, nicht pro Konto —
+ein Neuabruf nur wegen des Kontowechsels wäre verschwendetes
+Rate-Limit-Budget) sowie `_offline`/`_live_leagues` (Spielzustand ohne
+Konto-Bezug).
+
+**`_persist_cache()` schreibt nichts ohne aktives Konto** (`if not
+self._account_name: return`). Ohne dieses Gate könnte ein spät
+eintreffender Job — eine Antwort, die kurz nach einem Logout eintrifft,
+weil sie schon vor dem Logout-Klick unterwegs war — eine FAST LEERE
+`CachedData` über einen bestehenden, guten Kontostand schreiben und ihn
+damit zerstören. Da `_account_name` nach einem Logout sofort auf `""`
+steht, wird so ein verspäteter Persist-Versuch zuverlässig übersprungen.
+
+**Bewusst keine Löschfunktion für lokale Daten aus dem Tool heraus** —
+Peters Entscheidung: "zu gefährlich. Wer seine Daten löschen will, kann
+das über den Explorer erledigen." Kein Häkchen "auch die Items löschen"
+im Logout, keine "alte Konten aufräumen"-Funktion. Cache-Dateien
+verwaister Konten bleiben liegen, bis der Nutzer sie selbst entfernt.
+
+**Bewusst nicht gelöst:** Der Zonenwechsel-Trigger/"Auto"-Modus
+refreshen weiterhin nur das zuletzt einzeln gewählte Fach im
+Hintergrund (`_current_stash_id`) — das bleibt nach einem Logout
+`None`, nach einem Kontowechsel ebenfalls (`_reset_session_data`), sie
+laufen also einfach ins Leere, bis der Nutzer wieder etwas auswählt.
+Kein Sonderfall nötig.
+
 ---
 
 ## 5. UI-Konzept (Oberflächenvorschlag)
