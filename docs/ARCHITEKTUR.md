@@ -1877,6 +1877,77 @@ double_clicked`) — der Verlauf hat weder Proxy noch Sortierung/Filter,
 die bestehenden Handler der Haupttabelle sind zu eng an `self.proxy`/
 `self.table_model` gebunden, um sie direkt wiederzuverwenden.
 
+### 4.22 Erweiterter CSV-Export (`services/csv_export.py`)
+
+Peter, 2026-08-02: "Im CSV hätte ich gerne alle Eigenschaften eines Items
+gehabt. Auch hätte ich gerne den Export ins Rechtsklick-Menü übernommen."
+Der bisherige Export (§4.11-Umgebung, `MainWindow._export_csv`) schrieb
+nur 10 feste Spalten (Name, Rarity, TypeLine, BaseType, Level, Quality,
+StackSize, ItemLevel, Corrupted) — Value, Anforderungen, Sockets/Links,
+Mods, Influences, Position und die meisten Merkmale fehlten.
+
+**Fester, breiter Spaltensatz statt Vereinigung aller Felder** — `Item`
+erlaubt beliebige Zusatzfelder von GGG (`extra="allow"`), und Items sind
+je nach Typ höchst ungleich aufgebaut (ein Gem hat andere Properties als
+ein Rüstungsteil). Eine Vereinigung aller real vorkommenden Felder ergäbe
+eine über 100 Spalten breite, zu 90 % leere Tabelle. `FIELDNAMES` in
+`csv_export.py` listet stattdessen einen festen Satz — alles, was die App
+auch selbst anzeigt oder intern kennt: Position (`Tab`/`InventoryId`/`X`/
+`Y`), `Category` (`item_category()`), Anforderungen (`ReqLevel`/`ReqStr`/
+`ReqDex`/`ReqInt`), `Sockets`/`Links`, `Identified`/`Corrupted` sowie
+sieben Ja/Nein-Merkmale ohne eigenes Modellfeld (`Mirrored` — GGG nennt
+das Feld intern `duplicated` — `Fractured`, `Synthesised`, `Veiled`,
+`Replica`, `Searing`, `Tangled`), `Influences`, `Properties`, sieben
+Mod-Arten (`ImplicitMods`/`ExplicitMods`/`CraftedMods`/`EnchantMods`/
+`FracturedMods`/`VeiledMods`/`UtilityMods`), `Note`, `ValueChaos` und
+`ItemId`. Mehrwertige Felder (Mod-Listen, Properties) landen zusammen-
+gefasst in EINER Zelle, getrennt durch `" | "` — pro Eintrag eine eigene
+Spalte wäre nicht vorhersagbar breit.
+
+Zugriff auf Felder ohne Modell-Attribut (die sieben Merkmale, `note`,
+`influences`, sowie Mod-Arten jenseits von `explicitMods`/`implicitMods`)
+läuft über `item.model_extra` (`_extra()`/`_joined_list()`) — pydantics
+Sammelstelle für `extra="allow"`-Felder, die die API liefert, aber die
+niemand als eigenes Attribut deklariert hat.
+
+**`ValueChaos` ist eine reine Zahl ohne Einheit** — anders als die
+Value-Spalte im UI (`format_chaos_value`, Chaos/Divine je nach Höhe):
+"2.3div" ist in einer Tabellenkalkulation nicht weiterverarbeitbar, eine
+einheitliche Chaos-Zahl schon. `export_items()` bekommt dafür optional
+den `PriceIndex` der aktuellen Liga übergeben (`MainWindow._export_rows`
+reicht `self._price_indexes.get(self._current_league)` durch); fehlt er
+(SSF-Liga ohne poe.ninja-Daten) oder kennt er das Item nicht, bleibt die
+Zelle leer statt 0 — dieselbe Regel wie bei der Value-Spalte
+(FALLSTRICKE #39: unbekannter Preis ≠ wertloses Item).
+
+**`RawJSON`-Spalte: restlos alles, aber Opt-in.** Wer wirklich jedes
+Feld braucht (auch eins ohne eigene Spalte), bekommt es über einen
+zweiten Dateityp im Speichern-Dialog (`_CSV_RAW_FILTER` neben
+`_CSV_FILTER`, `QFileDialog.getSaveFileName` liefert den gewählten Filter
+als zweiten Rückgabewert). Dann hängt `export_items(..., raw_json=True)`
+`item.model_dump(mode="json")` als zusätzliche letzte Spalte an. Bewusst
+NICHT die Voreinstellung: ein einzelnes Item-JSON ist mehrere Kilobyte
+groß, ein liga-weiter Export über zehntausende Items würde damit
+dreistellige Megabyte erreichen.
+
+**Export per Rechtsklick, zwei Bereiche.** `_on_table_row_menu` hängt
+über `_add_export_actions()` zwei Einträge ans Item-Kontextmenü:
+"Export selected items (n)" (`_selected_rows()`, aus
+`selectionModel().selectedRows()`, nach sichtbarer Zeilenposition
+sortiert statt nach Klick-Reihenfolge) und "Export visible items (n)"
+(identisch zum bisherigen Toolbar-Weg, `_visible_rows()`). Beide teilen
+sich `_rows_for()` als gemeinsamen Kern. Die Anzahl steht im Menütext,
+damit vor dem Speichern-Dialog klar ist, was gleich in der Datei landet.
+
+Dabei repariert: `_on_table_row_menu` rief bislang bedingungslos
+`self.table.selectRow(index.row())` auf — ein Rechtsklick INNERHALB
+einer bestehenden Mehrfachauswahl hätte diese auf die angeklickte Zeile
+zusammengestrichen, noch bevor das Menü überhaupt erscheint. Mehrere
+markierte Zeilen wären dadurch nie exportierbar gewesen. Jetzt nur noch,
+wenn die geklickte Zeile NICHT schon Teil der Auswahl ist
+(`selectionModel().isRowSelected`); ein Rechtsklick außerhalb wählt wie
+gewohnt die angeklickte Zeile.
+
 ---
 
 ## 5. UI-Konzept (Oberflächenvorschlag)
@@ -2042,8 +2113,9 @@ dafür trägt jede Zeile in der neuen **Tab-Spalte** ihren Herkunfts-Tab, damit
 der Bezug beim Filtern/Sortieren über den gesamten Stash nicht verloren geht.
 Der Toolbar-Button "💾 CSV exportieren" schreibt die aktuell sichtbaren
 (gefilterten) Zeilen — egal ob Einzeltab oder Aggregat — über
-`services/csv_export.py` als Semikolon-CSV mit UTF-8-BOM (Excel/de-DE-kompatibel).
-Der Speicherdialog startet im echten Windows-Downloads-Ordner
+`services/csv_export.py` als Semikolon-CSV mit UTF-8-BOM (Excel/de-DE-kompatibel);
+Spaltensatz und der zweite Export-Weg per Rechtsklick sind in §4.22
+beschrieben. Der Speicherdialog startet im echten Windows-Downloads-Ordner
 (`config.downloads_dir()`, per Registry ermittelt — respektiert eine vom User
 verschobene Downloads-Location) und schlägt einen Dateinamen vor
 (`MainWindow._default_export_filename`): **immer** die aktuelle Liga voran

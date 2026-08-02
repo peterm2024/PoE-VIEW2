@@ -6,6 +6,22 @@ nach [SemVer](https://semver.org/lang/de/).
 
 ## [Unveröffentlicht]
 
+### Hinzugefügt
+
+- CSV-Export: deutlich breiterer Spaltensatz statt bisher 10 fester
+  Spalten — jetzt u. a. Position (Tab/X/Y), Kategorie, alle
+  Anforderungen (Level/Str/Dex/Int), Sockets/Links, sämtliche Mod-Arten
+  (Implicit/Explicit/Crafted/Enchant/Fractured/Veiled/Utility),
+  Influences, Merkmale (Mirrored/Fractured/Synthesised/Veiled/Replica/
+  Searing/Tangled), Notiz, Chaos-Wert und Item-ID. Optional zusätzlich
+  eine `RawJSON`-Spalte mit dem vollständigen, unveränderten API-Objekt
+  je Item — über einen zweiten Dateityp im Speichern-Dialog wählbar,
+  bewusst nicht die Voreinstellung (Dateigröße bei großen Exporten).
+- Export per Rechtsklick auf ein Item: "Export selected items" (die
+  markierten Zeilen, Mehrfachauswahl per Strg-/Umschalt-Klick möglich)
+  und "Export visible items" (identisch zum bisherigen Toolbar-Knopf),
+  jeweils mit der Anzahl im Menütext.
+
 ## [0.3.0] - 2026-08-02
 
 ### Behoben
