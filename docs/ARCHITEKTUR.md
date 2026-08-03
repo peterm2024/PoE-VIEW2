@@ -2230,6 +2230,15 @@ ist entfallen; `_switch_active_account_data` stellt den Kontostand jetzt
 bei jeder Anmeldung her, bei der er nicht schon im Speicher steht.
 Vollständige Herleitung samt Log-Beweis: FALLSTRICKE #62.
 
+Weil damit binnen zweier Tage zum zweiten Mal ein magerer Speicherstand
+einen reichen Dateistand überschrieben hatte, kam auf Peters Wunsch ein
+**pfad-unabhängiger Überschreibschutz** dazu: `_persist_cache()`
+vergleicht den Umfang des Speicherstands (`_cache_scale`) mit dem des
+zuletzt geladenen bzw. geschriebenen Stands und verweigert das Schreiben,
+wenn davon weniger als ein Viertel übrig bliebe. Der Wächter kennt die
+Ursache eines Einbruchs bewusst nicht — er soll auch Fehler abfangen,
+die es noch nicht gibt. Details und die gewählte Fehlerrichtung: ebenda.
+
 **Bewusst keine Löschfunktion für lokale Daten aus dem Tool heraus** —
 Peters Entscheidung: "zu gefährlich. Wer seine Daten löschen will, kann
 das über den Explorer erledigen." Kein Häkchen "auch die Items löschen"

@@ -2156,6 +2156,91 @@ def test_logging_in_again_after_a_logout_reloads_the_account_cache(qapp, monkeyp
     win.worker.wait(5000)
 
 
+def _window_with_stored_cache(monkeypatch, tabs: int = 40):
+    """Fenster, dessen Konto einen nennenswerten Bestand auf der Platte
+    hat — Ausgangslage für die Tests des Überschreibschutzes."""
+    from poe_view.services import data_cache
+
+    stored = data_cache.CachedData()
+    stored.account_name = "TestAccount#1234"
+    stored.characters = [make_char("RichChar", "Standard")]
+    stored.stash_trees = {"Standard": [_make_leaf(f"t{i}", f"Tab {i}") for i in range(tabs)]}
+    stored.items_by_league = {"Standard": {f"t{i}": [] for i in range(tabs)}}
+    data_cache.save(stored, data_cache.path_for("TestAccount#1234"))
+
+    win = MainWindow()
+    monkeypatch.setattr(win.worker, "submit", lambda job: None)
+    win._on_logged_in("TestAccount#1234")  # laedt den Stand und merkt sich den Umfang
+    return win
+
+
+def test_persist_refuses_to_shrink_the_stored_cache_drastically(qapp, monkeypatch) -> None:
+    """Praeventiver Schutz nach zwei echten Datenverlusten (FALLSTRICKE
+    #62): Beide entstanden dadurch, dass ein magerer Speicherstand einen
+    reichen Dateistand ueberschrieb. Der Waechter arbeitet bewusst
+    pfad-unabhaengig — hier wird der Speicher direkt geleert, ohne dass
+    einer der bekannten Fehlerpfade beteiligt waere."""
+    from poe_view.services import data_cache
+
+    win = _window_with_stored_cache(monkeypatch)
+    assert win._persisted_scale >= win._CACHE_GUARD_MIN
+
+    win._items = {}          # Einbruch, egal aus welchem Grund
+    win._all_characters = []
+    win._character_items = {}
+    win._persist_cache()
+
+    on_disk = data_cache.load(data_cache.path_for("TestAccount#1234"))
+    assert on_disk is not None
+    assert len(on_disk.items_by_league["Standard"]) == 40  # unveraendert
+    assert [c.name for c in on_disk.characters] == ["RichChar"]
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_persist_still_writes_normal_growth_and_moderate_shrinking(qapp, monkeypatch) -> None:
+    """Der Waechter darf den Normalbetrieb nicht behindern: Wachstum immer,
+    und massvolles Schrumpfen (hier auf die Haelfte, z. B. weil Faecher im
+    Spiel entfernt wurden) ebenfalls."""
+    from poe_view.services import data_cache
+
+    win = _window_with_stored_cache(monkeypatch)
+
+    win._items = {"Standard": {f"t{i}": [] for i in range(60)}}  # gewachsen
+    win._persist_cache()
+    assert len(data_cache.load(data_cache.path_for("TestAccount#1234"))
+               .items_by_league["Standard"]) == 60
+
+    win._items = {"Standard": {f"t{i}": [] for i in range(30)}}  # halbiert
+    win._persist_cache()
+    assert len(data_cache.load(data_cache.path_for("TestAccount#1234"))
+               .items_by_league["Standard"]) == 30
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_persist_guard_does_not_block_a_fresh_account(qapp, monkeypatch) -> None:
+    """Ein Konto ohne gespeicherten Bestand muss ganz normal anwachsen
+    koennen — der Schutz greift erst ab einem nennenswerten Stand."""
+    from poe_view.services import data_cache
+
+    win = MainWindow()
+    monkeypatch.setattr(win.worker, "submit", lambda job: None)
+    win._on_logged_in("FreshAccount#9999")
+    assert win._persisted_scale == 0
+
+    win._all_characters = [make_char("FirstChar", "Standard")]
+    win._persist_cache()
+
+    on_disk = data_cache.load(data_cache.path_for("FreshAccount#9999"))
+    assert on_disk is not None and [c.name for c in on_disk.characters] == ["FirstChar"]
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
 def test_persist_after_a_logout_login_cycle_keeps_the_stored_data(qapp, monkeypatch) -> None:
     """Der eigentliche Schaden entstand erst beim Zurückschreiben: solange
     der Speicher nach dem Wieder-Anmelden leer blieb, machte der nächste

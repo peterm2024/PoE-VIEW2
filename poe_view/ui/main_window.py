@@ -181,6 +181,10 @@ class MainWindow(QMainWindow):
         # sichert (`data_cache.path_for`). "" bedeutet "kein Konto aktiv",
         # sowohl direkt nach dem Start als auch nach einem Logout.
         self._account_name: str = ""
+        # Umfang dessen, was für dieses Konto auf der Platte liegt (Maß
+        # siehe `_cache_scale`). Grundlage des Überschreibschutzes in
+        # `_persist_cache`; 0 heißt "dort liegt nichts Nennenswertes".
+        self._persisted_scale: int = 0
         self._stash_trees: dict[str, list[StashTab]] = {}      # Liga → Baumstruktur
         self._items: dict[str, dict[str, list[Item]]] = {}     # Liga → {stash_id: Items}
         self._last_loaded: dict[str, dict[str, str]] = {}      # Liga → {stash_id: ISO-Zeitstempel}
@@ -356,15 +360,74 @@ class MainWindow(QMainWindow):
         self._last_loaded = cached.last_loaded
         self._character_items = cached.character_items
         self._character_items_loaded = cached.character_items_loaded
-        log.info("Daten-Cache geladen: %d Charaktere, %d Liga(en)",
-                 len(cached.characters), len(cached.stash_trees))
+        self._persisted_scale = self._scale_of(cached)
+        log.info("Daten-Cache geladen: %d Charaktere, %d Liga(en), Umfang %d",
+                 len(cached.characters), len(cached.stash_trees),
+                 self._persisted_scale)
+
+    # Überschreibschutz (siehe `_persist_cache`): Ein Bestand gilt ab
+    # dieser Menge als nennenswert; darunter greift der Schutz gar nicht,
+    # damit ein frisches Konto normal anwachsen kann.
+    _CACHE_GUARD_MIN = 20
+    # Blockiert wird, wenn weniger als dieser Bruchteil des bekannten
+    # Bestands übrig bliebe (4 = weniger als ein Viertel). Bewusst grob:
+    # er soll Einbrüche abfangen, nicht normales Schrumpfen bewerten.
+    _CACHE_GUARD_FRACTION = 4
+
+    def _cache_scale(self) -> int:
+        """Grobes Maß für "wie viel steckt in diesem Bestand" — Grundlage
+        des Überschreibschutzes. Gezählt wird, was teuer erarbeitet wurde:
+        geladene Fächer (dominieren mit Abstand), Charaktere und
+        Charakter-Inventare. Nicht die Baumstruktur: die kommt mit einem
+        einzigen Listen-Abruf zurück und ist deshalb kein Verlust."""
+        return (sum(len(tabs) for tabs in self._items.values())
+                + len(self._all_characters) + len(self._character_items))
+
+    @staticmethod
+    def _scale_of(cached: data_cache.CachedData) -> int:
+        """``_cache_scale`` für einen von der Platte gelesenen Stand."""
+        return (sum(len(tabs) for tabs in cached.items_by_league.values())
+                + len(cached.characters) + len(cached.character_items))
 
     def _persist_cache(self) -> None:
-        """Kein aktives Konto (frisch ausgeloggt) → nichts zu sichern, UND
-        insbesondere keine leere Datei über einen bestehenden Kontostand
-        schreiben (könnte sonst passieren, wenn ein noch laufender Job kurz
-        nach einem Logout sein Ergebnis liefert, siehe _on_logout_clicked)."""
+        """Sichert den Speicherstand in die Datei dieses Kontos.
+
+        Zwei Schutzstufen, beide aus echten Datenverlusten entstanden:
+
+        1. **Kein aktives Konto** (frisch ausgeloggt) → gar nichts
+           schreiben. Sonst könnte ein Job, der kurz nach dem Logout noch
+           sein Ergebnis liefert, eine leere Datei über den Kontostand
+           legen (siehe ``_on_logout_clicked``).
+        2. **Kein Einbruch des Umfangs** (FALLSTRICKE #62). Beide
+           Datenverluste dieser Woche entstanden nicht beim Lesen, sondern
+           dadurch, dass ein magerer Speicherstand einen reichen
+           Dateistand überschrieb — einmal wegen einer zu früh greifenden
+           Migrationsweiche, einmal wegen eines Logouts ohne Nachladen.
+           Beide Löcher sind gestopft, aber die Bauart lädt weitere ein:
+           Wo die Anwendung ihren gesamten Zustand in eine Datei spiegelt,
+           ist JEDER Pfad, der den Speicher leert, zugleich ein möglicher
+           Löschbefehl für die Platte. Dieser Wächter arbeitet deshalb
+           bewusst pfad-unabhängig — er kennt die Ursache nicht und muss
+           sie nicht kennen.
+
+        Die Fehlerrichtung ist mit Absicht einseitig: Im Zweifel bleibt zu
+        VIEL in der Datei stehen (harmlos, der nächste Abruf korrigiert
+        es) statt zu wenig (Verlust). Ein echter Rückgang um mehr als drei
+        Viertel kommt im Betrieb praktisch nicht vor — dafür müsste man
+        Tausende Truhenfächer im Spiel löschen. Sollte es doch je nötig
+        sein, hilft das Entfernen der Datei über den Explorer (bewusst
+        keine Löschfunktion im Programm, Peters Entscheidung 2026-08-02).
+        """
         if not self._account_name:
+            return
+        scale = self._cache_scale()
+        if (self._persisted_scale >= self._CACHE_GUARD_MIN
+                and scale * self._CACHE_GUARD_FRACTION < self._persisted_scale):
+            log.warning(
+                "Cache-Sicherung übersprungen: der Speicherstand (%d) ist "
+                "drastisch kleiner als der gesicherte (%d) — die Datei "
+                "bleibt unverändert, damit nichts verlorengeht (Konto %s).",
+                scale, self._persisted_scale, self._account_name)
             return
         data = data_cache.CachedData()
         data.account_name = self._account_name
@@ -375,6 +438,7 @@ class MainWindow(QMainWindow):
         data.character_items = self._character_items
         data.character_items_loaded = self._character_items_loaded
         data_cache.save(data, data_cache.path_for(self._account_name))
+        self._persisted_scale = scale
 
     # ------------------------------------------------------------------ #
 
@@ -1185,6 +1249,11 @@ class MainWindow(QMainWindow):
         self._last_loaded = {}
         self._character_items = {}
         self._character_items_loaded = {}
+        # Der Speicher ist jetzt leer — was für das bisherige Konto auf der
+        # Platte lag, sagt über das nächste nichts mehr aus. Der Aufrufer
+        # setzt den Wert neu, sobald er einen Kontostand geladen hat
+        # (``_switch_active_account_data``).
+        self._persisted_scale = 0
         self._leaf_stashes = []
         self._current_league = ""
         self._current_tab_name = ""
@@ -1218,6 +1287,7 @@ class MainWindow(QMainWindow):
             self._last_loaded = cached.last_loaded
             self._character_items = cached.character_items
             self._character_items_loaded = cached.character_items_loaded
+            self._persisted_scale = self._scale_of(cached)
         self._rebuild_league_combo(None)
 
     def _update_online_controls_enabled(self) -> None:

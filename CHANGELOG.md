@@ -14,6 +14,12 @@ nach [SemVer](https://semver.org/lang/de/).
   stattdessen über die vorhandene Datei geschrieben. Beim nächsten Start
   wirkte es, als müsse alles neu geladen werden. Die Daten kommen jetzt
   nach dem erneuten Anmelden wieder von der Platte.
+- Zusätzlicher Schutz gegen Datenverlust: Die lokale Datendatei wird
+  nicht mehr überschrieben, wenn dabei der allergrößte Teil des
+  gespeicherten Bestands verlorenginge. Im Zweifel bleibt lieber zu viel
+  gespeichert — beide bisherigen Datenverluste entstanden genau so, und
+  der Schutz greift unabhängig davon, welcher Programmteil das
+  Speichern auslöst.
 
 ## [0.5.0] - 2026-08-03
 
