@@ -885,7 +885,8 @@ Einträge auf oberster Ebene, erkennbar allein am gesetzten `folder`-Feld
 Baum oben statt im Ordner und schöben sich zwischen die echten Fächer — die
 Reihenfolge wich dadurch sichtbar von der im Spiel ab. `_nest_folder_members()`
 hängt sie unter ihren Ordner und läuft an **beiden** Eintrittspunkten: in
-`_on_stash_list` vor dem Merge und beim Cache-Laden (`_load_cache`), damit
+`_on_stash_list` vor dem Merge und beim Cache-Laden
+(`_restore_cached_data`), damit
 bestehende Caches ohne Listen-Refresh geheilt werden. Kennt ein Ordner ein
 Mitglied bereits, ersetzt der frische Eintrag den alten und übernimmt dessen
 entdeckte Unter-Tabs — das beseitigt Dubletten, die vorher entstanden, wenn
@@ -2324,8 +2325,8 @@ allem in **vier Detailgraden**: nur Zahnrad mit Auge, runde Fassung mit
 Runenkranz, abgerundetes Quadrat mittlerer Dichte und die volle
 Ausführung. Genau diese Staffelung ist der Grund für den ganzen Aufwand
 hier: würde man nur die große Fassung einbetten, rechnet Windows sie für
-die Taskleiste selbst auf 16 px herunter und der Runenring zerfällt zu
-Matsch. `tools/make_icon.py` ordnet deshalb jeder der sieben Stufen
+die Taskleiste selbst auf 16 px herunter und der Runenring wird
+unkenntlich. `tools/make_icon.py` ordnet deshalb jeder der sieben Stufen
 (16/24/32/48/64/128/256) die passende Vorlage zu.
 
 **Warum ein eigener ICO-Generator.** Qt kann `.ico` schreiben, aber nur

@@ -1633,9 +1633,10 @@ class MainWindow(QMainWindow):
         geliefert — in Baumstruktur und Anzeige einhängen. Deren Items werden
         wie bei normalen Tabs erst per Klick (oder Auto-Refresh) geladen."""
         self._last_loaded.setdefault(league, {})[stash_id] = datetime.now(timezone.utc).isoformat()
-        # Ein evtl. vorhandener alter Item-Eintrag des Eltern-Tabs ist Müll
-        # (Spezial-Tabs haben nie eigene Items) — raus damit, sonst wäre der
-        # nächste Klick wieder ein irreführender "0 Items"-Cache-Treffer.
+        # Ein evtl. vorhandener alter Item-Eintrag des Eltern-Tabs ist
+        # ungültig (Spezial-Tabs haben nie eigene Items) — er muss weg,
+        # sonst wäre der nächste Klick wieder ein irreführender
+        # "0 Items"-Cache-Treffer.
         self._items.get(league, {}).pop(stash_id, None)
         tree = self._stash_trees.get(league)
         if tree is not None:

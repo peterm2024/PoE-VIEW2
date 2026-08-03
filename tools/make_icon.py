@@ -14,7 +14,7 @@ erledigt Laden, Skalieren und PNG-Kodierung.
 Warum überhaupt mehrere Stufen: Peter hat die Grafik bewusst in vier
 Detailgraden gezeichnet (2026-08-03). Würde man nur die große Fassung
 einbetten, skaliert Windows sie selbst auf 16 px herunter und der
-Runenring zerfällt zu Matsch. Die Zuordnung in ``LAYOUT`` bildet Peters
+Runenring wird unkenntlich. Die Zuordnung in ``LAYOUT`` bildet Peters
 Absicht ab: je kleiner die Zielgröße, desto reduzierter die Vorlage.
 
 Die Quelldateien sind nicht exakt quadratisch (z. B. 490x504), deshalb

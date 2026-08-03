@@ -74,7 +74,17 @@ to a single line by default.
 - **Type filters** for Normal, Magic, Rare, Unique, Gem, Currency,
   Divination Card, and Other, shown as color-coded checkboxes next to
   the league selector.
-- **CSV export** of the currently visible, filtered items.
+- **Multi-selection in the stash tree**: Ctrl- or Shift-click several
+  tabs, or pick a folder, to view their items together. This shows only
+  what is already cached and never triggers a fetch of its own; tabs
+  that have never been loaded are named in the status bar instead.
+- **CSV export** of the visible, filtered items or of just the selected
+  rows — from the toolbar or the right-click menu of the table, the
+  stash tree, and the character list. The file carries the full item
+  detail: position, requirements, sockets and links, every mod category,
+  influences, flags such as mirrored or fractured, note, and value. The
+  complete, unmodified API object per item is available as an optional
+  extra column.
 
 ### Item and character views
 
@@ -109,15 +119,21 @@ to a single line by default.
   changed since the last refresh are highlighted, and items that
   disappeared stay visible for one cycle in grey and struck through.
 - **Item history**: a collapsible panel below the table logs the last
-  120 items that entered or left any character's inventory — a quick way
-  to check what you just stashed, sold, or traded.
+  120 items that entered, left, or changed quantity in any character's
+  inventory — a quick way to check what you just stashed, sold, or
+  traded. Stack changes carry the difference, for example `53 (+3)`.
 - **Optional zone-change trigger** (off by default): PoE-VIEW2 can watch
   the game's own `Client.txt` (read-only, path entered by you) and
   reload the open view as soon as the game reports a zone change, which
-  is when GGG's API tends to publish new stash contents.
+  is when GGG's API tends to publish new stash contents. The toolbar
+  shows the zone most recently detected this way.
 - **Offline mode**: during GGG maintenance or a lost connection, the
   app shows the last known state from the cache, clearly marked as such
   (📴).
+- **Separate cache per account**: every GGG account keeps its own local
+  data, so switching accounts never mixes up stash trees, items, or
+  characters. Nothing is deleted in the process — each account keeps its
+  own state, including when you switch back.
 - **Rate-limit dashboard** with rules, current usage, and active locks.
 - **Raw data viewer** per stash tab, showing the unmodified API
   response.

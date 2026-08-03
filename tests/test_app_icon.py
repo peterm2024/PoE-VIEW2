@@ -23,7 +23,7 @@ def test_the_icon_file_ships_with_the_project() -> None:
 def test_the_icon_contains_every_expected_size(qapp) -> None:
     """Mehrstufig ist der ganze Zweck: ohne die kleinen Stufen würde
     Windows die große Fassung selbst auf 16 px herunterrechnen und der
-    Runenring zerfiele zu Matsch."""
+    Runenring würde unkenntlich."""
     icon = QIcon(str(config.APP_ICON))
     sizes = sorted(s.width() for s in icon.availableSizes())
     assert sizes == EXPECTED_SIZES

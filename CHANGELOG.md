@@ -36,7 +36,7 @@ nach [SemVer](https://semver.org/lang/de/).
   Explorer, Taskleiste und Fenstertitel statt des allgemeinen
   Standardsymbols. Es steckt in sieben Größenstufen in der Datei, wobei
   die kleinen Stufen eine bewusst vereinfachte Fassung der Grafik
-  verwenden — sonst würde der Runenring bei 16 Pixeln zu Matsch.
+  verwenden — sonst würde der Runenring bei 16 Pixeln unkenntlich.
 - Live-Zonenanzeige in der Toolbar: zeigt die zuletzt aus der Client.txt
   erkannte Zone an — unabhängig davon, ob danach tatsächlich ein Refresh
   folgt (Pause-Modus/Rate-Limit können das weiterhin verhindern). Auch
@@ -201,9 +201,9 @@ nach [SemVer](https://semver.org/lang/de/).
   sofort entfernt, sondern für einen Refresh-Zyklus grau und
   durchgestrichen angezeigt.
 - Optionaler Zonenwechsel-Trigger für den Live-Refresh (Settings-Dialog,
-  Reiter "Zone Refresh", standardmäßig AUS): PoE-VIEW2 kann Peters lokale
-  Client.txt beobachten (rein lesend, Pfad muss selbst eingetragen
-  werden) und lädt die gerade offene Truhe/den Charakter sofort neu,
+  Reiter "Zone Refresh", standardmäßig AUS): PoE-VIEW2 kann die lokale
+  Client.txt des Spiels beobachten (rein lesend, Pfad muss selbst
+  eingetragen werden) und lädt die offene Truhe/den Charakter sofort neu,
   sobald PoE einen Zonenwechsel meldet — GGGs Stash-API liefert neue
   Daten offenbar ohnehin erst danach, gezieltes Nachladen spart also
   Rate-Limit-Budget gegenüber reinem Zeit-Takt.
@@ -425,7 +425,8 @@ Erste veröffentlichte Version.
 Die technischen Hintergründe einzelner Entscheidungen stehen in
 [FALLSTRICKE_UND_WORKAROUNDS.md](FALLSTRICKE_UND_WORKAROUNDS.md).
 
-[Unveröffentlicht]: https://github.com/peterm2024/PoE-VIEW2/compare/v0.4.0...HEAD
+[Unveröffentlicht]: https://github.com/peterm2024/PoE-VIEW2/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/peterm2024/PoE-VIEW2/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/peterm2024/PoE-VIEW2/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/peterm2024/PoE-VIEW2/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/peterm2024/PoE-VIEW2/compare/v0.1.0...v0.2.0
