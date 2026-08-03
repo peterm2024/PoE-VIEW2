@@ -38,6 +38,13 @@ nach [SemVer](https://semver.org/lang/de/).
 
 ### Behoben
 
+- Der Zonenwechsel-Refresh löste in Wirklichkeit nie aus: die
+  Datei-Überwachung von Qt bemerkt neue Zeilen in PoEs Client.txt nicht,
+  solange das Spiel läuft. Aufgefallen ist das erst durch die neue
+  Zonenanzeige, die dauerhaft leer blieb; die Daten waren trotzdem nie
+  veraltet, weil der reguläre getaktete Refresh unabhängig davon
+  weiterlief — der Zonenwechsel beschleunigt ihn nur. Die Erkennung
+  prüft die Datei jetzt selbst im 2-Sekunden-Takt.
 - Ein Liga-Wechsel im Dropdown leerte die Itemliste bisher nicht — der
   zuletzt angezeigte Fach- oder Charakterinhalt der vorherigen Liga blieb
   sichtbar stehen, obwohl keine Auswahl mehr dazu passte. Die Liste wird

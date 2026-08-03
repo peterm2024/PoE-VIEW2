@@ -2305,6 +2305,17 @@ Refresh geblockt wäre. Tooltip verweist auf "Settings > Zone Refresh".
 Gegenprobe: Zuweisung entfernt, `test_zone_changed_updates_the_zone_
 label_even_while_paused` schlägt fehl, restauriert wieder grün.
 
+**Und genau das deckte sofort einen echten Fehler auf:** die Anzeige
+blieb bei Peter dauerhaft leer. Der Zonenwechsel-Trigger (§4.8,
+FALLSTRICKE #58) hatte in Wahrheit nie ausgelöst — Qts
+`QFileSystemWatcher` meldet Anhänge an PoEs dauerhaft geöffnete
+`Client.txt` auf Windows nicht. Aufgefallen war es vorher niemandem,
+weil der Trigger rein additiv zum getakteten Refresh ist: der lief
+weiter und aktualisierte die Daten trotzdem, nur langsamer. Seitdem
+trägt ein Poll-Timer (2 s) die Erkennung, der Watcher bleibt als
+beschleunigende Zugabe daneben. Vollständige Herleitung mit den drei
+Messungen gegen Peters echte Dateien: FALLSTRICKE #61.
+
 ---
 
 ## 5. UI-Konzept (Oberflächenvorschlag)

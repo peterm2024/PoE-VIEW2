@@ -2674,10 +2674,18 @@ class MainWindow(QMainWindow):
             self._zone_watcher.deleteLater()
             self._zone_watcher = None
         if not enabled:
+            log.info("Zonen-Beobachtung deaktiviert (Settings > Zone Refresh).")
             return
         resolved = resolve_client_log_path(path)
         if resolved is None:
-            return  # ungültiger/leerer Pfad — Dialog zeigt das schon live an, keine weitere Fehlermeldung nötig
+            # ungültiger/leerer Pfad — Dialog zeigt das schon live an, keine
+            # weitere Fehlermeldung dort nötig, aber im Log muss stehen,
+            # WARUM keine Beobachtung stattfindet (Peter, 2026-08-03:
+            # "Überwachen wir überhaupt? Oder überwachen wir die falsche
+            # Datei?").
+            log.warning("Zonen-Beobachtung: Pfad %r ergibt keine existierende "
+                        "Client.txt — keine Beobachtung aktiv.", path)
+            return
         self._zone_watcher = ZoneWatcher(resolved, self)
         self._zone_watcher.zone_changed.connect(self._on_zone_changed)
 

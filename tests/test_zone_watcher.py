@@ -111,6 +111,29 @@ def test_a_second_check_without_new_content_emits_nothing(tmp_path, qapp) -> Non
     assert seen == []
 
 
+# --- Poll-Timer als verlässliche Grundlage (FALLSTRICKE #61) ----------- #
+
+def test_the_poll_timer_runs_and_detects_an_append_without_any_watcher_event(
+        tmp_path, qapp) -> None:
+    """Peter, 2026-08-03: "Ich habe gerade die Zone gewechselt und das LOG
+    hat es nicht mitbekommen." Ursache: Qts ``fileChanged`` feuert für PoEs
+    Client.txt nicht (FALLSTRICKE #61). Der Poll-Timer trägt die Erkennung
+    seitdem allein — hier bewusst OHNE jedes Datei-Ereignis geprüft, nur
+    über den Timer-Slot."""
+    log = tmp_path / "Client.txt"
+    _write(log, "")
+    watcher = ZoneWatcher(log)
+    assert watcher._poll_timer.isActive()
+
+    seen = []
+    watcher.zone_changed.connect(seen.append)
+    with log.open("a", encoding="utf-8") as f:
+        f.write(_ZONE_LINE)
+    watcher._poll_timer.timeout.emit()  # das, was der laufende Timer tut
+
+    assert seen == ["The Coast"]
+
+
 def test_a_truncated_or_replaced_file_is_watched_from_the_start_again(tmp_path, qapp) -> None:
     """Peter startet PoE gelegentlich neu — dann kann Client.txt kleiner
     sein als der zuletzt gemerkte Stand. Statt daran hängen zu bleiben,
