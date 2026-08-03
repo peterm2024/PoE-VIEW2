@@ -234,7 +234,7 @@ class ItemTableModel(QAbstractTableModel):
         Chance nie ("nach Quantity gesucht, nur Chisel gefunden" — die
         Chisel-Beschreibung nennt "Item Quantity" im Mod-Text, die Maps
         selbst tragen den Wert nur als Property)."""
-        prop_text = " ".join(f"{p.name} {p.display_value or ''}" for p in item.properties)
+        prop_text = " ".join(p.display_text for p in item.properties)
         return (f"{item.display_name} {item.typeLine} {item.baseType} "
                f"{item.rarity} {source} {item.socket_string} "
                f"{' '.join(item.explicitMods)} {' '.join(item.implicitMods)} {prop_text}").lower()

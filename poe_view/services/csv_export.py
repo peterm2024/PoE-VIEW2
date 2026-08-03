@@ -103,14 +103,11 @@ def _joined_list(item: Item, field: str) -> str:
 
 
 def _properties_text(item: Item) -> str:
-    """properties als "Name: Wert"-Paare. Waffen tragen ihre Item-Klasse als
-    wertlose erste Property ("Bow") — die bleibt ohne Doppelpunkt stehen,
-    sonst stünde dort ein irreführendes "Bow: "."""
-    parts = []
-    for prop in item.properties:
-        value = prop.display_value
-        parts.append(f"{prop.name}: {value}" if value else prop.name)
-    return _LIST_SEP.join(parts)
+    """properties als fertige Zeilen (§``ItemProperty.display_text``):
+    Platzhalter im Namen werden mit ihren Werten gefüllt, wertlose
+    Einträge wie die Waffenklasse ("Bow") bleiben ohne Doppelpunkt
+    stehen."""
+    return _LIST_SEP.join(prop.display_text for prop in item.properties)
 
 
 def _influences_text(item: Item) -> str:

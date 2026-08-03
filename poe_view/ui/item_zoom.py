@@ -142,7 +142,7 @@ class ItemZoomDialog(QDialog):
         if item.socket_string:
             lines.append(f"Sockets: {item.socket_string}")
 
-        prop_lines = [f"{p.name}: {p.display_value}" for p in item.properties if p.display_value]
+        prop_lines = [p.display_text for p in item.properties if p.display_value]
         if prop_lines:
             lines.append("")
             lines.extend(prop_lines)

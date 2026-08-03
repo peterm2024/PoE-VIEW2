@@ -21,6 +21,11 @@ nach [SemVer](https://semver.org/lang/de/).
 
 ### Behoben
 
+- Item-Eigenschaften mit Platzhaltern wurden falsch dargestellt: Statt
+  "Consumes 35 of 65 Charges on use" stand dort "Consumes {0} of {1}
+  Charges on use: 35" — die Platzhalter blieben stehen und der zweite
+  Wert fehlte ganz. Betraf das Detail-Panel, die vergrößerte Item-
+  Ansicht, den CSV-Export und den Suchindex.
 - Item-Verlauf: Nach einem Programmstart tauchten dort Ereignisse auf,
   die längst vergangen waren — mit der aktuellen Uhrzeit versehen. Der
   Verlauf selbst wird nicht gespeichert, der Inventarstand der

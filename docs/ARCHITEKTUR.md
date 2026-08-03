@@ -2454,6 +2454,35 @@ galt (`previous_items=None`), nur konsequent auf "aus der Datei geladen"
 ausgeweitet. Beim Logout wird die Menge geleert, sonst gälte der Stand
 des abgemeldeten Kontos als Basis für das nächste.
 
+### 4.30 Eigenschaften mit Platzhaltern im Namen
+
+Peter, 2026-08-04, per Screenshot einer Divine Life Flask: Im
+Detail-Panel stand "Consumes {0} of {1} Charges on use: 15".
+
+GGGs `properties`-Array trägt seine Werte nicht immer hinten an, sondern
+oft als Platzhalter MITTEN im Namen. An echten Daten aus dem Cache
+belegt: `{"name": "Consumes {0} of {1} Charges on use", "values":
+[["35", 0], ["65", 0]]}`. Der bisherige `display_value` griff nur
+`values[0][0]` ab und hängte es hinten an — die Platzhalter blieben
+stehen, der zweite Wert verschwand spurlos.
+
+Neu ist `ItemProperty.display_text`, das die fertige Zeile liefert und
+drei Fälle abdeckt, alle aus echten Daten belegt: Platzhalter im Namen
+werden der Reihe nach durch `values[i][0]` ersetzt; ein Name ohne
+Platzhalter behält die Form "Name: Wert" ("Quality: +20%"); eine
+Eigenschaft ganz ohne Wert bleibt nackt stehen (die Waffenklasse als
+wertlose erste Eigenschaft, "Sceptre" statt "Sceptre: ").
+
+Bewusst an der Wurzel im Datenmodell behoben statt in der Anzeige: Die
+Formatierung war an VIER Stellen dupliziert — Detail-Panel, vergrößerte
+Ansicht, CSV-Export und der Suchindex der Tabelle. Letzterer ist der
+unauffälligste, aber nicht der unwichtigste Fall: Wer nach dem sucht,
+was er auf dem Bildschirm liest, hätte einen Treffer sonst verfehlt.
+
+Wenn weniger Werte als Platzhalter geliefert werden, bleibt der
+überzählige Platzhalter stehen, statt eine Ausnahme auszulösen — ein
+sichtbarer Schönheitsfehler ist besser als ein leeres Detail-Panel.
+
 ---
 
 ## 5. UI-Konzept (Oberflächenvorschlag)

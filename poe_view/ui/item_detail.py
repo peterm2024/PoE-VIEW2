@@ -55,9 +55,8 @@ class ItemDetail(QFrame):
         if requirement_bits:
             lines.append(" · ".join(requirement_bits))
         for prop in item.properties:
-            value = prop.display_value
-            if value:
-                lines.append(f"{prop.name}: {value}")
+            if prop.display_value:
+                lines.append(prop.display_text)
         lines.extend(item.implicitMods)
         lines.extend(item.explicitMods)
         self._props.setText("\n".join(lines[:12]))

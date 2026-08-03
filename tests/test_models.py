@@ -4,9 +4,9 @@ Die JSON-Strukturen entsprechen den in docs/api-notes/ggg-api.md
 festgehaltenen Beobachtungen.
 """
 
-from poe_view.api.models import (Character, Item, StashTab, dominant_category,
-                                 gem_level, gem_quality, get_property_value,
-                                 item_category)
+from poe_view.api.models import (Character, Item, ItemProperty, StashTab,
+                                 dominant_category, gem_level, gem_quality,
+                                 get_property_value, item_category)
 
 
 def test_max_links_is_the_largest_socket_group() -> None:
@@ -290,3 +290,48 @@ def test_item_without_requirements_returns_none() -> None:
     item = Item.model_validate({"typeLine": "Chaos Orb"})
     assert req_level(item) is None
     assert req_attribute(item, "Str") is None
+
+
+# --- ItemProperty.display_text: Platzhalter im Namen ------------------- #
+
+def test_property_placeholders_are_filled_with_their_values() -> None:
+    """Peter, 2026-08-04, per Screenshot einer Divine Life Flask: im
+    Detail-Panel stand "Consumes {0} of {1} Charges on use: 15" — die
+    Platzhalter blieben stehen und der zweite Wert fehlte ganz. Die
+    Datenform stammt 1:1 aus dem echten Cache."""
+    prop = ItemProperty.model_validate(
+        {"name": "Consumes {0} of {1} Charges on use",
+         "values": [["35", 0], ["65", 0]]})
+
+    assert prop.display_text == "Consumes 35 of 65 Charges on use"
+
+
+def test_property_with_a_single_placeholder() -> None:
+    prop = ItemProperty.model_validate(
+        {"name": "Currently has {0} Charges", "values": [["65", 0]]})
+    assert prop.display_text == "Currently has 65 Charges"
+
+    prop = ItemProperty.model_validate(
+        {"name": "Weapon Range: {0} metres", "values": [["1.1", 0]]})
+    assert prop.display_text == "Weapon Range: 1.1 metres"
+
+
+def test_property_without_placeholder_keeps_the_name_value_form() -> None:
+    """Der haeufigere Fall bleibt unveraendert: Name, Doppelpunkt, Wert."""
+    prop = ItemProperty.model_validate({"name": "Quality", "values": [["+20%", 1]]})
+    assert prop.display_text == "Quality: +20%"
+
+
+def test_property_without_any_value_is_just_its_name() -> None:
+    """Waffen tragen ihre Klasse als wertlose erste Eigenschaft — ein
+    "Sceptre: " waere irrefuehrend."""
+    prop = ItemProperty.model_validate({"name": "Sceptre", "values": []})
+    assert prop.display_text == "Sceptre"
+
+
+def test_property_with_fewer_values_than_placeholders_stays_readable() -> None:
+    """Verteidigung gegen unerwartete Daten: lieber ein stehengebliebener
+    Platzhalter als eine Ausnahme mitten im Detail-Panel."""
+    prop = ItemProperty.model_validate(
+        {"name": "Consumes {0} of {1} Charges on use", "values": [["35", 0]]})
+    assert prop.display_text == "Consumes 35 of {1} Charges on use"

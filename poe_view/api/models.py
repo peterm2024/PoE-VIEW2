@@ -33,6 +33,42 @@ class ItemProperty(BaseModel):
         except (IndexError, TypeError):
             return None
 
+    @property
+    def display_text(self) -> str:
+        """Fertige Zeile, wie sie das Spiel zeigt.
+
+        Viele Eigenschaften tragen ihre Werte NICHT hinten dran, sondern
+        als Platzhalter mitten im Namen: ``"Consumes {0} of {1} Charges
+        on use"`` mit ``values=[['35', 0], ['65', 0]]`` ergibt "Consumes
+        35 of 65 Charges on use". Wer nur ``display_value`` anhängt,
+        bekommt "Consumes {0} of {1} Charges on use: 35" — die
+        Platzhalter bleiben stehen und der zweite Wert fehlt ganz (Peter,
+        2026-08-04, per Screenshot an einer Divine Life Flask).
+
+        Drei Fälle, alle aus echten Daten belegt:
+
+        * Platzhalter im Namen → jeder ``{i}`` wird durch ``values[i][0]``
+          ersetzt.
+        * Name ohne Platzhalter, aber mit Wert ("Quality", "+20%") →
+          "Name: Wert", wie bisher.
+        * Gar kein Wert (Waffenklasse als wertlose erste Eigenschaft,
+          z. B. "Sceptre") → nur der Name, ohne Doppelpunkt.
+
+        Der zweite Eintrag je Wert (``['35', 0]``) ist ein Formathinweis
+        des Spiels (0 = normal, 1 = hervorgehoben) und für den reinen
+        Text ohne Belang.
+        """
+        if "{" in self.name:
+            text = self.name
+            for index, entry in enumerate(self.values):
+                try:
+                    text = text.replace("{%d}" % index, str(entry[0]))
+                except (IndexError, TypeError):
+                    continue
+            return text
+        value = self.display_value
+        return f"{self.name}: {value}" if value else self.name
+
 
 class Socket(BaseModel):
     """Ein Socket-Eintrag. Items mit gleichem ``group`` sind miteinander
