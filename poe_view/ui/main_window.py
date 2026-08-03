@@ -307,8 +307,12 @@ class MainWindow(QMainWindow):
         self._countdown_timer = QTimer(self)
         self._countdown_timer.setInterval(1000)
         self._countdown_timer.timeout.connect(self._update_auto_refresh_countdown)
+        # Die Uhr in der Toolbar hängt am selben Sekundentakt — ein
+        # zweiter Timer für dieselbe Frequenz wäre reine Verschwendung.
+        self._countdown_timer.timeout.connect(self._update_clock)
         self._countdown_timer.start()
         self._update_auto_refresh_countdown()
+        self._update_clock()
 
     # ------------------------------------------------------------------ #
 
@@ -550,6 +554,22 @@ class MainWindow(QMainWindow):
             "refresh follows. Stays empty if the zone watcher is disabled "
             "or the log shows no activity (Settings > Zone Refresh).")
         toolbar.addWidget(self._zone_label)
+
+        # Uhr ganz rechts außen (Peter, 2026-08-04: "dann sieht man im
+        # gleichen Screenshot was Sache ist"). Zweck ist nicht, die Uhrzeit
+        # zu wissen — die steht in der Taskleiste —, sondern dass ein
+        # Screenshot allein auswertbar wird: erst im Vergleich mit dieser
+        # Uhr sagt das "Updated HH:MM:SS" der Statuszeile, ob die Ansicht
+        # gerade frisch ist oder seit zehn Minuten steht.
+        clock_spacer = QWidget()
+        clock_spacer.setSizePolicy(QSizePolicy.Policy.Expanding,
+                                   QSizePolicy.Policy.Preferred)
+        toolbar.addWidget(clock_spacer)
+        self._clock_label = QLabel("")
+        self._clock_label.setToolTip(
+            "Current date and time — so a screenshot shows how fresh the "
+            "\"Updated\" time in the status bar actually is")
+        toolbar.addWidget(self._clock_label)
 
         filter_toolbar.addWidget(QLabel(" League: "))
         self._league_combo = QComboBox()
@@ -968,6 +988,16 @@ class MainWindow(QMainWindow):
                 total += item.stackSize
                 names.add(item.display_name)
         self._stack_sum_label.setText(f"Stack total: {total:,}" if len(names) == 1 else "")
+
+    def _update_clock(self) -> None:
+        """Datum und Uhrzeit rechts außen in der Toolbar.
+
+        Bewusst mit Datum und in fester Schreibweise (ISO-nah statt
+        Landesformat): Ein Screenshot soll ohne Rückfrage auswertbar
+        sein, auch wenn er Tage später auftaucht — und 04.08. vs. 08.04.
+        wäre genau die Mehrdeutigkeit, die man dabei nicht gebrauchen
+        kann."""
+        self._clock_label.setText(datetime.now().strftime("%Y-%m-%d  %H:%M:%S "))
 
     def _note_view_updated(self, *_args) -> None:
         """Hält fest, wann die Tabelle zuletzt neu aufgebaut wurde.

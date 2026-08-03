@@ -18,6 +18,9 @@ nach [SemVer](https://semver.org/lang/de/).
 - Statuszeile zeigt jetzt "Updated HH:MM:SS" — wann der Inhalt der
   Tabelle zuletzt neu aufgebaut wurde. Damit ist auf einen Blick
   erkennbar, wie frisch das Angezeigte ist.
+- Datum und Uhrzeit rechts oben in der Toolbar. Zusammen mit dem
+  "Updated"-Zeitstempel der Statuszeile ist damit auch auf einem
+  Screenshot allein erkennbar, wie aktuell die angezeigten Daten sind.
 
 ### Behoben
 

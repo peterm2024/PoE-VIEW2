@@ -2436,6 +2436,20 @@ muss. Läuft die Zeit weiter, während die Tabelle unverändert aussieht,
 ist es ein Zeichenproblem; steht sie still, ist es Logik. Unabhängig von
 der Diagnose beantwortet sie dauerhaft die Frage "wie frisch ist das?".
 
+**Uhr in der Toolbar.** Peter, direkt im Anschluss: "Füge doch oben
+rechts außen in der ersten Zeile noch das aktuelle Datum und die Uhrzeit
+ein, dann sieht man im gleichen Screenshot was Sache ist." Der Zweck ist
+nicht, die Uhrzeit zu kennen — die steht in der Taskleiste —, sondern
+dass ein Screenshot für sich allein auswertbar wird: Erst im Vergleich
+mit dieser Uhr sagt das "Updated HH:MM:SS" der Statuszeile, ob die
+Ansicht frisch ist oder seit zehn Minuten steht. Genau dieser Vergleich
+ist bei der offenen Single-Modus-Frage der entscheidende. Datum bewusst
+in fester, ISO-naher Schreibweise: Ein Tage später auftauchender
+Screenshot soll eindeutig bleiben, und 04.08. gegen 08.04. wäre genau
+die Mehrdeutigkeit, die man dabei nicht gebrauchen kann. Die Uhr hängt
+am bereits laufenden Sekundentakt des Refresh-Countdowns — ein zweiter
+Timer für dieselbe Frequenz wäre Verschwendung.
+
 **Verlauf zeigte längst Vergangenes.** Peter: "in meiner History war
 noch Kishara's Star drin. Ein Item, das ich schon lange nicht mehr
 habe." Ursache ist eine Asymmetrie, die beim Bau nicht auffiel: Der

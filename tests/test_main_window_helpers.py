@@ -6137,3 +6137,35 @@ def test_the_history_baseline_resets_on_logout(qapp, monkeypatch) -> None:
 
     win.worker.stop()
     win.worker.wait(5000)
+
+
+def test_the_toolbar_clock_shows_date_and_time(qapp) -> None:
+    """Peter, 2026-08-04: "dann sieht man im gleichen Screenshot was Sache
+    ist." Zweck ist nicht die Uhrzeit an sich, sondern dass ein Screenshot
+    allein auswertbar wird — erst im Vergleich mit dieser Uhr sagt das
+    "Updated HH:MM:SS" der Statuszeile etwas aus. Mit Datum und in fester
+    Schreibweise, damit auch ein Tage spaeter auftauchender Screenshot
+    eindeutig bleibt."""
+    import re
+
+    win = MainWindow()
+
+    assert re.fullmatch(r"\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\s*",
+                        win._clock_label.text()), win._clock_label.text()
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_the_clock_reuses_the_existing_one_second_timer(qapp) -> None:
+    """Kein zweiter Timer fuer dieselbe Frequenz: die Uhr haengt am
+    Countdown-Takt, der ohnehin jede Sekunde laeuft."""
+    win = MainWindow()
+    win._clock_label.setText("")
+
+    win._countdown_timer.timeout.emit()
+
+    assert win._clock_label.text() != ""
+
+    win.worker.stop()
+    win.worker.wait(5000)
