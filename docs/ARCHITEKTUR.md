@@ -2219,6 +2219,17 @@ weil sie schon vor dem Logout-Klick unterwegs war — eine FAST LEERE
 damit zerstören. Da `_account_name` nach einem Logout sofort auf `""`
 steht, wird so ein verspäteter Persist-Versuch zuverlässig übersprungen.
 
+**Nachtrag 2026-08-03 — der Logout löschte indirekt doch Daten.**
+`_on_logout_clicked` leert den Speicher und setzt `_account_name` auf
+leer. Die Weiche in `_on_logged_in` prüfte zusätzlich auf einen
+gesetzten `_account_name` und griff deshalb ausgerechnet dann nicht,
+wenn keiner gesetzt war: Nach einem Logout wurde beim erneuten Anmelden
+nichts von der Platte nachgeladen, und der nächste `_persist_cache()`
+schrieb den leeren Stand über die gefüllte Datei. Die Zusatzbedingung
+ist entfallen; `_switch_active_account_data` stellt den Kontostand jetzt
+bei jeder Anmeldung her, bei der er nicht schon im Speicher steht.
+Vollständige Herleitung samt Log-Beweis: FALLSTRICKE #62.
+
 **Bewusst keine Löschfunktion für lokale Daten aus dem Tool heraus** —
 Peters Entscheidung: "zu gefährlich. Wer seine Daten löschen will, kann
 das über den Explorer erledigen." Kein Häkchen "auch die Items löschen"

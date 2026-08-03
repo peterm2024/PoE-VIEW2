@@ -6,6 +6,15 @@ nach [SemVer](https://semver.org/lang/de/).
 
 ## [Unveröffentlicht]
 
+### Behoben
+
+- Datenverlust beim Ab- und Wieder-Anmelden: Wer sich abmeldete und
+  danach erneut mit demselben Konto anmeldete, bekam seine gespeicherten
+  Truhen- und Charakterdaten nicht zurück — der leere Zustand wurde
+  stattdessen über die vorhandene Datei geschrieben. Beim nächsten Start
+  wirkte es, als müsse alles neu geladen werden. Die Daten kommen jetzt
+  nach dem erneuten Anmelden wieder von der Platte.
+
 ## [0.5.0] - 2026-08-03
 
 ### Hinzugefügt

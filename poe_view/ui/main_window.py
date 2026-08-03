@@ -1096,16 +1096,28 @@ class MainWindow(QMainWindow):
         (§ApiWorker._after_auth) — sowohl nach einem interaktiven Login als
         auch nach einem kalten Start mit noch gültigem gespeichertem Token.
 
-        Weicht es vom Konto ab, dessen Daten gerade im Speicher stehen
-        (``self._account_name``, gesetzt von ``_restore_cached_data`` beim
-        kalten Start oder einem vorherigen Login in dieser Session), ist
-        das ein Kontowechsel: der spekulativ geladene oder noch übrige
-        Stand des ALTEN Kontos wird verworfen, nicht vermischt (Peter,
-        2026-08-02: "Wenn ich den Account wechsle, habe ich dann meine
-        eigenen Daten?"). Der Normalfall — dieselbe Person startet neu
-        oder loggt sich erneut mit demselben Konto ein — durchläuft diesen
-        Zweig gar nicht (`self._account_name` stimmt schon überein)."""
-        if self._account_name and account_name != self._account_name:
+        Steht im Speicher nicht bereits der Stand GENAU DIESES Kontos, wird
+        er über ``_switch_active_account_data`` hergestellt: alles Alte
+        verwerfen, danach die Cache-Datei dieses Kontos laden. Das deckt
+        zwei Fälle ab, die beide dieselbe Behandlung brauchen:
+
+        * **Kontowechsel** — der Stand des ALTEN Kontos wird verworfen,
+          nicht vermischt (Peter, 2026-08-02: "Wenn ich den Account
+          wechsle, habe ich dann meine eigenen Daten?").
+        * **Anmeldung, während gar kein Konto aktiv ist** — insbesondere
+          nach einem Logout, der den Speicher absichtlich geleert hat
+          (``_on_logout_clicked``). Hier MUSS von der Platte nachgeladen
+          werden. Die frühere Fassung prüfte zusätzlich auf
+          ``self._account_name`` und übersprang den Zweig deshalb genau
+          dann, wenn nichts geladen war — der leere Speicher blieb leer,
+          und der erste ``_persist_cache()`` danach überschrieb die
+          gefüllte Cache-Datei mit dem Nichts. Realer Datenverlust bei
+          Peter, 2026-08-03 (FALLSTRICKE #62).
+
+        Der Normalfall — kalter Start, bei dem ``_restore_cached_data``
+        den Stand schon geladen hat — durchläuft den Zweig nicht, die
+        Namen stimmen dann bereits überein."""
+        if account_name != self._account_name:
             self._switch_active_account_data(account_name)
         self._account_name = account_name
         self._settings().setValue(self._ACCOUNT_SETTING_KEY, account_name)

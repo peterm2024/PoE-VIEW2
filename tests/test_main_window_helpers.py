@@ -1813,6 +1813,13 @@ def test_maybe_auto_refresh_stops_after_token_expires_mid_session(qapp, monkeypa
     Auto-Refresh sofort stoppen; `logged_in` ihn wieder erlauben."""
     win = MainWindow()
     win._current_league = "Standard"
+    # Ein Token-Ablauf MITTEN in der Sitzung setzt einen vorherigen Login
+    # voraus — `_on_login_required` lässt `_account_name` bewusst stehen
+    # (siehe dort). Ohne dieses Feld wäre die Ausgangslage unmöglich: Liga
+    # und Fächer gefüllt, aber nie ein Konto aktiv gewesen. Seit
+    # FALLSTRICKE #62 macht das einen Unterschied, weil `_on_logged_in`
+    # bei leerem `_account_name` den Kontostand von der Platte nachlädt.
+    win._account_name = "PeterM"
     now = datetime.now(timezone.utc)
     win._leaf_stashes = [_make_leaf("t1", "Tab 1")]
     win._last_loaded["Standard"] = {"t1": (now - timedelta(days=5)).isoformat()}
@@ -2114,6 +2121,65 @@ def test_restore_cached_data_falls_back_to_legacy_when_account_file_is_missing(
     assert win._account_name == "TestAccount#1234"
     assert [c.name for c in win._all_characters] == ["RichChar"]
     assert "Standard" in win._stash_trees
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_logging_in_again_after_a_logout_reloads_the_account_cache(qapp, monkeypatch) -> None:
+    """Realer Datenverlust bei Peter, 2026-08-03 (FALLSTRICKE #62): nach
+    einem Logout ist der Speicher absichtlich leer UND ``_account_name``
+    zurückgesetzt. Meldet man sich danach mit DEMSELBEN Konto wieder an,
+    muss der Stand von der Platte zurückkommen — sonst bleibt der
+    Speicher leer und der nächste ``_persist_cache()`` überschreibt die
+    gefüllte Cache-Datei mit dem Nichts."""
+    from poe_view.services import data_cache
+
+    stored = data_cache.CachedData()
+    stored.account_name = "TestAccount#1234"
+    stored.characters = [make_char("RichChar", "Standard")]
+    stored.stash_trees = {"Standard": [_make_leaf("t1", "Currency 1")]}
+    data_cache.save(stored, data_cache.path_for("TestAccount#1234"))
+
+    win = MainWindow()
+    monkeypatch.setattr(win.worker, "submit", lambda job: None)
+    win._on_logged_in("TestAccount#1234")
+    win._on_logout_clicked()
+    assert win._stash_trees == {} and win._account_name == ""  # Logout wirkt
+
+    win._on_logged_in("TestAccount#1234")  # dieselbe Person meldet sich neu an
+
+    assert [c.name for c in win._all_characters] == ["RichChar"]
+    assert "Standard" in win._stash_trees
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_persist_after_a_logout_login_cycle_keeps_the_stored_data(qapp, monkeypatch) -> None:
+    """Der eigentliche Schaden entstand erst beim Zurückschreiben: solange
+    der Speicher nach dem Wieder-Anmelden leer blieb, machte der nächste
+    ``_persist_cache()`` aus 2295 Fächern eine leere Datei. Prüft das
+    Ergebnis auf der Platte, nicht nur den Speicher."""
+    from poe_view.services import data_cache
+
+    stored = data_cache.CachedData()
+    stored.account_name = "TestAccount#1234"
+    stored.characters = [make_char("RichChar", "Standard")]
+    stored.stash_trees = {"Standard": [_make_leaf("t1", "Currency 1")]}
+    data_cache.save(stored, data_cache.path_for("TestAccount#1234"))
+
+    win = MainWindow()
+    monkeypatch.setattr(win.worker, "submit", lambda job: None)
+    win._on_logged_in("TestAccount#1234")
+    win._on_logout_clicked()
+    win._on_logged_in("TestAccount#1234")
+    win._persist_cache()
+
+    on_disk = data_cache.load(data_cache.path_for("TestAccount#1234"))
+    assert on_disk is not None
+    assert [c.name for c in on_disk.characters] == ["RichChar"]
+    assert "Standard" in on_disk.stash_trees
 
     win.worker.stop()
     win.worker.wait(5000)

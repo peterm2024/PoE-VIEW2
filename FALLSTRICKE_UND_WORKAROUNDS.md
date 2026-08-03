@@ -644,3 +644,28 @@ Dazu drei ergänzende Messungen: der Prozess läuft in keinem Job-Object (`IsPro
 **Lösung:** Ein `QTimer` (2 s) ruft `check_now()` — dieselbe Methode, in die auch das Datei-Ereignis mündet. Kosten pro Takt: ein `stat()`, und nur bei tatsächlichem Wachstum das Lesen der **neu angehängten** Bytes (nicht der mehrere MB großen Datei). Bei unveränderter Größe kehrt `check_now()` sofort zurück, doppeltes Auslösen ist damit folgenlos. Der `QFileSystemWatcher` bleibt daneben stehen: er kostet nichts und beschleunigt die Reaktion auf Systemen, auf denen er doch feuert.
 
 **Wie vermeiden:** Zwei Lehren. Erstens — **ein Feature ohne jede Beobachtbarkeit kann beliebig lange tot sein**, besonders wenn es nur einen langsameren Weg beschleunigt statt ihn zu ersetzen: hier hätte eine einzige INFO-Zeile pro erkanntem Zonenwechsel den Ausfall sofort sichtbar gemacht. Sichtbarkeit gehört zu jedem Trigger dazu, der im Hintergrund arbeitet. Zweitens — **Betriebssystem-Benachrichtigungen sind eine Optimierung, keine Garantie**; wo Korrektheit davon abhängt, gehört ein billiger Poll-Fallback daneben. Der Grundsatz aus #58 ("erst messen, dann bauen") galt auch hier: nicht die Bibliothek war schuld, und ohne die drei Messungen wäre der naheliegende, aber wirkungslose Bibliothekswechsel die Konsequenz gewesen.
+
+## 62. Ab- und wieder anmelden löschte den gesamten Datenbestand — der leere Speicher überschrieb die gefüllte Cache-Datei
+
+**Symptom (Peter, 2026-08-03, zweiter Datenverlust binnen zweier Tage):** "mir ist gerade aufgefallen, dass ich schon wieder keine Daten von mir mehr sehe". Aus 2295 geladenen Fächern in 10 Ligen war eine einzige Liga mit einem geladenen Fach geworden.
+
+**Ausschluss der naheliegendsten Ursache zuerst.** Verdacht war, dass die Testsuite in die echten Anwendungsdaten schreibt — der Migrationstest greift auf `config.APP_DATA_DIR` zu, und die Suite lief an diesem Tag dutzendfach. Das war falsch: `tests/conftest.py` biegt per autouse-Fixture sowohl `config.APP_DATA_DIR` als auch `data_cache._CACHE_FILE` auf ein `tmp_path`-Verzeichnis um. Die Tests waren nie beteiligt.
+
+**Beweisführung über das Log.** Die Zeile `Daten-Cache geladen: N Charaktere, M Liga(en)` (2026-08-03 wegen FALLSTRICKE #61 ergänzt) datiert den Schaden auf die Sekunde:
+
+```
+02:59:42  Daten-Cache geladen: 50 Charaktere, 12 Liga(en)
+02:59:43  GET /profile          <- Login beim kalten Start
+03:00:16  GET /profile          <- ZWEITER Login, 33 s später
+03:00:52  Daten-Cache geladen: 50 Charaktere, 1 Liga(en)
+```
+
+Zwei `/profile`-Aufrufe in derselben Sitzung sind die Signatur eines Ab- und Wieder-Anmeldens — Peter testete zu dem Zeitpunkt die neue Logout-Funktion. Zwischen dem 12-Ligen-Start und dem 1-Liga-Start liegen 70 Sekunden.
+
+**Ursache.** `_on_logout_clicked` leert absichtlich den Speicher UND setzt `self._account_name = ""`. Die Weiche in `_on_logged_in` lautete aber `if self._account_name and account_name != self._account_name:` — der führende `self._account_name`-Test macht sie genau dann unwirksam, wenn gar kein Konto aktiv ist. Nach einem Logout wurde also nichts von der Platte nachgeladen; der Speicher blieb leer. Der erste `_persist_cache()` danach (er hängt an jedem `_on_characters`/`_on_stash_items`) schrieb diesen leeren Stand über die gefüllte Datei. Die Bedingung war als Schutz gedacht — "beim allerersten Login gibt es nichts zu verwerfen" — und wurde dadurch zum Auslöser.
+
+**Lösung.** Die Zusatzbedingung entfällt: `if account_name != self._account_name:`. Damit stellt `_switch_active_account_data` den Stand des angemeldeten Kontos in beiden Fällen her, die dieselbe Behandlung brauchen — beim echten Kontowechsel und bei jeder Anmeldung, während kein Konto aktiv ist. Der Normalfall (kalter Start, `_restore_cached_data` hat den Stand bereits geladen) läuft nicht durch den Zweig, weil die Namen übereinstimmen.
+
+**Ein bestehender Test musste dabei angepasst werden — und das war ein eigener Befund.** `test_maybe_auto_refresh_stops_after_token_expires_mid_session` füllte Liga und Fächer, ließ `_account_name` aber leer. Diese Ausgangslage kann es real nicht geben: Ein Token-Ablauf mitten in der Sitzung setzt einen vorherigen Login voraus, und `_on_login_required` lässt `_account_name` ausdrücklich stehen. Unter der alten Bedingung war die Lücke folgenlos, unter der neuen fiel sie auf. Der Test modelliert sein eigenes Szenario jetzt vollständig.
+
+**Wie vermeiden:** Drei Lehren. Erstens — **Zurückschreiben ist gefährlicher als Lesen.** Beide Datenverluste dieser Woche (#62 und der Vorläufer vom 2026-08-02) entstanden nicht beim Laden, sondern dadurch, dass ein magerer Speicherstand einen reichen Dateistand überschrieb. Wo eine Anwendung ihren gesamten Zustand in eine Datei spiegelt, ist jeder Pfad, der den Speicher leert, zugleich ein potenzieller Löschbefehl für die Platte. Zweitens — **eine Bedingung, die einen Sonderfall ausnimmt, muss gegen alle Zustände geprüft werden, die diesen Sonderfall auslösen können.** `if self._account_name and ...` sollte den Erststart abfangen; dass ein Logout denselben Zustand herstellt, wurde übersehen. Drittens, methodisch: Die eine Log-Zeile aus #61 hat den Fehler in Minuten statt Stunden geklärt. Ohne sie hätte man raten müssen, wann der Bestand kippte.
