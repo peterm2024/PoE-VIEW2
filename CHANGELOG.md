@@ -30,6 +30,11 @@ nach [SemVer](https://semver.org/lang/de/).
   solche Änderungen komplett ignoriert — nur echte Neuzugänge und
   verschwundene Items landeten im Verlauf. Gilt nur für das
   Charakter-Inventar, nicht für Stash-Fächer.
+- Eigenes Anwendungssymbol: PoE-VIEW2 hat jetzt ein eigenes Icon in
+  Explorer, Taskleiste und Fenstertitel statt des allgemeinen
+  Standardsymbols. Es steckt in sieben Größenstufen in der Datei, wobei
+  die kleinen Stufen eine bewusst vereinfachte Fassung der Grafik
+  verwenden — sonst würde der Runenring bei 16 Pixeln zu Matsch.
 - Live-Zonenanzeige in der Toolbar: zeigt die zuletzt aus der Client.txt
   erkannte Zone an — unabhängig davon, ob danach tatsächlich ein Refresh
   folgt (Pause-Modus/Rate-Limit können das weiterhin verhindern). Auch

@@ -2316,6 +2316,48 @@ trägt ein Poll-Timer (2 s) die Erkennung, der Watcher bleibt als
 beschleunigende Zugabe daneben. Vollständige Herleitung mit den drei
 Messungen gegen Peters echte Dateien: FALLSTRICKE #61.
 
+### 4.27 Anwendungssymbol
+
+Peter hat die Grafik selbst erstellen lassen und in Paint.NET
+nachbearbeitet (2026-08-03) — freigestellt, ohne Wasserzeichen, und vor
+allem in **vier Detailgraden**: nur Zahnrad mit Auge, runde Fassung mit
+Runenkranz, abgerundetes Quadrat mittlerer Dichte und die volle
+Ausführung. Genau diese Staffelung ist der Grund für den ganzen Aufwand
+hier: würde man nur die große Fassung einbetten, rechnet Windows sie für
+die Taskleiste selbst auf 16 px herunter und der Runenring zerfällt zu
+Matsch. `tools/make_icon.py` ordnet deshalb jeder der sieben Stufen
+(16/24/32/48/64/128/256) die passende Vorlage zu.
+
+**Warum ein eigener ICO-Generator.** Qt kann `.ico` schreiben, aber nur
+ein Bild pro Datei — für eine mehrstufige Icondatei reicht das nicht.
+Statt dafür ein Bildbearbeitungspaket als Abhängigkeit aufzunehmen,
+schreibt das Skript den ICO-Container selbst (Kopf, Verzeichnis,
+Bilddaten); Laden, Skalieren und PNG-Kodierung übernimmt das ohnehin
+vorhandene PySide6. Stufen bis 48 px liegen als klassisches DIB darin,
+ab 64 px PNG-komprimiert — 256×256 unkomprimiert wären allein 256 KB.
+
+Zwei Fallen, die dabei auffielen: `QBuffer(QByteArray())` stürzt ab,
+weil Python den temporären Puffer sofort wieder freigibt (der
+parameterlose Konstruktor tut es), und DIB-Einträge speichern ihre
+Zeilen von UNTEN nach oben, bei doppelt eingetragener Höhe im Header.
+Gegen den Zeilendreher — den klassischen Fehler dabei — sichert
+`test_the_small_sizes_are_not_upside_down` ab: Gegenprobe mit
+absichtlich nicht umgedrehten Zeilen schlägt fehl, zurückgedreht grün.
+Die weiteren Tests in `tests/test_app_icon.py` prüfen den Container
+strukturell (lückenlose Offsets bis exakt ans Dateiende), weil die
+`.ico` als fertige Datei versioniert wird und sonst niemandem auffiele,
+wenn sie beim Regenerieren kaputtginge.
+
+**Zweifach eingebunden:** `icon=` in der Spec brennt das Symbol in die
+`.exe` (das sieht Explorer), zusätzlich liegt dieselbe Datei über
+`datas` im Bundle, weil `main.py` sie als Fenster-Icon setzt — nur so
+trägt auch der Start aus der Quelle heraus nicht das Python-Symbol.
+Dafür brauchte `config.py` einen zweiten Pfad: `PROJECT_ROOT` zeigt in
+der gepackten Anwendung neben die `.exe` (dorthin legt der Nutzer seine
+`.env`), Mitgeliefertes entpackt PyInstaller aber nach `sys._MEIPASS` —
+dafür jetzt `BUNDLE_DIR`. Verifiziert wurde die fertige `.exe`, indem
+die Nutzdaten aller sieben Stufen im Binary wiedergefunden wurden.
+
 ---
 
 ## 5. UI-Konzept (Oberflächenvorschlag)

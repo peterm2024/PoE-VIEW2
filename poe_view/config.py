@@ -28,6 +28,14 @@ else:
     PROJECT_ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(PROJECT_ROOT / ".env")
 
+# Mitgeliefertes (Icon o. Ä.) entpackt PyInstaller dagegen nach
+# ``sys._MEIPASS`` — also gerade NICHT neben die .exe. Beide Pfade werden
+# gebraucht und dürfen nicht verwechselt werden: ``PROJECT_ROOT`` für das,
+# was der Nutzer selbst danebenlegt (.env), ``BUNDLE_DIR`` für das, was
+# wir mitliefern. Ungepackt fallen beide auf dasselbe Verzeichnis zurück.
+BUNDLE_DIR = Path(getattr(sys, "_MEIPASS", PROJECT_ROOT))
+APP_ICON = BUNDLE_DIR / "assets" / "PoE-VIEW2.ico"
+
 # --- OAuth2 (PKCE, public client — kein Secret) ---
 CLIENT_ID = os.getenv("POE_CLIENT_ID", "poeview")
 

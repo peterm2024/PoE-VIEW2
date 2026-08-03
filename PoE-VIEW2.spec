@@ -8,10 +8,16 @@ Ergebnis: dist/PoE-VIEW2.exe (Single-File, kein Python nötig).
 Windows Credential Manager) über einen dynamischen Plugin-Mechanismus
 lädt, den PyInstallers statische Analyse allein nicht findet — ohne das
 würde die gepackte .exe zur Laufzeit keinen Token speichern können.
+
+Das Icon wird zweifach gebraucht: `icon=` unten brennt es fest in die
+.exe (das ist es, was Explorer und Taskleiste anzeigen), der Eintrag in
+`datas` legt dieselbe Datei zusätzlich ins Bundle, weil `main.py` sie
+zur Laufzeit als Fenster-Icon setzt. Neu erzeugen lässt sie sich mit
+`python tools/make_icon.py`.
 """
 from PyInstaller.utils.hooks import collect_all
 
-datas = []
+datas = [('assets/PoE-VIEW2.ico', 'assets')]
 binaries = []
 hiddenimports = ['keyring.backends.Windows']
 tmp_ret = collect_all('keyring')
@@ -52,4 +58,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    icon='assets/PoE-VIEW2.ico',
 )

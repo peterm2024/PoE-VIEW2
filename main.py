@@ -6,6 +6,7 @@ import logging
 import sys
 from logging.handlers import RotatingFileHandler
 
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication
 
 from poe_view import config
@@ -36,6 +37,11 @@ def main() -> int:
     _setup_logging()
     app = QApplication(sys.argv)
     app.setApplicationName("PoE-VIEW2")
+    # Ohne das trägt das Fenster beim Start aus der Quelle heraus das
+    # allgemeine Python-Symbol. Die gepackte .exe bekommt ihr Icon zwar
+    # ohnehin fest eingebettet (siehe PoE-VIEW2.spec), aber ein zweiter
+    # Weg schadet nicht — und für die Entwicklung ist es der einzige.
+    app.setWindowIcon(QIcon(str(config.APP_ICON)))
     window = MainWindow()
     window.show()
     return app.exec()

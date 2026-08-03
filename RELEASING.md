@@ -31,6 +31,12 @@ Ergebnis ist `dist/PoE-VIEW2.exe`, eine eigenständige Datei von rund
 60 MB. Sie enthält Python und Qt und setzt auf dem Zielrechner nichts
 weiter voraus.
 
+Das Anwendungssymbol steckt fertig als `assets/PoE-VIEW2.ico` im Repo
+und muss für einen Release nicht angefasst werden. Nur wenn sich die
+Grafik ändert, die Vorlagen in `assets/icon/` austauschen und einmal
+`python tools/make_icon.py` laufen lassen — das baut die sieben
+Größenstufen neu zusammen.
+
 **Vor dem Hochladen manuell testen.** Die `.exe` in einen leeren Ordner
 kopieren, ausdrücklich ohne `.env`, da Nutzer sie genau so erhalten.
 Anschließend starten und den vollständigen Login-Flow durchspielen:
