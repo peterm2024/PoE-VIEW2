@@ -265,6 +265,11 @@ class MainWindow(QMainWindow):
         # ALLE Charaktere hinweg, unabhängig davon, welcher gerade angezeigt
         # wird (appendleft: Zeile 0 = jüngstes Ereignis, siehe item_history.py).
         self._item_history: deque[HistoryEntry] = deque(maxlen=120)
+        # Charaktere, für die in DIESER Sitzung schon einmal ein Stand
+        # eintraf. Erst ab dem zweiten Abruf ist ein Vergleich sinnvoll —
+        # ein aus der Datei geladener Stand kann wochenalt sein
+        # (§_log_character_item_history).
+        self._history_baseline_chars: set[str] = set()
         self._offline = False  # GGG nicht erreichbar (Wartung am Patchday)
         self._live_leagues: set[str] | None = None  # letzte /account/leagues-Antwort; None = noch unbekannt
         self._restore_cached_data()
@@ -792,7 +797,23 @@ class MainWindow(QMainWindow):
         # Aufrufe, nie an rowsInserted/rowsRemoved (FALLSTRICKE #39).
         self._value_sum_label = QLabel("")
         self.statusBar().addPermanentWidget(self._value_sum_label)
+        # Zeitpunkt, zu dem der ANGEZEIGTE Inhalt zuletzt neu aufgebaut
+        # wurde (Peter, 2026-08-04: "Bin im 'Single' Mode und habe die
+        # ganze Zeit mein Inventar beobachtet ... aber es hat sich nichts
+        # getan"). Die Abrufe liefen dabei nachweislich alle ~13 s
+        # durch — ohne diese Anzeige ließ sich nicht unterscheiden, ob
+        # die Ansicht nicht neu gesetzt oder nur nicht neu gezeichnet
+        # wurde. Nebenbei die Antwort auf "wie frisch ist das hier?".
+        self._view_updated_label = QLabel("")
+        self._view_updated_label.setToolTip(
+            "When the table below was last rebuilt with fresh data")
+        self.statusBar().addPermanentWidget(self._view_updated_label)
         self.proxy.modelReset.connect(self._update_summaries)
+        # An dasselbe Signal gehängt wie die Summen: `modelReset` feuert
+        # genau einmal pro `set_items()` und damit bei JEDEM Neuaufbau der
+        # Tabelle — egal aus welcher Ansicht heraus. Kein Aufrufer muss
+        # daran denken, und es kann keine Ansicht vergessen werden.
+        self.proxy.modelReset.connect(self._note_view_updated)
         # Sichtbarer Nachweis, dass der Hintergrund-Auto-Refresh arbeitet
         # ("Bist du dir sicher, dass das funktioniert?").
         self._auto_refresh_label = QLabel("")
@@ -947,6 +968,19 @@ class MainWindow(QMainWindow):
                 total += item.stackSize
                 names.add(item.display_name)
         self._stack_sum_label.setText(f"Stack total: {total:,}" if len(names) == 1 else "")
+
+    def _note_view_updated(self, *_args) -> None:
+        """Hält fest, wann die Tabelle zuletzt neu aufgebaut wurde.
+
+        Entstanden als Diagnosemittel (Peter, 2026-08-04: im Single-Modus
+        tat sich beim Zuschauen nichts, obwohl das Log durchgehend
+        erfolgreiche Abrufe zeigte). Läuft die Zeit hier weiter, während
+        die Tabelle unverändert aussieht, liegt es am Neuzeichnen und
+        nicht am Nachladen — ohne diese Anzeige war das nicht
+        auseinanderzuhalten. Bleibt auch danach nützlich: sie beantwortet
+        die Frage "wie frisch ist das, was ich hier sehe?"."""
+        self._view_updated_label.setText(
+            f"Updated {datetime.now().strftime('%H:%M:%S')}")
 
     def _update_summaries(self, *_args) -> None:
         """Einziger Anschlusspunkt für beide Statuszeilen-Summen (Stack,
@@ -1273,6 +1307,7 @@ class MainWindow(QMainWindow):
         self._search_all_active = False
         self._large_search_items = None
         self._item_history.clear()
+        self._history_baseline_chars.clear()
         self._filter_edit.clear()
         self.tree.set_stashes([])
         self.character_list.set_characters([])
@@ -2557,7 +2592,24 @@ class MainWindow(QMainWindow):
         ``_show_character_items``, die nur die aktuell offene Ansicht
         betrifft. ``previous_items=None`` (erster Ladevorgang dieses
         Charakters) loggt bewusst nichts, sonst würde jeder erstmalige
-        Charakter-Load die komplette Ausrüstung als "neu" eintragen."""
+        Charakter-Load die komplette Ausrüstung als "neu" eintragen.
+
+        **Ein aus der Datei geladener Stand zählt dabei NICHT als
+        Vergleichsbasis** (Peter, 2026-08-04: "Hab gerade gesehen, dass in
+        meiner History noch Kishara's Star drin war. Ein Item, das ich
+        schon lange nicht mehr habe"). Der Verlauf selbst überlebt keinen
+        Neustart, der Inventarstand der Charaktere schon — der erste
+        Abruf nach dem Start verglich deshalb gegen einen womöglich
+        wochenalten Stand und schrieb sämtliche zwischenzeitlichen
+        Änderungen mit der AKTUELLEN Uhrzeit ins Protokoll. Das ist
+        schlicht falsch: Der Verlauf soll zeigen, was gerade durchs
+        Inventar gewandert ist, nicht was irgendwann seit dem letzten
+        Programmlauf passiert ist. Protokolliert wird deshalb erst ab dem
+        ZWEITEN Abruf eines Charakters in dieser Sitzung; der erste setzt
+        nur die Vergleichsbasis (``_history_baseline_chars``)."""
+        if name not in self._history_baseline_chars:
+            self._history_baseline_chars.add(name)
+            return
         added_ids, _changed_ids, removed_items = self._diff_character_items(previous_items, items)
         stack_changes = self._stack_size_changes(previous_items, items)
         if not added_ids and not removed_items and not stack_changes:

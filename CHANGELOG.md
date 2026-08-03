@@ -15,6 +15,19 @@ nach [SemVer](https://semver.org/lang/de/).
   Wertspalte in SSF-Ligen leer bleibt, und wo die eigenen Daten liegen.
   Das Fenster ist nicht modal — es kann offen bleiben, während man das
   Erklärte ausprobiert.
+- Statuszeile zeigt jetzt "Updated HH:MM:SS" — wann der Inhalt der
+  Tabelle zuletzt neu aufgebaut wurde. Damit ist auf einen Blick
+  erkennbar, wie frisch das Angezeigte ist.
+
+### Behoben
+
+- Item-Verlauf: Nach einem Programmstart tauchten dort Ereignisse auf,
+  die längst vergangen waren — mit der aktuellen Uhrzeit versehen. Der
+  Verlauf selbst wird nicht gespeichert, der Inventarstand der
+  Charaktere schon; der erste Abruf nach dem Start verglich deshalb
+  gegen einen womöglich wochenalten Stand. Protokolliert wird jetzt erst
+  ab dem zweiten Abruf eines Charakters, der erste setzt nur die
+  Vergleichsbasis.
 
 ## [0.5.1] - 2026-08-04
 

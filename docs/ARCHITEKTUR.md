@@ -2412,6 +2412,48 @@ bleiben, an denen der Spielertest hängen geblieben ist.
 Reiter englisch, Fenstertitel und Fließtext deutsch. Das bricht dieselbe
 Grenze und ist noch offen.
 
+### 4.29 "Updated HH:MM:SS" + Verlauf ohne gecachte Vergleichsbasis
+
+Zwei Beobachtungen Peters vom 2026-08-04, beide aus dem laufenden Spiel
+heraus.
+
+**"Im Single-Modus tat sich nichts."** Peter beobachtete sein Inventar
+während des Spielens; die Tabelle blieb stehen, erst ein Klick ins
+Fenster brachte sie auf Stand. Das Log widerlegte die naheliegende
+Erklärung sofort: `GET /character/...` lief durchgehend alle ~13 s mit
+`200 OK`. Auch der Anzeige-Pfad hat keine versteckte Abbruchbedingung —
+`_show_character_items` setzt das Modell bedingungslos neu, sobald der
+aktualisierte Charakter der ausgewählte ist. Damit blieben zwei
+Möglichkeiten übrig, die sich von außen nicht unterscheiden ließen:
+Ansicht wird nicht neu GESETZT oder nur nicht neu GEZEICHNET.
+
+Statt zu raten wieder erst Sichtbarkeit (dieselbe Lehre wie FALLSTRICKE
+#61): `_note_view_updated` schreibt bei jedem Neuaufbau der Tabelle die
+Uhrzeit in die Statuszeile. Angehängt an `proxy.modelReset` — dasselbe
+Signal wie die Summen, es feuert genau einmal pro `set_items()` und
+damit aus JEDER Ansicht heraus, ohne dass ein Aufrufer daran denken
+muss. Läuft die Zeit weiter, während die Tabelle unverändert aussieht,
+ist es ein Zeichenproblem; steht sie still, ist es Logik. Unabhängig von
+der Diagnose beantwortet sie dauerhaft die Frage "wie frisch ist das?".
+
+**Verlauf zeigte längst Vergangenes.** Peter: "in meiner History war
+noch Kishara's Star drin. Ein Item, das ich schon lange nicht mehr
+habe." Ursache ist eine Asymmetrie, die beim Bau nicht auffiel: Der
+Verlauf (`_item_history`, reines `deque` im Speicher) überlebt keinen
+Neustart — der Inventarstand der Charaktere (`character_items`) aber
+schon. Der erste Abruf eines Charakters nach dem Start verglich deshalb
+den frischen Stand gegen einen womöglich wochenalten und schrieb
+sämtliche zwischenzeitlichen Änderungen mit `datetime.now()` ins
+Protokoll. Für einen Verlauf, der zeigen soll, was gerade durchs
+Inventar wandert, ist das schlicht falsch.
+
+Behoben über `_history_baseline_chars`: Der erste Abruf eines Charakters
+IN DIESER SITZUNG setzt nur die Vergleichsbasis und protokolliert
+nichts — dieselbe Regel, die für den allerersten Abruf überhaupt schon
+galt (`previous_items=None`), nur konsequent auf "aus der Datei geladen"
+ausgeweitet. Beim Logout wird die Menge geleert, sonst gälte der Stand
+des abgemeldeten Kontos als Basis für das nächste.
+
 ---
 
 ## 5. UI-Konzept (Oberflächenvorschlag)

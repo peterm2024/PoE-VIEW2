@@ -6052,3 +6052,88 @@ def test_character_list_export_visible_requested_reaches_export_csv(
 
     win.worker.stop()
     win.worker.wait(5000)
+
+
+# --- "Updated HH:MM:SS": wann wurde die Tabelle zuletzt neu aufgebaut --- #
+
+def test_the_view_timestamp_updates_on_every_table_rebuild(qapp, monkeypatch) -> None:
+    """Peter, 2026-08-04: "Bin im 'Single' Mode und habe die ganze Zeit
+    mein Inventar beobachtet ... aber es hat sich nichts getan." Das Log
+    zeigte gleichzeitig alle ~13 s erfolgreiche Abrufe. Ohne eine sichtbare
+    Marke liess sich nicht unterscheiden, ob die Ansicht nicht neu gesetzt
+    oder nur nicht neu gezeichnet wurde."""
+    win = _three_tab_window(monkeypatch)
+    assert win._view_updated_label.text() == ""
+
+    win._show_items("t1", win._items["Standard"]["t1"], "Currency 1")
+
+    assert win._view_updated_label.text().startswith("Updated ")
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_the_view_timestamp_also_covers_the_character_view(qapp, monkeypatch) -> None:
+    """Gerade die Charakter-Ansicht war der Anlass — sie ist das Ziel des
+    Single-Modus, wenn ein Charakter ausgewaehlt ist."""
+    win = _three_tab_window(monkeypatch)
+    win._show_items("t1", win._items["Standard"]["t1"], "Currency 1")
+    before = win._view_updated_label.text()
+    win._view_updated_label.setText("")  # zuruecksetzen, um den naechsten Aufbau zu sehen
+
+    win._show_character_items("WitchOfPeter",
+                              [Item.model_validate({"typeLine": "Chaos Orb"})])
+
+    assert before.startswith("Updated ")
+    assert win._view_updated_label.text().startswith("Updated ")
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_a_cached_inventory_is_not_used_as_a_history_baseline(qapp) -> None:
+    """Peter, 2026-08-04: "Hab gerade gesehen, dass in meiner History noch
+    Kishara's Star drin war. Ein Item, das ich schon lange nicht mehr
+    habe." Der Verlauf ueberlebt keinen Neustart, der Inventarstand schon
+    — der erste Abruf nach dem Start verglich deshalb gegen einen
+    womoeglich wochenalten Stand und schrieb alles Zwischenzeitliche mit
+    der AKTUELLEN Uhrzeit ins Protokoll."""
+    win = MainWindow()
+    win._current_character_name = "WitchOfPeter"
+    # Stand wie nach _restore_cached_data: liegt im Speicher, stammt aber
+    # aus einem frueheren Programmlauf.
+    win._character_items["WitchOfPeter"] = [
+        Item.model_validate({"id": "old", "typeLine": "Kishara's Star"})]
+
+    win._on_character_items("WitchOfPeter", [
+        Item.model_validate({"id": "new", "typeLine": "Chaos Orb"})], False)
+
+    assert list(win._item_history) == []  # kein Ereignis aus der Vergangenheit
+
+    # Ab dem zweiten Abruf dieser Sitzung ist der Vergleich wieder gueltig.
+    win._on_character_items("WitchOfPeter", [
+        Item.model_validate({"id": "new", "typeLine": "Chaos Orb"}),
+        Item.model_validate({"id": "fresh", "typeLine": "Divine Orb"})], False)
+
+    assert [e.item.display_name for e in win._item_history] == ["Divine Orb"]
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_the_history_baseline_resets_on_logout(qapp, monkeypatch) -> None:
+    """Nach einem Logout faengt alles von vorn an — sonst gaelte der Stand
+    des abgemeldeten Kontos als Vergleichsbasis fuer das naechste."""
+    win = MainWindow()
+    monkeypatch.setattr(win.worker, "submit", lambda job: None)
+    win._on_logged_in("TestAccount#1234")
+    win._on_character_items("WitchOfPeter", [
+        Item.model_validate({"id": "1", "typeLine": "Sword"})], False)
+    assert "WitchOfPeter" in win._history_baseline_chars
+
+    win._on_logout_clicked()
+
+    assert win._history_baseline_chars == set()
+
+    win.worker.stop()
+    win.worker.wait(5000)
