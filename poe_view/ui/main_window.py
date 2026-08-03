@@ -38,6 +38,7 @@ from poe_view.services.api_worker import (ApiWorker, BootstrapJob,
                                           LogoutJob)
 from poe_view.services.csv_export import export_items, sanitize_filename
 from poe_view.ui import external_tools
+from poe_view.ui.help_dialog import HelpDialog
 from poe_view.ui.character_list import CharacterList
 from poe_view.ui.item_detail import ItemDetail
 from poe_view.ui.item_table import (COLUMNS, CONFIGURABLE_COLUMNS, ICON_COL,
@@ -193,6 +194,9 @@ class MainWindow(QMainWindow):
         self._current_league: str = ""
         self._current_tab_name: str = ""
         self._bulk_dialog: QProgressDialog | None = None
+        # Hilfe-Fenster: einmal gebaut, danach wiederverwendet
+        # (nicht modal, siehe _open_help_dialog).
+        self._help_dialog: HelpDialog | None = None
         self._bulk_progress: BulkProgress | None = None  # letzter Tick, für den Sekunden-Countdown
         self._bulk_next_fetch_at = 0.0   # time.monotonic()-Zeitpunkt des nächsten Bulk-Abrufs
         # Rest der aktuellen Rate-Limit-Zwangspause, gespeist vom
@@ -516,6 +520,11 @@ class MainWindow(QMainWindow):
         self._settings_action.setToolTip("Configure the item right-click menu")
         self._settings_action.triggered.connect(self._open_settings_dialog)
         toolbar.addAction(self._settings_action)
+
+        self._help_action = QAction("❓ Help", self)
+        self._help_action.setToolTip("What the columns, filters and modes mean")
+        self._help_action.triggered.connect(self._open_help_dialog)
+        toolbar.addAction(self._help_action)
 
         # Live-Anzeige der zuletzt aus der Client.txt erkannten Zone (Peter,
         # 2026-08-03: erst als kurz aufblinkende LED vorgeschlagen, dann
@@ -2789,6 +2798,17 @@ class MainWindow(QMainWindow):
             return
         if self._refresh_current_view():
             self._on_status(f"Zone changed to {zone_name!r} — refreshing current view")
+
+    def _open_help_dialog(self) -> None:
+        """Bewusst nicht modal (``show()`` statt ``exec()``): Die Hilfe soll
+        neben dem Fenster stehen bleiben können, während man das Erklärte
+        ausprobiert. Die Instanz hängt deshalb am Fenster — ohne die
+        Referenz würde Python sie sofort wieder einsammeln."""
+        if self._help_dialog is None:
+            self._help_dialog = HelpDialog(self)
+        self._help_dialog.show()
+        self._help_dialog.raise_()
+        self._help_dialog.activateWindow()
 
     def _open_settings_dialog(self) -> None:
         dialog = SettingsDialog(self._load_tool_entries(), self._load_column_config(),

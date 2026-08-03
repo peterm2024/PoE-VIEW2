@@ -6,6 +6,16 @@ nach [SemVer](https://semver.org/lang/de/).
 
 ## [Unveröffentlicht]
 
+### Hinzugefügt
+
+- Hilfe-Fenster (Fragezeichen-Knopf in der Toolbar) mit zehn Themen: was
+  die Spalten bedeuten, wofür die Farbfilter stehen, wie Suche und
+  Refresh-Modi arbeiten, warum die beiden Zähler in "Load All Tabs"
+  auseinanderlaufen, was die Symbole im Item-Verlauf heißen, warum die
+  Wertspalte in SSF-Ligen leer bleibt, und wo die eigenen Daten liegen.
+  Das Fenster ist nicht modal — es kann offen bleiben, während man das
+  Erklärte ausprobiert.
+
 ## [0.5.1] - 2026-08-04
 
 ### Behoben

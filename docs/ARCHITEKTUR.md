@@ -2379,6 +2379,39 @@ der gepackten Anwendung neben die `.exe` (dorthin legt der Nutzer seine
 dafür jetzt `BUNDLE_DIR`. Verifiziert wurde die fertige `.exe`, indem
 die Nutzdaten aller sieben Stufen im Binary wiedergefunden wurden.
 
+### 4.28 Hilfe-Fenster
+
+Peter, 2026-08-03, im Anschluss an einen Spielertest: "Punkt 5 wäre eine
+kleine Hilfe-Funktion". Auslöser war die Beobachtung, dass die
+Oberfläche sich an mehreren Stellen nicht selbst erklärt — acht
+unbeschriftete Farbkästchen als Typ-Filter, `#2 (0, 0)` in der
+Positionsspalte, die Pfeile im Item-Verlauf, die in SSF-Ligen dauerhaft
+leere Wertspalte (die wie ein Defekt aussieht, aber eine Grenze der
+Datenquelle ist) und die beiden auseinanderlaufenden Zähler in
+"Load All Tabs".
+
+`ui/help_dialog.py`: Themenliste links, Text rechts, Inhalte als HTML in
+einer Modul-Konstante `TOPICS` — an einer Stelle pflegbar, ohne
+Widget-Code anzufassen. Die Legende der Typ-Filter zieht ihre Farben aus
+`theme.RARITY_COLORS` statt aus eingetippten Werten, sonst liefe sie beim
+nächsten Farbwechsel aus dem Ruder.
+
+**Bewusst nicht modal** (`show()` statt `exec()`): Man soll nachschlagen
+und das Erklärte gleichzeitig ausprobieren können. Das Fenster wird
+einmal gebaut und wiederverwendet; die Referenz hängt am Hauptfenster,
+ohne sie sammelte Python es sofort wieder ein.
+
+**Texte auf Englisch**, wie die übrige Oberfläche und die README —
+Kommentare und Projektdoku bleiben deutsch. Ein Test hält diese Grenze
+(`test_the_help_is_written_in_english_like_the_rest_of_the_ui`), weil
+sie sich beim Nachpflegen sonst leicht verwischt. Die weiteren Tests
+prüfen nicht die Formulierung, sondern dass genau die Stellen abgedeckt
+bleiben, an denen der Spielertest hängen geblieben ist.
+
+**Dabei aufgefallen:** Der Settings-Dialog ist sprachlich gemischt —
+Reiter englisch, Fenstertitel und Fließtext deutsch. Das bricht dieselbe
+Grenze und ist noch offen.
+
 ---
 
 ## 5. UI-Konzept (Oberflächenvorschlag)
