@@ -2101,17 +2101,17 @@ def test_restore_cached_data_falls_back_to_legacy_when_account_file_is_missing(
     from PySide6.QtCore import QSettings
 
     legacy_data = data_cache.CachedData()
-    legacy_data.account_name = "Gandol#4338"
+    legacy_data.account_name = "TestAccount#1234"
     legacy_data.characters = [make_char("RichChar", "Standard")]
     legacy_data.stash_trees = {"Standard": [_make_leaf("t1", "Currency 1")]}
     data_cache.save(legacy_data)  # alter, gemeinsamer Pfad
     QSettings(str(config.APP_DATA_DIR / "ui-settings.ini"),
-             QSettings.Format.IniFormat).setValue("account/last_active", "Gandol#4338")
-    assert not data_cache.path_for("Gandol#4338").exists()  # genau der beobachtete Zustand
+             QSettings.Format.IniFormat).setValue("account/last_active", "TestAccount#1234")
+    assert not data_cache.path_for("TestAccount#1234").exists()  # genau der beobachtete Zustand
 
     win = MainWindow()
 
-    assert win._account_name == "Gandol#4338"
+    assert win._account_name == "TestAccount#1234"
     assert [c.name for c in win._all_characters] == ["RichChar"]
     assert "Standard" in win._stash_trees
 

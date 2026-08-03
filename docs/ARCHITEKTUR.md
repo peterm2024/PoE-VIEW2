@@ -2159,7 +2159,7 @@ erfolgreich eingeloggt hatte, schrieb `_on_logged_in` den Hinweis sofort
 (jeder Login tut das), UNABHÄNGIG davon, ob in dieser Sitzung je ein
 vollständiger `_persist_cache()` gelaufen war. Peters Fall exakt: eine
 kurze erste Sitzung mit dem neuen Code schrieb `account/last_active=
-Gandol#4338`, ohne dass die 52 MB große alte `data-cache.json` je unter
+<Konto>`, ohne dass die 52 MB große alte `data-cache.json` je unter
 dem neuen, kontospezifischen Pfad gesichert wurde. Jeder weitere Start
 versuchte danach NUR NOCH die (fehlende) kontospezifische Datei, gab
 auf und zeigte eine leere App — die reiche alte Datei lag unangetastet,
