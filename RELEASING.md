@@ -70,8 +70,27 @@ Changelog heraus. Alternativ lässt sich der Text manuell einfügen;
 Unabhängig vom Release, aber für die Auffindbarkeit entscheidend: Die
 GitHub-Topics (Repo-Seite, Zahnrad neben "About") steuern die
 GitHub-interne Suche und die Indexierung durch Suchmaschinen. Git-Tags
-tun das nicht.
+tun das nicht. Gesetzt sind (Stand 2026-08-03, GitHub erlaubt bis zu 20):
 
 ```
-path-of-exile, poe, stash, inventory, ggg-api, pyside6, python, desktop-app
+path-of-exile, pathofexile, poe, poe-api, poe-tools, ggg-api, poeview,
+stash, game-tools, pyside6, qt, python, desktop-app, windows
 ```
+
+Die Auswahl beruht auf den tatsächlichen Nutzungszahlen, abgefragt über
+`gh api "search/repositories?q=topic:<name>&per_page=1" --jq .total_count`.
+Drei Erkenntnisse daraus, die man ohne Messung nicht hätte:
+
+- **Die kleinen Topics sind der eigentliche Fundweg.** Unter `python`
+  liegen über 800.000 Repos — dort taucht ein Projekt ohne Sterne nie
+  auf. `poe-tools` hat 7 Einträge; dort steht man sofort auf Seite 1.
+  Die großen Topics sind Etikett, nicht Fundweg.
+- **`pathofexile` (323 Repos) ist verbreiteter als `path-of-exile`
+  (200).** Beide Schreibweisen mitzunehmen kostet nichts.
+- **Mehrdeutige Topics ziehen das falsche Publikum an.** `inventory`
+  (3122) gehört zur Warenwirtschaft und wurde deshalb gestrichen.
+
+`ggg-api` und `poeview` haben null Treffer und bringen als Fundweg
+zunächst nichts. Sie bleiben trotzdem drin: `poeview` ist die bei GGG
+registrierte Client-ID aus dem User-Agent (siehe `poe_view/config.py`) —
+wer sie in einem Log sieht und danach sucht, soll hier landen.
