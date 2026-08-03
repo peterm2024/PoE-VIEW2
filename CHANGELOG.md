@@ -6,6 +6,8 @@ nach [SemVer](https://semver.org/lang/de/).
 
 ## [Unveröffentlicht]
 
+## [0.5.0] - 2026-08-03
+
 ### Hinzugefügt
 
 - Logout: der Konto-Button in der Toolbar öffnet nach dem Login jetzt ein
