@@ -1436,6 +1436,21 @@ weitgehend leer — bewusst nicht bei jedem Liga-Wechsel neu versucht
 (würde ~30 nutzlose Requests pro Wechsel gegen poe.ninja auslösen),
 sondern höchstens einmal pro Stunde.
 
+**Und die leere Spalte sagt es auch.** Bis dahin stand dort schlicht
+nichts, was im Spielertest (2026-08-03) wie ein Defekt aussah. Ist der
+Index der aktuellen Liga `is_empty`, steht in der Statuszeile jetzt "No
+prices for this league", die Begründung im Tooltip. Der Kurztext nennt
+SSF bewusst NICHT: Ein vorübergehender Ausfall von poe.ninja sieht von
+hier aus identisch aus (siehe oben), und eine falsche
+Ursachenbehauptung wäre schlechter als gar keine — der Tooltip nennt
+beide Möglichkeiten. Der Hinweis ersetzt die Summe auch dann, wenn
+zufällig doch ein Wert zustande käme: In einem leeren Index bepreist
+nur die fest eingebaute Chaos-Orb-Referenz überhaupt etwas, und "Value:
+20c" neben lauter wertlos aussehenden Zeilen wäre irreführender als der
+Hinweis. `_on_league_changed` ruft `_update_value_sum()` nach dem Setzen
+des neuen Index explizit auf — der beim Leeren der Liste ausgelöste
+`modelReset` lief noch gegen den Index der VORIGEN Liga.
+
 **Versionsnummer neben der TTL** (`price_cache.CACHE_VERSION`): Die TTL
 misst das Alter der DATEN, nicht das der Rechenvorschrift. Als die
 Boden-Korrektur oben eingebaut wurde, hätte der Cache bis zu sechs
@@ -1879,6 +1894,16 @@ kompakte Zeile unnötig auf (ein Doppelklick öffnet bei Bedarf die normale
 vergrößerte Item-Ansicht, §4.17). `HistoryEntry` (Zeitstempel, Ereignis,
 Charaktername, `Item`) ist eine eigene, unabhängige Datenklasse — das
 Model kennt nur fertige Einträge, keine Diff-Logik.
+
+Die Ereignis-Spalte ist genau ein Zeichen breit; der Tooltip ist deshalb
+die einzige Stelle, an der sie sich erklären kann (Spielertest
+2026-08-03: "was bedeuten die Pfeile" war eine der Rückfragen).
+`_EVENT_TOOLTIPS` deckt bewusst ALLE Ereignisarten ab und trägt das
+Zeichen selbst im Text — sonst fiele beim nächsten neuen Symbol genau
+das eine durch, und die Zuordnung Zeichen → Bedeutung wäre im Tooltip
+nicht verankert. In allen anderen Spalten bleibt der Herkunftshinweis
+("WitchOfPeter: Chaos Orb"), der bei einem Verlauf über ALLE Charaktere
+hinweg die eigentliche Frage beantwortet.
 
 **Rollierendes Log, 120 Einträge, neueste zuerst** — `MainWindow.
 _item_history: deque[HistoryEntry] = deque(maxlen=120)`. Neue Einträge

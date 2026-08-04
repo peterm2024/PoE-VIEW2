@@ -26,6 +26,11 @@ nach [SemVer](https://semver.org/lang/de/).
   "wir holen nichts mehr" von "wir holen, die API liefert denselben
   Stand" zu unterscheiden — letzteres ist der Normalfall, solange im
   Spiel kein Zonenwechsel stattgefunden hat.
+- Die Symbole im Item-Verlauf (↑ ↓ ±) erklären sich jetzt per Tooltip.
+- In Ligen, für die poe.ninja keine Preise führt, steht in der
+  Statuszeile "No prices for this league" statt einer wortlos leeren
+  Wertspalte. Der Tooltip nennt den Grund: Solo Self-Found hat keinen
+  Handel, aus dem sich Preise ableiten ließen.
 
 ### Geändert
 

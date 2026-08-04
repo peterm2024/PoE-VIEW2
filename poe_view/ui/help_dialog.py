@@ -155,7 +155,8 @@ known price group with the cheap ones, since both are usually not worth
 keeping.</p>
 <p><b>Why the Value column stays empty in SSF leagues:</b> poe.ninja
 derives prices from trading activity, and Solo Self-Found leagues have
-none, so they are not tracked at all. This is a limit of the data
+none, so they are not tracked at all. The status bar says <b>No prices
+for this league</b> when that is the case. It is a limit of the data
 source, not a fault in PoE-VIEW2 — there is nothing to fix or
 configure.</p>
 <p>Prices are community data, not official, and are cached for up to six

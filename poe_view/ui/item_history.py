@@ -30,6 +30,16 @@ HistoryEventType = Literal["added", "removed", "changed"]
 
 _EVENT_SYMBOLS: dict[HistoryEventType, str] = {"added": "↑", "removed": "↓", "changed": "±"}
 
+# Die Symbole sind kompakt genug für eine schmale Spalte, aber nicht aus
+# sich heraus verständlich — im Spielertest am 2026-08-03 war "was
+# bedeuten die Pfeile" eine der Stellen, an denen die Oberfläche
+# Rückfragen erzeugte. Text auf Englisch wie die gesamte Oberfläche.
+_EVENT_TOOLTIPS: dict[HistoryEventType, str] = {
+    "added": "↑  appeared in the inventory",
+    "removed": "↓  gone from the inventory",
+    "changed": "±  quantity changed — the Stack column carries the difference",
+}
+
 
 @dataclass(frozen=True)
 class HistoryEntry:
@@ -156,5 +166,12 @@ class ItemHistoryModel(QAbstractTableModel):
             if colour:
                 return QBrush(QColor(colour))
         if role == Qt.ItemDataRole.ToolTipRole:
+            # In der Ereignis-Spalte steht nur ein Zeichen — dort ist der
+            # Tooltip die einzige Stelle, an der es sich erklären kann.
+            # Überall sonst bleibt der Herkunftshinweis stehen, der bei
+            # einem Verlauf über ALLE Charaktere hinweg die eigentliche
+            # Frage beantwortet ("wer war das?").
+            if col == EVENT_COL:
+                return _EVENT_TOOLTIPS[entry.event]
             return f"{entry.character}: {item.display_name}"
         return None

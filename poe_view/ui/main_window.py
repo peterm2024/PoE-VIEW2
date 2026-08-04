@@ -1083,13 +1083,39 @@ class MainWindow(QMainWindow):
         self._update_stack_sum()
         self._update_value_sum()
 
+    # Statt einer leeren Wertspalte kommentarlos dazustehen (Spielertest
+    # 2026-08-03: die leere Spalte sah nach einem Defekt aus). Kurz genug
+    # für die Statuszeile, die Begründung steht im Tooltip. Bewusst OHNE
+    # das Wort SSF im Kurztext: Ein vorübergehender Ausfall von poe.ninja
+    # sieht von hier aus genauso aus (FALLSTRICKE #49), und eine falsche
+    # Ursachenbehauptung wäre schlechter als gar keine.
+    _NO_PRICES_TEXT = "No prices for this league"
+    _NO_PRICES_TOOLTIP = (
+        "poe.ninja derives prices from trading activity, and Solo Self-Found "
+        "leagues have none —\nso they are not tracked at all. A temporary "
+        "outage at poe.ninja looks the same from here.\nEither way it is a "
+        "limit of the data source, not a fault in PoE-VIEW2.")
+
     def _update_value_sum(self) -> None:
         """Gesamt-Chaos-Wert der aktuell sichtbaren (gefilterten) Zeilen,
         soweit poe.ninja dafür einen Preis kennt — anders als die Stack-
         Summe unabhängig vom Item-Namen sinnvoll (verschiedene Item-Typen
         lassen sich in Chaos aufaddieren, anders als in Stack-Größe).
         Bleibt leer, solange kein Preis-Index für die aktuelle Liga
-        vorliegt oder kein sichtbares Item einen Preis hat."""
+        vorliegt oder kein sichtbares Item einen Preis hat.
+
+        Führt poe.ninja die Liga gar nicht, steht dort stattdessen ein
+        Hinweis. Er ersetzt die Summe auch dann, wenn zufällig doch ein
+        Wert zustande käme: In einem leeren Index bepreist nur die fest
+        eingebaute Chaos-Orb-Referenz überhaupt etwas, und "Value: 20c"
+        für einen Stapel Chaos Orbs neben lauter wertlos aussehenden
+        Zeilen wäre irreführender als der Hinweis."""
+        index = self._price_indexes.get(self._current_league)
+        if index is not None and index.is_empty:
+            self._value_sum_label.setText(self._NO_PRICES_TEXT)
+            self._value_sum_label.setToolTip(self._NO_PRICES_TOOLTIP)
+            return
+        self._value_sum_label.setToolTip("")
         total = 0.0
         known = False
         for row in range(self.proxy.rowCount()):
@@ -1101,7 +1127,6 @@ class MainWindow(QMainWindow):
         if not known:
             self._value_sum_label.setText("")
             return
-        index = self._price_indexes.get(self._current_league)
         self._value_sum_label.setText(f"Value: {format_chaos_value(total, index)}")
 
     # --- Spalten-Sichtbarkeit + Reihenfolge der Item-Tabelle --------- #
@@ -1496,6 +1521,11 @@ class MainWindow(QMainWindow):
         # direkt danach eintrifft.
         self.table_model.set_price_index(self._price_indexes.get(league))
         self.history_model.set_price_index(self._price_indexes.get(league))
+        # Die Liste ist beim Liga-Wechsel bereits geleert worden, der dabei
+        # ausgelöste modelReset lief also noch gegen den Preis-Index der
+        # VORIGEN Liga. Ohne diesen Aufruf bliebe der "No prices"-Hinweis
+        # beim Wechsel nach SSF aus (und beim Wechsel zurück stehen).
+        self._update_value_sum()
         # Stash-Modus soll sofort auf die neue Liga umsteigen statt den
         # Rest-Takt der vorherigen Liga abzuwarten. NICHT zurückgesetzt:
         # _refresh_mode_policy — die Policy eines Fach-Abrufs

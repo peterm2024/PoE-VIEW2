@@ -4498,6 +4498,10 @@ def test_on_prices_loaded_updates_table_and_value_sum_for_the_current_league(qap
 
     index = PriceIndex()
     index._simple["Chaos Orb"] = 1.0
+    # Zweiter Preis, damit der Index nicht als LEER gilt: "Chaos Orb"
+    # allein ueberschreibt nur die fest eingebaute Referenz und ist nach
+    # PriceIndex.is_empty kein einziger echter Preis (FALLSTRICKE #49).
+    index._simple["Exalted Orb"] = 50.0
     win._on_prices_loaded("Standard", index)
 
     assert win._value_sum_label.text() == "Value: 10c"
@@ -4514,6 +4518,7 @@ def test_on_prices_loaded_ignores_a_league_that_is_not_currently_shown(qapp) -> 
 
     other_index = PriceIndex()
     other_index._simple["Chaos Orb"] = 1.0
+    other_index._simple["Exalted Orb"] = 50.0  # siehe oben: sonst gilt der Index als leer
     win._on_prices_loaded("Hardcore", other_index)
 
     assert win._value_sum_label.text() == ""
@@ -4524,6 +4529,7 @@ def test_on_prices_loaded_ignores_a_league_that_is_not_currently_shown(qapp) -> 
 def test_league_changed_applies_the_cached_price_index_to_the_table(qapp, monkeypatch) -> None:
     index = PriceIndex()
     index._simple["Chaos Orb"] = 1.0
+    index._simple["Exalted Orb"] = 50.0  # siehe oben: sonst gilt der Index als leer
     monkeypatch.setattr(price_cache, "load", lambda league, ttl_seconds=None: index)
     win = MainWindow()
     monkeypatch.setattr(win.worker, "submit", lambda job: None)
@@ -4548,6 +4554,58 @@ def test_value_sum_label_shows_total_across_different_item_names(qapp) -> None:
     ])
 
     assert win._value_sum_label.text() == "Value: 110c"
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_a_league_without_prices_says_so_instead_of_staying_blank(qapp) -> None:
+    """Spielertest 2026-08-03: Die dauerhaft leere Wertspalte in SSF-Ligen
+    sieht aus wie ein Defekt. poe.ninja leitet Preise aus Handelsaktivitaet
+    ab, und die gibt es in Solo Self-Found nicht — die Liga wird dort gar
+    nicht gefuehrt (FALLSTRICKE #49)."""
+    win = MainWindow()
+    win._current_league = "Solo Self-Found"
+    win._price_indexes["Solo Self-Found"] = PriceIndex()  # nur die Chaos-Orb-Referenz
+    win.table_model.set_items([Item.model_validate({"typeLine": "Some Rare"})])
+
+    assert win._value_sum_label.text() == "No prices for this league"
+    assert "Solo Self-Found" in win._value_sum_label.toolTip()
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_the_hint_replaces_the_sum_even_when_chaos_orbs_would_add_up(qapp) -> None:
+    """Ein leerer Index bepreist trotzdem eine Sache: die fest eingebaute
+    Chaos-Orb-Referenz. "Value: 20c" neben lauter wertlos aussehenden
+    Zeilen waere irrefuehrender als der Hinweis."""
+    win = MainWindow()
+    win._current_league = "Solo Self-Found"
+    index = PriceIndex()
+    win._price_indexes["Solo Self-Found"] = index
+    win.table_model.set_price_index(index)
+    win.table_model.set_items([
+        Item.model_validate({"typeLine": "Chaos Orb", "frameType": 5, "stackSize": 20})])
+
+    assert win._value_sum_label.text() == "No prices for this league"
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_a_league_with_prices_shows_no_hint_and_no_stale_tooltip(qapp) -> None:
+    """Gegenprobe: Der Hinweis darf nicht haengenbleiben, wenn die naechste
+    Liga Preise hat — sonst behauptet der Tooltip etwas Falsches."""
+    win = MainWindow()
+    win._current_league = "Standard"
+    win._price_indexes["Standard"] = _price_index(**{"Exalted Orb": 50.0})
+    win.table_model.set_price_index(win._price_indexes["Standard"])
+    win.table_model.set_items([
+        Item.model_validate({"typeLine": "Exalted Orb", "frameType": 5, "stackSize": 2})])
+
+    assert win._value_sum_label.text() == "Value: 100c"
+    assert win._value_sum_label.toolTip() == ""
+
     win.worker.stop()
     win.worker.wait(5000)
 

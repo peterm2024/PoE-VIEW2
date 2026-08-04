@@ -110,3 +110,35 @@ def test_row_count_matches_entry_count(qapp) -> None:
     model = ItemHistoryModel()
     model.set_entries([_entry(item_id="1"), _entry(item_id="2")])
     assert model.rowCount() == 2
+
+
+def test_every_event_symbol_explains_itself_in_a_tooltip(qapp) -> None:
+    """Spielertest 2026-08-03: "was bedeuten die Pfeile" war eine der
+    Stellen, an denen die Oberflaeche Rueckfragen erzeugte. In einer
+    Spalte, die nur ein Zeichen breit ist, ist der Tooltip die einzige
+    Stelle, an der das Zeichen sich erklaeren kann — und er muss ALLE
+    Ereignisarten abdecken, sonst faellt beim naechsten neuen Symbol
+    genau das eine durch."""
+    model = ItemHistoryModel()
+    model.set_entries([_entry(event="added"), _entry(event="removed", item_id="2"),
+                       _entry(event="changed", item_id="3")])
+
+    tips = [model.data(model.index(row, EVENT_COL), Qt.ItemDataRole.ToolTipRole)
+            for row in range(3)]
+
+    assert "appeared" in tips[0]
+    assert "gone" in tips[1]
+    assert "quantity changed" in tips[2].lower() and "Stack" in tips[2]
+    for symbol, tip in zip(("↑", "↓", "±"), tips):
+        assert symbol in tip  # das Zeichen selbst mit im Text: verankert die Zuordnung
+
+
+def test_the_other_columns_keep_the_origin_tooltip(qapp) -> None:
+    """Gegenprobe: Der Verlauf laeuft ueber ALLE Charaktere, deshalb
+    beantwortet der Tooltip dort weiterhin "wer war das?"."""
+    model = ItemHistoryModel()
+    model.set_entries([_entry(event="added", character="WitchOfPeter")])
+
+    tip = model.data(model.index(0, NAME_COL), Qt.ItemDataRole.ToolTipRole)
+
+    assert tip == "WitchOfPeter: Chaos Orb"
