@@ -274,6 +274,11 @@ class MainWindow(QMainWindow):
         # nicht — an welcher Stelle sein Ergebnis landet, ändert daran
         # nichts.
         self._session_fetched_chars: set[str] = set()
+        # Zuletzt angezeigter Tabelleninhalt und der Zeitpunkt, seit dem er
+        # unverändert ist — Grundlage des "unchanged for X" in der
+        # Statuszeile (§_note_view_updated).
+        self._view_signature: int | None = None
+        self._view_content_since: datetime | None = None
         self._offline = False  # GGG nicht erreichbar (Wartung am Patchday)
         self._live_leagues: set[str] | None = None  # letzte /account/leagues-Antwort; None = noch unbekannt
         self._restore_cached_data()
@@ -836,7 +841,10 @@ class MainWindow(QMainWindow):
         # wurde. Nebenbei die Antwort auf "wie frisch ist das hier?".
         self._view_updated_label = QLabel("")
         self._view_updated_label.setToolTip(
-            "When the table below was last rebuilt with fresh data")
+            "When the table below was last rebuilt with fresh data.\n"
+            "\"unchanged for\" means the data kept arriving but stayed "
+            "identical — usually because\nthe API has not published a new "
+            "stash state yet; changing zone in the game triggers that.")
         self.statusBar().addPermanentWidget(self._view_updated_label)
         self.proxy.modelReset.connect(self._update_summaries)
         # An dasselbe Signal gehängt wie die Summen: `modelReset` feuert
@@ -1008,7 +1016,8 @@ class MainWindow(QMainWindow):
         self._clock_label.setText(datetime.now().strftime("%Y-%m-%d  %H:%M:%S "))
 
     def _note_view_updated(self, *_args) -> None:
-        """Hält fest, wann die Tabelle zuletzt neu aufgebaut wurde.
+        """Hält fest, wann die Tabelle zuletzt neu aufgebaut wurde — und
+        seit wann ihr Inhalt dabei derselbe geblieben ist.
 
         Entstanden als Diagnosemittel (Peter, 2026-08-04: im Single-Modus
         tat sich beim Zuschauen nichts, obwohl das Log durchgehend
@@ -1016,9 +1025,55 @@ class MainWindow(QMainWindow):
         die Tabelle unverändert aussieht, liegt es am Neuzeichnen und
         nicht am Nachladen — ohne diese Anzeige war das nicht
         auseinanderzuhalten. Bleibt auch danach nützlich: sie beantwortet
-        die Frage "wie frisch ist das, was ich hier sehe?"."""
-        self._view_updated_label.setText(
-            f"Updated {datetime.now().strftime('%H:%M:%S')}")
+        die Frage "wie frisch ist das, was ich hier sehe?".
+
+        Der Zusatz "unchanged for X" beantwortet die zwangsläufige
+        Anschlussfrage: Ein weiterlaufender Zeitstempel allein sagt nicht,
+        ob GGG tatsächlich Neues liefert. Genau daran hing die Diagnose
+        vom 2026-08-04 (FALLSTRICKE #58: Die API veröffentlicht neue
+        Fach-Inhalte oft erst nach einem Zonenwechsel). Beide Angaben
+        zusammen trennen die drei Fälle sauber: Zeitstempel steht = wir
+        holen nichts mehr; Zeitstempel läuft mit "unchanged for 12m" = wir
+        holen, GGG liefert Altes; Zeitstempel läuft ohne Zusatz = alles in
+        Ordnung."""
+        signature = self.table_model.content_signature()
+        now = datetime.now()
+        if signature != self._view_signature:
+            self._view_signature = signature
+            self._view_content_since = now
+        text = f"Updated {now.strftime('%H:%M:%S')}"
+        unchanged = self._unchanged_duration_text(self._view_content_since, now)
+        if unchanged:
+            text += f" · {unchanged}"
+        self._view_updated_label.setText(text)
+
+    # Unter dieser Dauer bleibt der Zusatz weg: Zwischen zwei Abrufen
+    # liegen im Single-Modus ~13 s, und dass sich in dieser Zeit nichts
+    # geändert hat, ist der Normalfall und keine Meldung wert. Der Zusatz
+    # soll auffallen, wenn er auftaucht.
+    _UNCHANGED_HINT_AFTER_S = 60
+
+    @classmethod
+    def _unchanged_duration_text(cls, since: datetime | None,
+                                 now: datetime) -> str:
+        """"unchanged for 12m" / "unchanged for 2h 5m", leer unterhalb der
+        Schwelle.
+
+        Gemessen wird bis zum letzten Neuaufbau, NICHT bis jetzt: Ohne
+        Neuaufbau haben wir nicht nachgesehen, und "unchanged" würde eine
+        Prüfung behaupten, die nicht stattgefunden hat. Im Pause-Modus
+        friert dadurch die ganze Anzeige gemeinsam ein — Zeitstempel und
+        Zusatz gehören zusammen und sollen nicht auseinanderlaufen."""
+        if since is None:
+            return ""
+        seconds = int((now - since).total_seconds())
+        if seconds < cls._UNCHANGED_HINT_AFTER_S:
+            return ""
+        minutes = seconds // 60
+        if minutes < 60:
+            return f"unchanged for {minutes}m"
+        hours, minutes = divmod(minutes, 60)
+        return f"unchanged for {hours}h" + (f" {minutes}m" if minutes else "")
 
     def _update_summaries(self, *_args) -> None:
         """Einziger Anschlusspunkt für beide Statuszeilen-Summen (Stack,

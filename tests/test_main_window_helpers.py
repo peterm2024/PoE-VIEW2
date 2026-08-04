@@ -6091,6 +6091,52 @@ def test_the_view_timestamp_also_covers_the_character_view(qapp, monkeypatch) ->
     win.worker.wait(5000)
 
 
+def test_unchanged_duration_is_formatted_and_suppressed_when_short(qapp) -> None:
+    """Unterhalb einer Minute bleibt der Zusatz weg: Im Single-Modus liegen
+    ~13 s zwischen zwei Abrufen, und dass sich dazwischen nichts geaendert
+    hat, ist der Normalfall. Der Zusatz soll auffallen, wenn er auftaucht."""
+    from datetime import timedelta
+
+    now = datetime(2026, 8, 5, 14, 0, 0)
+    text = MainWindow._unchanged_duration_text
+
+    assert text(None, now) == ""
+    assert text(now - timedelta(seconds=59), now) == ""
+    assert text(now - timedelta(seconds=60), now) == "unchanged for 1m"
+    assert text(now - timedelta(minutes=12), now) == "unchanged for 12m"
+    assert text(now - timedelta(minutes=59), now) == "unchanged for 59m"
+    assert text(now - timedelta(hours=2), now) == "unchanged for 2h"
+    assert text(now - timedelta(hours=2, minutes=5), now) == "unchanged for 2h 5m"
+
+
+def test_identical_data_is_reported_as_unchanged_and_a_change_resets_it(
+        qapp, monkeypatch) -> None:
+    """Peter, 2026-08-04, zur Single-Modus-Frage: Ein weiterlaufender
+    Zeitstempel allein sagt nicht, ob GGG tatsaechlich Neues liefert — die
+    API veroeffentlicht neue Fach-Inhalte oft erst nach einem Zonenwechsel
+    (FALLSTRICKE #58). Erst beide Angaben zusammen trennen "wir holen
+    nichts mehr" von "wir holen, GGG liefert Altes"."""
+    from datetime import timedelta
+
+    win = _three_tab_window(monkeypatch)
+    items = win._items["Standard"]["t1"]
+
+    win._show_items("t1", items, "Currency 1")
+    assert "unchanged" not in win._view_updated_label.text()
+
+    # Wie nach fuenf Minuten Abrufen mit stets demselben Ergebnis.
+    win._view_content_since -= timedelta(minutes=5)
+    win._show_items("t1", items, "Currency 1")
+    assert "unchanged for 5m" in win._view_updated_label.text()
+
+    # Sobald sich etwas aendert, faengt die Zaehlung von vorn an.
+    win._show_items("t1", items[:-1], "Currency 1")
+    assert "unchanged" not in win._view_updated_label.text()
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
 def test_a_cached_inventory_is_not_used_as_a_history_baseline(qapp) -> None:
     """Peter, 2026-08-04: "Hab gerade gesehen, dass in meiner History noch
     Kishara's Star drin war. Ein Item, das ich schon lange nicht mehr

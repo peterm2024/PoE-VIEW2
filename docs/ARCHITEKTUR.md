@@ -2538,6 +2538,47 @@ Wenn weniger Werte als Platzhalter geliefert werden, bleibt der
 überzählige Platzhalter stehen, statt eine Ausnahme auszulösen — ein
 sichtbarer Schönheitsfehler ist besser als ein leeres Detail-Panel.
 
+### 4.31 "unchanged for X": abgeholt ist nicht neu
+
+Der Zeitstempel aus §4.29 beantwortet, wann die Tabelle zuletzt neu
+aufgebaut wurde — nicht, ob dabei etwas Neues ankam. Genau diese Lücke
+war bei Peters Single-Modus-Frage der offene Rest: Die Anzeige lief
+sichtbar mit, die Zahlen blieben trotzdem stehen. Aufgelöst hat das erst
+ein Screenshot-Vergleich von Hand (Portal Scroll 26 → 29 im Spiel, in
+PoE-VIEW2 eine Minute lang 26): GGG veröffentlicht neue Fach-Inhalte
+oft erst nach einem Zonenwechsel (FALLSTRICKE #58). Das Werkzeug
+arbeitete korrekt, die Quelle lieferte Altes.
+
+Der Zusatz macht diese Unterscheidung ablesbar, ohne dass jemand
+Screenshots vergleichen muss. Drei Fälle, sauber getrennt:
+
+| Anzeige | Bedeutung |
+|---|---|
+| Zeitstempel steht still | Wir holen nichts mehr (Pause, Rate-Limit, Token) |
+| Zeitstempel läuft, "unchanged for 12m" | Wir holen, GGG liefert denselben Stand |
+| Zeitstempel läuft, kein Zusatz | Alles in Ordnung |
+
+Zwei Entwurfsentscheidungen tragen das:
+
+**Verglichen wird, was der Spieler sieht.** `ItemTableModel.
+content_signature()` bildet die Kennzahl aus den vorgerechneten
+Anzeigewerten (`_rows`) und den Tab-Namen, nicht aus den Item-Objekten.
+Ein API-Feld, das in keiner Spalte auftaucht, soll die Anzeige nicht als
+"geändert" gelten lassen — sonst widerspräche die Statuszeile dem
+Bildschirm. Die Werte liegen aus `set_items()` ohnehin fertig vor, der
+Vergleich kostet also nichts obendrauf, auch bei liga-weiten Aggregaten
+mit zehntausenden Zeilen.
+
+**Gemessen wird bis zum letzten Neuaufbau, nicht bis jetzt.** Ohne
+Neuaufbau haben wir nicht nachgesehen, und "unchanged" würde eine
+Prüfung behaupten, die nicht stattgefunden hat. Dadurch friert im
+Pause-Modus die ganze Anzeige gemeinsam ein, statt dass der Zusatz
+munter weiterzählt, während der Zeitstempel steht. Unterhalb einer
+Minute bleibt er ganz weg: Im Single-Modus liegen ~13 s zwischen zwei
+Abrufen, und dass sich dazwischen nichts geändert hat, ist der
+Normalfall und keine Meldung wert. Der Zusatz soll auffallen, wenn er
+auftaucht.
+
 ---
 
 ## 5. UI-Konzept (Oberflächenvorschlag)

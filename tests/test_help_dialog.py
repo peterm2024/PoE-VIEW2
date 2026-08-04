@@ -56,6 +56,17 @@ def test_the_help_explains_the_two_counts_in_load_all_tabs(qapp) -> None:
     assert "map" in text and "unique" in text  # Grund fuer die Differenz
 
 
+def test_the_help_explains_the_unchanged_hint_in_the_status_bar(qapp) -> None:
+    """"unchanged for 12m" ist neues Vokabular in der Statuszeile, und der
+    dahinterstehende Sachverhalt ist nicht zu erraten: Die API
+    veroeffentlicht neue Fach-Inhalte oft erst nach einem Zonenwechsel
+    (FALLSTRICKE #58). Ohne diese Erklaerung liest sich der Hinweis wie
+    ein Defekt."""
+    text = _all_text()
+    assert "unchanged for" in text
+    assert "zone" in text  # der Ausweg, nicht nur die Feststellung
+
+
 def test_the_help_is_written_in_english_like_the_rest_of_the_ui(qapp) -> None:
     """Oberfläche und README sind englisch, Kommentare und Projektdoku
     deutsch (bewusste Trennung). Ein deutscher Hilfetext wäre für die

@@ -8,7 +8,7 @@ nach [SemVer](https://semver.org/lang/de/).
 
 ### Hinzugefügt
 
-- Hilfe-Fenster (Fragezeichen-Knopf in der Toolbar) mit zehn Themen: was
+- Hilfe-Fenster (Fragezeichen-Knopf in der Toolbar) mit elf Themen: was
   die Spalten bedeuten, wofür die Farbfilter stehen, wie Suche und
   Refresh-Modi arbeiten, warum die beiden Zähler in "Load All Tabs"
   auseinanderlaufen, was die Symbole im Item-Verlauf heißen, warum die
@@ -21,6 +21,11 @@ nach [SemVer](https://semver.org/lang/de/).
 - Datum und Uhrzeit rechts oben in der Toolbar. Zusammen mit dem
   "Updated"-Zeitstempel der Statuszeile ist damit auch auf einem
   Screenshot allein erkennbar, wie aktuell die angezeigten Daten sind.
+- Neben dem "Updated"-Zeitstempel erscheint "unchanged for 12m", wenn
+  die Daten zwar weiter eintreffen, aber unverändert bleiben. Damit ist
+  "wir holen nichts mehr" von "wir holen, die API liefert denselben
+  Stand" zu unterscheiden — letzteres ist der Normalfall, solange im
+  Spiel kein Zonenwechsel stattgefunden hat.
 
 ### Geändert
 

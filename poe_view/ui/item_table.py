@@ -225,6 +225,22 @@ class ItemTableModel(QAbstractTableModel):
                 req_attribute(item, "Int") or "–",
                 " · ".join(item.explicitMods))  # v. a. Map-Modifikatoren
 
+    def content_signature(self) -> int:
+        """Kennzahl über den ANGEZEIGTEN Inhalt — gleiche Zahl bedeutet
+        gleiche Tabelle (MainWindow._note_view_updated, "unchanged for X").
+
+        Gebildet aus den vorgerechneten Anzeigewerten und den Tab-Namen,
+        nicht aus den Item-Objekten: Verglichen werden soll, was der
+        Spieler sieht. Ein Feld, das in keiner Spalte auftaucht, soll die
+        Anzeige nicht als "geändert" gelten lassen — und die Werte liegen
+        aus ``set_items`` ohnehin schon fertig da, der Vergleich kostet
+        also nichts obendrauf.
+
+        Die Zahl ist nur INNERHALB eines Programmlaufs vergleichbar
+        (Pythons String-Hashing ist pro Prozess zufällig). Sie wird
+        nirgends gespeichert, insofern unerheblich."""
+        return hash((tuple(self._rows), tuple(self._sources)))
+
     @staticmethod
     def _build_haystack(item: Item, source: str) -> str:
         """Durchsuchter Text für die globale Suche, bereits klein geschrieben.

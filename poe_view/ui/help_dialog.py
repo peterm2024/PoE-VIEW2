@@ -117,6 +117,11 @@ zone in the game. PoE-VIEW2 can watch the game's own
 moment — off by default, switch it on under
 <i>Settings &gt; Zone Refresh</i>. The toolbar then shows the zone last
 detected.</p>
+<p>The status bar tells you how that is going. <b>Updated 14:23:05</b> is
+when the table was last rebuilt; if <b>unchanged for 12m</b> appears next
+to it, data kept arriving but stayed identical — almost always the
+API holding back a new stash state rather than a fault. Change zone in
+the game and it will catch up.</p>
 """),
     ("Load All Tabs", """
 <h3>Load All Tabs</h3>
