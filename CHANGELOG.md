@@ -48,6 +48,14 @@ nach [SemVer](https://semver.org/lang/de/).
   gegen einen womöglich wochenalten Stand. Protokolliert wird jetzt erst
   ab dem zweiten Abruf eines Charakters, der erste setzt nur die
   Vergleichsbasis.
+- Währungen unter einem Chaos wurden alle mit genau einem Chaos
+  bewertet — ein voller Stapel Scrolls of Wisdom stand dadurch mit 40c
+  in der Value-Spalte statt mit 0,2c. Ursache war poe.ninjas
+  "receive"-Seite, die kein kleineres Verhältnis als 1:1 ausdrücken
+  kann; die Gegenrichtung derselben Zeile kennt den echten Kurs und wird
+  jetzt verwendet. Betraf in der Liga Allflame 20 von 67 Währungen.
+  Nebenbei behoben: poe.ninja rundet auf zwei Nachkommastellen, was sich
+  bei großen Stapeln aufsummierte.
 - Gleiche Ursache, zweite Anzeige: Beim ersten Abruf nach dem
   Programmstart wurden Inventarzeilen türkis hervorgehoben und
   verschwundene Items grau angehängt, obwohl die Änderungen Tage

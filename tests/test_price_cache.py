@@ -28,6 +28,38 @@ def test_load_ignores_corrupt_file(tmp_path, monkeypatch) -> None:
     assert price_cache.load("Standard") is None
 
 
+def test_an_entry_from_an_older_calculation_is_ignored(tmp_path, monkeypatch) -> None:
+    """Die TTL misst das Alter der DATEN, nicht das der Rechenvorschrift.
+    Als am 2026-08-05 der 1:1-Boden der poe.ninja-receive-Seite korrigiert
+    wurde, haette der Cache sonst bis zu sechs Stunden weiter die alten,
+    um Faktor 246 zu hohen Werte ausgeliefert — der Fix haette wie ein
+    fehlgeschlagener Fix ausgesehen."""
+    path = tmp_path / "prices.json"
+    monkeypatch.setattr(price_cache, "_CACHE_FILE", path)
+    price_cache.save("Standard", _index_with_all_kinds())
+    assert price_cache.load("Standard") is not None  # frisch geschrieben: gueltig
+
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    raw["Standard"]["version"] = price_cache.CACHE_VERSION - 1
+    path.write_text(json.dumps(raw), encoding="utf-8")
+
+    assert price_cache.load("Standard") is None
+    # Nur ignoriert, nicht geloescht — der naechste Abruf ueberschreibt ihn.
+    assert "Standard" in json.loads(path.read_text(encoding="utf-8"))
+
+
+def test_an_entry_without_a_version_is_ignored(tmp_path, monkeypatch) -> None:
+    """Der Zustand vor Einfuehrung der Nummer: Genau diese Eintraege lagen
+    auf der Platte, als die Preisberechnung sich aenderte."""
+    path = tmp_path / "prices.json"
+    path.write_text(json.dumps({"Standard": {
+        "fetched_at": 9_999_999_999, "empty": False, "prices": {"simple": {"Divine Orb": 220.0}},
+    }}), encoding="utf-8")
+    monkeypatch.setattr(price_cache, "_CACHE_FILE", path)
+
+    assert price_cache.load("Standard") is None
+
+
 def test_save_and_load_roundtrip_preserves_all_three_price_kinds(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(price_cache, "_CACHE_FILE", tmp_path / "prices.json")
     price_cache.save("Standard", _index_with_all_kinds())

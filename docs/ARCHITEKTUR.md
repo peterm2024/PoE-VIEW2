@@ -1373,7 +1373,7 @@ Traffic ist gering: alle ~30 Requests zusammen ≈ 1,2 MB komprimiert pro
 Liga (real gemessen), da jede Anfrage eine ganze Kategorie statt eines
 Einzel-Items liefert.
 
-**Zwei Fälle, in denen der Item-Name allein nicht zum richtigen Preis
+**Drei Fälle, in denen der Item-Name allein nicht zum richtigen Preis
 führt** (`PriceIndex`, drei getrennte interne Dicts: `_simple`/`_gems`/
 `_links`):
 
@@ -1393,6 +1393,22 @@ führt** (`PriceIndex`, drei getrennte interne Dicts: `_simple`/`_gems`/
 3. **Chaos Orb** ist ein eigener Sonderfall: poe.ninja listet die
    Referenzwährung nicht gegen sich selbst (kein `chaosEquivalent`-Eintrag
    für "Chaos Orb"). `PriceIndex` seedet ihn deshalb fest mit `1.0`.
+
+**Und ein Fall, in dem poe.ninjas eigene Zahl nicht stimmt.** Die
+Currency-Route veröffentlicht `chaosEquivalent` aus der "receive"-Seite
+des Handels, und die hat einen Boden: Das kleinste Verhältnis, das die
+Handelsseite ausdrücken kann, ist 1:1. Jede Währung unterhalb eines
+Chaos bekommt dadurch glatt 1 c — in der Liga Allflame real 20 von 67
+Währungen, aus einem vollen Stapel Schriftrollen wurden so 40 c
+(FALLSTRICKE #63, Peter 2026-08-05). Die "pay"-Seite derselben Zeile
+trägt den echten Kurs (246 Rollen pro Chaos). `currency_chaos_value()`
+rechnet deshalb aus der pay-Seite, wenn die receive-Seite genau auf dem
+Boden steht und die pay-Seite ihr widerspricht — und holt nebenbei die
+Stellen zurück, die `chaosEquivalent` durch Rundung auf zwei
+Nachkommastellen verliert (0,01483 → 0,01, bei fünfstelligen Stapeln
+nicht mehr gleichgültig). Beides greift nur dort, wo die Quelle sich
+selbst widerspricht; eine eigenständige Aussage von poe.ninja bleibt
+unangetastet.
 
 **Cache mit TTL** (`services/price_cache.py`): JSON-Datei analog
 `data_cache.py`, 6 Stunden TTL (Preise bewegen sich über Stunden, nicht
@@ -1419,6 +1435,17 @@ ableiten ließen. Für SSF bleibt die Value-Spalte deshalb dauerhaft
 weitgehend leer — bewusst nicht bei jedem Liga-Wechsel neu versucht
 (würde ~30 nutzlose Requests pro Wechsel gegen poe.ninja auslösen),
 sondern höchstens einmal pro Stunde.
+
+**Versionsnummer neben der TTL** (`price_cache.CACHE_VERSION`): Die TTL
+misst das Alter der DATEN, nicht das der Rechenvorschrift. Als die
+Boden-Korrektur oben eingebaut wurde, hätte der Cache bis zu sechs
+Stunden weiter die alten, um Faktor 246 zu hohen Werte ausgeliefert —
+die Behebung wäre unsichtbar geblieben und hätte wie ein
+fehlgeschlagener Fix ausgesehen. Einträge mit einer anderen Nummer
+gelten deshalb als abgelaufen. Sie werden ignoriert, nicht gelöscht: Der
+nächste Abruf derselben Liga überschreibt sie ohnehin, und ein Cache,
+der von sich aus Daten wegwirft, ist in diesem Projekt schon zweimal
+teuer geworden (§4.24, FALLSTRICKE #62).
 
 **Anzeige** (`item_table.py`): `format_chaos_value()` wählt Chaos für
 kleine Beträge, Divine sobald der Gegenwert mindestens einen Divine Orb

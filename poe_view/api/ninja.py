@@ -159,9 +159,75 @@ def _merge_currency(index: PriceIndex, http: httpx.Client, league: str, item_typ
         return
     for line in data.get("lines", []):
         name = line.get("currencyTypeName")
-        chaos = line.get("chaosEquivalent")
+        chaos = currency_chaos_value(line)
         if name and chaos is not None:
             index._simple[name] = chaos
+
+
+# Kleinster Kurs, den die Handelsseite auf der "receive"-Seite ausdrücken
+# kann: ein Chaos für ein Stück. Alles Billigere fällt darauf zurück.
+_RECEIVE_FLOOR = 1.0
+
+# Halber Rundungsschritt von ``chaosEquivalent`` (zwei Nachkommastellen).
+# Liegt ``receive.value`` innerhalb dieser Spanne, ist es derselbe Wert
+# ungerundet — und nicht etwa eine abweichende Aussage.
+_CHAOS_EQUIVALENT_STEP = 0.005
+
+
+def currency_chaos_value(line: dict) -> float | None:
+    """Chaos-Wert EINES Stücks aus einer Zeile der Currency-Route.
+
+    Nicht einfach ``chaosEquivalent``, aus zwei an echten Daten belegten
+    Gründen (Peter, 2026-08-05: "Einzig die Value-Werte stimmen nicht ...
+    40/40 Scroll of Wisdom sind vermutlich 1c wert und nicht jede einzelne
+    Scroll").
+
+    **Die "receive"-Seite hat einen Boden bei 1:1.** In der Liga Allflame
+    lieferte poe.ninja für Scroll of Wisdom ``receive.value = 1.0`` und
+    damit ``chaosEquivalent = 1.0`` — ein Chaos pro Schriftrolle. Die
+    "pay"-Seite derselben Zeile sagt gleichzeitig ``246.0``: 246 Rollen
+    für ein Chaos, also 0,004 c pro Stück, ein Faktor 246 dazwischen. Die
+    Ursache ist keine Marktschwankung, sondern die Handelsseite: Ein
+    Angebot "0,004 Chaos für eine Schriftrolle" lässt sich dort nicht
+    formulieren, das kleinste ausdrückbare Verhältnis ist 1:1. In
+    Allflame traf das 20 von 67 Währungen — jede Währung unter einem
+    Chaos bekam glatt 1 c, und mit der Stack-Größe multipliziert wurde
+    aus einem vollen Stapel Schriftrollen ein Gegenwert von 40 c. In
+    Standard tritt dasselbe nicht auf, dort trägt die receive-Seite
+    Bruchwerte (0,01483 für Scroll of Wisdom) — es ist also keine
+    Eigenheit einer einzelnen Abfrage.
+
+    Erkannt wird der Boden daran, dass die receive-Seite GENAU auf ihm
+    steht, während die pay-Seite mehr als ein Stück pro Chaos verlangt.
+    Dann zählt die pay-Seite. Der Test ist bewusst eng: Eine Währung, die
+    wirklich ein Chaos wert ist, hat auch ``pay.value ≈ 1`` und bekommt
+    denselben Wert wie zuvor — die Regel greift nur dort, wo die beiden
+    Seiten einander widersprechen, und korrigiert nur nach unten.
+
+    **``chaosEquivalent`` ist auf zwei Nachkommastellen gerundet.** Real
+    gemessen über die ganze Standard-Route: 0,01483 wird zu 0,01 (−33 %),
+    0,006198 zu 0,01 (+61 %). Bei Einzelstücken ist das gleichgültig, bei
+    einem Currency-Fach mit fünfstelligen Stapeln nicht mehr. Liegt
+    ``receive.value`` innerhalb eines halben Rundungsschritts, ist es
+    derselbe Wert ungerundet und wird genommen. Weicht es weiter ab, ist
+    ``chaosEquivalent`` eine eigenständige Aussage von poe.ninja (bei
+    Divine Orb in Standard: 626,6 gegen receive 799,6, weil beide
+    Handelsrichtungen verrechnet werden) und bleibt unangetastet. Wir
+    gewinnen also nur Stellen zurück, die poe.ninja weggerundet hat, und
+    widersprechen der Quelle nie.
+
+    ``None`` heißt "kein Preis in dieser Zeile" — nie 0.
+    """
+    chaos = line.get("chaosEquivalent")
+    if chaos is None:
+        return None
+    receive = (line.get("receive") or {}).get("value")
+    pay = (line.get("pay") or {}).get("value")
+    if receive == _RECEIVE_FLOOR and pay and pay > 1:
+        return 1.0 / pay
+    if receive and abs(receive - chaos) <= _CHAOS_EQUIVALENT_STEP:
+        return receive
+    return chaos
 
 
 def _merge_exchange(index: PriceIndex, http: httpx.Client, league: str, item_type: str) -> None:

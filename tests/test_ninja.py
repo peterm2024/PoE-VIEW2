@@ -217,6 +217,107 @@ def test_merge_currency_maps_type_name_to_chaos_equivalent(monkeypatch) -> None:
     assert index._simple["Divine Orb"] == 220.0
 
 
+# --- currency_chaos_value: der 1:1-Boden der receive-Seite ---------------- #
+#
+# Alle Zeilen unten sind am 2026-08-05 real von poe.ninja abgerufen und
+# gekuerzt (Sparklines, IDs). Kein erfundenes Zahlenmaterial: Genau die
+# Diskrepanz zwischen den beiden Handelsrichtungen ist der Punkt, und die
+# laesst sich nur an echten Antworten zeigen.
+
+_ALLFLAME_WISDOM = {  # Boden erreicht: receive sagt 1c, pay sagt 246 Stueck/c
+    "currencyTypeName": "Scroll of Wisdom",
+    "pay": {"value": 246.0, "listing_count": 3},
+    "receive": {"value": 1.0, "listing_count": 353},
+    "chaosEquivalent": 1.0,
+}
+_STANDARD_WISDOM = {  # dieselbe Waehrung, andere Liga: receive traegt Bruchwerte
+    "currencyTypeName": "Scroll of Wisdom",
+    "receive": {"value": 0.01483, "listing_count": 4042},
+    "chaosEquivalent": 0.01,
+}
+_STANDARD_DIVINE = {  # chaosEquivalent ist hier eine eigene Aussage, nicht gerundet
+    "currencyTypeName": "Divine Orb",
+    "pay": {"value": 0.00167}, "receive": {"value": 799.6},
+    "chaosEquivalent": 626.6,
+}
+
+
+def test_a_currency_below_one_chaos_is_read_from_the_pay_side() -> None:
+    """Peter, 2026-08-05: "40/40 Scroll of Wisdom sind vermutlich 1c wert
+    und nicht jede einzelne Scroll." Die Handelsseite kann kein Angebot
+    "0,004 Chaos fuer eine Schriftrolle" ausdruecken — das kleinste
+    Verhaeltnis ist 1:1, und genau darauf faellt die receive-Seite
+    zurueck. Die pay-Seite derselben Zeile kennt den echten Kurs."""
+    from poe_view.api.ninja import currency_chaos_value
+
+    value = currency_chaos_value(_ALLFLAME_WISDOM)
+
+    assert value == 1.0 / 246.0
+    assert value * 40 < 0.2  # ein voller Stapel, vorher: 40c
+
+
+def test_a_currency_genuinely_worth_one_chaos_keeps_its_value() -> None:
+    """Gegenstueck: Die Regel darf nur dort greifen, wo die beiden
+    Handelsrichtungen einander widersprechen. Bei einer Waehrung, die
+    wirklich rund ein Chaos kostet, sagen beide Seiten dasselbe."""
+    from poe_view.api.ninja import currency_chaos_value
+
+    line = {"pay": {"value": 1.0}, "receive": {"value": 1.0}, "chaosEquivalent": 1.0}
+
+    assert currency_chaos_value(line) == 1.0
+
+
+def test_without_a_pay_side_the_floor_cannot_be_detected_and_is_left_alone() -> None:
+    """Ohne Gegenprobe gibt es keinen Widerspruch, den man aufloesen
+    koennte — dann bleibt poe.ninjas Wert stehen. Lieber ein moeglicher
+    Fehler der Quelle als ein selbst erfundener Preis."""
+    from poe_view.api.ninja import currency_chaos_value
+
+    assert currency_chaos_value({"receive": {"value": 1.0}, "chaosEquivalent": 1.0}) == 1.0
+
+
+def test_the_rounding_of_chaos_equivalent_is_recovered_from_the_receive_side() -> None:
+    """``chaosEquivalent`` ist auf zwei Nachkommastellen gerundet: 0,01483
+    wird zu 0,01 (−33 %). Bei einem Einzelstueck egal, bei einem
+    Currency-Fach mit fuenfstelligen Stapeln nicht. Liegt receive
+    innerhalb eines halben Rundungsschritts, ist es derselbe Wert
+    ungerundet."""
+    from poe_view.api.ninja import currency_chaos_value
+
+    assert currency_chaos_value(_STANDARD_WISDOM) == 0.01483
+
+
+def test_a_deviating_chaos_equivalent_is_not_overruled() -> None:
+    """Divine Orb in Standard: chaosEquivalent 626,6 gegen receive 799,6.
+    Das ist keine weggerundete Stelle, sondern poe.ninjas Verrechnung
+    beider Handelsrichtungen — und die bleibt unangetastet. Sonst wuerde
+    aus einer Praezisierung ein Widerspruch zur Quelle."""
+    from poe_view.api.ninja import currency_chaos_value
+
+    assert currency_chaos_value(_STANDARD_DIVINE) == 626.6
+
+
+def test_a_line_without_a_price_yields_none_not_zero() -> None:
+    """Unbekannter Preis ist etwas anderes als ein wertloses Item
+    (FALLSTRICKE #39)."""
+    from poe_view.api.ninja import currency_chaos_value
+
+    assert currency_chaos_value({"currencyTypeName": "Irgendwas"}) is None
+
+
+def test_merge_currency_applies_the_floor_correction(monkeypatch) -> None:
+    """Der Weg vom Rohdatensatz bis in den Index — sonst koennte die
+    Korrektur richtig rechnen und trotzdem nicht angewendet werden."""
+    import poe_view.api.ninja as ninja
+
+    monkeypatch.setattr(ninja, "_get",
+                        lambda http, path, league, item_type: {"lines": [_ALLFLAME_WISDOM]})
+    index = PriceIndex()
+    _merge_currency(index, http=None, league="Allflame", item_type="Currency")
+
+    assert index._simple["Scroll of Wisdom"] == 1.0 / 246.0
+
+
 def test_merge_exchange_resolves_id_to_name_via_items_block(monkeypatch) -> None:
     import poe_view.api.ninja as ninja
 

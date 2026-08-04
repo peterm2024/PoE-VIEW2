@@ -35,6 +35,16 @@ TTL_SECONDS = 6 * 3600
 # Wechsel erneut ~30 Requests gegen poe.ninja auslöst.
 EMPTY_TTL_SECONDS = 3600
 
+# Hochzählen, sobald sich die BERECHNUNG der Preise ändert — Einträge mit
+# einer anderen Nummer gelten als abgelaufen, egal wie frisch sie sind.
+# Anlass war die Korrektur des 1:1-Bodens der poe.ninja-receive-Seite
+# (2026-08-05, §api/ninja.currency_chaos_value): Ohne diese Nummer hätte
+# der Cache bis zu sechs Stunden weiter die alten, um Faktor 246 zu hohen
+# Werte ausgeliefert — die Behebung wäre unsichtbar geblieben und hätte
+# wie ein fehlgeschlagener Fix ausgesehen. Die TTL allein deckt das nicht
+# ab: Sie misst das Alter der DATEN, nicht das der Rechenvorschrift.
+CACHE_VERSION = 2
+
 
 def _index_to_payload(index: PriceIndex) -> dict:
     return {
@@ -65,7 +75,8 @@ def _payload_to_index(payload: dict) -> PriceIndex:
 def save(league: str, index: PriceIndex) -> None:
     """Schreibt EINEN Liga-Eintrag; andere Ligen im Cache bleiben erhalten."""
     all_leagues = _read_raw()
-    all_leagues[league] = {"fetched_at": time.time(), "empty": index.is_empty,
+    all_leagues[league] = {"version": CACHE_VERSION, "fetched_at": time.time(),
+                           "empty": index.is_empty,
                            "prices": _index_to_payload(index)}
     try:
         config.ensure_dirs()
@@ -80,9 +91,17 @@ def load(league: str, ttl_seconds: float | None = None) -> PriceIndex | None:
 
     Ohne explizite ``ttl_seconds`` entscheidet der beim Speichern
     vermerkte ``empty``-Zustand über die TTL (§EMPTY_TTL_SECONDS) — ein
-    Ergebnis ganz ohne Preiszeile verdient kein 6h-Vertrauen."""
+    Ergebnis ganz ohne Preiszeile verdient kein 6h-Vertrauen.
+
+    Ein Eintrag aus einer älteren Rechenvorschrift (§CACHE_VERSION) gilt
+    ebenfalls als abgelaufen. Er wird nur ignoriert, nicht gelöscht: Der
+    nächste Abruf derselben Liga überschreibt ihn ohnehin, und ein Cache,
+    der von sich aus Daten wegwirft, ist in diesem Projekt schon zweimal
+    teuer geworden."""
     entry = _read_raw().get(league)
     if entry is None:
+        return None
+    if entry.get("version") != CACHE_VERSION:
         return None
     if ttl_seconds is None:
         ttl_seconds = EMPTY_TTL_SECONDS if entry.get("empty") else TTL_SECONDS
