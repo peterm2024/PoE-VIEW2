@@ -22,6 +22,13 @@ nach [SemVer](https://semver.org/lang/de/).
   "Updated"-Zeitstempel der Statuszeile ist damit auch auf einem
   Screenshot allein erkennbar, wie aktuell die angezeigten Daten sind.
 
+### Geändert
+
+- Statuszeile aufgeräumt: Die beiden Refresh-Angaben sind zu einer
+  zusammengefasst ("Single — next update in 1s · 0/94 tabs"), und der
+  Hinweis zur fehlenden Zugehörigkeit zu Grinding Gear Games steht jetzt
+  im Hilfe-Fenster unter "About" statt dauerhaft in der Statuszeile.
+
 ### Behoben
 
 - Item-Eigenschaften mit Platzhaltern wurden falsch dargestellt: Statt

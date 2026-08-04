@@ -865,15 +865,15 @@ def test_auto_refresh_counter_label_counts_silent_loads(qapp) -> None:
     win._current_league = "Standard"
     win._stash_trees["Standard"] = [_make_leaf("t1", "Tab 1"), _make_leaf("t2", "Tab 2")]
     win._leaf_stashes = win._stash_trees["Standard"]
-    win._update_auto_refresh_label()
-    assert win._auto_refresh_label.text() == "Auto-refresh: 0 of 2 stash tabs updated"
+    win._update_refresh_status()
+    assert win._sweep_counter_text() == "0/2 tabs"
 
     win._on_stash_items("Standard", "t1", "Tab 1", [], silent=True)
-    assert win._auto_refresh_label.text() == "Auto-refresh: 1 of 2 stash tabs updated"
+    assert win._sweep_counter_text() == "1/2 tabs"
 
     # Manuelle (nicht-silente) Ladevorgänge zählen nicht als Auto-Refresh.
     win._on_stash_items("Standard", "t2", "Tab 2", [], silent=False)
-    assert win._auto_refresh_label.text() == "Auto-refresh: 1 of 2 stash tabs updated"
+    assert win._sweep_counter_text() == "1/2 tabs"
 
     win.worker.stop()
     win.worker.wait(5000)
@@ -894,16 +894,16 @@ def test_auto_refresh_counter_counts_real_vault_slots_not_map_sections(qapp) -> 
     win._stash_trees["Standard"] = [_make_leaf("t1", "Tab 1"), map_stash]
     win._leaf_stashes = win._flatten_stashes(win._stash_trees["Standard"])  # 3 ladbare Einheiten
 
-    win._update_auto_refresh_label()
-    assert win._auto_refresh_label.text() == "Auto-refresh: 0 of 2 stash tabs updated"  # nicht "of 3"
+    win._update_refresh_status()
+    assert win._sweep_counter_text() == "0/2 tabs"  # nicht "of 3"
 
     win._on_stash_items("Standard", "c1", "x", [], silent=True)
-    assert win._auto_refresh_label.text() == "Auto-refresh: 1 of 2 stash tabs updated"
+    assert win._sweep_counter_text() == "1/2 tabs"
 
     # Die zweite Sektion DESSELBEN Map-Tabs darf den Zähler nicht weiter
     # hochtreiben — beide gehören zum selben Truhenplatz "m1".
     win._on_stash_items("Standard", "c2", "x", [], silent=True)
-    assert win._auto_refresh_label.text() == "Auto-refresh: 1 of 2 stash tabs updated"
+    assert win._sweep_counter_text() == "1/2 tabs"
 
     win.worker.stop()
     win.worker.wait(5000)
@@ -925,7 +925,7 @@ def test_auto_refresh_counter_counts_tabs_already_loaded_from_a_previous_session
 
     win._on_stash_items("Standard", "t1", "Tab 1", [], silent=True)
 
-    assert win._auto_refresh_label.text() == "Auto-refresh: 1 of 2 stash tabs updated"
+    assert win._sweep_counter_text() == "1/2 tabs"
 
     win.worker.stop()
     win.worker.wait(5000)
@@ -933,8 +933,8 @@ def test_auto_refresh_counter_counts_tabs_already_loaded_from_a_previous_session
 
 def test_auto_refresh_label_is_empty_without_league(qapp) -> None:
     win = MainWindow()
-    win._update_auto_refresh_label()
-    assert win._auto_refresh_label.text() == ""
+    win._update_refresh_status()
+    assert win._sweep_counter_text() == ""
 
     win.worker.stop()
     win.worker.wait(5000)
@@ -977,7 +977,7 @@ def test_auto_refresh_countdown_shows_seconds_when_not_blocked(qapp, monkeypatch
     win._update_auto_refresh_countdown()
 
     assert win._auto_refresh_blocked_reason() is None
-    assert "Next auto-refresh in" in win._auto_refresh_countdown_label.text()
+    assert "Next auto-refresh in" in win._refresh_status_label.text()
 
     win.worker.stop()
     win.worker.wait(5000)
@@ -991,7 +991,7 @@ def test_auto_refresh_countdown_shows_reason_when_blocked(qapp, monkeypatch) -> 
     win._update_auto_refresh_countdown()
 
     assert win._auto_refresh_blocked_reason() == "rate limit budget reserved for manual requests"
-    assert "Auto-refresh paused" in win._auto_refresh_countdown_label.text()
+    assert "Auto-refresh paused" in win._refresh_status_label.text()
 
     win.worker.stop()
     win.worker.wait(5000)
@@ -1021,7 +1021,7 @@ def test_auto_refresh_countdown_blank_without_league(qapp) -> None:
 
     win._update_auto_refresh_countdown()
 
-    assert win._auto_refresh_countdown_label.text() == ""
+    assert win._refresh_status_label.text() == ""
 
     win.worker.stop()
     win.worker.wait(5000)
@@ -1760,7 +1760,7 @@ def test_refresh_mode_countdown_label_shows_active_mode(qapp) -> None:
 
     win._update_auto_refresh_countdown()
 
-    assert "Single" in win._auto_refresh_countdown_label.text()
+    assert "Single" in win._refresh_status_label.text()
 
     win.worker.stop()
     win.worker.wait(5000)
@@ -1792,7 +1792,7 @@ def test_stepping_mode_stops_while_the_rate_limit_window_is_too_full(qapp, monke
     assert submitted == []  # kein Request, solange das Fenster zu voll ist
 
     win._update_auto_refresh_countdown()
-    assert "headroom" in win._auto_refresh_countdown_label.text()
+    assert "headroom" in win._refresh_status_label.text()
 
     # Sobald GGGs Zähler wieder sinkt, läuft der Takt weiter.
     blocked[0] = False
@@ -4922,7 +4922,7 @@ def test_refresh_mode_pause_says_so_in_the_countdown_label(qapp) -> None:
 
     win._update_auto_refresh_countdown()
 
-    assert "Pause" in win._auto_refresh_countdown_label.text()
+    assert "Pause" in win._refresh_status_label.text()
 
     win.worker.stop()
     win.worker.wait(5000)

@@ -288,15 +288,21 @@ class MainWindow(QMainWindow):
         # (FALLSTRICKE #30). `submit()` ist eine reine Queue-Operation und
         # funktioniert bereits vor `worker.start()`.
         self.worker.submit(BootstrapJob())
-        self._build_ui()
-        self._connect_worker()
-        self.worker.start()
-        self._apply_zone_watcher_config(*self._load_zone_watcher_config())
 
+        # VOR `_build_ui()`: der Aufbau rendert bereits den Baum aus dem
+        # Cache und aktualisiert dabei die Refresh-Anzeige, die seit dem
+        # Zusammenlegen der beiden Statuszeilen-Segmente auch den
+        # Countdown dieses Timers liest. Stünde er weiter unten, liefe
+        # der Start in ein fehlendes Attribut.
         self._auto_refresh_timer = QTimer(self)
         self._auto_refresh_timer.setInterval(self.AUTO_REFRESH_INTERVAL_MS)
         self._auto_refresh_timer.timeout.connect(self._maybe_auto_refresh)
         self._auto_refresh_timer.start()
+
+        self._build_ui()
+        self._connect_worker()
+        self.worker.start()
+        self._apply_zone_watcher_config(*self._load_zone_watcher_config())
 
         # Sekündliches Ticken der Countdown-Anzeige — unabhängig vom
         # Auto-Refresh-Timer selbst, der nur alle AUTO_REFRESH_INTERVAL_MS
@@ -834,16 +840,14 @@ class MainWindow(QMainWindow):
         # Tabelle — egal aus welcher Ansicht heraus. Kein Aufrufer muss
         # daran denken, und es kann keine Ansicht vergessen werden.
         self.proxy.modelReset.connect(self._note_view_updated)
-        # Sichtbarer Nachweis, dass der Hintergrund-Auto-Refresh arbeitet
-        # ("Bist du dir sicher, dass das funktioniert?").
-        self._auto_refresh_label = QLabel("")
-        self.statusBar().addPermanentWidget(self._auto_refresh_label)
-        # Countdown bis zum nächsten Auto-Refresh-Tick, bzw. der Grund, warum
-        # gerade keiner stattfindet (§ _auto_refresh_blocked_reason).
-        self._auto_refresh_countdown_label = QLabel("")
-        self._auto_refresh_countdown_label.setStyleSheet("color: #8a8478;")
-        self.statusBar().addPermanentWidget(self._auto_refresh_countdown_label)
-        self.statusBar().addPermanentWidget(QLabel(config.DISCLAIMER))
+        # Eine Anzeige statt zweier: Zustand des Hintergrund-Refresh
+        # ("Single — next update in 9s") und der Sweep-Zähler ("12/94
+        # tabs") standen bis 2026-08-04 als getrennte Segmente
+        # nebeneinander und sagten teils dasselbe. Peter: "für Punkt 2
+        # geht uns langsam der Platz aus."
+        self._refresh_status_label = QLabel("")
+        self.statusBar().addPermanentWidget(self._refresh_status_label)
+        self._refresh_status_label.setStyleSheet("color: #8a8478;")
 
         # Liga-Dropdown SOFORT aus dem Cache befüllen — unabhängig vom
         # Netzwerk nutzbar (GGG-Wartung am Patchday). Muss
@@ -1498,7 +1502,7 @@ class MainWindow(QMainWindow):
         item_counts = self._item_counts_for_current_league()
         self.tree.set_stashes(stashes, last_loaded=last_loaded, item_counts=item_counts,
                               positions=self._tab_positions())
-        self._update_auto_refresh_label()
+        self._update_refresh_status()
 
     def _item_counts_for_current_league(self) -> dict[str, int]:
         """stash_id → tatsächlich geladene Item-Anzahl — überschreibt im Baum
@@ -1771,7 +1775,7 @@ class MainWindow(QMainWindow):
         if relabelled is not None:
             self.tree.update_label(stash_id, relabelled)
         if silent:
-            self._update_auto_refresh_label()
+            self._update_refresh_status()
         # Bei einem STILLEN Refresh die sichtbare Tabelle nur dann live
         # aktualisieren, wenn genau DIESES Fach gerade als Einzelansicht
         # offen ist (Regression, das Live-Halten des
@@ -1821,7 +1825,7 @@ class MainWindow(QMainWindow):
         counts = [item_counts.get(c.id, c.metadata.get("items")) for c in children]
         total = sum(c or 0 for c in counts) if any(c is not None for c in counts) else None
         self.tree.mark_loaded(stash_id, league_loaded[stash_id], count=total)
-        self._update_auto_refresh_label()
+        self._update_refresh_status()
         if not silent:
             self._status_msg.setText(
                 f"{name}: special tab with {len(children)} sub-tabs — "
@@ -1896,7 +1900,7 @@ class MainWindow(QMainWindow):
         API sie für die angegebene (oder sonst die aktuelle) Liga
         zurückliefert. Grundlage der Position-Spalte in der Item-Tabelle
         (§4.11), der Pos.-Spalte im Stash-Baum (§4.7.1) und des
-        Auto-Refresh-Zählers (§_count_silent_refresh, §_update_auto_refresh_label).
+        Auto-Refresh-Zählers (§_count_silent_refresh, §_sweep_counter_text).
 
         Explizite ``league`` nötig, wenn der Aufrufer für eine ANDERE als
         die gerade aktive Liga rechnet (z. B. ein spät eintreffender
@@ -3036,32 +3040,7 @@ class MainWindow(QMainWindow):
         # Erfolgs-Signal-Pfad übersprungen hat —, stößt der ohnehin
         # laufende Sekunden-Timer sie spätestens hier wieder an.
         self._drive_refresh_mode()
-        if not self._current_league:
-            self._auto_refresh_countdown_label.setText("")
-            return
-        if self._refresh_mode == "pause":
-            self._auto_refresh_countdown_label.setText(
-                "Refresh mode: Pause — no background requests")
-            return
-        if self._refresh_mode in self.STEPPING_REFRESH_MODES:
-            mode_name = self._refresh_mode_combo.currentText()
-            # Pausiert der Takt wegen zu vollen Fensters, gehört genau das
-            # ins Label — ein weiterlaufender Countdown, der bei 0s stehen
-            # bleibt, sähe wieder wie ein Hänger aus (§pacing_blocked).
-            if self.worker.rate_limiter.pacing_blocked(self._refresh_mode_policy):
-                self._auto_refresh_countdown_label.setText(
-                    f"Refresh mode: {mode_name} — waiting for rate-limit headroom")
-                return
-            seconds = max(0, round(self._refresh_mode_next_due - time.monotonic()))
-            self._auto_refresh_countdown_label.setText(
-                f"Refresh mode: {mode_name} — next update in {seconds}s")
-            return
-        reason = self._auto_refresh_blocked_reason()
-        if reason is not None:
-            self._auto_refresh_countdown_label.setText(f"Auto-refresh paused ({reason})")
-            return
-        seconds = max(0, self._auto_refresh_timer.remainingTime() // 1000)
-        self._auto_refresh_countdown_label.setText(f"Next auto-refresh in {seconds}s")
+        self._update_refresh_status()
 
     def _on_refresh_mode_changed(self, mode: str) -> None:
         self._refresh_mode = mode.lower()
@@ -3306,8 +3285,9 @@ class MainWindow(QMainWindow):
             return True
         return False
 
-    def _update_auto_refresh_label(self) -> None:
-        """Zähler rechts in der Statusleiste: „Auto-refresh: X of Y stash tabs updated“.
+    def _sweep_counter_text(self) -> str:
+        """Der Sweep-Zähler als "X/Y tabs" — wie viele Truhenfächer der
+        Hintergrund-Refresh in dieser Liga schon erwischt hat.
 
         "Y" ist die Zahl echter Truhenplätze (eindeutige Werte aus
         ``_tab_positions()``), NICHT ``len(self._leaf_stashes)`` — das zählt
@@ -3316,11 +3296,41 @@ class MainWindow(QMainWindow):
         refresh`` zählt "X" in derselben Einheit, sonst passt der Bruch nicht."""
         total = len(set(self._tab_positions().values()))
         if not total:
-            self._auto_refresh_label.setText("")
-            return
+            return ""
         count = self._auto_refresh_counts.get(self._current_league, 0)
-        self._auto_refresh_label.setText(
-            f"Auto-refresh: {count} of {total} stash tabs updated")
+        return f"{count}/{total} tabs"
+
+    def _refresh_state_text(self) -> str:
+        """Was der Hintergrund-Refresh gerade tut — bzw. warum nicht."""
+        if not self._current_league:
+            return ""
+        if self._refresh_mode == "pause":
+            return "Pause — no background requests"
+        if self._refresh_mode in self.STEPPING_REFRESH_MODES:
+            mode_name = self._refresh_mode_combo.currentText()
+            # Pausiert der Takt wegen zu vollen Fensters, gehört genau das
+            # ins Label — ein weiterlaufender Countdown, der bei 0s stehen
+            # bleibt, sähe wieder wie ein Hänger aus (§pacing_blocked).
+            if self.worker.rate_limiter.pacing_blocked(self._refresh_mode_policy):
+                return f"{mode_name} — waiting for rate-limit headroom"
+            seconds = max(0, round(self._refresh_mode_next_due - time.monotonic()))
+            return f"{mode_name} — next update in {seconds}s"
+        reason = self._auto_refresh_blocked_reason()
+        if reason is not None:
+            return f"Auto-refresh paused ({reason})"
+        seconds = max(0, self._auto_refresh_timer.remainingTime() // 1000)
+        return f"Next auto-refresh in {seconds}s"
+
+    def _update_refresh_status(self) -> None:
+        """Zustand und Sweep-Zähler in EINER Anzeige (Peter, 2026-08-04:
+        "für Punkt 2 geht uns langsam der Platz aus"). Vorher zwei
+        Segmente nebeneinander, die sich teilweise dasselbe sagten:
+        "Auto-refresh: 0 of 94 stash tabs updated | Refresh mode: Single
+        — next update in 1s" ist jetzt "Single — next update in 1s ·
+        0/94 tabs"."""
+        parts = [text for text in (self._refresh_state_text(),
+                                   self._sweep_counter_text()) if text]
+        self._refresh_status_label.setText("  ·  ".join(parts))
 
     # Noch nie geladene Tabs zählen als "unendlich alt" — sie kommen vor
     # jedem tatsächlich datierten Tab dran (siehe _pick_auto_refresh_candidate).

@@ -80,3 +80,35 @@ def test_toolbar_button_opens_the_help_and_reuses_it(qapp) -> None:
     first.close()
     win.worker.stop()
     win.worker.wait(5000)
+
+
+def test_the_about_topic_carries_the_disclaimer(qapp) -> None:
+    """Peter, 2026-08-04: "für Punkt 2 geht uns langsam der Platz aus. Wir
+    koennten den Disclaimer in die Hilfe packen." Er hat vorher bei Path of
+    Building nachgesehen — das zeigt gar keinen. Aus der Statuszeile ist er
+    damit raus, aber im Wortlaut muss er erhalten bleiben: Es ist GGGs
+    vorgeschriebene Formulierung, kein selbstgewaehlter Text."""
+    from poe_view import __version__, config
+
+    about = next(body for title, body in TOPICS if title.startswith("About"))
+
+    assert config.DISCLAIMER in about
+    assert __version__ in about
+    assert "poe.ninja" in about  # zweite Nicht-Zugehoerigkeit, wie in der README
+
+
+def test_the_disclaimer_is_no_longer_in_the_status_bar(qapp) -> None:
+    """Gegenstueck zum Test oben: er darf genau einmal existieren, nicht
+    an beiden Stellen — sonst waere die Platzersparnis wieder dahin."""
+    from PySide6.QtWidgets import QLabel
+
+    from poe_view import config
+    from poe_view.ui.main_window import MainWindow
+
+    win = MainWindow()
+    texts = [w.text() for w in win.statusBar().findChildren(QLabel)]
+
+    assert config.DISCLAIMER not in texts
+
+    win.worker.stop()
+    win.worker.wait(5000)

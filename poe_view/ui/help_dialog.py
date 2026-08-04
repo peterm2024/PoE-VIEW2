@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (QDialog, QDialogButtonBox, QHBoxLayout,
                                QListWidget, QSplitter, QTextBrowser,
                                QVBoxLayout, QWidget)
 
+from poe_view import __version__, config
 from poe_view.ui.theme import RARITY_COLORS
 
 
@@ -199,6 +200,22 @@ that in your GGG account settings if you want it gone completely. Your
 loaded data is kept either way.</p>
 <p>There is deliberately no delete function inside the program. If you
 want the local data gone, remove the folder above in Explorer.</p>
+"""),
+
+    ("About PoE-VIEW2", f"""
+<h3>About PoE-VIEW2</h3>
+<p><b>Version {__version__}</b> — a desktop viewer for Path of Exile
+stash tabs and characters, built on the official GGG API.</p>
+<p><b>{config.DISCLAIMER}</b> It is likewise not affiliated with or
+endorsed by poe.ninja, whose publicly available price data the optional
+value display builds on.</p>
+<p>PoE-VIEW2 is free software under the MIT licence. Source code, issue
+tracker and releases:
+<a href="https://github.com/peterm2024/PoE-VIEW2">github.com/peterm2024/PoE-VIEW2</a></p>
+<p>The application identifies itself to GGG's API as
+<code>{config.CLIENT_ID}</code> with the contact address
+<code>{config.CONTACT_EMAIL}</code>, as their developer documentation
+requires.</p>
 """),
 )
 

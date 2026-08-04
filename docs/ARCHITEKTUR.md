@@ -2450,6 +2450,32 @@ die Mehrdeutigkeit, die man dabei nicht gebrauchen kann. Die Uhr hängt
 am bereits laufenden Sekundentakt des Refresh-Countdowns — ein zweiter
 Timer für dieselbe Frequenz wäre Verschwendung.
 
+**Statuszeile aufgeräumt.** Peter, als die "unchanged for"-Ergänzung
+zur Sprache kam: "Ich glaube für Punkt 2 geht uns langsam der Platz
+aus." Zwei Maßnahmen, beide ohne Informationsverlust.
+
+Erstens standen dort zwei Refresh-Angaben nebeneinander, die sich
+teilweise dasselbe sagten: "Auto-refresh: 0 of 94 stash tabs updated |
+Refresh mode: Single — next update in 1s". Daraus wurde eine Anzeige,
+zusammengesetzt aus `_refresh_state_text()` (was der Hintergrund-Refresh
+gerade tut) und `_sweep_counter_text()` (wie weit der Rundlauf ist):
+"Single — next update in 1s · 0/94 tabs". Das halbiert den Platzbedarf.
+
+Zweitens ist der GGG-Disclaimer aus der Statuszeile ins Hilfe-Fenster
+gewandert, in ein eigenes Thema "About". Peters Begründung war eine
+empirische: "Hab gerade in PoB nachgeschaut, da gibts gar keinen
+Disclaimer" — Path of Building ist das bekannteste Werkzeug dieser
+Community. Der Wortlaut bleibt unangetastet, weil er GGGs vorgegebene
+Formulierung ist und kein selbstgewählter Text; er steht weiterhin auch
+in der README. Zwei Tests sichern beides ab: dass er im About-Thema
+steht UND dass er nicht mehr in der Statuszeile auftaucht — sonst wäre
+die Platzersparnis beim nächsten Nachpflegen wieder dahin.
+
+Nebenwirkung des Zusammenlegens: Die gemeinsame Anzeige liest jetzt auch
+den Countdown des Auto-Refresh-Timers. Der wurde bisher NACH `_build_ui()`
+angelegt, das aber schon den Cache-Baum rendert und dabei die Anzeige
+aktualisiert — der Timer musste deshalb vor den UI-Aufbau wandern.
+
 **Verlauf zeigte längst Vergangenes.** Peter: "in meiner History war
 noch Kishara's Star drin. Ein Item, das ich schon lange nicht mehr
 habe." Ursache ist eine Asymmetrie, die beim Bau nicht auffiel: Der
@@ -2770,7 +2796,7 @@ Töne #3fb8ae und #0ebac5 waren nebeneinander kaum zu unterscheiden.
   Bedarf und steht in `.gitignore`. Als *public client* mit PKCE gibt es
   **kein** Client-Secret — es gibt also nichts Geheimes zu verteilen.
 - Access-Token nur im Windows Credential Manager, nie auf Platte/im Repo.
-- Disclaimer in UI (Statusbar + Über-Dialog) und README:
+- Disclaimer im Hilfe-Fenster (Thema "About") und in der README:
   *"This product isn't affiliated with or endorsed by Grinding Gear Games in any way."*
 - Lizenz: MIT (siehe `LICENSE`).
 
