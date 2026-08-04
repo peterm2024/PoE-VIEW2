@@ -267,9 +267,13 @@ class MainWindow(QMainWindow):
         self._item_history: deque[HistoryEntry] = deque(maxlen=120)
         # Charaktere, für die in DIESER Sitzung schon einmal ein Stand
         # eintraf. Erst ab dem zweiten Abruf ist ein Vergleich sinnvoll —
-        # ein aus der Datei geladener Stand kann wochenalt sein
-        # (§_log_character_item_history).
-        self._history_baseline_chars: set[str] = set()
+        # ein aus der Datei geladener Stand kann wochenalt sein. Gilt für
+        # BEIDE Auswertungen des Vergleichs: den Verlauf
+        # (§_log_character_item_history) und die Türkis-/Grau-Hervorhebung
+        # (§_show_character_items). Der Vergleich ist entweder gültig oder
+        # nicht — an welcher Stelle sein Ergebnis landet, ändert daran
+        # nichts.
+        self._session_fetched_chars: set[str] = set()
         self._offline = False  # GGG nicht erreichbar (Wartung am Patchday)
         self._live_leagues: set[str] | None = None  # letzte /account/leagues-Antwort; None = noch unbekannt
         self._restore_cached_data()
@@ -1341,7 +1345,7 @@ class MainWindow(QMainWindow):
         self._search_all_active = False
         self._large_search_items = None
         self._item_history.clear()
-        self._history_baseline_chars.clear()
+        self._session_fetched_chars.clear()
         self._filter_edit.clear()
         self.tree.set_stashes([])
         self.character_list.set_characters([])
@@ -2494,9 +2498,16 @@ class MainWindow(QMainWindow):
         Charakters in die aktuelle Ansicht einsickern lassen (analog
         `_on_stash_items`)."""
         previous_items = self._character_items.get(name)  # vor dem Überschreiben: Diff-Basis
+        # Taugt dieser vorige Stand überhaupt als Vergleichsbasis? Beim
+        # ersten Abruf eines Charakters in dieser Sitzung stammt er aus der
+        # Datei und kann wochenalt sein — dann ist JEDER daraus abgeleitete
+        # Unterschied wertlos, im Verlauf wie in der Hervorhebung
+        # (§_session_fetched_chars).
+        stale_baseline = name not in self._session_fetched_chars
+        self._session_fetched_chars.add(name)
         self._character_items[name] = items
         self._character_items_loaded[name] = datetime.now(timezone.utc).isoformat()
-        self._log_character_item_history(name, previous_items, items)
+        self._log_character_item_history(name, previous_items, items, stale_baseline)
         self._persist_cache()
         if silent:
             # Policy-Name jetzt festhalten, siehe Kommentar in
@@ -2511,7 +2522,8 @@ class MainWindow(QMainWindow):
             self._open_paperdoll(name, items)
         if name != self._current_character_name:
             return
-        self._show_character_items(name, items, previous_items)
+        self._show_character_items(name, items,
+                                   None if stale_baseline else previous_items)
 
     def _on_character_paperdoll_requested(self, char: Character) -> None:
         """Doppelklick auf einen Charakter (ToDo.md: "Doppelklick auf einen
@@ -2614,7 +2626,8 @@ class MainWindow(QMainWindow):
         return changes
 
     def _log_character_item_history(self, name: str, previous_items: list[Item] | None,
-                                    items: list[Item]) -> None:
+                                    items: list[Item],
+                                    stale_baseline: bool = False) -> None:
         """Protokolliert neu aufgetauchte/verschwundene/mengenmäßig
         veränderte Items eines Charakters im globalen Verlauf (Peter,
         2026-08-02: "eine Liste mit den letzten 120 Items, die durchs
@@ -2640,9 +2653,11 @@ class MainWindow(QMainWindow):
         Inventar gewandert ist, nicht was irgendwann seit dem letzten
         Programmlauf passiert ist. Protokolliert wird deshalb erst ab dem
         ZWEITEN Abruf eines Charakters in dieser Sitzung; der erste setzt
-        nur die Vergleichsbasis (``_history_baseline_chars``)."""
-        if name not in self._history_baseline_chars:
-            self._history_baseline_chars.add(name)
+        nur die Vergleichsbasis. Ob dieser Abruf der erste ist, entscheidet
+        der Aufrufer (``stale_baseline``, aus ``_session_fetched_chars``) —
+        die Türkis-Hervorhebung braucht dieselbe Auskunft, und sie darf
+        nicht davon abhängen, wer von beiden zuerst gefragt hat."""
+        if stale_baseline:
             return
         added_ids, _changed_ids, removed_items = self._diff_character_items(previous_items, items)
         stack_changes = self._stack_size_changes(previous_items, items)
@@ -2668,7 +2683,14 @@ class MainWindow(QMainWindow):
         ``previous_items`` ist der Item-Stand VOR diesem Refresh (``None``
         beim ersten Anzeigen bzw. aus dem Cache, siehe
         ``_on_character_selected``) — Grundlage der Türkis-/Grau-Diff-
-        Hervorhebung, siehe ``_diff_character_items``."""
+        Hervorhebung, siehe ``_diff_character_items``.
+
+        ``None`` reicht der Aufrufer auch dann, wenn zwar ein voriger Stand
+        vorliegt, dieser aber aus einem früheren Programmlauf stammt
+        (``_on_character_items``, ``stale_baseline``): Ein wochenalter Stand
+        ließe beim ersten Abruf halbe Inventare türkis aufleuchten, als
+        wäre das gerade eben passiert. Derselbe Grund wie beim Verlauf
+        (``_log_character_item_history``), nur eine Ebene weiter vorn."""
         self._showing_aggregate = False
         self._search_all_active = False
         self._large_search_items = None

@@ -6121,6 +6121,38 @@ def test_a_cached_inventory_is_not_used_as_a_history_baseline(qapp) -> None:
     win.worker.wait(5000)
 
 
+def test_a_cached_inventory_does_not_light_up_the_table_either(qapp) -> None:
+    """Gegenstueck zum Test darueber, gleiche Ursache eine Ebene weiter
+    vorn: Der aus der Datei geladene Stand darf auch die Tuerkis-/Grau-
+    Hervorhebung nicht ausloesen. Sonst leuchtet beim ersten Abruf nach dem
+    Programmstart ein halbes Inventar auf, als waere das gerade passiert —
+    und das verschwundene Item haengt zusaetzlich als graue Zeile darunter.
+    """
+    win = MainWindow()
+    win._current_character_name = "WitchOfPeter"
+    win._character_items["WitchOfPeter"] = [
+        Item.model_validate({"id": "old", "typeLine": "Kishara's Star"})]
+
+    win._on_character_items("WitchOfPeter", [
+        Item.model_validate({"id": "new", "typeLine": "Chaos Orb"})], False)
+
+    assert win.table_model._changed_ids == frozenset()
+    assert win.table_model._removed_ids == frozenset()
+    # Das seit dem letzten Programmlauf verschwundene Item wird gar nicht
+    # erst angehaengt — nur das, was jetzt wirklich da ist.
+    assert win.table_model.rowCount() == 1
+
+    # Ab dem zweiten Abruf dieser Sitzung ist der Vergleich wieder gueltig.
+    win._on_character_items("WitchOfPeter", [
+        Item.model_validate({"id": "new", "typeLine": "Chaos Orb"}),
+        Item.model_validate({"id": "fresh", "typeLine": "Divine Orb"})], False)
+
+    assert win.table_model._changed_ids == frozenset({"fresh"})
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
 def test_the_history_baseline_resets_on_logout(qapp, monkeypatch) -> None:
     """Nach einem Logout faengt alles von vorn an — sonst gaelte der Stand
     des abgemeldeten Kontos als Vergleichsbasis fuer das naechste."""
@@ -6129,11 +6161,11 @@ def test_the_history_baseline_resets_on_logout(qapp, monkeypatch) -> None:
     win._on_logged_in("TestAccount#1234")
     win._on_character_items("WitchOfPeter", [
         Item.model_validate({"id": "1", "typeLine": "Sword"})], False)
-    assert "WitchOfPeter" in win._history_baseline_chars
+    assert "WitchOfPeter" in win._session_fetched_chars
 
     win._on_logout_clicked()
 
-    assert win._history_baseline_chars == set()
+    assert win._session_fetched_chars == set()
 
     win.worker.stop()
     win.worker.wait(5000)

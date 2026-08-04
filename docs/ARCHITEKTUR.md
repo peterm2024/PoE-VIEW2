@@ -2487,12 +2487,27 @@ sämtliche zwischenzeitlichen Änderungen mit `datetime.now()` ins
 Protokoll. Für einen Verlauf, der zeigen soll, was gerade durchs
 Inventar wandert, ist das schlicht falsch.
 
-Behoben über `_history_baseline_chars`: Der erste Abruf eines Charakters
+Behoben über `_session_fetched_chars`: Der erste Abruf eines Charakters
 IN DIESER SITZUNG setzt nur die Vergleichsbasis und protokolliert
 nichts — dieselbe Regel, die für den allerersten Abruf überhaupt schon
 galt (`previous_items=None`), nur konsequent auf "aus der Datei geladen"
 ausgeweitet. Beim Logout wird die Menge geleert, sonst gälte der Stand
 des abgemeldeten Kontos als Basis für das nächste.
+
+Nachtrag vom 2026-08-05: Derselbe Vergleich speist eine zweite Anzeige,
+die Türkis-/Grau-Hervorhebung (§4.20) — und die war zunächst nicht
+mitgefixt. Beim ersten Abruf nach dem Programmstart leuchtete deshalb
+weiter auf, was sich seit Tagen geändert hatte, und verschwundene Items
+hingen als graue Zeilen darunter. Die Ursache war dieselbe, nur eine
+Ebene weiter vorn: `_show_character_items` ruft `_diff_character_items`
+selbst auf und lief an der Sperre vorbei. Konsequenz für den Aufbau: Ob
+die Vergleichsbasis taugt, entscheidet jetzt `_on_character_items` EINMAL
+(`stale_baseline`) und reicht die Auskunft an beide Verwerter weiter,
+statt dass jeder für sich in der Menge nachsieht. Der Vergleich ist
+entweder gültig oder nicht; wohin sein Ergebnis fließt, ändert daran
+nichts. Die vorige Bauweise hätte sonst auch beim dritten Verwerter
+wieder versagt — und sie war reihenfolgeabhängig: Wer zuerst nachsah,
+trug den Namen ein und nahm dem Zweiten die Antwort weg.
 
 ### 4.30 Eigenschaften mit Platzhaltern im Namen
 

@@ -43,6 +43,11 @@ nach [SemVer](https://semver.org/lang/de/).
   gegen einen womöglich wochenalten Stand. Protokolliert wird jetzt erst
   ab dem zweiten Abruf eines Charakters, der erste setzt nur die
   Vergleichsbasis.
+- Gleiche Ursache, zweite Anzeige: Beim ersten Abruf nach dem
+  Programmstart wurden Inventarzeilen türkis hervorgehoben und
+  verschwundene Items grau angehängt, obwohl die Änderungen Tage
+  zurücklagen. Auch die Hervorhebung vergleicht jetzt erst ab dem
+  zweiten Abruf eines Charakters.
 
 ## [0.5.1] - 2026-08-04
 
