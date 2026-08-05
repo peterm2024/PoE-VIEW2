@@ -50,7 +50,7 @@ Bereich) "Export visible items" (``export_visible_requested`` — exportiert
 das, was gerade in der Item-Tabelle zu sehen ist, unabhängig vom
 angeklickten Knoten, genau wie der Toolbar-Button; Peter, 2026-08-03: "im
 Stash-Tree das 'Export visible Items'-Rechtsklick menu auch aufnehmen")
-sowie "Alle öffnen"/"Alle schließen" für den kompletten Baum
+sowie "Expand All"/"Collapse All" für den kompletten Baum
 (``expandAll``/``collapseAll``) — bei über 100 Fächern in tief
 verschachtelten Ordnern (Map-/Unique-Sektionen) sonst mühsames
 Knoten-für-Knoten-Aufklappen.
@@ -569,9 +569,9 @@ class StashTree(QTreeWidget):
         self.scrollToItem(node)
 
     def _on_context_menu(self, pos) -> None:
-        """"Rohdaten anzeigen" nur für Fächer mit eigenen Daten (kein
+        """"View Raw Data" nur für Fächer mit eigenen Daten (kein
         Ordner-/Gruppenknoten); "Export visible items" (Peter, 2026-08-03)
-        und "Alle öffnen"/"Alle schließen" gelten für den ganzen Baum bzw.
+        und "Expand All"/"Collapse All" gelten für den ganzen Baum bzw.
         die Item-Tabelle und stehen deshalb immer zur Verfügung, auch auf
         einem Ordner oder im leeren Bereich unterhalb der letzten Zeile —
         der Export bezieht sich auf das, was gerade in der Tabelle zu sehen

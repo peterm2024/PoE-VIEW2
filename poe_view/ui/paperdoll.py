@@ -27,24 +27,33 @@ from poe_view.ui.item_detail import ItemDetail
 # Stash-Cache, 2026-07-31) — "Helm" nicht "Helmet", "Offhand"/"Offhand2"
 # statt "Shield"/"Shield2". Position im Grid folgt dem klassischen
 # PoE-Charakterbogen-Layout.
+#
+# Die zweite Spalte ist die sichtbare Beschriftung des leeren Platzes und
+# deshalb ENGLISCH (Oberfläche englisch, Kommentare deutsch — dieselbe
+# Trennung wie in ``help_dialog.py``/``settings_dialog.py``). Bewusst die
+# Slot-Namen aus dem Spiel selbst, nicht die der API: Ein Spieler kennt
+# "Off Hand", nicht "Offhand2".
 _DOLL_SLOTS = (
-    (0, 1, "Helm", "Helm"),
-    (1, 0, "Weapon", "Waffe"),
-    (1, 1, "Amulet", "Amulett"),
-    (1, 2, "Offhand", "Zweithand"),
-    (2, 1, "BodyArmour", "Rüstung"),
+    (0, 1, "Helm", "Helmet"),
+    (1, 0, "Weapon", "Weapon"),
+    (1, 1, "Amulet", "Amulet"),
+    (1, 2, "Offhand", "Off Hand"),
+    (2, 1, "BodyArmour", "Body Armour"),
     (3, 0, "Ring", "Ring"),
-    (3, 1, "Belt", "Gürtel"),
+    (3, 1, "Belt", "Belt"),
     (3, 2, "Ring2", "Ring"),
-    (4, 0, "Gloves", "Handschuhe"),
-    (4, 2, "Boots", "Stiefel"),
+    (4, 0, "Gloves", "Gloves"),
+    (4, 2, "Boots", "Boots"),
 )
 
 # Nur gezeigt, wenn der Charakter tatsächlich etwas darin trägt — ein
 # Waffentausch-Set oder ein Trinket (Ritual-/Necropolis-Liga-Feature) hat
-# nicht jeder Charakter.
-_SWAP_SLOTS = (("Weapon2", "Waffe (Tausch)"), ("Offhand2", "Zweithand (Tausch)"))
-_TRINKET_SLOT = ("Trinket", "Anhänger")
+# nicht jeder Charakter. Ihre Beschriftung ist deshalb nie zu sehen: Sie
+# erscheint nur an einem LEEREN Platz, und leer wird hier keiner angelegt.
+# Trotzdem englisch gehalten wie alles andere — der Tag, an dem diese
+# Plätze doch dauerhaft stehen, soll nicht überraschen.
+_SWAP_SLOTS = (("Weapon2", "Weapon (swap)"), ("Offhand2", "Off Hand (swap)"))
+_TRINKET_SLOT = ("Trinket", "Trinket")
 
 
 class _SlotButton(QToolButton):
@@ -94,7 +103,7 @@ class PaperdollDialog(QDialog):
 
         self.detail = ItemDetail()
 
-        doll_box = QGroupBox("Ausrüstung")
+        doll_box = QGroupBox("Equipment")
         doll_grid = QGridLayout(doll_box)
         for row, col, slot_id, label in _DOLL_SLOTS:
             slot_items = by_slot.get(slot_id)
@@ -107,7 +116,7 @@ class PaperdollDialog(QDialog):
         flasks = sorted(by_slot.get("Flask", []), key=lambda i: i.x or 0)
         flask_row = QHBoxLayout()
         for flask in flasks:
-            btn = _SlotButton("Flasche")
+            btn = _SlotButton("Flask")
             btn.set_item(flask, pixmap_for(flask))
             btn.picked.connect(self._show_detail)
             flask_row.addWidget(btn)
@@ -133,7 +142,7 @@ class PaperdollDialog(QDialog):
 
         jewels = by_slot.get("PassiveJewels", [])
         if jewels:
-            jewel_box = QGroupBox(f"Jewels im Passiv-Baum ({len(jewels)})")
+            jewel_box = QGroupBox(f"Jewels in the passive tree ({len(jewels)})")
             jewel_layout = QVBoxLayout(jewel_box)
             jewel_list = QLabel("\n".join(j.display_name for j in jewels))
             jewel_list.setWordWrap(True)

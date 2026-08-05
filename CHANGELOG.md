@@ -40,6 +40,11 @@ nach [SemVer](https://semver.org/lang/de/).
   zusammengefasst ("Single — next update in 1s · 0/94 tabs"), und der
   Hinweis zur fehlenden Zugehörigkeit zu Grinding Gear Games steht jetzt
   im Hilfe-Fenster unter "About" statt dauerhaft in der Statuszeile.
+- Settings-Dialog und Charakter-Fenster sind jetzt durchgehend englisch
+  wie die übrige Oberfläche. Vorher waren im Settings-Dialog nur die
+  Reiter englisch und alle Beschriftungen deutsch; im Charakter-Fenster
+  standen die Ausrüstungsplätze, "Ausrüstung", "Flasche" und "Jewels im
+  Passiv-Baum" auf Deutsch.
 
 ### Behoben
 

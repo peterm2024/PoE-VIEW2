@@ -106,16 +106,76 @@ def test_status_label_confirms_a_resolvable_path(qapp, tmp_path) -> None:
     log.write_text("", encoding="utf-8")
     dialog = _dialog()
     dialog._zone_path_edit.setText(str(tmp_path))
-    assert "Gefunden" in dialog._zone_path_status.text()
+    assert "Found" in dialog._zone_path_status.text()
 
 
 def test_status_label_flags_an_unresolvable_path(qapp) -> None:
     dialog = _dialog()
     dialog._zone_path_edit.setText(r"Z:\does\not\exist")
-    assert "Keine Client.txt" in dialog._zone_path_status.text()
+    assert "No Client.txt" in dialog._zone_path_status.text()
 
 
 def test_status_label_is_empty_for_an_empty_path(qapp) -> None:
     dialog = _dialog(zone_path=r"C:\PoE")
     dialog._zone_path_edit.setText("")
     assert dialog._zone_path_status.text() == ""
+
+
+# --- Sprachgrenze -------------------------------------------------------- #
+
+def _visible_texts(dialog) -> list[str]:
+    """Alles, was im Dialog tatsaechlich lesbar ist — quer durch die
+    Widget-Arten, damit kein Feld durchrutscht, nur weil es kein QLabel
+    ist."""
+    from PySide6.QtWidgets import (QAbstractButton, QLabel, QLineEdit,
+                                   QTabWidget)
+
+    texts = [dialog.windowTitle()]
+    for kind in (QLabel, QAbstractButton):
+        for widget in dialog.findChildren(kind):
+            texts.append(widget.text())
+            texts.append(widget.toolTip())
+    for edit in dialog.findChildren(QLineEdit):
+        texts.append(edit.placeholderText())
+    for tabs in dialog.findChildren(QTabWidget):
+        texts += [tabs.tabText(i) for i in range(tabs.count())]
+    table = dialog._table
+    texts += [table.horizontalHeaderItem(c).text() for c in range(table.columnCount())]
+    return [t for t in texts if t]
+
+
+def test_the_settings_dialog_is_written_in_english_like_the_rest_of_the_ui(qapp) -> None:
+    """Oberflaeche und README sind englisch, Kommentare und Projektdoku
+    deutsch (bewusste Trennung, gleiche Regel wie in help_dialog.py).
+    Dieser Dialog war bis 2026-08-05 die einzige Ausnahme: Reiter
+    englisch, Titel und saemtliche Beschriftungen deutsch. Fuer die
+    Zielgruppe waere er damit ueber weite Strecken unlesbar."""
+    dialog = _dialog(entries=[ToolEntry("Wiki", "https://x.example.test/{slug}")],
+                     columns=[("Name", True)], zone_path="C:/nirgendwo")
+    text = " ".join(_visible_texts(dialog)).lower()
+
+    for umlaut in "äöüß":
+        assert umlaut not in text, f"deutscher Text im Settings-Dialog: {umlaut!r}"
+    for german in (" der ", " die ", " das ", " und ", " oder ", " nicht ",
+                   " wird ", " werden ", "einstellungen", "gefunden",
+                   "hinzufügen", "entfernen", "durchsuchen"):
+        assert german not in text, f"deutscher Text im Settings-Dialog: {german!r}"
+
+    dialog.deleteLater()
+
+
+def test_the_language_check_actually_sees_every_kind_of_field(qapp) -> None:
+    """Gegenprobe zum Test darueber: Er taugt nur, wenn er die Felder
+    wirklich einsammelt. Geprueft an je einem Vertreter aus jeder Quelle
+    — Titel, Reiter, Label, Knopf, Tabellenkopf, Platzhalter."""
+    dialog = _dialog(zone_path="C:/nirgendwo")
+    texts = _visible_texts(dialog)
+
+    assert "PoE-VIEW2 — Settings" in texts          # Fenstertitel
+    assert "Zone Refresh" in texts                  # Reiter
+    assert "Add" in texts and "Browse…" in texts    # Knoepfe
+    assert "URL template" in texts                  # Tabellenkopf
+    assert any("{slug}" in t for t in texts)        # Label
+    assert any("SteamLibrary" in t for t in texts)  # Platzhalter
+
+    dialog.deleteLater()

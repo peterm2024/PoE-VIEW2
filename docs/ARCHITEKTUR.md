@@ -1556,9 +1556,21 @@ mit Leerzeichen→Unterstrich ersetzt (MediaWiki-Konvention,
 Original-Schreibweise inkl. Apostrophe bleibt erhalten). Persistiert wird
 als JSON-Array (`tools_to_json`/`tools_from_json`) unter
 `external_tools/entries` in derselben `ui-settings.ini` wie die übrigen
+**Sprachgrenze auch hier** (2026-08-05): Der Settings-Dialog war bis
+dahin die einzige Stelle, an der die Trennung "Oberfläche englisch,
+Kommentare und Projektdoku deutsch" verrutscht war — Reiter englisch,
+Fenstertitel und sämtliche Beschriftungen deutsch. Beim Nachsehen fand
+sich eine zweite: die Paperdoll (§4.16) mit deutschen Slot-Namen,
+"Ausrüstung", "Flasche" und "Jewels im Passiv-Baum". Beide jetzt
+englisch, beide mit einem Test abgesichert, der die sichtbaren Texte
+einsammelt (Titel, Reiter, Labels, Knöpfe, Tabellenköpfe,
+Platzhaltertexte) und auf Umlaute sowie typische deutsche Wörter prüft.
+Ohne den Test verrutscht die Grenze beim nächsten neuen Feld wieder —
+genau so ist sie ja entstanden.
+
 UI-Einstellungen (§ *_settings()*). Der Toolbar-Button "⚙ Settings" öffnet
-`SettingsDialog` (Tabelle mit Aktiv-Checkbox/Name/URL-Vorlage-Spalten,
-Hinzufügen/Entfernen-Buttons) — bei OK schreibt
+`SettingsDialog` (Tabelle mit "Active"/"Name"/"URL template"-Spalten,
+"Add"/"Remove"-Buttons) — bei OK schreibt
 `MainWindow._open_settings_dialog()` die bearbeitete Liste zurück, bei
 Abbrechen bleibt der alte Stand unangetastet. Eine bewusst geleerte Liste
 wird als `"[]"` gespeichert und bleibt leer; nur ein fehlender oder
@@ -1805,11 +1817,11 @@ statt hängen zu bleiben.
 "Wir werden den User aber explizit über eine Pfadangabe die richtige
 Datei bzw. lediglich den PoE-Pfad angeben lassen"): Settings-Dialog (§4.15),
 dritter Reiter "Zone Refresh" — eine Checkbox (Feature standardmäßig AUS)
-und ein Pfadfeld samt "Durchsuchen…"-Button. `resolve_client_log_path()`
+und ein Pfadfeld samt "Browse…"-Button. `resolve_client_log_path()`
 akzeptiert entweder direkt die Client.txt oder nur den
 PoE-Installationsordner (probiert dann `<Ordner>/logs/Client.txt`, dann
 `<Ordner>/Client.txt`) und zeigt sofort eine Live-Rückmeldung
-("✓ Gefunden: …" / "✗ Keine Client.txt an diesem Pfad gefunden"), damit
+("✓ Found: …" / "✗ No Client.txt found at this path"), damit
 Peter nicht blind einen Pfad einträgt und hofft. Persistiert als
 `zone_watcher/enabled` + `zone_watcher/log_path` in `ui-settings.ini`.
 `MainWindow._apply_zone_watcher_config()` baut den `ZoneWatcher` bei

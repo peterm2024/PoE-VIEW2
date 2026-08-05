@@ -92,3 +92,39 @@ def test_clicking_an_empty_slot_does_nothing(qapp) -> None:
     for button in _slot_buttons(dialog):
         button.click()  # deaktiviert, Qt liefert ohnehin kein clicked-Signal
     assert dialog.detail._name.text() == before
+
+
+def test_the_paperdoll_is_written_in_english_like_the_rest_of_the_ui(qapp) -> None:
+    """Oberflaeche englisch, Kommentare und Projektdoku deutsch (bewusste
+    Trennung). Neben dem Settings-Dialog war die Paperdoll die zweite
+    Stelle, an der die Grenze verrutscht war — samtliche Slot-Namen,
+    "Ausruestung", "Flasche" und "Jewels im Passiv-Baum" standen deutsch
+    im Fenster."""
+    from PySide6.QtWidgets import QAbstractButton, QGroupBox, QLabel
+
+    char = Character(name="WitchOfPeter", league="Standard", classId=0,
+                     ascendancyClass=0, **{"class": "Chieftain"}, level=90,
+                     experience=0)
+    dialog = PaperdollDialog(char, [
+        _item("Flask", "Divine Life Flask"),
+        _item("PassiveJewels", "The Red Nightmare"),
+        _item("Weapon2", "Swap Bow"),
+    ], lambda item: None)
+
+    texts = []
+    for kind in (QGroupBox, QLabel, QAbstractButton):
+        texts += [w.title() if kind is QGroupBox else w.text()
+                  for w in dialog.findChildren(kind)]
+    joined = " ".join(t for t in texts if t)
+
+    for umlaut in "äöüß":
+        assert umlaut not in joined, f"deutscher Text in der Paperdoll: {umlaut!r}"
+    for german in ("Flasche", "Passiv-Baum", "Waffe", "Tausch"):
+        assert german not in joined, f"deutscher Text in der Paperdoll: {german!r}"
+
+    # Und die Beschriftungen sind wirklich da — sonst prueft der Test nichts.
+    assert "Equipment" in joined
+    assert "Jewels in the passive tree" in joined
+    assert "(Body Armour)" in joined  # Platzhalter eines leeren Slots
+
+    dialog.deleteLater()

@@ -16,7 +16,16 @@ Bewusst schlichte Tabelle/Liste statt eigener Zeilen-Widgets — Peter ist
 kein Python-Programmierer und bearbeitet hier nur Text/Häkchen/
 Reihenfolge, keinen Code. Persistiert wird über ``main_window.py``
 (QSettings), dieser Dialog kennt nur die reinen Datenlisten/-werte
-rein/raus."""
+rein/raus.
+
+**Texte auf Englisch**, wie die gesamte Oberfläche und die README —
+Kommentare und Projektdoku bleiben deutsch (bewusste Trennung, siehe
+README/ARCHITEKTUR, gleiche Regel wie in ``help_dialog.py``). Dieser
+Dialog war bis 2026-08-05 die einzige Ausnahme: Reiter englisch, Titel
+und sämtliche Beschriftungen deutsch. Aufgefallen ist das beim
+Spielertest — für die Zielgruppe wäre der Dialog damit über weite
+Strecken unlesbar gewesen. Ein Test hält die Grenze jetzt fest, sonst
+verrutscht sie beim nächsten neuen Feld wieder."""
 
 from __future__ import annotations
 
@@ -39,7 +48,7 @@ class SettingsDialog(QDialog):
                 zone_watcher_enabled: bool, zone_watcher_path: str,
                 parent=None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Einstellungen")
+        self.setWindowTitle("PoE-VIEW2 — Settings")
         self.resize(560, 400)
 
         layout = QVBoxLayout(self)
@@ -62,12 +71,12 @@ class SettingsDialog(QDialog):
         tab = QWidget()
         layout = QVBoxLayout(tab)
         layout.addWidget(QLabel(
-            "Rechtsklick-Menü für Items — hier eigene Nachschlagewerke "
-            "eintragen.\nAb Werk ist die Liste leer: PoE-VIEW2 bringt "
-            "bewusst keine fremde Seite mit."))
+            "Right-click menu for items — add your own reference sites "
+            "here.\nThe list is empty out of the box: PoE-VIEW2 "
+            "deliberately ships without any third-party site."))
 
         self._table = QTableWidget(0, 3)
-        self._table.setHorizontalHeaderLabels(["Aktiv", "Name", "URL-Vorlage"])
+        self._table.setHorizontalHeaderLabels(["Active", "Name", "URL template"])
         self._table.horizontalHeader().setSectionResizeMode(_COL_TEMPLATE, QHeaderView.ResizeMode.Stretch)
         self._table.verticalHeader().setVisible(False)
         self._table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
@@ -76,14 +85,14 @@ class SettingsDialog(QDialog):
         layout.addWidget(self._table)
 
         layout.addWidget(QLabel(
-            "Platzhalter {slug} wird durch den Item-Namen ersetzt "
-            "(Leerzeichen -> Unterstrich),\nz. B. "
-            "https://<deine-seite>/wiki/{slug}"))
+            "The {slug} placeholder is replaced with the item name "
+            "(spaces become underscores),\nfor example "
+            "https://<your-site>/wiki/{slug}"))
 
         row_buttons = QHBoxLayout()
-        add_button = QPushButton("Hinzufügen")
+        add_button = QPushButton("Add")
         add_button.clicked.connect(lambda: self._add_row(ToolEntry("", "https://")))
-        remove_button = QPushButton("Entfernen")
+        remove_button = QPushButton("Remove")
         remove_button.clicked.connect(self._remove_selected_row)
         row_buttons.addWidget(add_button)
         row_buttons.addWidget(remove_button)
@@ -129,8 +138,8 @@ class SettingsDialog(QDialog):
         tab = QWidget()
         layout = QVBoxLayout(tab)
         layout.addWidget(QLabel(
-            "Sichtbare Spalten der Item-Tabelle und ihre Reihenfolge "
-            "(Häkchen = sichtbar, Ziehen = Reihenfolge ändern):"))
+            "Columns of the item table and their order "
+            "(tick = visible, drag to reorder):"))
 
         self._column_list = QListWidget()
         self._column_list.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
@@ -156,21 +165,24 @@ class SettingsDialog(QDialog):
         tab = QWidget()
         layout = QVBoxLayout(tab)
         layout.addWidget(QLabel(
-            "PoE schreibt Zonenwechsel in seine eigene Client.txt (rein "
-            "lesend, von GGG erlaubt). Damit lässt sich die gerade "
-            "geöffnete Truhe/der Charakter gezielt neu laden, statt auf "
-            "gut Glück zu pollen."))
+            "Path of Exile records every zone change in its own Client.txt. "
+            "PoE-VIEW2 only reads that file,\nwhich GGG permits. Watching it "
+            "refreshes the open stash tab or character at the moment\nnew "
+            "data actually appears, instead of polling and hoping. Off by "
+            "default — the path is yours to point at."))
 
-        self._zone_enabled_check = QCheckBox("Bei Zonenwechsel die aktuelle Ansicht neu laden")
+        self._zone_enabled_check = QCheckBox(
+            "Refresh the current view when the zone changes")
         self._zone_enabled_check.setChecked(enabled)
         layout.addWidget(self._zone_enabled_check)
 
         path_row = QHBoxLayout()
         self._zone_path_edit = QLineEdit(path)
         self._zone_path_edit.setPlaceholderText(
-            r"z. B. D:\SteamLibrary\steamapps\common\Path of Exile (oder direkt ...\logs\Client.txt)")
+            r"e.g. D:\SteamLibrary\steamapps\common\Path of Exile "
+            r"(or the Client.txt itself)")
         self._zone_path_edit.textChanged.connect(self._update_zone_path_status)
-        browse_button = QPushButton("Durchsuchen…")
+        browse_button = QPushButton("Browse…")
         browse_button.clicked.connect(self._browse_for_poe_folder)
         path_row.addWidget(self._zone_path_edit, stretch=1)
         path_row.addWidget(browse_button)
@@ -185,16 +197,17 @@ class SettingsDialog(QDialog):
 
     def _browse_for_poe_folder(self) -> None:
         start_dir = self._zone_path_edit.text().strip() or ""
-        chosen = QFileDialog.getExistingDirectory(self, "Path-of-Exile-Ordner wählen", start_dir)
+        chosen = QFileDialog.getExistingDirectory(
+            self, "Select the Path of Exile folder", start_dir)
         if chosen:
             self._zone_path_edit.setText(chosen)
 
     def _update_zone_path_status(self, path: str) -> None:
         resolved = resolve_client_log_path(path)
         if resolved is not None:
-            self._zone_path_status.setText(f"✓ Gefunden: {resolved}")
+            self._zone_path_status.setText(f"✓ Found: {resolved}")
         elif path.strip():
-            self._zone_path_status.setText("✗ Keine Client.txt an diesem Pfad gefunden")
+            self._zone_path_status.setText("✗ No Client.txt found at this path")
         else:
             self._zone_path_status.setText("")
 
