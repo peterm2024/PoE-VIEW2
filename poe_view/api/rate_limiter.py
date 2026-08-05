@@ -39,6 +39,37 @@ DEFAULT_PACING_INTERVAL_S = 20.0
 # Requests (Klicks, Liga-Wechsel, Programmstart). Siehe pacing_blocked().
 PACING_FILL_LIMIT = 0.85
 
+
+def _pacing_budget(rule: "RateLimitRule") -> int:
+    """Wie viele Treffer je Fenster der gleichmäßige Takt höchstens
+    belegen darf — die EINE Zahl, aus der sowohl der Takt
+    (``steady_pace_interval_s``) als auch die Notbremse
+    (``pacing_blocked``) abgeleitet werden.
+
+    Bis 2026-08-05 hatten die beiden getrennte Vorstellungen davon: Der
+    Takt rechnete mit ``max_hits - SAFETY_MARGIN - 1`` (bei 30/300s also
+    28), die Bremse stoppte schon bei ``(max_hits - SAFETY_MARGIN) *
+    PACING_FILL_LIMIT`` (24,65). Der Takt zielte damit auf ein Budget,
+    das die Bremse gar nicht zuließ — im Dauerbetrieb lief er
+    zwangsläufig in seine eigene Bremse. An Peters Log vom 2026-08-04
+    nachgerechnet: 26 Abrufe im Fenster vor der Bremse, davon 23 allein
+    vom Takt; es blieben 1,6 Abrufe Luft, und drei Zonenwechsel-Refreshs
+    kippten es. Ergebnis war eine fünfminütige Zwangspause
+    (FALLSTRICKE #64).
+
+    Peters Entscheidung dazu (2026-08-06): "machen wir 15% langsamer" —
+    seltenere Zwangspausen sind ihm den längeren Takt wert. Bei 30/300s
+    ergibt das 13,0s statt 10,7s nominal.
+
+    Rückgabe bewusst als Bruchzahl: Die Bremse vergleicht direkt gegen
+    sie und behält damit exakt ihre bisherige Schwelle (bei 30/300s
+    greift sie unverändert ab 25). Der Takt rundet selbst ab und zieht
+    noch einen Treffer ab — er soll das Budget im Dauerbetrieb nicht
+    ausschöpfen, sondern darunter bleiben.
+    """
+    return (rule.max_hits - SAFETY_MARGIN) * PACING_FILL_LIMIT
+
+
 # callback(policy_name, rules_snapshot, wait_remaining_s)
 StatusCallback = Callable[[str, list[dict], float], None]
 
@@ -334,9 +365,8 @@ class RateLimitManager:
             self._decay_expired_rules(state)
             intervals = []
             for rule in state.rules.values():
-                usable = rule.max_hits - SAFETY_MARGIN - 1
-                if usable > 0:
-                    intervals.append(rule.window_s / usable)
+                usable = max(1, int(_pacing_budget(rule)) - 1)
+                intervals.append(rule.window_s / usable)
             return max(intervals) if intervals else DEFAULT_PACING_INTERVAL_S
 
     def pacing_blocked(self, policy_name: str | None = None) -> bool:
@@ -371,7 +401,7 @@ class RateLimitManager:
             if state is None:
                 return False
             self._decay_expired_rules(state)
-            return any(rule.current >= (rule.max_hits - SAFETY_MARGIN) * PACING_FILL_LIMIT
+            return any(rule.current >= _pacing_budget(rule)
                        for rule in state.rules.values())
 
     def snapshot(self) -> tuple[str, list[dict], float]:

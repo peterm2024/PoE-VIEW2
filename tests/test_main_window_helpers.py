@@ -1124,7 +1124,7 @@ def test_refresh_mode_pace_is_immune_to_an_interleaved_unrelated_policy(qapp) ->
     win._current_league = "Standard"
     win._current_character_name = "WitchOfPeter"
 
-    # Eigener Request des Single-Modus: lockere Policy, ~10.3s Takt.
+    # Eigener Request des Single-Modus: lockere Policy, ~13.0s Takt.
     win.worker.rate_limiter.update_from_headers({
         "X-Rate-Limit-Policy": "character-request-limit",
         "X-Rate-Limit-Rules": "Account",
@@ -1147,7 +1147,9 @@ def test_refresh_mode_pace_is_immune_to_an_interleaved_unrelated_policy(qapp) ->
 
     # Der Single-Modus-Takt darf sich davon nicht beirren lassen.
     interval = win.worker.rate_limiter.steady_pace_interval_s(win._refresh_mode_policy)
-    assert interval == pytest.approx(300 / 28, abs=0.01)
+    # 300/23 seit 2026-08-06: Takt und Notbremse kommen aus demselben
+    # Budget (§rate_limiter._pacing_budget, FALLSTRICKE #64).
+    assert interval == pytest.approx(300 / 23, abs=0.01)
 
     win.worker.stop()
     win.worker.wait(5000)
@@ -6550,6 +6552,76 @@ def test_the_substring_popup_survives_alongside_the_inline_completion(qapp) -> N
 
     assert edit.completer() is not None
     assert edit.completer().filterMode() == Qt.MatchFlag.MatchContains
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+# --- "Pin this": Spaltenfilter aus der angeklickten Zelle ---------------- #
+
+def _pinned(win, col: int, source_row: int = 0):
+    """Baut das Pin-Menue fuer eine Zelle und loest es aus, ohne
+    QMenu.exec() (blockiert ohne echte Nutzerinteraktion)."""
+    menu = QMenu(win)
+    win._add_pin_action(menu, col, source_row)
+    return menu
+
+
+def test_pin_sets_the_column_filter_to_the_clicked_cells_value(qapp) -> None:
+    """Peter, 2026-08-05: "RK auf 'MainInventory' -> Spaltenfilter wird auf
+    'MainInventory' gesetzt." Der Wert, nach dem man filtern will, steht
+    meistens schon unter dem Mauszeiger — bis dahin musste man ihn im
+    Header-Menue abtippen."""
+    from poe_view.ui.item_table import BASE_COL
+    win = MainWindow()
+    win.table_model.set_items([
+        Item.model_validate({"typeLine": "Chaos Orb", "baseType": "Chaos Orb"}),
+        Item.model_validate({"typeLine": "Divine Orb", "baseType": "Divine Orb"}),
+    ])
+
+    menu = _pinned(win, BASE_COL, 0)
+    actions = menu.actions()
+    assert len(actions) == 1
+    assert actions[0].text() == '📌 Pin Base = "Chaos Orb"'
+
+    actions[0].trigger()
+
+    assert win.proxy.column_filter(BASE_COL) == "=Chaos Orb"
+    assert win.proxy.rowCount() == 1  # nur noch die angepinnte Zeile
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_pin_is_exact_so_a_shorter_name_does_not_drag_others_along(qapp) -> None:
+    """"=Wert" statt des nackten Werts: Ohne Operator waere es eine
+    Teilstring-Suche, bei der "Ring" auch "Ring of Wisdom" mitnaehme —
+    "Pin" heisst aber "nur noch diese"."""
+    from poe_view.ui.item_table import BASE_COL
+    win = MainWindow()
+    win.table_model.set_items([
+        Item.model_validate({"typeLine": "Ring", "baseType": "Ring"}),
+        Item.model_validate({"typeLine": "Ring of Wisdom", "baseType": "Ring of Wisdom"}),
+    ])
+
+    _pinned(win, BASE_COL, 0).actions()[0].trigger()
+
+    assert win.proxy.rowCount() == 1
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_pin_is_absent_where_there_is_nothing_to_filter_on(qapp) -> None:
+    """Icon-Spalte (kein Text) und der Platzhalter "–" (kein Wert)."""
+    from poe_view.ui.item_table import ICON_COL, MODS_COL
+    win = MainWindow()
+    win.table_model.set_items([Item.model_validate({"typeLine": "Chaos Orb"})])
+
+    assert _pinned(win, ICON_COL, 0).actions() == []
+    # Mods sind bei einer Currency leer -> nichts zum Anpinnen
+    assert win.table_model.display_text(0, MODS_COL) == ""
+    assert _pinned(win, MODS_COL, 0).actions() == []
 
     win.worker.stop()
     win.worker.wait(5000)

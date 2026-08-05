@@ -231,11 +231,25 @@ Zuordnung von Regel zu Verbrauch eine bekannte Fehlerquelle ist:
   Refresh-Modus, §4.8): die knappste Regel der angegebenen (oder sonst
   zuletzt benutzten) Policy, geteilt auf ihr Fenster. Bewusst NICHT über
   alle Policies gemittelt — GGG vergibt pro Endpunkt-Art eine eigene
-  Policy, siehe FALLSTRICKE #33. Der Nenner ist
-  `max_hits - SAFETY_MARGIN - 1`, also eins WENIGER als die Schwelle, ab
-  der `_required_wait` bremst: ein Takt, der die Schwelle exakt trifft,
-  löst im Dauerbetrieb genau die Sperre aus, die er verhindern soll
-  (FALLSTRICKE #34).
+  Policy, siehe FALLSTRICKE #33. Der Nenner kommt aus `_pacing_budget()`,
+  abgerundet und um eins verringert: ein Takt, der seine Schwelle exakt
+  trifft, löst im Dauerbetrieb genau die Sperre aus, die er verhindern
+  soll (FALLSTRICKE #34). Bei 30/300s ergibt das 300/23 ≈ 13,0s.
+- `_pacing_budget(rule)` — **die eine Zahl, aus der sowohl der Takt als
+  auch die Notbremse abgeleitet werden** (`(max_hits - SAFETY_MARGIN) *
+  PACING_FILL_LIMIT`, bei 30/300s also 24,65). Bis 2026-08-05 hatten die
+  beiden getrennte Vorstellungen davon: Der Takt rechnete mit 28 Treffern,
+  die Bremse stoppte bei 24,65 — der Takt zielte also auf ein Budget, das
+  die Bremse gar nicht zuließ, und lief im Dauerbetrieb zwangsläufig
+  hinein. An Peters Log vom 2026-08-04 nachgerechnet: 26 Abrufe im
+  Fenster vor der Bremse, davon 23 allein vom Takt; drei
+  Zonenwechsel-Refreshs kippten es, Ergebnis war eine fünfminütige
+  Zwangspause (FALLSTRICKE #64). Peters Entscheidung am 2026-08-06:
+  "machen wir 15% langsamer" — seltenere Zwangspausen sind ihm den
+  längeren Takt wert. Die Bremsschwelle selbst blieb dabei unverändert;
+  nur der Takt leitet sich neu ab. Ein Eigenschafts-Test über mehrere
+  Kontingente hält beide aneinander, damit sie nicht wieder auseinander
+  laufen.
 - `_log_header_detail(policy, state)` — schreibt bei jedem
   `update_from_headers` eine INFO-Zeile JE Regel mit den rohen Header-Werten
   (`current/max`, `window_s`, `lock_rest`) und dem gelernten Absenkungs-Takt

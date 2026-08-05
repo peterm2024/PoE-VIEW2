@@ -33,6 +33,12 @@ nach [SemVer](https://semver.org/lang/de/).
   Cursor und wird mit Return oder Tab übernommen. Die bisherige
   Vorschlagsliste bleibt daneben bestehen — sie findet auch Werte, bei
   denen man nur einen Teil aus der Mitte kennt.
+- "📌 Pin" im Rechtsklick-Menü der Item-Liste: setzt den Spaltenfilter
+  auf genau den Wert der angeklickten Zelle. Rechtsklick auf
+  "MainInventory" in der Tab-Spalte zeigt also nur noch Items von
+  dort. Der Wert, nach dem man filtern will, steht meistens schon
+  unter dem Mauszeiger — bisher musste man ihn im Header-Menü
+  abtippen.
 - Die Symbole im Item-Verlauf (↑ ↓ ±) erklären sich jetzt per Tooltip.
 - In Ligen, für die poe.ninja keine Preise führt, steht in der
   Statuszeile "No prices for this league" statt einer wortlos leeren
@@ -50,6 +56,14 @@ nach [SemVer](https://semver.org/lang/de/).
   Reiter englisch und alle Beschriftungen deutsch; im Charakter-Fenster
   standen die Ausrüstungsplätze, "Ausrüstung", "Flasche" und "Jewels im
   Passiv-Baum" auf Deutsch.
+
+- Der Hintergrund-Refresh taktet in den Modi "Single" und "Stash" etwas
+  langsamer (bei GGGs üblichem Kontingent 13 statt 11 Sekunden).
+  Grund: Der bisherige Takt schöpfte das Abruf-Kontingent so weit
+  aus, dass schon wenige zusätzliche Abrufe — etwa durch mehrere
+  Zonenwechsel kurz hintereinander — die Notbremse auslösten und
+  der Refresh dann minutenlang ganz aussetzte. Etwas langsamer,
+  dafür ohne diese Aussetzer.
 
 ### Behoben
 

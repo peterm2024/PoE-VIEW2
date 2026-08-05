@@ -314,22 +314,31 @@ def test_steady_pace_interval_uses_default_before_any_policy_is_known() -> None:
 
 
 def test_steady_pace_interval_reflects_the_tightest_known_rule() -> None:
-    """15:15 → 15/13 ≈ 1.15s, 90:300 → 300/88 ≈ 3.41s — die 300s-Regel ist
+    """15:15 → 15/10 = 1.5s, 90:300 → 300/74 ≈ 4.05s — die 300s-Regel ist
     hier die knappere und bestimmt den Takt (Maximum, nicht Minimum:
-    "wie eng darf getaktet werden" muss die strengste Regel respektieren)."""
+    "wie eng darf getaktet werden" muss die strengste Regel respektieren).
+
+    Die Zahlen kommen seit 2026-08-06 aus ``_pacing_budget`` statt aus
+    ``max_hits - SAFETY_MARGIN - 1`` — siehe den Test unten."""
     mgr = make_manager(FakeClock())
     mgr.update_from_headers(HEADERS)
-    assert mgr.steady_pace_interval_s() == pytest.approx(300 / 88, abs=0.01)
+    assert mgr.steady_pace_interval_s() == pytest.approx(300 / 74, abs=0.01)
 
 
 def test_steady_pace_interval_stays_strictly_below_the_throttle_threshold() -> None:
-    """30 Treffer pro 300s → 300/28 ≈ 10.7s, NICHT 300/29 ≈ 10.3s.
+    """30 Treffer pro 300s → 300/23 ≈ 13.0s.
 
     Regression (FALLSTRICKE #34): der Takt muss strikt unter der Schwelle
-    bleiben, ab der ``_required_wait`` bremst (``current >= max_hits -
-    SAFETY_MARGIN`` = 29). Ein Takt von 300/29 erzeugt im Dauerbetrieb exakt
-    29 Treffer je Fenster und löst damit genau die 300s-Sperre aus, die er
-    verhindern soll — real beobachtet, zweimal in Folge."""
+    bleiben, ab der gebremst wird. Ein Takt, der die Schwelle im
+    Dauerbetrieb punktgenau trifft, löst genau die Sperre aus, die er
+    verhindern soll — real beobachtet, zweimal in Folge.
+
+    Bis 2026-08-05 war die maßgebliche Schwelle dabei die FALSCHE: Der
+    Takt hielt Abstand zu ``_required_wait`` (bremst bei 29), lief aber
+    in ``pacing_blocked`` (stoppt schon bei 24,65). Aus 300/28 ≈ 10,7s
+    wurde deshalb 300/23 ≈ 13,0s — Peters Entscheidung am 2026-08-06,
+    "machen wir 15% langsamer", nachdem eine fünfminütige Zwangspause
+    genau darauf zurückging (FALLSTRICKE #64)."""
     mgr = make_manager(FakeClock())
     headers = dict(HEADERS)
     headers["X-Rate-Limit-Account"] = "30:300:1800"
@@ -338,7 +347,7 @@ def test_steady_pace_interval_stays_strictly_below_the_throttle_threshold() -> N
 
     interval = mgr.steady_pace_interval_s()
 
-    assert interval == pytest.approx(300 / 28, abs=0.01)
+    assert interval == pytest.approx(300 / 23, abs=0.01)
     # Kernaussage, unabhängig von der konkreten Formel: die Anzahl Requests,
     # die dieser Takt in ein volles Fenster legt, bleibt unter der Schwelle.
     assert 300 / interval < 30 - SAFETY_MARGIN
@@ -430,11 +439,62 @@ def test_steady_pace_interval_ignores_unrelated_older_policies() -> None:
         "X-Rate-Limit-Account": "5:300:1800",
         "X-Rate-Limit-Account-State": "0:300:0",
     })
-    # … dann eine Charakter-Anfrage mit einer LOCKEREREN Policy (30/300s → 10.7s).
+    # … dann eine Charakter-Anfrage mit einer LOCKEREREN Policy (30/300s → 13.0s).
     mgr.update_from_headers({
         "X-Rate-Limit-Policy": "account-character-limit",
         "X-Rate-Limit-Rules": "Account",
         "X-Rate-Limit-Account": "30:300:1800",
         "X-Rate-Limit-Account-State": "0:300:0",
     })
-    assert mgr.steady_pace_interval_s() == pytest.approx(300 / 28, abs=0.01)
+    assert mgr.steady_pace_interval_s() == pytest.approx(300 / 23, abs=0.01)
+
+
+def test_the_steady_clock_never_paces_itself_into_its_own_brake() -> None:
+    """Die eigentliche Lehre aus FALLSTRICKE #64, als Eigenschaft statt als
+    Einzelwert: Takt und Notbremse muessen aus DEMSELBEN Budget kommen.
+
+    Bis 2026-08-05 taten sie das nicht — der Takt rechnete mit
+    ``max_hits - SAFETY_MARGIN - 1`` (bei 30/300s: 28), die Bremse stoppte
+    bei 24,65. Der Takt zielte also auf ein Budget, das die Bremse gar
+    nicht zuliess, und lief im Dauerbetrieb zwangslaeufig hinein. Real
+    kostete das eine fuenfminuetige Zwangspause.
+
+    Geprueft ueber eine Reihe von Kontingenten, damit die Eigenschaft
+    nicht nur fuer Peters 30/300 gilt."""
+    from poe_view.api.rate_limiter import _pacing_budget
+
+    for max_hits, window in ((30, 300), (90, 300), (15, 15), (5, 300),
+                             (45, 60), (300, 3600)):
+        mgr = make_manager(FakeClock())
+        mgr.update_from_headers({
+            "X-Rate-Limit-Policy": "p",
+            "X-Rate-Limit-Rules": "Account",
+            "X-Rate-Limit-Account": f"{max_hits}:{window}:1800",
+            "X-Rate-Limit-Account-State": f"0:{window}:0",
+        })
+        interval = mgr.steady_pace_interval_s()
+        rule = next(iter(mgr._policies["p"].rules.values()))
+
+        # Was der Takt allein in ein volles Fenster legt …
+        per_window = window / interval
+        # … muss unter dem Budget bleiben, ab dem die Bremse greift.
+        assert per_window < _pacing_budget(rule), (
+            f"{max_hits}/{window}s: Takt legt {per_window:.1f} Abrufe ins "
+            f"Fenster, Bremse greift ab {_pacing_budget(rule):.1f}")
+
+
+def test_a_tiny_quota_still_yields_a_usable_interval() -> None:
+    """Bei sehr kleinen Kontingenten ergaebe die Formel rechnerisch null
+    oder weniger nutzbare Treffer. Dann gilt EIN Treffer pro Fenster —
+    langsam, aber definiert. Vorher fiel so eine Regel stillschweigend aus
+    der Betrachtung und der Takt richtete sich nach dem 20s-Default, der
+    fuer "2 pro 300s" viel zu schnell waere."""
+    mgr = make_manager(FakeClock())
+    mgr.update_from_headers({
+        "X-Rate-Limit-Policy": "winzig",
+        "X-Rate-Limit-Rules": "Account",
+        "X-Rate-Limit-Account": "2:300:1800",
+        "X-Rate-Limit-Account-State": "0:300:0",
+    })
+
+    assert mgr.steady_pace_interval_s() == 300.0

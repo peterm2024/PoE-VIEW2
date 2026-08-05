@@ -3105,8 +3105,37 @@ class MainWindow(QMainWindow):
         if item is None:
             return
         menu = self._build_item_tools_menu(item)
+        self._add_pin_action(menu, index.column(), source_idx.row())
         self._add_export_actions(menu)
         menu.exec(self.table.viewport().mapToGlobal(pos))
+
+    def _add_pin_action(self, menu: QMenu, col: int, source_row: int) -> None:
+        """"Pin" für die angeklickte ZELLE: setzt den Spaltenfilter auf
+        genau ihren Wert.
+
+        Peter, 2026-08-05: "Wenn ich in der Item-Liste ein Item
+        Rechtsklicke, würde ich gerne die Spalte und die Zeile dazu
+        benutzen um einen Punkt 'Pin this...' im Rechtsklick-Menü, was
+        sozusagen den Spaltenfilter auf diese Auswahl setzt, z. B. RK auf
+        'MainInventory' -> Spaltenfilter wird auf 'MainInventory'
+        gesetzt." Der Filter war bis dahin nur über den
+        Header-Rechtsklick und Tippen erreichbar — obwohl der Wert, nach
+        dem man filtern will, meistens schon unter dem Mauszeiger steht.
+
+        Gesetzt wird ``=Wert`` (exakt), nicht der nackte Wert: "Pin"
+        heißt "nur noch diese", und ohne Operator wäre es eine
+        Teilstring-Suche, bei der "Ring" auch "Ring of Wisdom" mitnähme.
+
+        Übersprungen wird die Icon-Spalte (kein Text) und der Platzhalter
+        "–" (kein Wert) — auf beides lässt sich sinnvoll nicht filtern."""
+        if col <= ICON_COL:
+            return
+        value = self.table_model.display_text(source_row, col)
+        if not value or value == "–":
+            return
+        action = menu.addAction(f"📌 Pin {COLUMNS[col]} = \"{value}\"")
+        action.triggered.connect(
+            lambda _=False, c=col, v=value: self._apply_column_filter(c, f"={v}"))
 
     def _add_export_actions(self, menu: QMenu) -> None:
         """Export-Einträge ans Ende eines Item-Kontextmenüs. Die Anzahl steht
