@@ -28,6 +28,11 @@ nach [SemVer](https://semver.org/lang/de/).
   Spiel kein Zonenwechsel stattgefunden hat. Zeiten, in denen wegen des
   Rate-Limits gar nicht abgefragt wurde, zählen dabei nicht mit — die
   Angabe nennt nur geprüfte Zeit.
+- Der Spaltenfilter (Rechtsklick auf einen Spaltenkopf) vervollständigt
+  jetzt schon beim Tippen: Der passende Rest steht markiert hinter dem
+  Cursor und wird mit Return oder Tab übernommen. Die bisherige
+  Vorschlagsliste bleibt daneben bestehen — sie findet auch Werte, bei
+  denen man nur einen Teil aus der Mitte kennt.
 - Die Symbole im Item-Verlauf (↑ ↓ ±) erklären sich jetzt per Tooltip.
 - In Ligen, für die poe.ninja keine Preise führt, steht in der
   Statuszeile "No prices for this league" statt einer wortlos leeren

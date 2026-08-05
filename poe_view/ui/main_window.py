@@ -107,6 +107,58 @@ class _TypeFilterCheckBox(QCheckBox):
         super().mouseDoubleClickEvent(event)
 
 
+class _InlineCompleteLineEdit(QLineEdit):
+    """Eingabefeld, das den passenden Rest gleich hinter dem Cursor
+    stehen lässt — markiert, sodass Weitertippen ihn ersetzt und Return
+    oder Tab ihn übernimmt.
+
+    Peter, 2026-08-06: "Es gibt Programme, da tippe ich Text in ein Feld
+    und direkt hinter dem Cursor erscheint schon der passende Text, den
+    ich nur noch durch Tab oder return bestätigen muss." Das Feld hatte
+    seit 2026-08-02 bereits eine Vervollständigung, aber als Popup-Liste
+    unter dem Feld — offenbar nicht das, was gemeint war, und Peter hat
+    sie beim Arbeiten nicht als solche wahrgenommen.
+
+    **Beides bleibt nebeneinander**, weil beide etwas anderes können: Die
+    Inline-Ergänzung braucht einen PRÄFIX ("Main" → "MainInventory"), die
+    Popup-Liste sucht per Teilstring und findet "MainInventory" auch bei
+    der Eingabe "inv". Letzteres passt zum Filter selbst, der ohne
+    Operator ebenfalls eine reine Teilstring-Suche ist.
+
+    Ergänzt wird nur beim WACHSEN der Eingabe. Sonst käme man mit der
+    Rücktaste nicht mehr aus einem Vorschlag heraus: Sie löscht die
+    Markierung, und der Vorschlag stünde sofort wieder da."""
+
+    def __init__(self, text: str = "", parent: QWidget | None = None) -> None:
+        super().__init__(text, parent)
+        self._suggestions: list[str] = []
+        # Der zuletzt vom NUTZER getippte Text — nicht der um den
+        # Vorschlag ergänzte. Sonst sähe das nächste Zeichen wie eine
+        # Verkürzung aus (es ersetzt ja die Markierung) und die Ergänzung
+        # bliebe aus.
+        self._typed = text
+        self.textEdited.connect(self._suggest)
+
+    def set_suggestions(self, values: list[str]) -> None:
+        self._suggestions = values
+
+    def _suggest(self, typed: str) -> None:
+        grew = len(typed) > len(self._typed)
+        self._typed = typed
+        if not grew or not typed:
+            return
+        lowered = typed.lower()
+        match = next((v for v in self._suggestions
+                      if len(v) > len(typed) and v.lower().startswith(lowered)), None)
+        if match is None:
+            return
+        # Der ganze Treffer, nicht getippter Text + Rest: Die
+        # Groß-/Kleinschreibung soll die des echten Werts sein, damit im
+        # Feld am Ende genau das steht, was in der Spalte vorkommt.
+        self.setText(match)  # löst textEdited NICHT aus, keine Rekursion
+        self.setSelection(len(typed), len(match) - len(typed))
+
+
 @dataclass
 class _PublishWatch:
     """Buchführung je Charakter für EINE offene Frage: Wovon hängt es ab,
@@ -1357,10 +1409,14 @@ class MainWindow(QMainWindow):
         Autovervollständigen mit Combobox über die Items in der Spalte").
         Eigene Methode statt inline in ``_on_table_header_menu``, damit sie
         ohne den blockierenden ``QMenu.exec()`` testbar ist."""
-        edit = QLineEdit(self.proxy.column_filter(col))
+        edit = _InlineCompleteLineEdit(self.proxy.column_filter(col))
         edit.setPlaceholderText("e.g. >=20, <45, =text, substring")
         values = self.table_model.distinct_values(col)
         if values:
+            # Zwei Wege zum selben Wert, siehe _InlineCompleteLineEdit:
+            # inline der passende Rest (Präfix), im Popup die
+            # Teilstring-Treffer.
+            edit.set_suggestions(values)
             completer = QCompleter(values, edit)
             completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
             # Contains statt StartsWith: passt zum Filter selbst, der auch

@@ -1023,6 +1023,22 @@ Anzeigewerte der Spalte über alle geladenen Zeilen, contains-Matching
 Autovervollständigen mit Combobox über die Items in der Spalte"
 (`MainWindow._build_column_filter_edit`).
 
+**Zwei Vervollständigungen nebeneinander** (2026-08-06): Peter meldete
+den Wunsch erneut an und präzisierte ihn: "direkt hinter dem Cursor
+erscheint schon der passende Text, den ich nur noch durch Tab oder
+return bestätigen muss." Gemeint war also die INLINE-Ergänzung, nicht die
+Popup-Liste — die gab es seit dem 02.08., er hatte sie beim Arbeiten
+schlicht nicht als das wahrgenommen, was er suchte. Beide bleiben
+nebeneinander, weil sie Verschiedenes können: Die Inline-Ergänzung
+(`_InlineCompleteLineEdit`) braucht einen PRÄFIX ("Main" →
+"MainInventory") und setzt den Rest markiert hinter den Cursor; die
+Popup-Liste sucht per Teilstring und findet "MainInventory" auch bei der
+Eingabe "inv". Ergänzt wird ausschließlich beim WACHSEN der Eingabe —
+sonst löscht die Rücktaste nur die Markierung, der Vorschlag steht sofort
+wieder da, und man kommt nie mehr heraus. Eingesetzt wird der komplette
+Treffer statt "Getipptes + Rest", damit im Feld am Ende genau die
+Schreibweise steht, die in der Spalte vorkommt.
+
 **View-relative Filter (Tab/Position) werden beim View-Wechsel gelöscht.**
 Tab- und Position-Spalte sind relativ zur gerade angezeigten Quelle
 (Charakter-Slot- vs. Truhenfach-Namen; Fach-Position vs. gar keine) — ein

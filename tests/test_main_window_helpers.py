@@ -6466,3 +6466,90 @@ def test_a_zone_refresh_does_not_get_a_second_request_on_its_heels(
 
     win.worker.stop()
     win.worker.wait(5000)
+
+
+# --- Inline-Vervollstaendigung im Spaltenfilter -------------------------- #
+
+def _filter_edit_with(qapp, *values):
+    """Ein Filter-Eingabefeld ueber Items mit den gegebenen baseType-Werten."""
+    from poe_view.ui.item_table import BASE_COL
+    win = MainWindow()
+    win.table_model.set_items([
+        Item.model_validate({"typeLine": v, "baseType": v}) for v in values])
+    return win, win._build_column_filter_edit(BASE_COL)
+
+
+def test_typing_a_prefix_completes_it_inline_and_selects_the_rest(qapp) -> None:
+    """Peter, 2026-08-06: "direkt hinter dem Cursor erscheint schon der
+    passende Text, den ich nur noch durch Tab oder return bestaetigen
+    muss." Das Feld hatte zwar seit 2026-08-02 eine Vervollstaendigung,
+    aber als Popup-Liste — nicht das Gemeinte."""
+    win, edit = _filter_edit_with(qapp, "MainInventory", "Weapon")
+
+    edit.setText("Main")
+    edit.textEdited.emit("Main")   # wie beim Tippen
+
+    assert edit.text() == "MainInventory"
+    assert edit.selectedText() == "Inventory"   # nur der Rest ist markiert
+    # Weitertippen ersetzt die Markierung, Return uebernimmt den ganzen Wert.
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_the_completion_uses_the_real_values_capitalisation(qapp) -> None:
+    """Im Feld soll am Ende genau das stehen, was in der Spalte vorkommt —
+    sonst passt der Filter zwar (er vergleicht ohne Ruecksicht auf Gross-
+    und Kleinschreibung), aber der angezeigte Text weicht ab."""
+    win, edit = _filter_edit_with(qapp, "MainInventory")
+
+    edit.setText("main")
+    edit.textEdited.emit("main")
+
+    assert edit.text() == "MainInventory"
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_backspace_gets_you_out_of_a_suggestion(qapp) -> None:
+    """Der wichtigste Fall: Ergaenzt wird nur beim WACHSEN der Eingabe.
+    Sonst loescht die Ruecktaste die Markierung und der Vorschlag stuende
+    sofort wieder da — man kaeme nie mehr heraus."""
+    win, edit = _filter_edit_with(qapp, "MainInventory")
+    edit.setText("Main")
+    edit.textEdited.emit("Main")
+    assert edit.text() == "MainInventory"
+
+    edit.setText("Main")           # Ruecktaste loescht die Markierung
+    edit.textEdited.emit("Main")
+
+    assert edit.text() == "Main"
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_text_without_a_matching_prefix_is_left_alone(qapp) -> None:
+    win, edit = _filter_edit_with(qapp, "MainInventory")
+
+    edit.setText(">=20")
+    edit.textEdited.emit(">=20")
+
+    assert edit.text() == ">=20"   # Filter-Ausdruecke duerfen nicht ergaenzt werden
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_the_substring_popup_survives_alongside_the_inline_completion(qapp) -> None:
+    """Beide nebeneinander, weil sie Verschiedenes koennen: inline braucht
+    einen Praefix, das Popup findet "MainInventory" auch bei "inv"."""
+    from PySide6.QtCore import Qt
+    win, edit = _filter_edit_with(qapp, "MainInventory")
+
+    assert edit.completer() is not None
+    assert edit.completer().filterMode() == Qt.MatchFlag.MatchContains
+
+    win.worker.stop()
+    win.worker.wait(5000)
