@@ -63,6 +63,12 @@ nach [SemVer](https://semver.org/lang/de/).
   jetzt verwendet. Betraf in der Liga Allflame 20 von 67 Währungen.
   Nebenbei behoben: poe.ninja rundet auf zwei Nachkommastellen, was sich
   bei großen Stapeln aufsummierte.
+- Die lokalen Cache-Dateien werden jetzt vollständig oder gar nicht
+  geschrieben. Vorher ging der Schreibvorgang direkt in die Zieldatei —
+  bei über 50 MB dauert das lange genug, dass ein Absturz oder eine
+  zweite gleichzeitig laufende Programminstanz eine unlesbare Datei
+  hinterlassen konnte. Beobachtet wurde ein solcher Schaden nie; die
+  Lücke gab es trotzdem.
 - Gleiche Ursache, zweite Anzeige: Beim ersten Abruf nach dem
   Programmstart wurden Inventarzeilen türkis hervorgehoben und
   verschwundene Items grau angehängt, obwohl die Änderungen Tage

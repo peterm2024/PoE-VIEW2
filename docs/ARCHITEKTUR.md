@@ -393,6 +393,17 @@ Datenumfang von einigen hundert Items rechtfertigt keine.
   geschrieben — bewusst keine Debounce-/Thread-Komplexität für diesen
   Datenumfang (siehe FALLSTRICKE_UND_WORKAROUNDS.md #9 falls das je zum
   Performance-Problem wird).
+- **Vollständig oder gar nicht** (`services/atomic_json.py`, seit
+  2026-08-05): geschrieben wird erst in eine Nebendatei mit Prozess-ID im
+  Namen, dann per `os.replace` an ihren Platz geschoben — auf einem
+  Laufwerk atomar. Vorher ging der Schreibvorgang direkt in die Zieldatei,
+  und bei 52 MB dauert das lange genug, dass ein Absturz oder eine zweite
+  Programminstanz ein Fragment hinterlassen könnte (FALLSTRICKE #65).
+  Wichtig ist dabei das Zusammenspiel mit dem Überschreibschutz aus §4.24:
+  Der vergleicht gegen den zuletzt GESCHRIEBENEN Umfang, und der ist nach
+  einer unlesbaren Datei 0 — die kaputte Datei hätte ihn also stillgelegt,
+  statt von ihm aufgefangen zu werden. Derselbe Weg schützt den
+  Preis-Cache (§4.14).
 - **"Aktualisieren" räumt den Item-Cache NICHT mehr leer:** Seit es
   Refresh-Buttons je Tab gibt, ist ein globales Verwerfen aller Items
   unnötig — der globale Refresh aktualisiert nur noch Stash-Liste und

@@ -15,6 +15,7 @@ import time
 
 from poe_view import config
 from poe_view.api.ninja import PriceIndex
+from poe_view.services import atomic_json
 
 log = logging.getLogger(__name__)
 
@@ -80,7 +81,11 @@ def save(league: str, index: PriceIndex) -> None:
                            "prices": _index_to_payload(index)}
     try:
         config.ensure_dirs()
-        _CACHE_FILE.write_text(json.dumps(all_leagues), encoding="utf-8")
+        # Wie beim Daten-Cache vollständig oder gar nicht (§atomic_json).
+        # Kleiner als der Daten-Cache und damit weniger gefährdet, aber
+        # dieselbe Bauart — eine halb geschriebene Datei kostet hier alle
+        # Preise ALLER Ligen auf einmal, nicht nur die zuletzt geholte.
+        atomic_json.write_json(_CACHE_FILE, all_leagues)
     except OSError:
         log.exception("Preis-Cache: Schreiben fehlgeschlagen")
 

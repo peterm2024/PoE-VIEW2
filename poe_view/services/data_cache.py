@@ -28,6 +28,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from poe_view import config
+from poe_view.services import atomic_json
 from poe_view.api.models import Character, Item, StashTab
 from poe_view.services.csv_export import sanitize_filename
 
@@ -81,7 +82,10 @@ def save(data: CachedData, path: Path | None = None) -> None:
     }
     try:
         config.ensure_dirs()
-        path.write_text(json.dumps(payload), encoding="utf-8")
+        # Nicht direkt in die Zieldatei: siehe atomic_json — bei 52 MB
+        # dauert das lange genug, dass ein Absturz oder eine zweite
+        # Instanz eine abgeschnittene Datei hinterlassen könnte.
+        atomic_json.write_json(path, payload)
     except OSError:
         log.exception("Daten-Cache: Schreiben fehlgeschlagen")
 
