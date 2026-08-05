@@ -11,6 +11,7 @@ import json
 import logging
 import time
 from collections import deque
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
 from PySide6.QtCore import QSettings, Qt, QTimer, QUrl, Signal
@@ -103,6 +104,32 @@ class _TypeFilterCheckBox(QCheckBox):
             event.accept()
             return
         super().mouseDoubleClickEvent(event)
+
+
+@dataclass
+class _PublishWatch:
+    """Buchführung je Charakter für EINE offene Frage: Wovon hängt es ab,
+    wann GGG neue Inventardaten veröffentlicht?
+
+    Peter, 2026-08-05: "Evtl. hängt der Refresh auch von irgendwelchen
+    anderen Sachen ab, wie aktiv man im Spiel ist oder wieviel Items im
+    Inventar sind und nicht, wie wir bisher annehmen, von der Zeit."
+    Beantworten lässt sich das nicht aus dem, was bisher protokolliert
+    wird — Inhaltsänderungen tauchten nur in der Oberfläche auf, nie im
+    Log. Diese Klasse hält die Bezugsgrößen, die eine einzelne Log-Zeile
+    pro Änderung braucht, damit sich die Frage nach ein paar
+    Spielabenden aus Daten statt aus Vermutungen beantworten lässt
+    (dieselbe Reihenfolge wie bei FALLSTRICKE #61/#62/#64: erst messen).
+    """
+
+    since: float                      # time.monotonic() der letzten Änderung
+    fetches: int = 0                  # Abrufe seitdem
+    zone_changes_at: int = 0          # Stand des Zonenwechsel-Zählers damals
+    # Der allererste Abruf eines Charakters in einer Sitzung ist keine
+    # beobachtete Änderung, sondern nur der Startpunkt — der daraus
+    # gemessene Abstand sagt nichts über GGG aus und wird als solcher
+    # gekennzeichnet, statt die Auswertung still zu verfälschen.
+    from_session_start: bool = True
 
 
 class MainWindow(QMainWindow):
@@ -260,6 +287,13 @@ class MainWindow(QMainWindow):
         self._refresh_mode_priority_id: str | None = None
         self._raw_data_viewer: RawDataViewer | None = None
         self._zone_watcher: ZoneWatcher | None = None
+        # Messung zu Peters offener Frage, wovon GGGs Veröffentlichung
+        # abhängt (§_PublishWatch). Der Zonenwechsel-Zähler ist global,
+        # die Buchführung pro Charakter.
+        self._zone_changes = 0
+        self._last_zone_at: float | None = None
+        self._last_zone_name = ""
+        self._publish_watch: dict[str, _PublishWatch] = {}
         # Charakter-Item-Verlauf (Peter, 2026-08-02): letzte 120 Items, die
         # neu im Inventar aufgetaucht oder daraus verschwunden sind — über
         # ALLE Charaktere hinweg, unabhängig davon, welcher gerade angezeigt
@@ -2623,6 +2657,10 @@ class MainWindow(QMainWindow):
         # (§_session_fetched_chars).
         stale_baseline = name not in self._session_fetched_chars
         self._session_fetched_chars.add(name)
+        watch = self._publish_watch.setdefault(
+            name, _PublishWatch(since=time.monotonic(),
+                                zone_changes_at=self._zone_changes))
+        watch.fetches += 1
         self._character_items[name] = items
         self._character_items_loaded[name] = datetime.now(timezone.utc).isoformat()
         self._log_character_item_history(name, previous_items, items, stale_baseline)
@@ -2781,6 +2819,8 @@ class MainWindow(QMainWindow):
         stack_changes = self._stack_size_changes(previous_items, items)
         if not added_ids and not removed_items and not stack_changes:
             return
+        self._log_publish_interval(name, len(added_ids), len(removed_items),
+                                   len(stack_changes), len(items))
         now = datetime.now(timezone.utc)
         for item in items:
             if item.id in added_ids:
@@ -2790,6 +2830,37 @@ class MainWindow(QMainWindow):
         for item in removed_items:
             self._item_history.appendleft(HistoryEntry(now, "removed", name, item))
         self.history_model.set_entries(list(self._item_history))
+
+    def _log_publish_interval(self, name: str, added: int, removed: int,
+                              changed: int, total: int) -> None:
+        """Eine Zeile pro beobachteter Inventar-Änderung — die Rohdaten zu
+        Peters Frage, wovon GGGs Veröffentlichung abhängt (§_PublishWatch).
+
+        Bewusst alles in EINER Zeile und nur bei einer Änderung: Ein
+        Eintrag pro Abruf (alle ~13 s) würde das Log fluten und die
+        Rate-Limit-Zeilen unlesbar machen; die Abrufe zwischen zwei
+        Änderungen stehen stattdessen als Zahl mit drin. Damit trägt jede
+        Zeile alle drei zur Debatte stehenden Größen nebeneinander:
+        verstrichene Zeit, Spielaktivität (Zonenwechsel als einziger von
+        außen sichtbarer Anhaltspunkt) und Umfang des Inventars."""
+        watch = self._publish_watch.get(name)
+        if watch is None:
+            return
+        elapsed = time.monotonic() - watch.since
+        zone_changes = self._zone_changes - watch.zone_changes_at
+        if self._last_zone_at is None:
+            zone_note = "kein Zonenwechsel bekannt"
+        else:
+            zone_note = (f"letzter Zonenwechsel vor {time.monotonic() - self._last_zone_at:.0f}s "
+                        f"({self._last_zone_name}), seit der letzten Änderung {zone_changes}")
+        log.info("Inventar-Änderung %s: +%d/-%d/~%d, jetzt %d Items — %.0fs und %d Abrufe "
+                "seit %s; %s",
+                name, added, removed, changed, total, elapsed, watch.fetches,
+                "Sitzungsbeginn" if watch.from_session_start else "der letzten Änderung",
+                zone_note)
+        self._publish_watch[name] = _PublishWatch(
+            since=time.monotonic(), zone_changes_at=self._zone_changes,
+            from_session_start=False)
 
     def _show_character_items(self, name: str, items: list[Item],
                               previous_items: list[Item] | None = None) -> None:
@@ -3017,6 +3088,13 @@ class MainWindow(QMainWindow):
         Rate-Limit-Obergrenze, sonst identisch zu jedem anderen stillen
         Refresh."""
         self._zone_label.setText(zone_name)
+        # VOR den Abbruchbedingungen: Für die Messung zählt, dass ein
+        # Zonenwechsel stattgefunden hat — nicht, ob daraufhin ein
+        # Refresh lief (§_PublishWatch, gleiche Begründung wie beim
+        # Label eine Zeile darüber).
+        self._zone_changes += 1
+        self._last_zone_at = time.monotonic()
+        self._last_zone_name = zone_name
         if (self._refresh_mode == "pause" or self._bulk_dialog is not None
                 or not self._logged_in or not self._current_league
                 or self._current_league_is_archived()

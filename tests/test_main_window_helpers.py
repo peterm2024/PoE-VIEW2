@@ -6250,6 +6250,76 @@ def test_identical_data_is_reported_as_unchanged_and_a_change_resets_it(
     win.worker.wait(5000)
 
 
+def test_every_inventory_change_is_logged_with_all_three_candidate_causes(
+        qapp, caplog) -> None:
+    """Peter, 2026-08-05: "Evtl. haengt der Refresh auch von irgendwelchen
+    anderen Sachen ab, wie aktiv man im Spiel ist oder wieviel Items im
+    Inventar sind und nicht, wie wir bisher annehmen, von der Zeit."
+    Beantworten laesst sich das nur aus Daten — und Inhaltsaenderungen
+    tauchten bis hierher nur in der Oberflaeche auf, nie im Log. Die Zeile
+    muss deshalb ALLE drei zur Debatte stehenden Groessen nebeneinander
+    tragen, sonst laesst sich hinterher nichts gegeneinander pruefen."""
+    import logging
+
+    win = MainWindow()
+    win._current_character_name = "WitchOfPeter"
+    win._on_zone_changed("Arachnid Nest")
+
+    # Erster Abruf der Sitzung: nur Startpunkt, keine beobachtete Aenderung.
+    win._on_character_items("WitchOfPeter", [
+        Item.model_validate({"id": "a", "typeLine": "Chaos Orb"})], False)
+
+    with caplog.at_level(logging.INFO, logger="poe_view.ui.main_window"):
+        win._on_character_items("WitchOfPeter", [
+            Item.model_validate({"id": "a", "typeLine": "Chaos Orb"}),
+            Item.model_validate({"id": "b", "typeLine": "Divine Orb"})], False)
+
+    line = next(m for m in caplog.messages if "Inventar-Änderung" in m)
+    assert "WitchOfPeter" in line
+    assert "+1/-0/~0" in line          # was sich geaendert hat
+    assert "2 Items" in line           # Umfang des Inventars
+    assert "Abrufe" in line            # verstrichene Zeit + Abrufe
+    assert "Arachnid Nest" in line     # Spielaktivitaet, soweit sichtbar
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_the_first_fetch_of_a_session_is_marked_as_such_in_the_measurement(
+        qapp, caplog) -> None:
+    """Der Abstand zum allerersten Abruf sagt nichts ueber GGG aus — er
+    misst, wann das Programm gestartet wurde. Als Messwert getarnt wuerde
+    er die Auswertung still verfaelschen."""
+    import logging
+
+    win = MainWindow()
+    win._current_character_name = "WitchOfPeter"
+    win._character_items["WitchOfPeter"] = [
+        Item.model_validate({"id": "old", "typeLine": "Kishara's Star"})]
+
+    with caplog.at_level(logging.INFO, logger="poe_view.ui.main_window"):
+        # Erster Abruf: gecachte Basis, es wird bewusst nichts geloggt.
+        win._on_character_items("WitchOfPeter", [
+            Item.model_validate({"id": "a", "typeLine": "Chaos Orb"})], False)
+        assert not [m for m in caplog.messages if "Inventar-Änderung" in m]
+
+        # Zweiter Abruf: erste echte Aenderung, aber gemessen ab Sitzungsbeginn.
+        win._on_character_items("WitchOfPeter", [
+            Item.model_validate({"id": "a", "typeLine": "Chaos Orb"}),
+            Item.model_validate({"id": "b", "typeLine": "Divine Orb"})], False)
+        first = next(m for m in caplog.messages if "Inventar-Änderung" in m)
+        assert "seit Sitzungsbeginn" in first
+
+        # Ab der dritten: echte Abstaende zwischen zwei Veroeffentlichungen.
+        win._on_character_items("WitchOfPeter", [
+            Item.model_validate({"id": "a", "typeLine": "Chaos Orb"})], False)
+        last = [m for m in caplog.messages if "Inventar-Änderung" in m][-1]
+        assert "seit der letzten Änderung" in last
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
 def test_a_cached_inventory_is_not_used_as_a_history_baseline(qapp) -> None:
     """Peter, 2026-08-04: "Hab gerade gesehen, dass in meiner History noch
     Kishara's Star drin war. Ein Item, das ich schon lange nicht mehr
