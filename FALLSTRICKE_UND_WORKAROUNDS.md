@@ -601,6 +601,8 @@ Der Abruf selbst läuft über die bestehende Icon-Infrastruktur (`FetchIconJob`,
 
 **Nachtrag nach längerer Beobachtung (Peter, 2026-08-01):** Der Zonenwechsel ist NICHT der einzige Weg, wie GGGs API neue Daten liefert — nach längerem Beobachten zeigte sich, dass sich der Stash-Inhalt auch ohne Zonenwechsel irgendwann aktualisiert, nur deutlich langsamer (Peters Schätzung: "wahrscheinlich nur viel langsamer (alle 5 Minuten?)"), vermutlich ein serverseitiger Cache mit eigener Ablauffrist unabhängig vom Zonenwechsel-Ereignis. Für PoE-VIEW2 ändert das nichts an der Umsetzung: Der Zonenwechsel-Trigger ist rein ADDITIV zum bestehenden getakteten Refresh (Auto/Single/Stash, §4.8) — er beschleunigt den häufigen Fall, ersetzt aber nicht den getakteten Poll-Mechanismus, der ohnehin weiterläuft und genau diesen langsameren, zonenwechsel-unabhängigen Fall abdeckt (z. B. lange Handwerks-Sessions im Hideout ohne Zonenwechsel). Die exakte Ablauffrist (die "5 Minuten" sind eine Schätzung, nicht gemessen) ist für die App nicht weiter relevant, solange der bestehende Takt kürzer als diese Frist bleibt.
 
+**Die geschätzten "5 Minuten" sind jetzt gemessen (2026-08-05).** Peters Log gibt den zonenwechsel-unabhängigen Fall erstmals exakt her. Um 22:54:42 wurde die Zone "Arachnid Nest" betreten, danach bis 23:06 kein weiterer Zonenwechsel. Der getaktete Refresh lief ab 22:59:45 durchgehend alle ~13 s (23 Abrufe) und bekam jedes Mal denselben Stand — bis um **23:04:43**, also zehn Minuten nach dem Zonenwechsel und ohne einen neuen, sieben neue Items auf einmal erschienen. Die Frist ist damit deutlich länger als geschätzt, und sie hängt nicht am Poll-Takt: 23 Anfragen in fünf Minuten haben sie nicht verkürzt. Für die App ändert das nichts (der Takt bleibt kürzer als die Frist), für die ANZEIGE schon — siehe #64.
+
 ## 59. Ein Spalten-Filter auf der Tab-Spalte überlebte den Wechsel zu einer Ansicht, in der sein Wert gar nicht vorkommt — alle Items verschwanden lautlos
 
 **Ausgangslage:** Peter, 2026-08-02: "Wir müssen beim Wechseln vom Character Inventory zur Stash aufpassen, dass kein Spaltenfilter aktiv ist, der im neuen View dadurch Items ausblenden kann, z.B. Tab->MainInventory gibt es im Stash nicht und es werden deshalb keine Items angezeigt."
@@ -697,3 +699,27 @@ Zwei Kontrollmessungen grenzten den Befund ein. Erstens dieselbe Währung in Sta
 **Der Preis-Cache brauchte eine Versionsnummer dazu.** Die TTL von sechs Stunden misst das Alter der Daten, nicht das der Rechenvorschrift — der Cache hätte die alten Werte weiter ausgeliefert und die Behebung wie einen fehlgeschlagenen Fix aussehen lassen. `price_cache.CACHE_VERSION` entwertet Einträge, die mit einer anderen Berechnung entstanden sind. Sie werden ignoriert, nicht gelöscht: Der nächste Abruf überschreibt sie ohnehin, und ein Cache, der von sich aus Daten wegwirft, ist in diesem Projekt schon zweimal teuer geworden (#62).
 
 **Wie vermeiden:** Drei Lehren. Erstens — **eine Zahl, die eine Fremd-API veröffentlicht, ist nicht schon deshalb eine Messung.** `chaosEquivalent` ist hier keine Preisauskunft, sondern das Artefakt einer Eingabemaske, die kleinere Verhältnisse als 1:1 nicht kennt. Ein zweites Feld derselben Zeile widersprach ihr um den Faktor 246 — der Widerspruch war die ganze Zeit mitgeliefert worden, es hatte nur nie jemand beide Seiten verglichen. Zweitens — **ein Multiplikator vergrößert nicht nur Werte, sondern auch Fehler.** Der falsche Einzelpreis fiel erst auf, weil ein voller Stapel ihn vierzigfach sichtbar machte; bei Einzelstücken wäre er unbemerkt geblieben. Wo eine Anzeige eine Fremdzahl skaliert, gehört diese Zahl auf ihre Plausibilität geprüft, bevor sie skaliert wird. Drittens, methodisch: Der Nutzer hatte den Fehler richtig gesehen und falsch erklärt — beides ist der Normalfall, und beides ist wertvoll. Die Beobachtung war der Anlass, die Diagnose kam aus den Rohdaten.
+
+## 64. "unchanged for 9m" zählte fünf Minuten mit, in denen gar nicht abgefragt wurde
+
+**Symptom (Peter, 2026-08-05, einen Tag nachdem die Anzeige gebaut wurde):** ""unchanged" war jetzt 9 Minuten, aber gerade wieder Daten bekommen :-/ Bekomme ich an dieser Stelle wirklich keine Daten momentan?"
+
+**Das Log trennt zwei Vorgänge, die die Anzeige zu einem verschmolzen hatte.** Beide Screenshots sind auf die Sekunde datierbar, die Zeile `Rate-Limit-Header` gibt den Rest:
+
+```
+22:54:42  Zonenwechsel erkannt: Arachnid Nest
+22:54:42  GET /character/…   current=24/30 window=300s
+22:54:44  GET /character/…   current=25/30 window=300s   <- letzter Abruf
+          … 5 Minuten kein einziger Request …
+22:59:45  GET /character/…   current=1/30  window=300s   <- Fenster gerollt
+22:59:45 – 23:04:43   23 Abrufe im ~13-s-Takt, jedes Mal derselbe Inhalt
+23:04:43  sieben neue Items, ohne weiteren Zonenwechsel
+```
+
+Die fünf Minuten Stille sind kein Fehler, sondern `pacing_blocked()` (#47): Der Takt füllt das Fenster nur bis 85 % der Bremsschwelle, bei 30/300 s also bis 25 — genau da stand der Zähler. Die Statuszeile sagte das auch korrekt an ("Single — waiting for rate-limit headroom"). Von den neun angezeigten Minuten waren also **fünf gar keine Prüfung**, und nur die restlichen vier "geprüft und unverändert".
+
+**Ursache.** Die Anzeige war einen Tag zuvor mit genau dieser Sorge gebaut worden: gemessen wird bis zum letzten Neuaufbau der Tabelle, nicht bis jetzt, damit "unchanged" keine Prüfung behauptet, die nicht stattgefunden hat. Der Gedanke war richtig und die Umsetzung eine Ebene zu hoch angesetzt — er deckt nur den Fall ab, dass der letzte Neuaufbau lange her ist. Zwischen ZWEI Neuaufbauten kann aber ebenfalls eine Pause liegen, und die wurde beim nächsten Neuaufbau in voller Länge als geprüfte Zeit verbucht.
+
+**Lösung.** Ein Sekundenzähler (`_tick_unchanged_accounting`, am ohnehin laufenden 1-s-Takt) schreibt mit, wie lange der Hintergrund-Refresh nicht abgefragt hat; `_unchanged_duration_text` zieht diese Zeit ab. Entscheidend dabei ist nicht der Zähler, sondern die gemeinsame Quelle: `_refresh_idle_reason()` beantwortet "fragt der Refresh gerade gar nicht ab?" für BEIDE Verwerter — die Statuszeilen-Beschriftung und die Buchführung. Vorher steckte diese Bedingung nur in `_refresh_state_text()`, und genau ihr Auseinanderlaufen war der Fehler: Das eine Segment der Statuszeile meldete die Pause, das andere zählte sie als Prüfung mit. Ein Test hält die beiden aneinander.
+
+**Wie vermeiden:** Zwei Lehren. Erstens — **eine Kennzahl, die "wir haben nachgesehen" behauptet, muss aus derselben Quelle stammen wie die Anzeige, die "wir sehen gerade nicht nach" meldet.** Standen beide Aussagen gleichzeitig auf dem Bildschirm und widersprachen sich, war der Nutzer zu Recht misstrauisch — er hat den Widerspruch schneller gesehen als wir. Zweitens, zur Bauart des Vortags: Die Überlegung "nicht bis jetzt messen, sondern bis zum letzten Neuaufbau" war korrekt, aber nur die halbe Konsequenz. Wer eine Zeitspanne als "geprüft" ausweist, muss jede Lücke darin ausschließen, nicht nur die am Ende.

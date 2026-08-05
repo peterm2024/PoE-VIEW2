@@ -2631,6 +2631,26 @@ Abrufen, und dass sich dazwischen nichts geändert hat, ist der
 Normalfall und keine Meldung wert. Der Zusatz soll auffallen, wenn er
 auftaucht.
 
+**Und Pausen zwischen zwei Neuaufbauten zählen ebenfalls nicht mit**
+(Nachtrag 2026-08-05, FALLSTRICKE #64). Der Absatz oben war einen Tag
+lang nur die halbe Konsequenz: Er deckt den Fall ab, dass der letzte
+Neuaufbau lange her ist — aber zwischen ZWEI Neuaufbauten kann ebenfalls
+eine Pause liegen, und die wurde beim nächsten in voller Länge als
+geprüfte Zeit verbucht. Real gemessen: Von einer 9-Minuten-Anzeige waren
+fünf Minuten eine Rate-Limit-Pause. `_tick_unchanged_accounting` schreibt
+am ohnehin laufenden Sekundentakt mit, wie lange nicht abgefragt wurde,
+und `_unchanged_duration_text` zieht das ab.
+
+Entscheidend ist dabei nicht der Zähler, sondern die gemeinsame Quelle:
+`_refresh_idle_reason()` beantwortet "fragt der Hintergrund-Refresh
+gerade gar nicht ab?" für BEIDE Verwerter — die Statuszeilen-
+Beschriftung (`_refresh_state_text`) und die Buchführung. Vorher steckte
+die Bedingung nur in der Beschriftung, und genau ihr Auseinanderlaufen
+war der Fehler: Das eine Segment der Statuszeile meldete "waiting for
+rate-limit headroom", das andere zählte dieselbe Pause als Prüfung mit.
+Dieselbe Bauform wie beim `stale_baseline` in §4.29 — eine Frage, eine
+Antwort, zwei Verwerter.
+
 ---
 
 ## 5. UI-Konzept (Oberflächenvorschlag)

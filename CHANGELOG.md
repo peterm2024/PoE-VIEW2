@@ -25,7 +25,9 @@ nach [SemVer](https://semver.org/lang/de/).
   die Daten zwar weiter eintreffen, aber unverändert bleiben. Damit ist
   "wir holen nichts mehr" von "wir holen, die API liefert denselben
   Stand" zu unterscheiden — letzteres ist der Normalfall, solange im
-  Spiel kein Zonenwechsel stattgefunden hat.
+  Spiel kein Zonenwechsel stattgefunden hat. Zeiten, in denen wegen des
+  Rate-Limits gar nicht abgefragt wurde, zählen dabei nicht mit — die
+  Angabe nennt nur geprüfte Zeit.
 - Die Symbole im Item-Verlauf (↑ ↓ ±) erklären sich jetzt per Tooltip.
 - In Ligen, für die poe.ninja keine Preise führt, steht in der
   Statuszeile "No prices for this league" statt einer wortlos leeren

@@ -279,6 +279,10 @@ class MainWindow(QMainWindow):
         # Statuszeile (§_note_view_updated).
         self._view_signature: int | None = None
         self._view_content_since: datetime | None = None
+        # Davon die Sekunden, in denen der Hintergrund-Refresh gar nicht
+        # abgefragt hat (Rate-Limit-Pause, Pause-Modus, …). Sie zählen
+        # nicht als "geprüft und unverändert" (§_tick_unchanged_accounting).
+        self._unchanged_idle_s = 0.0
         self._offline = False  # GGG nicht erreichbar (Wartung am Patchday)
         self._live_leagues: set[str] | None = None  # letzte /account/leagues-Antwort; None = noch unbekannt
         self._restore_cached_data()
@@ -325,6 +329,11 @@ class MainWindow(QMainWindow):
         # Die Uhr in der Toolbar hängt am selben Sekundentakt — ein
         # zweiter Timer für dieselbe Frequenz wäre reine Verschwendung.
         self._countdown_timer.timeout.connect(self._update_clock)
+        # Ebenso die Buchführung hinter "unchanged for X": Sie muss
+        # sekündlich mitzählen, weil sich zwischen zwei Neuaufbauten der
+        # Tabelle keine Aussage darüber gewinnen lässt, ob in der
+        # Zwischenzeit überhaupt abgefragt wurde.
+        self._countdown_timer.timeout.connect(self._tick_unchanged_accounting)
         self._countdown_timer.start()
         self._update_auto_refresh_countdown()
         self._update_clock()
@@ -1041,11 +1050,29 @@ class MainWindow(QMainWindow):
         if signature != self._view_signature:
             self._view_signature = signature
             self._view_content_since = now
+            self._unchanged_idle_s = 0.0  # neue Vergleichsbasis, neue Buchführung
         text = f"Updated {now.strftime('%H:%M:%S')}"
-        unchanged = self._unchanged_duration_text(self._view_content_since, now)
+        unchanged = self._unchanged_duration_text(self._view_content_since, now,
+                                                  self._unchanged_idle_s)
         if unchanged:
             text += f" · {unchanged}"
         self._view_updated_label.setText(text)
+
+    def _tick_unchanged_accounting(self) -> None:
+        """Sekundentakt: zählt mit, wie lange der Hintergrund-Refresh
+        NICHT abgefragt hat.
+
+        Peter, 2026-08-05: ""unchanged" war jetzt 9 Minuten, aber gerade
+        wieder Daten bekommen." Das Log löste es auf — von diesen neun
+        Minuten waren fünf eine Rate-Limit-Pause (der Zähler stand bei
+        25/30, ``pacing_blocked`` bremste planmäßig). In dieser Zeit hat
+        niemand nachgesehen; sie als "unverändert" mitzuzählen behauptet
+        eine Prüfung, die nicht stattgefunden hat. Genau der Fehler, den
+        die Messung "bis zum letzten Neuaufbau statt bis jetzt" schon
+        vermeiden sollte — nur eine Ebene tiefer: Zwischen zwei
+        Neuaufbauten kann ebenfalls eine Pause liegen."""
+        if self._refresh_idle_reason() is not None:
+            self._unchanged_idle_s += self._countdown_timer.interval() / 1000
 
     # Unter dieser Dauer bleibt der Zusatz weg: Zwischen zwei Abrufen
     # liegen im Single-Modus ~13 s, und dass sich in dieser Zeit nichts
@@ -1054,8 +1081,8 @@ class MainWindow(QMainWindow):
     _UNCHANGED_HINT_AFTER_S = 60
 
     @classmethod
-    def _unchanged_duration_text(cls, since: datetime | None,
-                                 now: datetime) -> str:
+    def _unchanged_duration_text(cls, since: datetime | None, now: datetime,
+                                 idle_seconds: float = 0.0) -> str:
         """"unchanged for 12m" / "unchanged for 2h 5m", leer unterhalb der
         Schwelle.
 
@@ -1063,10 +1090,16 @@ class MainWindow(QMainWindow):
         Neuaufbau haben wir nicht nachgesehen, und "unchanged" würde eine
         Prüfung behaupten, die nicht stattgefunden hat. Im Pause-Modus
         friert dadurch die ganze Anzeige gemeinsam ein — Zeitstempel und
-        Zusatz gehören zusammen und sollen nicht auseinanderlaufen."""
+        Zusatz gehören zusammen und sollen nicht auseinanderlaufen.
+
+        ``idle_seconds`` zieht davon die Zeit ab, in der zwar die Uhr
+        lief, aber niemand abgefragt hat (§_tick_unchanged_accounting).
+        Ohne diesen Abzug zählte eine fünfminütige Rate-Limit-Pause voll
+        als "geprüft und unverändert" mit — real beobachtet am
+        2026-08-05, mehr als die Hälfte einer 9-Minuten-Anzeige."""
         if since is None:
             return ""
-        seconds = int((now - since).total_seconds())
+        seconds = int((now - since).total_seconds() - idle_seconds)
         if seconds < cls._UNCHANGED_HINT_AFTER_S:
             return ""
         minutes = seconds // 60
@@ -3407,24 +3440,44 @@ class MainWindow(QMainWindow):
         count = self._auto_refresh_counts.get(self._current_league, 0)
         return f"{count}/{total} tabs"
 
-    def _refresh_state_text(self) -> str:
-        """Was der Hintergrund-Refresh gerade tut — bzw. warum nicht."""
+    def _refresh_idle_reason(self) -> str | None:
+        """Warum fragt der Hintergrund-Refresh gerade GAR NICHT ab?
+        ``None`` heißt "er fragt" (bzw. wartet nur auf seinen nächsten
+        Takt, was etwas anderes ist als gar nicht zu fragen).
+
+        Eine Quelle für zwei Verwerter: die Statuszeilen-Beschriftung
+        (``_refresh_state_text``) und die Buchführung hinter "unchanged
+        for X" (``_tick_unchanged_accounting``). Die beiden dürfen sich
+        nicht widersprechen — genau das war am 2026-08-04 der Fehler:
+        Die Anzeige sagte korrekt "waiting for rate-limit headroom",
+        während "unchanged for" die Pause trotzdem als geprüfte Zeit
+        mitzählte."""
         if not self._current_league:
-            return ""
+            return "no league selected"
         if self._refresh_mode == "pause":
             return "Pause — no background requests"
         if self._refresh_mode in self.STEPPING_REFRESH_MODES:
-            mode_name = self._refresh_mode_combo.currentText()
             # Pausiert der Takt wegen zu vollen Fensters, gehört genau das
             # ins Label — ein weiterlaufender Countdown, der bei 0s stehen
             # bleibt, sähe wieder wie ein Hänger aus (§pacing_blocked).
             if self.worker.rate_limiter.pacing_blocked(self._refresh_mode_policy):
+                mode_name = self._refresh_mode_combo.currentText()
                 return f"{mode_name} — waiting for rate-limit headroom"
+            return None
+        reason = self._auto_refresh_blocked_reason()
+        return f"Auto-refresh paused ({reason})" if reason is not None else None
+
+    def _refresh_state_text(self) -> str:
+        """Was der Hintergrund-Refresh gerade tut — bzw. warum nicht."""
+        if not self._current_league:
+            return ""
+        idle = self._refresh_idle_reason()
+        if idle is not None:
+            return idle
+        if self._refresh_mode in self.STEPPING_REFRESH_MODES:
+            mode_name = self._refresh_mode_combo.currentText()
             seconds = max(0, round(self._refresh_mode_next_due - time.monotonic()))
             return f"{mode_name} — next update in {seconds}s"
-        reason = self._auto_refresh_blocked_reason()
-        if reason is not None:
-            return f"Auto-refresh paused ({reason})"
         seconds = max(0, self._auto_refresh_timer.remainingTime() // 1000)
         return f"Next auto-refresh in {seconds}s"
 

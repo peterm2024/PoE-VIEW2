@@ -5,6 +5,7 @@ CSV-Dateiname-Vorschlag (Filtertext bzw. Tab-/Aggregat-Name).
 
 import json
 import re
+import time
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -6165,6 +6166,60 @@ def test_unchanged_duration_is_formatted_and_suppressed_when_short(qapp) -> None
     assert text(now - timedelta(minutes=59), now) == "unchanged for 59m"
     assert text(now - timedelta(hours=2), now) == "unchanged for 2h"
     assert text(now - timedelta(hours=2, minutes=5), now) == "unchanged for 2h 5m"
+
+
+def test_a_rate_limit_pause_does_not_count_as_checked_and_unchanged(
+        qapp, monkeypatch) -> None:
+    """Peter, 2026-08-05: ""unchanged" war jetzt 9 Minuten, aber gerade
+    wieder Daten bekommen." Das Log loeste es auf: Von diesen neun Minuten
+    waren fuenf eine Rate-Limit-Pause (22:54:44 stand der Zaehler bei
+    25/30, danach bis 22:59:45 kein einziger Request). In dieser Zeit hat
+    niemand nachgesehen — sie mitzuzaehlen behauptet eine Pruefung, die
+    nicht stattgefunden hat."""
+    from datetime import timedelta
+
+    win = _three_tab_window(monkeypatch)
+    items = win._items["Standard"]["t1"]
+    win._show_items("t1", items, "Currency 1")
+
+    # Zehn Minuten seit der letzten inhaltlichen Aenderung, davon fuenf
+    # Minuten Rate-Limit-Pause — wie im echten Log.
+    win._view_content_since -= timedelta(minutes=10)
+    win._unchanged_idle_s = 5 * 60
+    win._show_items("t1", items, "Currency 1")
+
+    assert "unchanged for 5m" in win._view_updated_label.text()
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_the_pause_counter_and_the_status_text_cannot_drift_apart(
+        qapp, monkeypatch) -> None:
+    """Anzeige und Buchfuehrung lesen dieselbe Quelle. Genau ihr
+    Auseinanderlaufen war der Fehler: Die Statuszeile sagte korrekt
+    "waiting for rate-limit headroom", waehrend "unchanged for" die Pause
+    trotzdem als geprueft mitzaehlte."""
+    win = _three_tab_window(monkeypatch)
+    win._refresh_mode = "pause"
+
+    assert win._refresh_idle_reason() is not None
+    assert win._refresh_state_text() == win._refresh_idle_reason()
+
+    before = win._unchanged_idle_s
+    win._countdown_timer.timeout.emit()
+    assert win._unchanged_idle_s > before  # Pause wird mitgeschrieben
+
+    # Und im Normalbetrieb laeuft der Zaehler NICHT mit.
+    win._refresh_mode = "single"
+    win._refresh_mode_next_due = time.monotonic() + 10
+    assert win._refresh_idle_reason() is None
+    steady = win._unchanged_idle_s
+    win._countdown_timer.timeout.emit()
+    assert win._unchanged_idle_s == steady
+
+    win.worker.stop()
+    win.worker.wait(5000)
 
 
 def test_identical_data_is_reported_as_unchanged_and_a_change_resets_it(
