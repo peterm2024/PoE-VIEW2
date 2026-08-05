@@ -2661,6 +2661,61 @@ Wenn weniger Werte als Platzhalter geliefert werden, bleibt der
 überzählige Platzhalter stehen, statt eine Ausnahme auszulösen — ein
 sichtbarer Schönheitsfehler ist besser als ein leeres Detail-Panel.
 
+### 4.32 "Load All Tabs": der Dialog erklärt seine eigenen Zahlen
+
+Letzter offener Punkt aus dem Spielertest (Peter, 2026-08-03, anhand
+eines Screenshots: "Loaded: (Remove-only) / Section 42 of 1456 · tab 1 of
+362 / about 4 h 12 min remaining" — "Ich denke, dass die meisten User mit
+den Zahlen nicht klar kommen"). Die Zahlen selbst waren nie falsch
+(FALLSTRICKE #37/#42), sie erklärten sich nur nicht.
+
+Vier Eingriffe, alle rein an der Vermittlung:
+
+**Der Fach-Zähler steht vorn.** "tab 3 of 362 — 42 of 1456 requests"
+statt umgekehrt: Ein Spieler kennt Truhenfächer, Abrufe sind die
+technische Größe dahinter. Der Balken hängt weiterhin an den Abrufen —
+das ist die tatsächlich anfallende Arbeit, und ein Balken über
+Truhenplätze stünde bei einem großen Map-Stash über eine Stunde still.
+
+**"Section" ist verschwunden.** Das Wort hat in PoEs Truhen-Oberfläche
+keine Entsprechung und tauchte für den Nutzer aus dem Nichts auf. Jetzt
+heißt es schlicht "requests".
+
+**Die Aufschlüsselung als kleine Tabelle mit Summe**
+(`_bulk_breakdown` / `_bulk_breakdown_html`, Peters Vorschlag am
+2026-08-06: "noch eine Zeile für die Erklärung der Berechnung … oder als
+mini Tabelle und anschließend als Summe"):
+
+```
+      289  plain tabs
+     1017  sections in one map tab
+      145  sections in one unique tab
+        5  sections in one unique tab
+     ----
+     1456  requests in total
+```
+
+Damit löst sich der scheinbare Widerspruch der beiden Zähler in eine
+Rechnung auf, die man nachvollziehen kann. Zahlen rechtsbündig, damit
+die Summe unter ihren Summanden steht — als Fließtext ließe sich das
+nicht auf einen Blick prüfen. Umgesetzt als Rich Text im Dialog-Label
+(eigenes `QLabel` mit ausdrücklichem `RichText`-Format, statt sich auf
+Qts Auto-Erkennung zu verlassen); eine Monospace-Schrift für den ganzen
+Dialog hätte auch "Loading: …" und die Restzeit nach Konsole aussehen
+lassen. Berechnet wird die Aufschlüsselung EINMAL beim Öffnen: Die
+Zusammensetzung steht mit `to_fetch` fest, `total_requests` wächst
+während des Laufs nicht. Ohne Spezial-Fach entfällt die Tabelle ganz —
+dann sind beide Zähler gleich und es gibt nichts zu erklären. Mehr als
+sechs Zeilen werden zusammengefasst, damit die Erklärung nicht länger
+wird als der Dialog.
+
+**Die Restzeit nennt ihren Grund.** "about 4 h 12 min remaining (GGG rate
+limit)" — ohne den Zusatz liest sich die Zahl wie ein Defekt, obwohl sie
+allein an GGGs Kontingent hängt und einmalig anfällt.
+
+Nicht angefasst: die Zahlen selbst und der Bezugspunkt des Balkens. Beide
+waren korrekt und sind es geblieben.
+
 ### 4.31 "unchanged for X": abgeholt ist nicht neu
 
 Der Zeitstempel aus §4.29 beantwortet, wann die Tabelle zuletzt neu

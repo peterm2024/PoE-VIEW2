@@ -33,6 +33,13 @@ nach [SemVer](https://semver.org/lang/de/).
   Cursor und wird mit Return oder Tab übernommen. Die bisherige
   Vorschlagsliste bleibt daneben bestehen — sie findet auch Werte, bei
   denen man nur einen Teil aus der Mitte kennt.
+- Der Fortschrittsdialog von "Load All Tabs" erklärt jetzt seine
+  Zahlen: Der Fach-Zähler steht vorn, die Abrufe heißen "requests"
+  statt "Section" (ein Wort, das es in der Truhen-Oberfläche gar
+  nicht gibt), eine kleine Tabelle rechnet vor, woraus sich die
+  Gesamtzahl zusammensetzt, und die Restzeit nennt das Rate-Limit
+  von GGG als Grund. Die Zahlen selbst waren immer richtig — sie
+  sahen nur nach einem Widerspruch aus.
 - "📌 Pin" im Rechtsklick-Menü der Item-Liste: setzt den Spaltenfilter
   auf genau den Wert der angeklickten Zelle. Rechtsklick auf
   "MainInventory" in der Tab-Spalte zeigt also nur noch Items von

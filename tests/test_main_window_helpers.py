@@ -5094,7 +5094,10 @@ def test_bulk_progress_keeps_both_counts_and_the_eta_in_the_label(qapp, monkeypa
                                     remaining_s=4000.0))
 
     text = win._bulk_dialog.labelText()
-    assert "Section 3 of 4" in text
+    # Seit 2026-08-06 steht der Fach-Zaehler VORN und die Abrufe heissen
+    # "requests" statt "Section" — ein Wort, das es in PoEs Truhen-
+    # Oberflaeche gar nicht gibt (Spielertest 2026-08-03).
+    assert "3 of 4 requests" in text
     assert "tab 2 of 2" in text
     assert "about 1 h 6 min remaining" in text
     assert win._bulk_dialog.value() == 3
@@ -6622,6 +6625,91 @@ def test_pin_is_absent_where_there_is_nothing_to_filter_on(qapp) -> None:
     # Mods sind bei einer Currency leer -> nichts zum Anpinnen
     assert win.table_model.display_text(0, MODS_COL) == ""
     assert _pinned(win, MODS_COL, 0).actions() == []
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+# --- "Load All Tabs": woraus sich die Abrufzahl zusammensetzt ------------ #
+
+def _stash(sid: str, name: str = "", type_: str = "PremiumStash", parent: str | None = None):
+    return StashTab(id=sid, name=name or sid, type=type_, parent=parent)
+
+
+def test_the_breakdown_explains_where_the_request_count_comes_from(qapp) -> None:
+    """Peter, 2026-08-03 (Spielertest): "Ich denke, dass die meisten User
+    mit den Zahlen nicht klar kommen." Zwei Zaehler mit verschiedenen
+    Skalen nebeneinander — "Section 42 of 1456" neben "tab 1 of 362" —
+    sehen aus wie ein Widerspruch. Beide stimmen: Ein Map-/Unique-Fach
+    belegt EINEN Platz in der Truhenleiste, buendelt darin aber viele
+    Sektionen mit je eigenem Abruf. Peter, 2026-08-06: "noch eine Zeile
+    fuer die Erklaerung der Berechnung ... oder als mini Tabelle und
+    anschliessend als Summe"."""
+    win = MainWindow()
+    win._current_league = "Standard"
+    win._stash_trees["Standard"] = [
+        _stash("m1", "Maps", "MapStash"),
+        _stash("u1", "Uniques", "UniqueStash"),
+    ]
+    to_fetch = ([_stash(f"t{i}") for i in range(3)]
+                + [_stash(f"ms{i}", parent="m1") for i in range(17)]
+                + [_stash(f"us{i}", parent="u1") for i in range(12)])
+
+    rows = win._bulk_breakdown(to_fetch)
+
+    assert rows == [(3, "plain tabs"),
+                    (17, "sections in one map tab"),
+                    (12, "sections in one unique tab")]
+    # Die Summe muss aufgehen — sonst erklaert die Tabelle nichts.
+    assert sum(count for count, _ in rows) == len(to_fetch)
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_without_special_tabs_there_is_nothing_to_explain(qapp) -> None:
+    """Dann sind beide Zaehler ohnehin gleich — eine Tabelle, die "3 = 3"
+    sagt, kostet nur Platz im Dialog."""
+    win = MainWindow()
+    win._current_league = "Standard"
+
+    assert win._bulk_breakdown([_stash(f"t{i}") for i in range(3)]) == []
+    assert win._bulk_breakdown_html([], 3) == ""
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_many_special_tabs_are_summarised_instead_of_listed(qapp) -> None:
+    """Sonst waere die Tabelle laenger als der halbe Dialog und erklaerte
+    nichts mehr, sondern erschluege."""
+    win = MainWindow()
+    win._current_league = "Standard"
+    win._stash_trees["Standard"] = [
+        _stash(f"m{i}", f"Maps {i}", "MapStash") for i in range(10)]
+    to_fetch = [_stash(f"s{i}-{j}", parent=f"m{i}")
+                for i in range(10) for j in range(i + 1)]
+
+    rows = win._bulk_breakdown(to_fetch)
+
+    assert len(rows) == win._BULK_BREAKDOWN_MAX_ROWS
+    assert "further special tabs" in rows[-1][1]
+    assert sum(count for count, _ in rows) == len(to_fetch)  # Summe geht trotzdem auf
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_the_breakdown_table_ends_in_the_total(qapp) -> None:
+    """Peters "anschliessend als Summe": Die Gesamtzahl muss unter ihren
+    Summanden stehen, sonst laesst sich die Rechnung nicht nachvollziehen."""
+    win = MainWindow()
+
+    html = win._bulk_breakdown_html([(3, "plain tabs"), (17, "sections in one map tab")], 20)
+
+    assert "3" in html and "17" in html
+    assert "<b>20</b>" in html and "requests in total" in html
+    assert html.index("17") < html.index("<b>20</b>")  # Summe zuletzt
 
     win.worker.stop()
     win.worker.wait(5000)

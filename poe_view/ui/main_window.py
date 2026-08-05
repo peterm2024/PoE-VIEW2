@@ -278,6 +278,10 @@ class MainWindow(QMainWindow):
         # (nicht modal, siehe _open_help_dialog).
         self._help_dialog: HelpDialog | None = None
         self._bulk_progress: BulkProgress | None = None  # letzter Tick, für den Sekunden-Countdown
+        # Aufschlüsselung der Abruf-Gesamtzahl (§_bulk_breakdown). Einmal
+        # beim Öffnen des Dialogs berechnet: Die Zusammensetzung steht bei
+        # Start des Laufs fest und ändert sich nicht mehr.
+        self._bulk_breakdown_rows: list[tuple[int, str]] = []
         self._bulk_next_fetch_at = 0.0   # time.monotonic()-Zeitpunkt des nächsten Bulk-Abrufs
         # Rest der aktuellen Rate-Limit-Zwangspause, gespeist vom
         # Sekunden-Countdown des RateLimitManagers (§_on_rate_limit_changed).
@@ -2386,14 +2390,86 @@ class MainWindow(QMainWindow):
         # sind durch" beantwortet.
         positions = self._tab_positions()
 
+        self._bulk_breakdown_rows = self._bulk_breakdown(to_fetch)
         self._bulk_dialog = QProgressDialog(
             "Loading stash tabs…", "Cancel", 0, len(to_fetch), self)
+        # Eigenes Label mit ausdrücklichem Rich-Text-Format: Die
+        # Aufschlüsselung ist eine Tabelle (§_bulk_breakdown_html), und auf
+        # Qts Auto-Erkennung soll sich das nicht verlassen müssen.
+        label = QLabel()
+        label.setTextFormat(Qt.TextFormat.RichText)
+        self._bulk_dialog.setLabel(label)
         self._bulk_dialog.setWindowModality(Qt.WindowModality.WindowModal)
         self._bulk_dialog.setMinimumDuration(0)
         self._bulk_dialog.canceled.connect(self.worker.cancel_bulk)
         self._bulk_progress = None
         self._bulk_next_fetch_at = 0.0
         self.worker.submit(FetchAllItemsJob(self._current_league, to_fetch, positions))
+
+    # Mehr Zeilen als diese fasst die Aufschlüsselung zusammen — bei einem
+    # Dutzend Spezial-Fächern wäre die Tabelle länger als der halbe Dialog
+    # und erklärte dann nichts mehr, sondern erschlüge.
+    _BULK_BREAKDOWN_MAX_ROWS = 6
+
+    def _bulk_breakdown(self, to_fetch: list[StashTab]) -> list[tuple[int, str]]:
+        """Woraus sich die Gesamtzahl der Abrufe zusammensetzt, als Zeilen
+        ``(Anzahl, Bezeichnung)``.
+
+        Peter, 2026-08-06: "noch eine Zeile für die Erklärung der
+        Berechnung '1465 = 289 Tabs + 1 x Uniq á 12 + 1 x Uniq á 15 + …'
+        … oder als mini Tabelle und anschließend als Summe". Anlass ist
+        der Spielertest: Die beiden Zähler im Fortschrittsdialog ("Section
+        42 of 1456" neben "tab 1 of 362") sehen aus wie ein Widerspruch.
+        Sie sind beide richtig — ein Map-/Unique-Fach belegt EINEN Platz
+        in der Truhenleiste, bündelt darin aber Dutzende bis Hunderte
+        Sektionen, die je einen eigenen Abruf brauchen (FALLSTRICKE
+        #37/#42). Die Rechnung geht auf, sobald man sie sieht.
+
+        Leere Liste, wenn gar kein Spezial-Fach dabei ist: Dann sind beide
+        Zähler ohnehin gleich und es gibt nichts zu erklären."""
+        tree = self._stash_trees.get(self._current_league, [])
+        plain = 0
+        per_parent: dict[str, int] = {}
+        for stash in to_fetch:
+            if stash.parent:
+                per_parent[stash.parent] = per_parent.get(stash.parent, 0) + 1
+            else:
+                plain += 1
+        if not per_parent:
+            return []
+        rows = [(plain, "plain tabs")] if plain else []
+        biggest = sorted(per_parent.items(), key=lambda kv: -kv[1])
+        budget = self._BULK_BREAKDOWN_MAX_ROWS - len(rows)
+        # Passt nicht alles, kostet die Sammelzeile selbst einen Platz.
+        shown = biggest if len(biggest) <= budget else biggest[:budget - 1]
+        for parent_id, count in shown:
+            parent = self._find_stash(tree, parent_id)
+            kind = (parent.type if parent is not None else "").replace("Stash", "").lower()
+            rows.append((count, f"sections in one {kind or 'special'} tab"))
+        rest = biggest[len(shown):]
+        if rest:
+            rows.append((sum(c for _, c in rest),
+                         f"sections in {len(rest)} further special tabs"))
+        return rows
+
+    @staticmethod
+    def _bulk_breakdown_html(rows: list[tuple[int, str]], total: int) -> str:
+        """Die Aufschlüsselung als kleine Tabelle mit Summe darunter.
+
+        Rechtsbündige Zahlen, damit sich die Summe unter ihren Summanden
+        wiederfindet — als Fließtext ("1456 = 289 + 802 + 365") ließe sich
+        das nicht auf einen Blick nachrechnen, und genau darum geht es
+        hier. Rich Text statt einer Monospace-Schrift für den ganzen
+        Dialog: Sonst sähen auch "Loading: …" und die Restzeit nach
+        Konsole aus."""
+        if not rows:
+            return ""
+        cells = "".join(
+            f"<tr><td align='right'>{count}&nbsp;&nbsp;</td><td>{label}</td></tr>"
+            for count, label in rows)
+        return (f"<table cellspacing='0' cellpadding='0'>{cells}"
+                f"<tr><td align='right'><b>{total}</b>&nbsp;&nbsp;</td>"
+                f"<td><b>requests in total</b></td></tr></table>")
 
     @staticmethod
     def _format_remaining(seconds: float) -> str:
@@ -2455,14 +2531,30 @@ class MainWindow(QMainWindow):
         progress = self._bulk_progress
         if self._bulk_dialog is None or progress is None:
             return
-        lines = [f"Loaded: {progress.name}",
-                 f"Section {progress.done_requests} of {progress.total_requests}"
-                 f"  ·  tab {progress.done_slots} of {progress.total_slots}",
-                 self._bulk_wait_line()]
+        # Der Fach-Zähler steht VORN: "tab 3 of 362" ist die Zahl, die ein
+        # Spieler kennt und erwartet. Die Abrufe dahinter sind die
+        # technische Größe, an der Balken und Restzeit hängen — sie waren
+        # bisher zuerst genannt und noch dazu "Section" betitelt, ein
+        # Wort, das es in PoEs Truhen-Oberfläche gar nicht gibt
+        # (Spielertest 2026-08-03).
+        lines = [f"Loading: {progress.name}",
+                 f"tab {progress.done_slots} of {progress.total_slots}"
+                 f" &nbsp;—&nbsp; {progress.done_requests} of "
+                 f"{progress.total_requests} requests"]
+        breakdown = self._bulk_breakdown_html(self._bulk_breakdown_rows,
+                                              progress.total_requests)
+        if breakdown:
+            lines.append("Map and unique tabs need one request per section:")
+            lines.append(breakdown)
+        tail = [self._bulk_wait_line()]
         eta = self._format_remaining(progress.remaining_s)
         if eta:
-            lines.append(eta)
-        self._bulk_dialog.setLabelText("\n".join(lines))
+            # Die Restzeit hängt allein an GGGs Rate-Limit, nicht an der
+            # Anwendung — ohne diesen Zusatz liest sich "about 4 h 12 min"
+            # wie ein Defekt (Spielertest 2026-08-03).
+            tail.append(f"{eta} (GGG rate limit)")
+        lines.append(" &nbsp;·&nbsp; ".join(tail))
+        self._bulk_dialog.setLabelText("<br>".join(lines))
 
     def _on_bulk_finished(self, success: int, total: int) -> None:
         if self._bulk_dialog is not None:
