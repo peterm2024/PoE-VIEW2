@@ -3571,14 +3571,38 @@ class MainWindow(QMainWindow):
         Charakter neu, unabhängig vom Alter der Daten — der gezielte
         (nicht der Sweep-)Teil von ``_maybe_auto_refresh``, gemeinsam
         genutzt mit ``_on_zone_changed`` (§ZoneWatcher). Gibt zurück, ob
-        überhaupt etwas angezeigt war, das sich neu laden ließ."""
+        überhaupt etwas angezeigt war, das sich neu laden ließ.
+
+        **Meldet den Abruf beim gleichmäßigen Takt an**
+        (``_refresh_mode_pending``). Ohne das wusste der Takt nichts von
+        einem Zonenwechsel-Refresh: Der Sekunden-Tick sah seine
+        Fälligkeit abgelaufen und keinen laufenden Job — und schickte
+        einen ZWEITEN Abruf desselben Ziels hinterher, während der erste
+        noch unterwegs war. Im Log vom 2026-08-04 dreimal belegt, jedes
+        Mal mit einer Sekunde Abstand und jedes Mal direkt nach einem
+        Zonenwechsel (kleinster Abstand im ganzen Fenster: 1 s bei einem
+        Sollabstand von 13 s). Der zweite Abruf kann nichts liefern, was
+        der erste nicht ohnehin holt, kostet aber Rate-Limit-Kontingent —
+        und genau daran fehlte es, als der Takt um 22:54:44 in die
+        fünfminütige Zwangspause lief (FALLSTRICKE #64).
+
+        Freigegeben wird die Anmeldung von
+        ``_note_refresh_mode_job_done``, das für JEDEN stillen Job läuft,
+        unabhängig vom Refresh-Modus."""
+        if self._read_only:
+            # Der Worker verwürfe den Job ohnehin (§_skip_read_only) — dann
+            # käme aber auch nie die Antwort zurück, die die Anmeldung
+            # wieder freigibt, und der Takt stünde dauerhaft still.
+            return False
         current_id = self._current_stash_id
         if current_id is not None:
+            self._refresh_mode_pending = True
             self.worker.submit(FetchStashItemsJob(
                 self._current_league, current_id, self._current_tab_name,
                 parent_id=self._parent_id_of(current_id), silent=True))
             return True
         if self._current_character_name is not None:
+            self._refresh_mode_pending = True
             self.worker.submit(FetchCharacterItemsJob(self._current_character_name, silent=True))
             return True
         return False

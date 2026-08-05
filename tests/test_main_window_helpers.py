@@ -6430,3 +6430,39 @@ def test_the_clock_reuses_the_existing_one_second_timer(qapp) -> None:
 
     win.worker.stop()
     win.worker.wait(5000)
+
+
+def test_a_zone_refresh_does_not_get_a_second_request_on_its_heels(
+        qapp, monkeypatch) -> None:
+    """Log vom 2026-08-04, dreimal belegt: Nach einem Zonenwechsel-Refresh
+    schickte der gleichmaessige Takt eine Sekunde spaeter einen ZWEITEN
+    Abruf desselben Ziels hinterher — Sollabstand waeren 13 s. Ursache:
+    Der Zonenwechsel-Pfad meldete seinen Abruf nicht beim Takt an, der
+    Sekunden-Tick sah seine Faelligkeit abgelaufen und keinen laufenden
+    Job. Der zweite Abruf kann nichts liefern, was der erste nicht holt,
+    kostet aber Kontingent — und daran fehlte es, als der Takt in die
+    fuenfminuetige Zwangspause lief."""
+    win = _three_tab_window(monkeypatch)
+    win._logged_in = True
+    win._refresh_mode = "single"
+    win._current_character_name = "WitchOfPeter"
+    win._current_stash_id = None
+    win._refresh_mode_next_due = 0.0  # Takt ist ueberfaellig, wie im Log
+
+    jobs = []
+    monkeypatch.setattr(win.worker, "submit", jobs.append)
+
+    win._on_zone_changed("Arachnid Nest")
+    assert len(jobs) == 1                      # der Zonenwechsel-Refresh
+
+    win._countdown_timer.timeout.emit()        # der Takt kommt hinterher
+    assert len(jobs) == 1, "zweiter Abruf auf den Fersen des ersten"
+
+    # Erst wenn die Antwort da ist, darf der naechste Takt wieder greifen.
+    win._note_refresh_mode_job_done()
+    win._refresh_mode_next_due = 0.0
+    win._countdown_timer.timeout.emit()
+    assert len(jobs) == 2
+
+    win.worker.stop()
+    win.worker.wait(5000)
