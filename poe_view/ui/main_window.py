@@ -28,6 +28,7 @@ from poe_view.api.models import (Character, Item, StashTab,
                                  dominant_category, is_ggg_suffix)
 from poe_view.api.ninja import PriceIndex
 from poe_view.services import data_cache, icon_cache, price_cache
+from poe_view.services.instance_lock import InstanceLock
 from poe_view.services.zone_watcher import ZoneWatcher, resolve_client_log_path
 from poe_view.services.api_worker import (ApiWorker, BootstrapJob,
                                           BulkProgress, FetchAllItemsJob,
@@ -318,6 +319,10 @@ class MainWindow(QMainWindow):
         # nicht als "geprüft und unverändert" (§_tick_unchanged_accounting).
         self._unchanged_idle_s = 0.0
         self._offline = False  # GGG nicht erreichbar (Wartung am Patchday)
+        # Eine andere Instanz bewirtschaftet dieses Konto bereits — dann
+        # läuft diese hier nur lesend (§_claim_account, instance_lock.py).
+        self._account_lock: InstanceLock | None = None
+        self._read_only = False
         self._live_leagues: set[str] | None = None  # letzte /account/leagues-Antwort; None = noch unbekannt
         self._restore_cached_data()
 
@@ -347,6 +352,12 @@ class MainWindow(QMainWindow):
         self._auto_refresh_timer.start()
 
         self._build_ui()
+        # NACH `_build_ui()` (die Anzeige muss stehen), aber VOR
+        # `worker.start()`: Bis dahin ist die Job-Queue nur gefüllt, nicht
+        # abgearbeitet — die von `_build_ui()` mit eingereihten Daten-Jobs
+        # sehen das Ergebnis dieser Zeile also noch, auch wenn sie vorher
+        # abgeschickt wurden.
+        self._claim_account(self._account_name)
         self._connect_worker()
         self.worker.start()
         self._apply_zone_watcher_config(*self._load_zone_watcher_config())
@@ -436,6 +447,42 @@ class MainWindow(QMainWindow):
                  len(cached.characters), len(cached.stash_trees),
                  self._persisted_scale)
 
+    def _claim_account(self, account_name: str) -> None:
+        """Beansprucht das Konto für DIESE Instanz — oder schaltet auf
+        Nur-Lesen um, wenn eine andere es schon hat.
+
+        Peter, 2026-08-05: "Zweitstart theoretisch ja, aber nur im
+        Offline-Modus bzw. anderer Account." Der Anspruch gilt deshalb pro
+        Konto: Zwei Fenster mit verschiedenen Konten stören einander
+        nicht (getrennte Cache-Dateien, getrennte Rate-Limit-Budgets, weil
+        GGG pro Konto zählt). Aufgerufen beim Start und nach jeder
+        bestätigten Anmeldung — meldet sich die zweite Instanz mit einem
+        anderen Konto an, wird sie dadurch vollwertig."""
+        if self._account_lock is not None:
+            if self._account_lock.account_name == account_name:
+                return
+            self._account_lock.release()
+            self._account_lock = None
+        if not account_name:
+            self._set_read_only(False)
+            return
+        lock = InstanceLock(account_name)
+        if lock.acquire():
+            self._account_lock = lock
+            self._set_read_only(False)
+        else:
+            self._set_read_only(True)
+
+    def _set_read_only(self, read_only: bool) -> None:
+        """Ein Schalter, drei Wirkungen: Der Worker verwirft Daten-Jobs
+        (der eigentliche Schutz, §_skip_read_only), ``_persist_cache``
+        schreibt nicht, und die Oberfläche sagt es."""
+        self._read_only = read_only
+        self.worker.read_only = read_only
+        self._read_only_label.setText(
+            "🔒 Read-only — this account is open in another window" if read_only else "")
+        self._update_online_controls_enabled()
+
     # Überschreibschutz (siehe `_persist_cache`): Ein Bestand gilt ab
     # dieser Menge als nennenswert; darunter greift der Schutz gar nicht,
     # damit ein frisches Konto normal anwachsen kann.
@@ -490,6 +537,12 @@ class MainWindow(QMainWindow):
         keine Löschfunktion im Programm, Peters Entscheidung 2026-08-02).
         """
         if not self._account_name:
+            return
+        if self._read_only:
+            # Eine andere Instanz bewirtschaftet dieses Konto und schreibt
+            # dieselbe Datei (§_claim_account). Ohne diese Zeile könnte ein
+            # Stand aus dieser Instanz — der mangels Abrufen zwangsläufig
+            # älter ist — den frischeren der anderen überschreiben.
             return
         scale = self._cache_scale()
         if (self._persisted_scale >= self._CACHE_GUARD_MIN
@@ -848,6 +901,21 @@ class MainWindow(QMainWindow):
         self._offline_label = QLabel("")
         self._offline_label.setStyleSheet("color: #d9a441; font-weight: 600;")
         self.statusBar().addPermanentWidget(self._offline_label)
+        # Zweite Instanz auf demselben Konto (§_claim_account). Eigenes
+        # Label statt Mitbenutzung des Offline-Banners: Beide Zustände
+        # können gleichzeitig gelten, und sie haben verschiedene Ursachen.
+        # Leerer Text kostet keinen Platz — die Zeile bleibt im Normalfall
+        # so schmal wie zuvor.
+        self._read_only_label = QLabel("")
+        self._read_only_label.setStyleSheet("color: #d9a441; font-weight: 600;")
+        self._read_only_label.setToolTip(
+            "Another PoE-VIEW2 window already has this account open, and only "
+            "one of them may fetch and save data —\notherwise both would write "
+            "over each other. This window still browses everything already "
+            "loaded:\nsearch, filters, item details and CSV export all work.\n"
+            "Log in with a different account here, or close the other window "
+            "and restart this one, to make it live again.")
+        self.statusBar().addPermanentWidget(self._read_only_label)
         # Summe der Stack-Größen über die gerade sichtbaren (gefilterten)
         # Items — die häufigste Alltagsfrage ("wie viel Chaos hab ich"),
         # bisher musste man die Stack-Spalte selbst zusammenzählen oder nach
@@ -1412,6 +1480,11 @@ class MainWindow(QMainWindow):
         if account_name != self._account_name:
             self._switch_active_account_data(account_name)
         self._account_name = account_name
+        # Erst jetzt steht das Konto bestätigt fest. Eine Instanz, die
+        # beim Start in den Nur-Lese-Modus musste, wird hier vollwertig,
+        # wenn sie sich mit einem anderen Konto anmeldet — Peters Bedingung
+        # "bzw. anderer Account".
+        self._claim_account(account_name)
         self._settings().setValue(self._ACCOUNT_SETTING_KEY, account_name)
         self._logged_in = True
         self._login_button.setText(f"⚷ {account_name}")
@@ -1532,10 +1605,17 @@ class MainWindow(QMainWindow):
 
         Bewusst NICHT betroffen: Stash-Baum, Charakterliste und
         Liga-Auswahl bleiben nutzbar, damit gecachte Daten weiter offline
-        durchsuchbar sind — genau der Zweck des Caches."""
-        self._refresh_action.setEnabled(self._logged_in)
-        self._load_all_action.setEnabled(self._logged_in)
-        self._refresh_mode_combo.setEnabled(self._logged_in)
+        durchsuchbar sind — genau der Zweck des Caches.
+
+        Dieselbe Sperre greift, wenn eine ANDERE Instanz dieses Konto
+        bewirtschaftet (§_claim_account). Sie ist dort allerdings nur
+        Höflichkeit gegenüber dem Nutzer, damit niemand ins Leere klickt —
+        der eigentliche Schutz sitzt im Worker (``_skip_read_only``) und
+        hängt nicht daran, dass hier jeder Knopf aufgezählt ist."""
+        live = self._logged_in and not self._read_only
+        self._refresh_action.setEnabled(live)
+        self._load_all_action.setEnabled(live)
+        self._refresh_mode_combo.setEnabled(live)
 
     def _on_leagues(self, leagues: list[str]) -> None:
         self._live_leagues = set(leagues)
@@ -3623,4 +3703,12 @@ class MainWindow(QMainWindow):
             log.warning("ApiWorker reagierte nicht innerhalb von 3s auf stop() — erzwinge Beendigung.")
             self.worker.terminate()
             self.worker.wait(1000)
+        # Nach dem Worker: Solange noch ein Job laufen könnte, gehört das
+        # Konto dieser Instanz. Ein Prozessende gäbe die Sperre ohnehin
+        # frei — ausdrücklich freigeben lässt aber ein zweites Fenster
+        # sofort weiterarbeiten, statt erst nach dem Beenden des ganzen
+        # Programms.
+        if self._account_lock is not None:
+            self._account_lock.release()
+            self._account_lock = None
         event.accept()

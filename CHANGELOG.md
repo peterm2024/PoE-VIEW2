@@ -63,6 +63,13 @@ nach [SemVer](https://semver.org/lang/de/).
   jetzt verwendet. Betraf in der Liga Allflame 20 von 67 Währungen.
   Nebenbei behoben: poe.ninja rundet auf zwei Nachkommastellen, was sich
   bei großen Stapeln aufsummierte.
+- Ein zweites PoE-VIEW2-Fenster mit demselben Konto läuft jetzt nur
+  lesend: Der Cache bleibt vollständig durchsuchbar (Suche, Filter,
+  Item-Details, CSV-Export), aber es ruft nichts ab und speichert nichts.
+  Vorher hätten sich zwei Fenster gegenseitig die Daten überschrieben und
+  sich obendrein das Abruf-Kontingent geteilt. Mit einem anderen Konto
+  angemeldet, ist das zweite Fenster uneingeschränkt nutzbar. Die
+  Statuszeile sagt, welcher Fall gerade gilt.
 - Die lokalen Cache-Dateien werden jetzt vollständig oder gar nicht
   geschrieben. Vorher ging der Schreibvorgang direkt in die Zieldatei —
   bei über 50 MB dauert das lange genug, dass ein Absturz oder eine

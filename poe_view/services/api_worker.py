@@ -181,6 +181,12 @@ class ApiWorker(QThread):
         self._jobs: queue.Queue = queue.Queue()
         self._cancel_bulk = threading.Event()
         self._offline = False
+        # Vom MainWindow gesetzt, sobald feststeht, ob eine andere Instanz
+        # dieses Konto bewirtschaftet (§_skip_read_only). Ein einfaches
+        # Attribut genügt: Ein bool-Zuweisung ist in CPython unteilbar, und
+        # ein Takt Verzögerung beim Umschalten ist folgenlos — im
+        # schlimmsten Fall läuft ein bereits eingereihter Job noch durch.
+        self.read_only = False
         # Callback der Qt-freien API-Schicht → Qt-Signal (Schichtengrenze).
         self.rate_limiter = RateLimitManager(status_callback=self._on_rate_limit)
         self.client = PoeApiClient(self.rate_limiter)
@@ -208,7 +214,7 @@ class ApiWorker(QThread):
             job = self._jobs.get()
             if isinstance(job, _StopJob):
                 break
-            if self._skip_unauthenticated(job):
+            if self._skip_unauthenticated(job) or self._skip_read_only(job):
                 continue
             self.busy_changed.emit(True)
             try:
@@ -261,6 +267,35 @@ class ApiWorker(QThread):
         if not isinstance(job, self._NEEDS_AUTH) or self.client.has_token:
             return False
         log.info("%s übersprungen — noch nicht angemeldet.", type(job).__name__)
+        return True
+
+    def _skip_read_only(self, job) -> bool:
+        """Verwirft Daten-Jobs, solange eine ANDERE Instanz dieses Konto
+        bewirtschaftet (Peter, 2026-08-05: "Ich will nicht, dass beide
+        gleichzeitig Daten refreshen und dann beide versuchen den neuen
+        Inhalt zu schreiben", §services/instance_lock.py).
+
+        Bewusst hier und nicht in der Oberfläche. Daten-Jobs entstehen an
+        einem knappen Dutzend Stellen — Auto-Refresh, Single-/Stash-Takt,
+        Zonenwechsel, Klick auf ein ungeladenes Fach, Klick auf einen
+        Charakter, "Load All Tabs", der manuelle Refresh-Knopf. Jede davon
+        einzeln abzusichern hieße, sich auf Vollständigkeit zu verlassen,
+        und die nächste neue Stelle fiele durch. Dieselbe Überlegung wie
+        beim Überschreibschutz in ``_persist_cache`` (FALLSTRICKE #62):
+        Ein Wächter, der den Weg nicht kennt, deckt auch die Wege ab, die
+        es noch nicht gibt. Die Knöpfe in der Oberfläche werden trotzdem
+        gesperrt — aber nur, damit niemand ins Leere klickt, nicht als
+        Schutz.
+
+        Nicht betroffen: Bootstrap (der Kontoname MUSS ermittelt werden,
+        sonst wüsste die Instanz nie, ob sie das Konto vielleicht doch
+        beanspruchen darf), Logout, Icons vom CDN und die poe.ninja-Preise
+        — nichts davon läuft über GGGs Rate-Limit-Budget für dieses Konto,
+        und der Preis-Cache verträgt zwei Schreiber (§atomic_json)."""
+        if not self.read_only or not isinstance(job, self._NEEDS_AUTH):
+            return False
+        log.info("%s übersprungen — dieses Konto wird von einer anderen "
+                "Instanz bewirtschaftet.", type(job).__name__)
         return True
 
     def _set_offline(self, offline: bool) -> None:

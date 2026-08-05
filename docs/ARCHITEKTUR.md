@@ -404,6 +404,24 @@ Datenumfang von einigen hundert Items rechtfertigt keine.
   einer unlesbaren Datei 0 — die kaputte Datei hätte ihn also stillgelegt,
   statt von ihm aufgefangen zu werden. Derselbe Weg schützt den
   Preis-Cache (§4.14).
+- **Nur eine Instanz je Konto bewirtschaftet die Datei**
+  (`services/instance_lock.py`, Peter 2026-08-05: "Zweitstart theoretisch
+  ja, aber nur im Offline-Modus bzw. anderer Account"). Der Anspruch gilt
+  PRO KONTO, nicht pro Programm: Zwei Fenster mit verschiedenen Konten
+  schreiben in getrennte Dateien und verbrauchen getrennte
+  Rate-Limit-Budgets (GGG zählt pro Konto, FALLSTRICKE #65). Bekommt eine
+  Instanz das Konto nicht, läuft sie nur lesend — der Cache bleibt
+  vollständig durchsuchbar, aber sie ruft nichts ab und schreibt nichts.
+  Meldet sie sich mit einem anderen Konto an, wird sie vollwertig.
+  Umgesetzt als Byte-Bereichs-Sperre (`msvcrt.locking`) statt einer
+  Marker-Datei: Die Sperre hängt am Prozess und verschwindet mit ihm, es
+  kann also keine verwaiste Sperre geben, die jemand aufräumen müsste.
+  **Der Schutz sitzt im Worker** (`ApiWorker._skip_read_only`), nicht in
+  den Klick-Handlern: Daten-Jobs entstehen an einem knappen Dutzend
+  Stellen, und die nächste neue fiele sonst durch — dieselbe Überlegung
+  wie beim pfad-unabhängigen Überschreibschutz (§4.24). Die gesperrten
+  Knöpfe in der Oberfläche sind nur Höflichkeit, damit niemand ins Leere
+  klickt.
 - **"Aktualisieren" räumt den Item-Cache NICHT mehr leer:** Seit es
   Refresh-Buttons je Tab gibt, ist ein globales Verwerfen aller Items
   unnötig — der globale Refresh aktualisiert nur noch Stash-Liste und
