@@ -806,6 +806,54 @@ def test_selecting_a_map_section_group_resolves_to_its_members(qapp) -> None:
     assert selection_changed == [["m1", "m2"]]
 
 
+def test_selecting_a_special_tab_resolves_to_its_subtabs(qapp) -> None:
+    """Peter, 2026-08-07: Fach "1" und den Überordner "Unique Items"
+    markiert, exportiert wurden nur die Items aus Fach "1". Spezial-Tabs
+    sind KEINE Ordner (``is_folder`` ist False) und tragen deshalb eine
+    eigene ``_DATA_ROLE`` — sie galten dadurch als Blatt. Unter ihrer ID
+    liegen aber keine Items, die stecken in den Unter-Fächern (§4.10)."""
+    data = [
+        {"id": "t1", "name": "1", "type": "PremiumStash", "metadata": {}},
+        {"id": "uniq", "name": "Unique Items", "type": "UniqueStash", "metadata": {},
+         "children": [
+             {"id": "u-weapons", "name": "Weapons", "type": "UniqueStash",
+              "parent": "uniq", "metadata": {}},
+             {"id": "u-armour", "name": "Armour", "type": "UniqueStash",
+              "parent": "uniq", "metadata": {}},
+         ]},
+    ]
+    tree = StashTree()
+    tree.set_stashes([StashTab.model_validate(d) for d in data])
+    selection_changed = []
+    tree.selection_changed.connect(selection_changed.append)
+    tree._stash_nodes["t1"].setSelected(True)
+    tree._stash_nodes["uniq"].setSelected(True)
+
+    tree._on_click(tree._stash_nodes["uniq"])
+
+    assert selection_changed == [["t1", "u-weapons", "u-armour"]]
+
+
+def test_a_special_tab_without_discovered_subtabs_stays_its_own_leaf(qapp) -> None:
+    """Solange die Unter-Fächer nicht entdeckt sind, gibt es nichts, wohin
+    abgestiegen werden könnte — der Knoten bleibt sein eigenes Blatt und
+    zählt in der Statuszeile als noch nicht geladenes Fach."""
+    data = [
+        {"id": "t1", "name": "1", "type": "PremiumStash", "metadata": {}},
+        {"id": "uniq", "name": "Unique Items", "type": "UniqueStash", "metadata": {}},
+    ]
+    tree = StashTree()
+    tree.set_stashes([StashTab.model_validate(d) for d in data])
+    selection_changed = []
+    tree.selection_changed.connect(selection_changed.append)
+    tree._stash_nodes["t1"].setSelected(True)
+    tree._stash_nodes["uniq"].setSelected(True)
+
+    tree._on_click(tree._stash_nodes["uniq"])
+
+    assert selection_changed == [["t1", "uniq"]]
+
+
 def test_selecting_a_folder_with_a_single_child_still_uses_selection_changed(qapp) -> None:
     """Bewusste Abgrenzung: ein Ordner zählt als Mehrfachauswahl-Pfad, auch
     wenn er zufällig nur ein Kind hat — nur ein direkt angeklicktes Fach

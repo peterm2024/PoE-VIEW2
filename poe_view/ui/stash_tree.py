@@ -73,12 +73,14 @@ Liste aller betroffenen Blatt-Fach-IDs (rekursiv aufgelöst,
 dedupliziert) — ``MainWindow`` zeigt dafür NUR bereits gecachte Items an
 und löst NIE einen API-Abruf aus
 (ein Shift-Klick über 20 nie geladene Fächer würde sonst 20 Requests auf
-einmal abfeuern und das Rate-Limit sprengen). Ordner UND die
-synthetischen Map-Sektionsgruppen ("Tier 6") werden dabei gleich
-behandelt: ``_leaf_ids_under`` sammelt einfach alle Kind-Knoten mit
-``_DATA_ROLE`` unter einem Knoten ein, unabhängig davon, ob er ein
-echter Ordner oder eine reine Anzeige-Gruppe ist — beide sind im
-Widget-Baum strukturell identisch.
+einmal abfeuern und das Rate-Limit sprengen). ``_leaf_ids_under``
+entscheidet dabei allein danach, ob ein Knoten Kinder HAT: hat er
+welche, ist er die Summe seiner Kinder, sonst ist er selbst das Blatt.
+Damit verhalten sich echte Ordner, die synthetischen
+Map-Sektionsgruppen ("Tier 6") und die Spezial-Tabs (UniqueStash,
+MapStash) gleich — Letztere sind keine Ordner und tragen eine eigene
+``_DATA_ROLE``, hätten bei einer Datenprüfung also als Blatt gegolten,
+obwohl unter ihrer ID gar keine Items liegen (§4.10).
 
 ``highlight_stash(stash_id)`` hebt einen Knoten hervor, wenn in einer
 Aggregat- oder Suchansicht eine Zeile ausgewählt wird
@@ -491,18 +493,33 @@ class StashTree(QTreeWidget):
         self.setItemWidget(node, _COL_STATUS, button)
 
     def _leaf_ids_under(self, item: QTreeWidgetItem) -> list[str]:
-        """Alle Blatt-Fach-IDs unter ``item`` — es selbst, falls es schon ein
-        Blatt ist, sonst rekursiv über seine Kinder. Funktioniert für echte
-        Ordner UND die synthetischen Map-Sektionsgruppen ("Tier 6")
-        gleichermaßen: beide sind im Widget-Baum einfach Knoten mit Kindern,
-        ohne eigene ``_DATA_ROLE`` — kein Sonderfall nötig."""
+        """Alle Blatt-Fach-IDs unter ``item`` — rekursiv über seine Kinder,
+        oder es selbst, falls es keine hat.
+
+        Die Frage ist BEWUSST "hat der Knoten Kinder?" und nicht "hat er
+        eigene Daten?" (Peter, 2026-08-07: Fach "1" + Überordner "Unique
+        Items" markiert, exportiert wurden nur die Items aus Fach "1").
+        Spezial-Tabs (UniqueStash, MapStash) sind keine Ordner im Sinne von
+        ``StashTab.is_folder`` und tragen deshalb sehr wohl eine eigene
+        ``_DATA_ROLE`` — die alte Datenprüfung hielt sie für Blätter und
+        lieferte ihre ID zurück, statt in die Unter-Fächer abzusteigen. Unter
+        dieser ID liegen aber gar keine Items: Spezial-Tabs liefern am
+        Einzel-Endpunkt ``children`` statt ``items`` (§4.10), die Items
+        stecken in den Unter-Fächern. Die Auswahl löste sich also auf eine
+        ID auf, zu der es nichts anzuzeigen gab.
+
+        So herum ist ein Knoten mit Kindern immer die Summe seiner Kinder —
+        egal ob echter Ordner, synthetische Map-Sektionsgruppe ("Tier 6")
+        oder Spezial-Tab. Ein Spezial-Tab, dessen Kinder noch nicht entdeckt
+        sind, bleibt sein eigenes Blatt und wird in der Statuszeile
+        wahrheitsgemäß als "never loaded" gezählt."""
+        if item.childCount():
+            ids: list[str] = []
+            for i in range(item.childCount()):
+                ids.extend(self._leaf_ids_under(item.child(i)))
+            return ids
         stash: StashTab | None = item.data(0, _DATA_ROLE)
-        if stash is not None:
-            return [stash.id]
-        ids: list[str] = []
-        for i in range(item.childCount()):
-            ids.extend(self._leaf_ids_under(item.child(i)))
-        return ids
+        return [stash.id] if stash is not None else []
 
     def _collect_leaf_ids(self, items: list[QTreeWidgetItem]) -> list[str]:
         """Blatt-Fach-IDs aller übergebenen Knoten, dedupliziert (Klick auf

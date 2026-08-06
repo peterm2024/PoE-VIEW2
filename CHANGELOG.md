@@ -129,6 +129,13 @@ nach [SemVer](https://semver.org/lang/de/).
 
 ### Behoben
 
+- Markierte man im Fach-Baum einen Spezial-Tab ("Unique Items", "Map
+  Stash") zusammen mit anderen Fächern, blieben seine Items in der
+  Tabelle aus — und damit auch im CSV-Export. Ordner lösten sich richtig
+  in ihre Fächer auf, Spezial-Tabs nicht: Sie sind technisch keine
+  Ordner und galten deshalb als einzelnes Fach, unter dessen ID es aber
+  gar keine Items gibt (die stecken in den Unter-Fächern). Maßgeblich
+  ist jetzt allein, ob ein Knoten Unter-Knoten hat.
 - Item-Eigenschaften mit Platzhaltern wurden falsch dargestellt: Statt
   "Consumes 35 of 65 Charges on use" stand dort "Consumes {0} of {1}
   Charges on use: 35" — die Platzhalter blieben stehen und der zweite

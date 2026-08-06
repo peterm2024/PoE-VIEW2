@@ -2311,13 +2311,28 @@ ein einzelnes Fach zurückstutzt, fällt dagegen zurecht auf den alten Pfad
 zurück — der verbleibende Knoten IST dann wieder ein direkt
 ausgewähltes Blatt.
 
-`_leaf_ids_under(item)` löst Ordner UND die synthetischen
-Map-Sektionsgruppen ("Tier 6", §`group_map_children`) gleich auf: beide
-sind im Widget-Baum strukturell identisch (ein Knoten mit Kindern, ohne
-eigene `_DATA_ROLE`) — kein Sonderfall für Gruppen nötig, die Rekursion
-über den Widget-Baum reicht. `_collect_leaf_ids` dedupliziert (Strg-Klick
+`_leaf_ids_under(item)` fragt allein: **hat dieser Knoten Kinder?** Hat
+er welche, ist er die Summe seiner Kinder; hat er keine, ist er selbst
+das Blatt. Damit lösen sich Ordner, die synthetischen
+Map-Sektionsgruppen ("Tier 6", §`group_map_children`) und die
+Spezial-Tabs (§4.10) gleich auf, obwohl sie im Widget-Baum
+unterschiedlich aussehen. `_collect_leaf_ids` dedupliziert (Strg-Klick
 auf einen Ordner UND eines seiner eigenen Kinder würde dessen ID sonst
 doppelt liefern).
+
+Ursprünglich fragte die Methode stattdessen "hat dieser Knoten eigene
+Daten?" (`_DATA_ROLE` gesetzt) und stieg nur bei Knoten ohne Daten ab.
+Für Ordner und Gruppen stimmt das, für Spezial-Tabs nicht: Ein
+UniqueStash/MapStash ist kein Ordner (`StashTab.is_folder` ist False)
+und trägt deshalb sehr wohl eine eigene `_DATA_ROLE` — er galt als Blatt
+und die Auswahl löste sich auf seine ID auf. Unter dieser ID liegen aber
+keine Items; Spezial-Tabs liefern am Einzel-Endpunkt `children` statt
+`items` (§4.10). Peter, 2026-08-07: Fach "1" und den Überordner "Unique
+Items" markiert, im CSV-Export landeten nur die Items aus Fach "1". Ein
+Spezial-Tab, dessen Unter-Fächer noch nicht entdeckt sind, bleibt
+weiterhin sein eigenes Blatt — es gibt nichts, wohin abgestiegen werden
+könnte, und die Statuszeile zählt ihn wahrheitsgemäß als noch nicht
+geladen.
 
 **`MainWindow._show_stash_selection(stash_ids)`, verdrahtet an
 `selection_changed`:** zeigt NUR bereits gecachte Items der übergebenen
