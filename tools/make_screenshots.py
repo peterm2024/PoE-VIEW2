@@ -100,7 +100,13 @@ _MAPS = [("Toxic Grove Map", 14), ("Sandy Seabed Map", 11)]
 # Sichtbare Spalten für die Bilder, in dieser Reihenfolge. Alles Weitere
 # (Level, Qual., Str/Dex/Int) bleibt aus — es würde die Value-Spalte aus
 # dem sichtbaren Bereich schieben.
-_COLUMN_CONFIG = [(name, name in ("Icon", "Position", "Name", "Base", "Stack",
+#
+# Die Icon-Spalte ist AUS (Peter, 2026-08-07). Sie bliebe in diesen
+# Bildern zwangsläufig leer: Der Generator arbeitet mit erfundenen Items
+# und ohne Netzzugriff, und GGGs Icon-URLs sind undurchsichtige
+# CDN-Token, die sich aus einem Item-Namen nicht bauen lassen. Eine
+# eingeschaltete, aber immer leere Spalte sieht nach Defekt aus.
+_COLUMN_CONFIG = [(name, name in ("Position", "Name", "Base", "Stack",
                                   "iLvl", "Mods", "Value"))
                   for name in ("Icon", "Position", "Name", "Base", "Type", "Level",
                                "Qual.", "Stack", "iLvl", "Req.Lvl", "Str", "Dex",

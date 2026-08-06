@@ -165,6 +165,14 @@ nach [SemVer](https://semver.org/lang/de/).
   verschwundene Items grau angehängt, obwohl die Änderungen Tage
   zurücklagen. Auch die Hervorhebung vergleicht jetzt erst ab dem
   zweiten Abruf eines Charakters.
+- Das Speichern der Cache-Dateien scheiterte gelegentlich, wenn ein
+  anderes Programm die Datei gerade zum Lesen geöffnet hatte — Windows
+  lässt das Ersetzen dann nicht zu, und ein Virenscanner auf einer frisch
+  geschriebenen 67-MB-Datei tut genau das. Der Vorgang wird jetzt
+  viermal in kurzem Abstand wiederholt (zusammen unter einer Sekunde),
+  statt beim ersten Versuch aufzugeben. Verloren ging dabei nie etwas,
+  der nächste Speichervorgang holte es nach; im Log stand aber ein
+  Fehler, der wie ein Defekt aussah.
 - Bei Divination Cards stand die Belohnung mit GGGs Färbungs-Anweisungen
   im Text: `<currencyitem>{3x Orb of Fusing}` statt "3x Orb of Fusing".
   Betraf 952 der 975 Karten in einem echten Stash und ausschließlich
