@@ -202,6 +202,32 @@ def test_the_cache_is_backed_up_at_startup(qapp, monkeypatch, tmp_path) -> None:
     win.worker.wait(5000)
 
 
+def test_the_startup_backup_never_writes_into_the_real_data_folder(
+        qapp, monkeypatch, tmp_path) -> None:
+    """Regression: ``BACKUP_DIR`` wurde beim Import ausgerechnet und zeigte
+    danach fuer immer auf den echten Datenordner. Tests, die
+    ``config.APP_DATA_DIR`` umbiegen, legten ihre Cache-Datei brav im
+    Wegwerf-Ordner ab — die Sicherung davon landete in Peters echtem
+    ``backups``-Verzeichnis (sechs Fremdkoerper, am 2026-08-07 dort
+    gefunden)."""
+    from poe_view import config
+    from poe_view.services import cache_backup, data_cache
+
+    monkeypatch.setattr(config, "APP_DATA_DIR", tmp_path)
+    monkeypatch.setattr(data_cache, "_CACHE_FILE", tmp_path / "cache.json")
+    data = data_cache.CachedData()
+    data.account_name = "Someone#1234"
+    data.characters = [make_char("A", "Standard")]
+    data_cache.save(data)
+
+    win = MainWindow()
+    win._backup_cached_data()
+
+    assert cache_backup.directory().parent == tmp_path
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
 def test_no_backup_before_the_first_login(qapp, monkeypatch) -> None:
     """Ohne Kontokennung gibt es keine kontospezifische Cache-Datei — und
     nichts zu sichern."""

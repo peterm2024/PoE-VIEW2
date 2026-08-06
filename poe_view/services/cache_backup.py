@@ -55,7 +55,22 @@ from poe_view import config
 
 log = logging.getLogger(__name__)
 
-BACKUP_DIR = config.APP_DATA_DIR / "backups"
+_DIR_NAME = "backups"
+
+
+def directory() -> Path:
+    """Ablageort der Sicherungen — als FUNKTION, nicht als Konstante.
+
+    Eine Konstante ``BACKUP_DIR = config.APP_DATA_DIR / "backups"`` wird
+    beim IMPORT ausgerechnet und zeigt danach für immer auf den echten
+    Datenordner. Genau das ist am 2026-08-06 aufgefallen: Tests, die
+    ``config.APP_DATA_DIR`` auf ein Wegwerf-Verzeichnis umbiegen, legten
+    ihre Cache-Datei brav dort ab — die Sicherung davon landete aber im
+    echten Ordner des Nutzers (sechs Fremdkörper in Peters
+    ``backups``-Verzeichnis, aus Testläufen). Nachgeschlagen wird deshalb
+    bei jedem Aufruf."""
+    return config.APP_DATA_DIR / _DIR_NAME
+
 
 # Peters Vorgabe: "ein Backup mit Timestamp, das erst nach 24h gelöscht
 # werden darf."
@@ -92,9 +107,10 @@ def _stamp_of(path: Path) -> datetime | None:
 
 def backups_for(source: Path) -> list[Path]:
     """Vorhandene Sicherungen dieser Cache-Datei, neueste zuerst."""
-    if not BACKUP_DIR.is_dir():
+    ordner = directory()
+    if not ordner.is_dir():
         return []
-    found = [(stamp, path) for path in BACKUP_DIR.glob(f"{source.stem}.*{_SUFFIX}")
+    found = [(stamp, path) for path in ordner.glob(f"{source.stem}.*{_SUFFIX}")
              if (stamp := _stamp_of(path)) is not None]
     return [path for _stamp, path in sorted(found, reverse=True)]
 
@@ -123,7 +139,7 @@ def create(source: Path, now: datetime | None = None) -> Path | None:
             log.debug("Cache-Backup: unverändert seit %s, übersprungen", newest)
             return None
 
-    target = BACKUP_DIR / f"{source.stem}.{now.strftime(_STAMP_FORMAT)}{_SUFFIX}"
+    target = directory() / f"{source.stem}.{now.strftime(_STAMP_FORMAT)}{_SUFFIX}"
     # Nebendatei mit Prozess-ID, dann verschieben — dieselbe Überlegung
     # wie in atomic_json: Ein Abbruch mitten im Packen darf kein halbes
     # Archiv hinterlassen, das später wie eine gültige Sicherung aussieht.
@@ -133,7 +149,7 @@ def create(source: Path, now: datetime | None = None) -> Path | None:
     # Ausnahmen abfangen soll.
     staging = target.with_name(f"{target.name}.{os.getpid()}.part")
     try:
-        BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+        target.parent.mkdir(parents=True, exist_ok=True)
         with source.open("rb") as raw, gzip.open(staging, "wb", compresslevel=6) as packed:
             shutil.copyfileobj(raw, packed, length=1 << 20)
         os.replace(staging, target)

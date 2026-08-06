@@ -18,9 +18,23 @@ from poe_view.services import cache_backup
 
 @pytest.fixture
 def cache_dir(tmp_path, monkeypatch):
-    """Sicherungsverzeichnis in einen Wegwerf-Ordner umbiegen."""
-    monkeypatch.setattr(cache_backup, "BACKUP_DIR", tmp_path / "backups")
+    """Den DATENORDNER umbiegen, nicht das Sicherungsverzeichnis.
+
+    Das ist der Weg, den auch die uebrigen Tests gehen — und der einzige,
+    der etwas beweist: Eine Konstante ``BACKUP_DIR``, beim Import
+    ausgerechnet, haette diesen Umweg ignoriert und in den echten Ordner
+    des Nutzers geschrieben. Genau das ist am 2026-08-06 passiert (sechs
+    Fremdkoerper in Peters ``backups``-Verzeichnis aus Testlaeufen),
+    siehe ``cache_backup.directory``."""
+    monkeypatch.setattr(cache_backup.config, "APP_DATA_DIR", tmp_path)
     return tmp_path
+
+
+def test_the_backup_folder_follows_the_configured_data_folder(cache_dir) -> None:
+    """Gegenstueck zur Fixture: Wird der Datenordner umgebogen, muss die
+    Sicherung mitwandern — sonst schreibt jeder Test in echte
+    Nutzerdaten."""
+    assert cache_backup.directory().parent == cache_dir
 
 
 @pytest.fixture
@@ -40,9 +54,9 @@ def _touch(source, when: datetime) -> None:
 
 
 def _fake_backup(name: str, when: datetime) -> None:
-    cache_backup.BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+    cache_backup.directory().mkdir(parents=True, exist_ok=True)
     stamp = when.strftime(cache_backup._STAMP_FORMAT)
-    (cache_backup.BACKUP_DIR / f"{name}.{stamp}.json.gz").write_bytes(b"alt")
+    (cache_backup.directory() / f"{name}.{stamp}.json.gz").write_bytes(b"alt")
 
 
 # --- Anlegen ---
@@ -141,8 +155,8 @@ def test_foreign_files_in_the_backup_folder_are_left_alone(source) -> None:
     der Ordner steht dem Nutzer offen, und ein Aufraeumer, der fremde
     Dateien mitnimmt, ist genau die Sorte Ueberraschung, gegen die dieses
     Modul gebaut wurde."""
-    cache_backup.BACKUP_DIR.mkdir(parents=True, exist_ok=True)
-    eigene = cache_backup.BACKUP_DIR / "meine-handkopie.json.gz"
+    cache_backup.directory().mkdir(parents=True, exist_ok=True)
+    eigene = cache_backup.directory() / "meine-handkopie.json.gz"
     eigene.write_bytes(b"wichtig")
     _fake_backup(source.stem, datetime(2020, 1, 1))
     _fake_backup(source.stem, datetime(2020, 1, 2))
