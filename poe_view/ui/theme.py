@@ -31,15 +31,60 @@ RARITY_COLORS = {
     9: "#82ad6a",  # Relic
 }
 
+# Ampel des Rate-Limit-Dashboards. Steht hier oben, weil STACK_COLORS
+# weiter unten dasselbe Grün wiederverwendet.
+DASH_OK = "#6fae5c"
+DASH_WARN = "#d3a94e"
+DASH_BAD = "#c05b4d"
+
+# GGGs Färbungs-Markup in Mod-Texten (``<currencyitem>{3x Orb of Fusing}``,
+# siehe api/models.markup_segments) → unsere Farben. Wo das Tag einer
+# Rarity entspricht, wird bewusst DIESELBE Farbe wie in der Item-Tabelle
+# genommen: Ein Kartentext, der ein Unique verspricht, soll dieselbe
+# Orange-Nuance tragen wie ein Unique in der Liste.
+#
+# Die Liste stammt nicht aus GGGs Doku, sondern aus echten Daten — es sind
+# genau die dreizehn Tags, die in Peters Stash vorkommen (2026-08-06).
+# Unbekannte Tags bekommen keine Farbe, keinen Ersatzwert: Eine geratene
+# Farbe wäre schlechter als gar keine.
+MARKUP_COLORS = {
+    "whiteitem": RARITY_COLORS[0],
+    "normal": RARITY_COLORS[0],
+    "magicitem": RARITY_COLORS[1],
+    "rareitem": RARITY_COLORS[2],
+    "uniqueitem": RARITY_COLORS[3],
+    "gemitem": RARITY_COLORS[4],
+    "currencyitem": RARITY_COLORS[5],
+    "divination": RARITY_COLORS[6],
+    "corrupted": "#d20000",   # PoEs Korruptionsrot
+    "augmented": "#8888ff",   # aufgewerteter Wert, wie ein Magic-Affix
+    "enchanted": "#b4b4ff",
+    "fractured": "#a29162",
+    "default": None,          # ausdrücklich "normale Textfarbe"
+}
+
+# Satz-Fortschritt einer Divination Card (item_zoom): vorhandene Karten in
+# der Kartenfarbe, fehlende gedämpft. Eigene Namen, keine GGG-Tags — der
+# Bindestrich schließt eine Verwechslung mit dem Markup oben aus, dessen
+# Tags durchweg reine Buchstaben sind.
+STACK_COLORS = {
+    # Volle Sätze: dasselbe Grün wie die "alles in Ordnung"-Anzeige des
+    # Rate-Limit-Dashboards. Ein Grün in der ganzen Anwendung, und es
+    # bedeutet an beiden Stellen dasselbe — fertig.
+    "stack-complete": DASH_OK,
+    "stack-full": RARITY_COLORS[6],
+    # Fester mittlerer Grauton statt palette-abhängiger Dimmung: Die
+    # Zeile wird als HTML-Text gebaut, dort steht keine Palette zur
+    # Verfügung. Auf hellem wie dunklem Untergrund bleibt er sichtbar,
+    # ohne mit den gefüllten Rechtecken zu konkurrieren.
+    "stack-empty": "#6f6f6f",
+}
+
 # Sentinel (kein echter frameType) für den Typ-Filter (MainWindow, item_table):
 # alles ohne eigene Checkbox (Quest, Prophecy, Relic, Unbekanntes) landet
 # hier — Pink, weil in RARITY_COLORS noch frei.
 OTHER_TYPE = -1
 TYPE_FILTER_COLOR = "#e05fae"
-
-DASH_OK = "#6fae5c"
-DASH_WARN = "#d3a94e"
-DASH_BAD = "#c05b4d"
 
 # Zeilen-Hervorhebung beim Beobachten des Charakter-Inventars (Peter
 # 2026-08-01: "die Zeilen hervorgehoben (Türkis), welche sich geändert

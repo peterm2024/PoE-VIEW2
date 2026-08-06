@@ -57,8 +57,8 @@ class ItemDetail(QFrame):
         for prop in item.properties:
             if prop.display_value:
                 lines.append(prop.display_text)
-        lines.extend(item.implicitMods)
-        lines.extend(item.explicitMods)
+        lines.extend(item.implicit_mods)
+        lines.extend(item.explicit_mods)
         self._props.setText("\n".join(lines[:12]))
 
         if pixmap:

@@ -284,7 +284,8 @@ modellieren — nichts geht verloren, nichts bricht bei API-Erweiterungen):
 - `StashTab`: id, name, type, index, colour (`#rrggbb` → via `QColor` in der UI),
   `children: list[StashTab]` (rekursiv — Ordner!), `items: list[Item]`
 - `Item`: id, name, typeLine, baseType, icon (URL), frameType (Rarity),
-  `properties: list[ItemProperty]`, sockets, …
+  `properties: list[ItemProperty]`, sockets, `flavourText: list[str]`,
+  `artFilename` (nur Divination Cards), …
 - `ItemProperty`: name, `values: list[tuple[str, int]]`
 
 **`explicitMods`/`implicitMods`: Einträge können String oder Objekt sein.**
@@ -295,6 +296,48 @@ Stash-Tab, nicht nur für das betroffene Item. Ein
 `field_validator(mode="before")` auf `Item` reduziert jeden dict-Eintrag
 vor der Typprüfung auf sein `description`-Feld; Strings bleiben
 unverändert (siehe FALLSTRICKE_UND_WORKAROUNDS.md #25).
+
+**GGGs Färbungs-Markup: camelCase roh, snake_case fertig.** Mod-Texte sind
+für den Tooltip des Spiels formatiert: `<currencyitem>{3x Orb of Fusing}`
+bestimmt die Farbe, `<size:26>{…}` zusätzlich die Schriftgröße, und beides
+kann ineinander verschachtelt sein.
+
+Das Feld `explicitMods` trägt deshalb weiterhin GENAU DAS, was die API
+geliefert hat; die Eigenschaften `explicit_mods`/`implicit_mods` daneben
+liefern denselben Text ohne Markup. Dieselbe Trennung wie bei
+`display_name`, `socket_string`, `flavour_text` — camelCase ist die
+Rohantwort, snake_case das, was man anzeigt. Jede Anzeige, der CSV-Export
+und der Suchindex nehmen die snake_case-Fassung.
+
+Warum nicht schon im Validator filtern (so war es einen Tag lang): Der
+Daten-Cache serialisiert die Modelle. Was das Feld verliert, verliert die
+Cache-Datei beim nächsten Speichern dauerhaft — und mit der Farbangabe
+verschwände die einzige Auskunft darüber, ob eine Karte eine Währung oder
+ein Unique verspricht. Genau das ist am 2026-08-06 einmal passiert, siehe
+FALLSTRICKE #66.
+
+`strip_display_markup()` ersetzt von innen nach außen, bis sich nichts
+mehr ändert, und vereinheitlicht die Zeilenenden (`\r\n` und einzelnes
+`\r` → `\n`; ein stehengebliebenes `\r` zeichnet Qt als Ersatzkästchen).
+`markup_segments()` ist das Gegenstück: Es wirft die Auszeichnung nicht
+weg, sondern gibt `(Farbname, Text)`-Abschnitte zurück — die Grundlage der
+farbigen Belohnungszeile in §4.17.
+
+Eine zweite, ganz andere Auszeichnung sind DOPPELTE spitze Klammern
+(`<<HBGAa>><<HBG01>>`): Verweise auf eine Runen-Schrift, die wir nicht
+haben. Sie fallen weg. Nur die doppelte Form — eine Regel, die alles in
+spitzen Klammern entfernt, verschluckt auch echten Text ("Bows &
+&lt;Wands&gt;"), und zwar unbemerkt. Bleibt umgekehrt eine unpaarige
+Auszeichnung stehen, ist sie im Fenster zu sehen und damit zu bemerken.
+
+**`flavourText` ist eine Liste, deren Markup die ganze Liste umschließt.**
+Die API liefert den Spruchtext zeilenweise, aber `<size:24>{` steht in der
+ersten und die schließende Klammer in der letzten Zeile. Deshalb gibt es
+dafür keinen Validator, sondern die Eigenschaft `Item.flavour_text`: erst
+zusammenfügen, dann filtern. Bleibt nichts Lesbares übrig — drei Items
+tragen statt Text nur Verweise auf eine Runen-Schrift, zwei Karten
+liefern von GGG selbst nur ein Leerzeichen —, ist das Ergebnis leer, und
+die Anzeige lässt die Zeile ganz weg.
 
 **Gem-Level und Quality** haben keine festen JSON-Keys, sondern liegen im
 `properties`-Array. Dafür gibt es dokumentierte Helper:
@@ -1734,8 +1777,7 @@ Div-Card dasselbe generische Icon (`2DItems/Divination/InventoryIcon.png`
 trugen identisch dieselbe URL), das wäre in dieser vergrößerten Ansicht
 wertlos. `_on_table_row_double_clicked` fordert deshalb zusätzlich das
 echte Artwork an (`external_tools.divination_card_art_url`, GGGs eigenes
-CDN `web.poecdn.com/image/divination-card/<Name ohne Leerzeichen>.png`,
-live an zehn echten PoEDB-Kartenseiten verifiziert, FALLSTRICKE #52).
+CDN `web.poecdn.com/image/divination-card/<artFilename>.png`).
 Cache-Treffer (`icon_cache.load`) aktualisieren das Icon sofort synchron,
 sonst läuft der Download wie jedes andere Item-Icon über
 `FetchIconJob`/`icon_loaded` — `MainWindow._pending_card_art` merkt sich
@@ -1744,17 +1786,104 @@ dafür (URL, Ziel-Dialog), `_on_icon` löst es beim Eintreffen auf. Da
 gilt die "Seitenbetreiber fragen"-Vorsicht der anderen drei Rechtsklick-
 Tools hier nicht.
 
+Der Dateiname kommt aus dem API-Feld `artFilename` und wird NICHT mehr aus
+dem Kartennamen konstruiert. Die frühere Konstruktionsregel (PascalCase
+ohne Trenner, an zehn Karten verifiziert) stimmt für 345 von 373
+Kartentypen; die übrigen 28 heißen auf dem Server historisch anders
+("The Cartographer" → `TheMapmaker`) und blieben ohne Artwork. Die Regel
+steht nur noch als Rückfallebene für den Fall, dass die API das Feld
+einmal weglässt — siehe FALLSTRICKE #66.
+
 **Wichtig, von Peter am echten Ergebnis geprüft (2026-07-31):** Diese URL
 liefert NUR das bloße Illustrations-Panel (querformatig, ~237×170px) —
 KEINEN vollständigen Karten-Look mit Pergament-Rahmen, Titel-Schriftrolle,
 Tier-Box oder Flavour-Text (das ist eine eigene, von Wikis komponierte
 Darstellung, kein einzelnes GGG-Asset). Peter fand über die Wiki-Seite
-eine solche Voll-Karten-Ansicht als optische Referenz; Text (Flavour,
-Tier, Stack) käme ohnehin nicht von GGG und ist laut Peter "nicht so
-wichtig" — nur ein rein dekorativer Rahmen wurde umgesetzt
-(`ItemZoomDialog._build_card_frame`, Qt-Stylesheet: Pergament-farbenes
-Titel-Banner um `self._name`, dunkler umrandeter Rahmen um Titel+Icon).
-Reine Optik, keine neuen Daten — nur bei `frameType == 6` aktiv.
+eine solche Voll-Karten-Ansicht als optische Referenz; umgesetzt wurde
+davon ein rein dekorativer Rahmen (`ItemZoomDialog._build_card_frame`,
+Qt-Stylesheet: Pergament-farbenes Titel-Banner um `self._name`, dunkler
+umrandeter Rahmen um Titel+Icon). Reine Optik, keine neuen Daten — nur bei
+`frameType == 6` aktiv.
+
+**Korrektur vom 2026-08-06:** Hier stand, der Text der Karte (Flavour,
+Tier, Stack) "käme ohnehin nicht von GGG". Für Tier stimmt das, für die
+beiden anderen nicht — Stack Size steht in `properties`, und den
+Spruchtext liefert das Feld `flavourText` (12226 Items in Peters Cache,
+davon 976 Karten und 9176 Uniques). Er wird jetzt angezeigt
+(`ItemZoomDialog._flavour`, gespeist aus `Item.flavour_text`). Bei einer
+Divination Card ist er der eigentliche Inhalt: Der Rahmen war gebaut, die
+Karte blieb stumm. Im kompakten `ItemDetail` steht er bewusst nicht —
+dort sind die Zeilen auf zwölf begrenzt, und die gehören den Mods.
+
+**Gestaltung (Peter, 2026-08-06: "mit einer 'schöneren' Schrift in kursiv
+und größer … sämtliche Texte mittig … evtl. noch etwas Farbe … vielleicht
+ein paar Symbole"):**
+
+- Der Spruchtext sitzt ZWISCHEN Bild und Zahlen; bei einer Karte innerhalb
+  des Pergamentrahmens, denn er gehört zur Karte und ist keine Bemerkung
+  darunter. Getrennt vom Artwork durch eine Zierlinie (`—— ◆ ——`).
+- Kursive Serifenschrift, 130 % der normalen Größe, über
+  `QFont.setFamilies` mit Ersatzkette. NICHT über ein Qt-Stylesheet:
+  `font-family` nimmt dort nur den ersten Namen, eine Ersatzkette gäbe es
+  damit nicht. Eine Schrift mitzuliefern wäre eine Lizenz- und
+  Paketgrößenfrage für eine reine Geschmacksverbesserung.
+- Die naheliegenden Zierzeichen ❦ (U+2766) und ❧ (U+2767) sind
+  unbrauchbar: Windows zeichnet sie aus einer Farb-Emoji-Schrift, sie
+  erscheinen als buntes Bildchen statt in der Rahmenfarbe — auch mit
+  Variantenselektor U+FE0E und auch mit ausdrücklich gesetzter
+  Serifenschrift (alle drei gerendert und angesehen). ◆ (U+25C6) und
+  ❖ (U+2756) bleiben Text und nehmen die Farbe an.
+- Der Textblock ist Rich Text (`_build_html`), alles zentriert wie in den
+  Item-Tooltips des Spiels. **Farbig ist nur, was GGG selbst eingefärbt
+  hat** (`theme.MARKUP_COLORS`): die Belohnungszeile einer Karte, in
+  Währungsgold, Gem-Grün, Unique-Orange oder Korruptionsrot. Unsere
+  eigenen Beschriftungen ("Class: …", "Sockets: …") bleiben schlicht,
+  sonst sähe das Fenster wie ein Farbkasten aus und die Belohnung ginge
+  in der Buntheit unter. Unbekannte Auszeichnungen bekommen KEINE
+  Ersatzfarbe — eine geratene Farbe wäre schlechter als gar keine.
+- `_text_lines` ist die gemeinsame Quelle für Klartext (`_build_text`,
+  für Tooltips und Tests) und HTML (`_build_html`). Zwei getrennte
+  Aufbauten wären auf Dauer zwei verschiedene Fenster.
+
+**Satz-Fortschritt bei Divination Cards** (`_stack_line`, Peters Entwurf
+2026-08-06): Statt "Stack Size: 7/5" steht dort `1 ▮  +  ▮ ▮ ▯ ▯ ▯` — ein
+voller Satz (grün), und vom nächsten sind zwei von fünf Karten da. Die
+Frage, die man an eine Karte hat, ist "wie weit bin ich?", und die
+beantwortet "7/5" erst nach Kopfrechnen.
+
+Warum die Aufteilung in Zahl UND Rechtecke, und nicht eins von beidem —
+die Antwort steht in den Daten (alle 976 Karten aus Peters Cache
+ausgewertet): Die **Satzgröße** liegt zwischen 1 und 27, die lässt sich
+zeichnen. Die **Zahl der vollen Sätze** geht bis 116 (467 × "The Carrion
+Crow" bei Satzgröße 4), die lässt sich nicht zeichnen. Bei 0 vollen Sätzen
+entfällt die Zahl — das ist mit 495 von 976 Karten der häufigste Fall.
+
+**Grün heißt an dieser Stelle immer und nur "vollständig".** Der erste
+Entwurf schrieb `3×  ▯ ▯ ▯ ▯ ▯` für einen genau aufgehenden Satz — sachlich
+richtig, liest sich aber wie "du hast nichts". Das grüne Rechteck hinter
+der Zahl sagt, wovon sie spricht, und macht daraus `3 ▮  +  ▯ ▯ ▯ ▯ ▯`:
+drei fertige Sätze und ein noch leerer vierter.
+
+**Die Zeile hängt NICHT an der `Stack Size`-Property**, sondern rechnet
+aus `stackSize`/`maxStackSize`. Grund ist ein Loch in den Daten, das Peter
+an "Society's Remorse" fand: Karten mit Satzgröße 1 liefern gar keine
+Property (real geprüft — alle 16 solchen Karten haben `properties: []`,
+alle 960 übrigen eine). Bei ihnen stand dadurch überhaupt nichts, weder
+Stückzahl noch Satzgröße, und "gar nichts" ist von einem Fehler nicht zu
+unterscheiden. Sie zeigen jetzt nur die Anzahl mit grünem Rechteck
+(`16 ▮`) — einen angefangenen Satz gibt es bei ihnen nicht.
+
+Den Zahlentext behalten nur noch zwei Fälle: **alles außer Divination
+Cards** (Peter: "die Rechtecke meine ich nur bei den Divination Cards" —
+bei Währung ist `maxStackSize` keine Satzgröße, sondern Lagerkapazität,
+real bis 50000) und Karten, bei denen eine der beiden Zahlen fehlt.
+
+Die genauen Zahlen wandern in den Tooltip (`_stack_tooltip`) — 467 Karten
+und 116 Sätze lassen sich nicht abzählen, die Auskunft darf aus der Zeile
+verschwinden, nicht aus dem Fenster. Zwischen den Rechtecken steht ein
+schmales Leerzeichen (U+2009): Aneinandergesetzt verschmelzen sie zu einem
+Balken, und abzählen kann man den nicht mehr. Qts Rich-Text kennt
+`letter-spacing` nicht, deshalb ein echtes Zeichen statt CSS.
 
 ### 4.18 Konfigurierbare Item-Spalten (`ui/item_table.py`, `ui/settings_dialog.py`)
 

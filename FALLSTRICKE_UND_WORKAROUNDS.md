@@ -747,3 +747,48 @@ Zwei Instanzen überschreiben sich damit weiterhin gegenseitig (der spätere Sch
 Zwei Entwurfsentscheidungen dabei. Erstens **eine Byte-Bereichs-Sperre (`msvcrt.locking`) statt einer Marker-Datei, deren bloßes Vorhandensein "belegt" bedeutet**: Eine Marker-Datei überlebt einen Absturz und sperrt danach dauerhaft aus — die häufigste Rückmeldung wäre "ich kann das Programm nicht mehr starten", und der Nutzer müsste von Hand aufräumen. Die Byte-Sperre hängt am Prozess; stirbt er, gibt das Betriebssystem sie frei. Verwaiste Sperren kann es damit nicht geben. Zweitens: **Der Schutz sitzt im Worker (`ApiWorker._skip_read_only`), nicht in den Klick-Handlern.** Daten-Jobs entstehen an einem knappen Dutzend Stellen — Auto-Refresh, Single-/Stash-Takt, Zonenwechsel, Klick auf ein ungeladenes Fach, Klick auf einen Charakter, "Load All Tabs", der manuelle Refresh-Knopf. Jede einzeln abzusichern hieße, sich auf Vollständigkeit zu verlassen, und die nächste neue Stelle fiele durch. Dieselbe Überlegung wie beim pfad-unabhängigen Überschreibschutz aus #62. Die gesperrten Knöpfe in der Oberfläche sind nur Höflichkeit gegenüber dem Nutzer, kein Schutz.
 
 **Wie vermeiden:** Zwei Lehren. Erstens — **eine Datei, in die die Anwendung ihren gesamten Zustand spiegelt, muss atomar geschrieben werden, sobald sie groß genug ist, dass "währenddessen" ein Zeitraum ist.** Das gilt unabhängig von zweiten Instanzen; die waren hier nur der Anlass, genauer hinzusehen. Zweitens — **Schutzmaßnahmen gegen dieselbe Gefahr können sich gegenseitig aushebeln.** Der Überschreibschutz aus #62 setzt voraus, dass die vorige Datei LESBAR war; genau das kann der hier beschriebene Fehler verhindern. Beim Bau der zweiten Sicherung wurde die erste als gegeben angenommen, statt zu prüfen, unter welchen Umständen sie ausfällt.
+
+## 66. Zwei Fehler in der Divination-Card-Ansicht, beide mit derselben Ursache: Die API hatte die Antwort mitgeliefert, wir haben sie uns selbst ausgedacht
+
+**Anlass (Peter, 2026-08-06, vor der Veröffentlichung):** "Schau dir auch nochmal die Paperdoll an und den Divination-Card-View. Da bin ich mir nicht sicher, ob wir das so lassen sollen oder überarbeiten." Eine Frage nach dem Aussehen — gefunden wurden zwei Sachfehler.
+
+**Erstens: GGGs Färbungs-Markup stand wörtlich im Fenster.** Statt "3x Orb of Fusing" las man dort:
+
+```
+<currencyitem>{3x Orb of Fusing}
+```
+
+Die API liefert Mod- und Spruchtexte mit Anweisungen für die Tooltip-Darstellung im Spiel — `<currencyitem>` bestimmt die Farbe, `<size:26>` zusätzlich die Schriftgröße. Wir haben den Text unverändert in ein `QLabel` gegeben. Warum das so lange unbemerkt blieb: Über den ganzen Stash gemessen tragen **952 von 51516 Items** solches Markup, und zwar ausschließlich Divination Cards. Jedes Rare, jedes Unique, jede Währung sieht sauber aus.
+
+Zwei Eigenheiten, die der naheliegende Filter (`<tag>{…}` einmal ersetzen) verfehlt. Die Auszeichnungen sind **verschachtelt** (`<size:26>{<rareitem>{Map}}`), also muss von innen nach außen ersetzt werden, bis sich nichts mehr ändert. Und beim Spruchtext, den die API zeilenweise als Liste liefert, umschließt das Markup die **ganze Liste**: `<size:24>{` steht in der ersten Zeile, die schließende Klammer in der letzten. Wer zeilenweise filtert, behält beide. Erst zusammenfügen, dann filtern.
+
+Rest: Drei Items ("The Messenger", "The Beachhead", "The Fracturing Spinner") tragen statt Text nur Verweise auf eine Runen-Schrift (`<<HBGAa>><<HBG01>>…`), die wir nicht haben. Übrig blieben Leerzeichen — der Spruchtext bleibt in dem Fall ganz weg, eine leere Kursivzeile unter dem Item sähe nach Fehler aus. Zwei weitere Karten ("Humility", "Vanity") liefern von GGG selbst nur ein Leerzeichen; dieselbe Behandlung passt, das ist ein Witz im Spiel.
+
+**Zweitens: Jede vierzehnte Karte blieb ohne Artwork.** GGGs Stash-API liefert für jede Divination Card dasselbe generische Icon, deshalb lädt die vergrößerte Ansicht das echte Kartenbild vom CDN nach (#52). Der Dateiname dafür wurde aus dem Kartennamen konstruiert — PascalCase ohne Trenner, ein Muster, das **an zehn echten Karten verifiziert** worden war. Es gilt für 345 von 373 Kartentypen. Die restlichen 28 heißen auf dem Server anders:
+
+| Karte | konstruiert | tatsächlich |
+|---|---|---|
+| Mawr Blaidd | `MawrBlaidd` (404) | `RussiaDivinationCard` |
+| The Cartographer | `TheCartographer` (404) | `TheMapmaker` |
+| Rebirth | `Rebirth` (404) | `BirthOfTheThree` |
+| Light and Truth | `LightAndTruth` (404) | `LigthAndTruth` |
+
+Es sind keine Regelabweichungen, sondern Geschichte: frühere Kartennamen, ein Werbe-Codename, ein Tippfehler auf GGGs Seite. Aus einem Kartennamen ist das grundsätzlich nicht ableitbar. **Die API liefert den Dateinamen mit** — Feld `artFilename`, vorhanden an allen 976 Karten in Peters Cache. Er wird jetzt bevorzugt, die Konstruktion bleibt nur als Rückfallebene stehen.
+
+**Gegenprobe.** Alle 51516 Items aus dem echten Cache durch die neuen Modelle geschickt: 0 Texte mit Rest-Markup, 976 von 976 Artwork-URLs stimmen mit `artFilename` überein. Die vier Tabellenzeilen oben sind am 2026-08-06 live gegen das CDN geprüft — konstruierter Pfad 404, `artFilename` 200.
+
+**Nebenbefund:** `flavourText` wurde von unserem Modell gar nicht erst gelesen, obwohl **12226 Items** ihn tragen, davon 9176 Uniques. Bei einer Divination Card ist der Spruchtext das, was die Karte ausmacht — der Kartenrahmen war gebaut, blieb aber stumm. Er steht jetzt kursiv und abgesetzt unter den Mods.
+
+**Nachtrag am selben Abend — der Filter saß an der falschen Stelle, und das kostete den Cache seine Farbangaben.** Peter wollte die Belohnung farbig sehen ("Evtl. noch etwas Farbe einbringen"). Die Farbe steht in genau dem Markup, das ein paar Stunden zuvor entfernt worden war: `<currencyitem>` heißt Währung, `<gemitem>` Gem, `<uniqueitem>` Unique. Aus dem Text allein ist das nicht zurückzugewinnen — "Doomfletch" sieht aus wie jedes andere Wort.
+
+Gefiltert wurde in einem `field_validator`, also im FELD. Damit war die Sache nicht nur für die Anzeige erledigt, sondern für alles, was das Modell weitergibt — und `data_cache.save()` serialisiert die Modelle. Zwischen dem Einbau und dem Umbau lief die Anwendung einmal (Log 21:09, Cache neu geschrieben 21:25). Danach: **976 von 976 Karten ohne Markup, alle sechs betroffenen Fächer.** Kein Datenverlust im engeren Sinn — der Belohnungstext selbst ist vollständig und richtig, verloren ist nur GGGs Farbangabe, und ein erneuter Abruf des Fachs bringt sie zurück. Wer nichts abruft, behält den farblosen Stand.
+
+**Behoben durch eine Trennung, die es im Modell längst gibt.** `explicitMods`/`implicitMods` tragen wieder GENAU die Rohantwort; `explicit_mods`/`implicit_mods` daneben liefern denselben Text ohne Markup. Das ist dieselbe Konvention wie bei `display_name`, `socket_string`, `flavour_text`: camelCase ist, was die API gesagt hat, snake_case ist, was man anzeigt. `markup_segments()` gibt zusätzlich `(Farbname, Text)`-Abschnitte heraus, aus denen die Oberfläche die farbige Zeile baut.
+
+Der Preis der Umstellung ist real und war der ursprüngliche Grund für den Validator: Ein neuer Verwerter, der `explicitMods` direkt liest, schreibt wieder `<currencyitem>{…}` in die Oberfläche. Es gibt sechs solche Stellen (Mods-Spalte, Suchindex, Spalten-Tooltip, Detail-Panel, Zoom-Fenster, CSV-Export), alle umgestellt, alle durch Tests belegt. Die Wahl steht zwischen "kann an einer neuen Stelle hässlich aussehen" und "verliert stillschweigend Daten, die nur ein voller Neuabruf zurückholt" — das ist keine schwere Wahl.
+
+**Wie vermeiden:** Drei Lehren. Erstens — **bevor ein Wert aus einer Fremd-API rekonstruiert wird, gehört ein Blick in die Rohantwort, ob er nicht schon dabei ist.** Die Regel hier war sorgfältig gebaut und an zehn Stichproben belegt, das Feld daneben stand die ganze Zeit im selben JSON. Zehn Stichproben belegen keine Regel, sie belegen zehn Fälle; hier waren es 92,5 % Trefferquote, und der Rest fiel still aus. Verwandt mit #63, wo ebenfalls ein zweites Feld derselben Zeile die Antwort trug. Zweitens — **Text aus einer Fremd-API ist nicht schon deshalb Anzeigetext, weil er lesbar aussieht.** Er ist für die Oberfläche der Quelle formatiert. Auffällig wurde das erst, weil es genau eine Item-Art betrifft; ein Fehler, der 2 % der Daten betrifft, findet sich nicht beim Draufschauen, sondern nur, indem man alle Daten durch den Code laufen lässt und zählt.
+
+Drittens, aus dem Nachtrag — **wo ein Modell persistiert wird, ist jede Umformung IM MODELL eine Umformung des Datenbestands.** Der Filter war als Anzeige-Entscheidung gedacht und wirkte als Migration: einmal die Anwendung gestartet, und der Cache trug den gefilterten Stand. Was eine Anzeige nicht braucht, braucht der Cache trotzdem — spätestens die nächste Funktion. Anzeige-Aufbereitung gehört deshalb in eine Eigenschaft neben das Feld, nicht in einen Validator davor. Verwandt mit #62 und #65: Alle drei Fälle drehen sich darum, dass die Cache-Datei beiläufig überschrieben wird, während man an etwas anderem arbeitet.
+
+**Was das für den vorhandenen Cache heißt:** Die Farbangaben kommen fachweise zurück, sobald ein Fach neu abgerufen wird — im Normalbetrieb also von selbst. Wer sie sofort vollständig will, drückt einmal "Load All Tabs".

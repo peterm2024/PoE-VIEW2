@@ -6,7 +6,8 @@ festgehaltenen Beobachtungen.
 
 from poe_view.api.models import (Character, Item, ItemProperty, StashTab,
                                  dominant_category, gem_level, gem_quality,
-                                 get_property_value, item_category)
+                                 get_property_value, item_category,
+                                 markup_segments)
 
 
 def test_max_links_is_the_largest_socket_group() -> None:
@@ -131,6 +132,136 @@ def test_explicit_mods_plain_strings_still_work() -> None:
     item = Item.model_validate({"typeLine": "Map", "frameType": 0,
                                 "explicitMods": ["Area contains an additional Boss"]})
     assert item.explicitMods == ["Area contains an additional Boss"]
+
+
+# --- GGGs Faerbungs-Markup in Mod- und Spruchtexten ---
+#
+# Alle Beispiele sind woertlich aus Peters Stash-Cache (2026-08-06)
+# uebernommen. In den Mods tragen es AUSSCHLIESSLICH Divination Cards (952
+# von 975), Spruchtexte auch Uniques.
+
+def test_mods_are_stripped_of_ggg_colour_markup() -> None:
+    """Ohne Filter stand woertlich "<currencyitem>{3x Orb of Fusing}" im
+    Item-Fenster — Tags und geschweifte Klammern inklusive."""
+    card = Item.model_validate({
+        "typeLine": "Loyalty", "frameType": 6,
+        "explicitMods": ["<currencyitem>{3x Orb of Fusing}"],
+    })
+    assert card.explicit_mods == ["3x Orb of Fusing"]
+
+
+def test_the_raw_field_keeps_the_markup_the_api_delivered() -> None:
+    """Gefiltert wird in der EIGENSCHAFT, nicht im Feld. Der Daten-Cache
+    serialisiert die Modelle — wuerde schon das Feld gefiltert, waere
+    GGGs Farbangabe nach dem ersten Speichern dauerhaft verloren, und
+    damit die einzige Auskunft darueber, ob eine Karte eine Waehrung oder
+    ein Unique verspricht."""
+    card = Item.model_validate({
+        "typeLine": "Loyalty", "frameType": 6,
+        "explicitMods": ["<currencyitem>{3x Orb of Fusing}"],
+    })
+    assert card.explicitMods == ["<currencyitem>{3x Orb of Fusing}"]
+    assert card.model_dump()["explicitMods"] == ["<currencyitem>{3x Orb of Fusing}"]
+
+
+def test_nested_markup_is_stripped_from_the_inside_out() -> None:
+    """``<size:26>{<rareitem>{Map}}`` — die Groessenangabe umschliesst die
+    Farbangabe. Ein einzelner Ersetzungsdurchlauf laesst die aeussere
+    Klammer stehen."""
+    card = Item.model_validate({
+        "typeLine": "The Cartographer's Delight", "frameType": 6,
+        "explicitMods": ["<size:26>{<rareitem>{Map}}\r\n"
+                        "<size:26>{<default>{Map Tier:} <normal>{13}}"],
+    })
+    assert card.explicit_mods == ["Map\nMap Tier: 13"]
+
+
+def test_carriage_returns_from_the_api_become_plain_newlines() -> None:
+    """Die API trennt Zeilen mit ``\\r\\n``; ein stehengebliebenes ``\\r``
+    zeichnet Qt als Ersatzkaestchen mitten im Text."""
+    card = Item.model_validate({
+        "typeLine": "Emperor's Luck", "frameType": 6,
+        "explicitMods": ["<currencyitem>{5x Chaos Orb}\r\nzweite Zeile"],
+    })
+    assert "\r" not in card.explicit_mods[0]
+    assert card.explicit_mods[0] == "5x Chaos Orb\nzweite Zeile"
+
+
+# --- markup_segments: dieselbe Auszeichnung, aber mit Blick hinein ---
+
+def test_markup_segments_keeps_the_colour_name_with_the_text() -> None:
+    """Aus dem Text allein laesst sich nicht zurueckgewinnen, ob eine
+    Karte eine Waehrung oder ein Unique verspricht — GGG sagt es nur im
+    Tag."""
+    assert markup_segments("<currencyitem>{3x Orb of Fusing}") == [
+        ("currencyitem", "3x Orb of Fusing")]
+    assert markup_segments("<uniqueitem>{Doomfletch}") == [
+        ("uniqueitem", "Doomfletch")]
+
+
+def test_markup_segments_splits_a_line_into_its_coloured_parts() -> None:
+    assert markup_segments("<default>{Item Level:} <normal>{100}") == [
+        ("default", "Item Level:"), (None, " "), ("normal", "100")]
+
+
+def test_markup_segments_uses_the_innermost_tag() -> None:
+    """``<size:26>`` ist die Schriftgroesse, nicht die Farbe — massgeblich
+    ist die Angabe, die dem Text am naechsten steht."""
+    assert markup_segments("<size:26>{<rareitem>{Map}}") == [("rareitem", "Map")]
+
+
+def test_markup_segments_marks_untagged_text_as_colourless() -> None:
+    assert markup_segments("ganz ohne Auszeichnung") == [
+        (None, "ganz ohne Auszeichnung")]
+
+
+def test_flavour_text_is_joined_before_the_markup_is_stripped() -> None:
+    """Die API liefert den Spruchtext zeilenweise, das Markup umschliesst
+    aber die GANZE Liste: ``<size:24>{`` steht in der ersten Zeile, die
+    schliessende Klammer in der letzten. Zeilenweise gefiltert bliebe
+    beides stehen."""
+    card = Item.model_validate({
+        "typeLine": "Vile Power", "frameType": 6,
+        "flavourText": ["<size:24>{Dread and danger \r", "makes the air feel thin. \r",
+                        "can never wait.}"],
+    })
+    assert card.flavour_text == ("Dread and danger \nmakes the air feel thin. \n"
+                                "can never wait.")
+
+
+def test_flavour_text_without_markup_survives_unchanged() -> None:
+    card = Item.model_validate({
+        "typeLine": "Loyalty", "frameType": 6,
+        "flavourText": ["Bound by fate,\r", "inseparable by choice."],
+    })
+    assert card.flavour_text == "Bound by fate,\ninseparable by choice."
+
+
+def test_flavour_text_is_empty_when_it_is_only_glyph_references() -> None:
+    """Drei Items ("The Messenger", "The Beachhead", "The Fracturing
+    Spinner") tragen statt Text nur Verweise auf eine Runen-Schrift, die
+    wir nicht haben. Uebrig blieben ein paar Leerzeichen — eine leere
+    Kursivzeile unter dem Item sieht nach Fehler aus, deshalb faellt sie
+    ganz weg."""
+    card = Item.model_validate({
+        "typeLine": "The Messenger", "frameType": 6,
+        "flavourText": ["<<HBGAa>><<HBG01>><<HBGAc>>\r\n", "<<HBGAa>><<HBG01>>"],
+    })
+    assert card.flavour_text == ""
+
+
+def test_item_without_flavour_text_reports_none() -> None:
+    assert Item.model_validate({"typeLine": "Chaos Orb", "frameType": 5}).flavour_text == ""
+
+
+def test_the_filter_does_not_swallow_ordinary_angle_brackets() -> None:
+    """Die Glyphen-Aufraeumregel entfernt nur die DOPPELTE Form
+    (``<<HBGAa>>``). Eine Regel, die alles in spitzen Klammern loescht,
+    wuerde echten Text stillschweigend mitnehmen — und still geloescht ist
+    schlimmer als sichtbar falsch."""
+    item = Item.model_validate({"typeLine": "Weird", "frameType": 2,
+                                "explicitMods": ["Bows & <Wands>"]})
+    assert item.explicit_mods == ["Bows & <Wands>"]
 
 
 def test_stash_display_name_from_real_special_tab_structures() -> None:

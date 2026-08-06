@@ -223,7 +223,7 @@ class ItemTableModel(QAbstractTableModel):
                 req_attribute(item, "Str") or "–",
                 req_attribute(item, "Dex") or "–",
                 req_attribute(item, "Int") or "–",
-                " · ".join(item.explicitMods))  # v. a. Map-Modifikatoren
+                " · ".join(item.explicit_mods))  # v. a. Map-Modifikatoren
 
     def content_signature(self) -> int:
         """Kennzahl über den ANGEZEIGTEN Inhalt — gleiche Zahl bedeutet
@@ -253,7 +253,8 @@ class ItemTableModel(QAbstractTableModel):
         prop_text = " ".join(p.display_text for p in item.properties)
         return (f"{item.display_name} {item.typeLine} {item.baseType} "
                f"{item.rarity} {source} {item.socket_string} "
-               f"{' '.join(item.explicitMods)} {' '.join(item.implicitMods)} {prop_text}").lower()
+               f"{' '.join(item.explicit_mods)} {' '.join(item.implicit_mods)} "
+               f"{prop_text}").lower()
 
     def set_price_index(self, index: PriceIndex | None) -> None:
         """Preise treffen meist ASYNCHRON nach ``set_items()`` ein (poe.ninja
@@ -383,7 +384,7 @@ class ItemTableModel(QAbstractTableModel):
             return text.lower()
         if role == Qt.ItemDataRole.ToolTipRole and col == MODS_COL:
             # Mods können lang werden — Tooltip zeigt sie zeilenweise komplett.
-            return "\n".join(item.explicitMods) or None
+            return "\n".join(item.explicit_mods) or None
         if role == Qt.ItemDataRole.DecorationRole and col == ICON_COL:
             pm = self._pixmaps.get(item.icon)
             if pm:

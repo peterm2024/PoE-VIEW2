@@ -30,7 +30,7 @@ import json
 import re
 
 from poe_view.api.models import (Item, gem_level, gem_quality, item_category,
-                                 req_attribute, req_level)
+                                 req_attribute, req_level, strip_display_markup)
 from poe_view.api.ninja import PriceIndex
 
 # Mehrwertige Felder (Mod-Listen, Properties) in einer Zelle.
@@ -93,13 +93,20 @@ def _extra(item: Item, field: str) -> object:
 
 
 def _joined_list(item: Item, field: str) -> str:
-    """Listenfeld als eine Zelle. Deckt Modellfelder und Zusatzfelder ab."""
+    """Listenfeld als eine Zelle. Deckt Modellfelder und Zusatzfelder ab.
+
+    GGGs Färbungs-Markup fällt dabei weg (``strip_display_markup``): In
+    einer Tabellenkalkulation ist ``<currencyitem>{3x Orb of Fusing}``
+    unbrauchbar. Der Filter steht hier und nicht am Modellfeld, weil
+    ``craftedMods`` und Konsorten gar keine Modellfelder sind, sondern
+    über ``extra="allow"`` durchkommen — sie brauchen dieselbe
+    Behandlung. Wer die Rohfassung will, exportiert mit ``raw_json``."""
     value = getattr(item, field, None)
     if value is None:
         value = _extra(item, field)
     if not isinstance(value, list):
         return ""
-    return _LIST_SEP.join(str(entry) for entry in value)
+    return _LIST_SEP.join(strip_display_markup(str(entry)) for entry in value)
 
 
 def _properties_text(item: Item) -> str:

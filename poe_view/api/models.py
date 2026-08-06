@@ -8,13 +8,103 @@ Beobachtetes Verhalten der einzelnen Felder: docs/api-notes/ggg-api.md.
 
 from __future__ import annotations
 
+import re
+
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+# GGGs Färbungs-Markup in Mod- und Flavour-Texten: ``<tag>{Text}``, wobei
+# das Tag die Farbe im Spiel-Tooltip bestimmt (``<currencyitem>`` gold,
+# ``<corrupted>`` rot …) und ``<size:26>`` zusätzlich die Schriftgröße.
+# Verschachtelung kommt real vor (``<size:26>{<rareitem>{Map}}``), deshalb
+# wird von innen nach außen so lange ersetzt, bis sich nichts mehr ändert.
+#
+# Ausschließlich Divination Cards tragen es in ihren Mods (952 von 975
+# Karten in Peters Cache, kein einziges anderes Item), Flavour-Texte auch
+# bei Uniques. Ohne Filter stand wörtlich "<currencyitem>{3x Orb of
+# Fusing}" im Fenster.
+_DISPLAY_MARKUP = re.compile(r"<[a-zA-Z][a-zA-Z0-9]*(?::[^<>{}]*)?>\{([^{}]*)\}")
+
+# Eine zweite, ganz andere Auszeichnung: DOPPELTE spitze Klammern
+# verweisen auf Sonderglyphen (``<<HBGAa>><<HBG01>>…`` — die Runen-Schrift
+# auf "The Messenger", "The Beachhead", "The Fracturing Spinner"). Die
+# Glyphen haben wir nicht, also fällt der Verweis weg; was dann übrig
+# bleibt, ist meist gar nichts — siehe ``Item.flavour_text``.
+#
+# Bewusst NUR die doppelte Form. Eine Regel, die alles in spitzen Klammern
+# entfernt, verschluckt auch echten Text ("Bows & <Wands>") — und das
+# unbemerkt. Bleibt umgekehrt einmal eine unpaarige Auszeichnung stehen,
+# ist sie im Fenster zu sehen und damit zu bemerken. Sichtbar falsch ist
+# besser als still gelöscht.
+_LEFTOVER_TAG = re.compile(r"<<[^<>]*>>")
 
 # frameType → Rarity (Textfarbe im UI)
 FRAME_TYPE_NAMES = {
     0: "Normal", 1: "Magic", 2: "Rare", 3: "Unique", 4: "Gem",
     5: "Currency", 6: "Divination Card", 7: "Quest", 8: "Prophecy", 9: "Relic",
 }
+
+
+def strip_display_markup(text: str) -> str:
+    """GGGs Färbungs-Markup entfernen und nur den lesbaren Text behalten.
+
+    ``"<currencyitem>{3x Orb of Fusing}"`` → ``"3x Orb of Fusing"``.
+
+    Die Zeilenenden kommen als ``\\r\\n`` bzw. als einzelnes ``\\r`` aus der
+    API (real geprüft: Flavour-Texte enden zeilenweise auf ``\\r``) — ein
+    stehengebliebenes ``\\r`` zeichnet Qt als Ersatzkästchen, deshalb wird
+    hier auf ``\\n`` vereinheitlicht."""
+    previous = None
+    while previous != text:
+        previous = text
+        text = _DISPLAY_MARKUP.sub(r"\1", text)
+    text = _LEFTOVER_TAG.sub("", text)
+    return text.replace("\r\n", "\n").replace("\r", "\n")
+
+
+# Dasselbe Markup, aber offen für den Blick hinein: Tag und Inhalt
+# getrennt. ``<size:26>`` interessiert dabei nicht — die Schriftgröße
+# bestimmt unsere Oberfläche selbst —, wohl aber der Farbname.
+_MARKUP_SEGMENT = re.compile(r"<([a-zA-Z][a-zA-Z0-9]*)(?::[^<>{}]*)?>\{([^{}]*)\}")
+
+
+def markup_segments(text: str) -> list[tuple[str | None, str]]:
+    """Text in ``(Farbname, Inhalt)``-Abschnitte zerlegen.
+
+    ``"<default>{Item Level:} <normal>{100}"`` →
+    ``[("default", "Item Level:"), (None, " "), ("normal", "100")]``.
+
+    Gegenstück zu ``strip_display_markup``: Statt die Auszeichnung
+    wegzuwerfen, wird sie zugänglich gemacht. GGG sagt darin, in welcher
+    Farbe das Spiel den Abschnitt zeigt — bei einer Divination Card also,
+    ob die Belohnung eine Währung, ein Gem oder ein Unique ist. Diese
+    Auskunft ist maßgeblich und lässt sich aus dem Text selbst nicht
+    zurückgewinnen; ``<currencyitem>{3x Orb of Fusing}`` und
+    ``<uniqueitem>{Doomfletch}`` unterscheiden sich sonst in nichts.
+
+    ``None`` als Farbname heißt "keine Angabe" — der Abschnitt bekommt die
+    normale Textfarbe. Verschachtelung wird vorher aufgelöst, sodass
+    ``<size:26>{<rareitem>{Map}}`` als ``[("rareitem", "Map")]``
+    herauskommt; ausschlaggebend ist immer die INNERSTE Angabe, denn sie
+    steht dem Text am nächsten."""
+    # Erst die äußeren Hüllen abtragen: Solange ein Tag nur ein einzelnes
+    # weiteres Tag umschließt, ist die äußere Angabe für die Farbe ohne
+    # Belang (in der Praxis ist es die Schriftgröße).
+    previous = None
+    while previous != text:
+        previous = text
+        text = re.sub(r"<[a-zA-Z][a-zA-Z0-9]*(?::[^<>{}]*)?>\{((?:[^{}]*\{[^{}]*\})+[^{}]*)\}",
+                      r"\1", text)
+
+    segments: list[tuple[str | None, str]] = []
+    position = 0
+    for match in _MARKUP_SEGMENT.finditer(text):
+        if match.start() > position:
+            segments.append((None, text[position:match.start()]))
+        segments.append((match.group(1), match.group(2)))
+        position = match.end()
+    if position < len(text):
+        segments.append((None, text[position:]))
+    return [(tag, strip_display_markup(content)) for tag, content in segments if content]
 
 
 class ItemProperty(BaseModel):
@@ -100,9 +190,29 @@ class Item(BaseModel):
     identified: bool = True  # API liefert das Feld immer explizit, Default nur zur Sicherheit
     properties: list[ItemProperty] = Field(default_factory=list)
     requirements: list[ItemProperty] = Field(default_factory=list)
+    # Mod-Texte SO, WIE GGG SIE LIEFERT — mit Färbungs-Markup. Für die
+    # Anzeige nie direkt nehmen, sondern ``explicit_mods``/``implicit_mods``
+    # (Text ohne Markup) oder ``markup_segments`` (Text MIT Farbangabe).
+    # Die Rohfassung bleibt stehen, weil der Daten-Cache die Modelle
+    # serialisiert: Würde hier schon gefiltert, wäre GGGs Farbangabe nach
+    # dem ersten Speichern dauerhaft verloren.
     explicitMods: list[str] = Field(default_factory=list)
     implicitMods: list[str] = Field(default_factory=list)
     sockets: list[Socket] = Field(default_factory=list)
+    # Der Spruchtext unter dem Item. Zeilenweise geliefert, aber das
+    # Färbungs-Markup umschließt die GANZE Liste (``["<size:24>{Dread and
+    # danger \\r", …, "can never wait.}"]``) — deshalb nie einzeln
+    # auswerten, sondern über ``flavour_text``.
+    flavourText: list[str] = Field(default_factory=list)
+    # Dateiname des Divination-Card-Artworks, von GGG mitgeliefert. Nur
+    # Karten haben ihn (real geprüft: 976 von 976).
+    artFilename: str = ""
+    # Wie viele Stück auf einen Stapel gehen. Bei einer Divination Card
+    # ist das die SATZGRÖSSE (1 bis 27, real geprüft) — so viele muss man
+    # sammeln, um sie einzulösen. Bei Währung dagegen reine Lagerkapazität
+    # und bis 50000 groß; wer daraus etwas Grafisches baut, muss die
+    # beiden Fälle trennen.
+    maxStackSize: int | None = None
 
     @property
     def max_links(self) -> int:
@@ -144,8 +254,40 @@ class Item(BaseModel):
         bevor pydantic validiert, sonst schlägt der ganze Stash-Tab fehl."""
         if not isinstance(value, list):
             return value
-        return [entry.get("description", str(entry)) if isinstance(entry, dict) else entry
+        return [entry.get("description", str(entry)) if isinstance(entry, dict) else str(entry)
                 for entry in value]
+
+    @property
+    def explicit_mods(self) -> list[str]:
+        """``explicitMods`` als Anzeigetext, ohne GGGs Färbungs-Markup.
+
+        Die camelCase-Felder tragen, was die API geliefert hat; die
+        snake_case-Eigenschaften daneben sind das, was man anzeigt (wie
+        ``display_name``, ``socket_string``, ``flavour_text``). Jede
+        Anzeige, jeder Export und der Suchindex nehmen diese hier —
+        ``explicitMods`` direkt zu lesen bedeutet, ``<currencyitem>{…}``
+        in die Oberfläche zu schreiben."""
+        return [strip_display_markup(mod) for mod in self.explicitMods]
+
+    @property
+    def implicit_mods(self) -> list[str]:
+        """``implicitMods`` als Anzeigetext — siehe ``explicit_mods``."""
+        return [strip_display_markup(mod) for mod in self.implicitMods]
+
+    @property
+    def flavour_text(self) -> str:
+        """Der Spruchtext als fertiger Block, Markup entfernt.
+
+        Erst zusammenfügen, dann filtern: Das Markup öffnet in der ersten
+        und schließt in der letzten Zeile, zeilenweise gefiltert bliebe
+        vorne ein ``<size:24>{`` und hinten ein ``}`` stehen.
+
+        Leer, wenn nach dem Filtern nichts Lesbares übrig ist — bei den
+        drei Items mit Runen-Schrift (siehe ``_LEFTOVER_TAG``) besteht der
+        Text ausschließlich aus Glyphen-Verweisen, und eine Handvoll
+        übriggebliebener Leerzeichen ist schlechter als gar keine Zeile."""
+        joined = strip_display_markup("\n".join(self.flavourText)).strip()
+        return joined if any(ch.isalnum() for ch in joined) else ""
 
     @property
     def display_name(self) -> str:

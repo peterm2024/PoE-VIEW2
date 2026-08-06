@@ -56,6 +56,27 @@ nach [SemVer](https://semver.org/lang/de/).
   Statuszeile "No prices for this league" statt einer wortlos leeren
   Wertspalte. Der Tooltip nennt den Grund: Solo Self-Found hat keinen
   Handel, aus dem sich Preise ableiten ließen.
+- Die vergrößerte Item-Ansicht (Doppelklick auf eine Zeile) zeigt jetzt
+  den Spruchtext des Items — bei einer Divination Card das, was die Karte
+  ausmacht, bei Uniques die Hintergrundgeschichte. Er steht zwischen Bild
+  und Zahlen, kursiv in einer Serifenschrift und etwas größer; bei Karten
+  innerhalb des Kartenrahmens, durch eine Zierlinie vom Artwork getrennt.
+- Die Belohnung einer Divination Card erscheint in der Farbe, die GGG ihr
+  selbst gibt: Währung gold, Gems grün, Uniques orange, "Corrupted" rot.
+  Die Angabe steckt in denselben Auszeichnungen, die aus dem Text
+  entfernt werden — statt sie wegzuwerfen, wird sie jetzt ausgewertet.
+- Alle Texte in der vergrößerten Ansicht sind zentriert, wie in den
+  Item-Tooltips des Spiels.
+- Bei einer Divination Card steht statt "Stack Size: 7/5" der Fortschritt
+  zum nächsten Satz: `1 ▮  +  ▮ ▮ ▯ ▯ ▯` — ein voller Satz (grün), und vom
+  nächsten sind zwei von fünf Karten da. Damit ist ohne Kopfrechnen zu
+  sehen, wie weit man ist. Die genauen Zahlen stehen im Tooltip. Nur bei
+  Karten — bei Währung ist die Stapelgröße keine Satzgröße, sondern
+  Lagerkapazität und reicht bis 50 000.
+- Karten, von denen eine einzelne schon ein voller Satz ist ("Society's
+  Remorse", "The Cartographer" und fünf weitere), zeigten bisher gar
+  keine Stückzahl an — die API liefert für sie kein Stack-Size-Feld.
+  Jetzt steht dort die Anzahl mit einem grünen Rechteck (`16 ▮`).
 
 ### Geändert
 
@@ -117,6 +138,15 @@ nach [SemVer](https://semver.org/lang/de/).
   verschwundene Items grau angehängt, obwohl die Änderungen Tage
   zurücklagen. Auch die Hervorhebung vergleicht jetzt erst ab dem
   zweiten Abruf eines Charakters.
+- Bei Divination Cards stand die Belohnung mit GGGs Färbungs-Anweisungen
+  im Text: `<currencyitem>{3x Orb of Fusing}` statt "3x Orb of Fusing".
+  Betraf 952 der 975 Karten in einem echten Stash und ausschließlich
+  Karten — kein anderes Item trägt dieses Markup.
+- Rund jede vierzehnte Divination Card blieb ohne Artwork und zeigte den
+  generischen Kartenrücken. Der Dateiname wurde aus dem Kartennamen
+  gebaut, obwohl die API ihn mitliefert; bei 28 von 373 Kartentypen
+  weichen beide voneinander ab ("The Cartographer" heißt auf dem Server
+  "TheMapmaker"). Jetzt zählt die Angabe der API.
 
 ## [0.5.1] - 2026-08-04
 

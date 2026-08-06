@@ -138,13 +138,26 @@ def divination_card_art_url(item: Item) -> str | None:
     real geprüft an Peters Stash-Cache, 2026-07-31) und deshalb für eine
     vergrößerte Ansicht wertlos.
 
-    URL-Muster PascalCase ohne Trenner, live an zehn echten Karten
-    verifiziert: Leerzeichen verschwinden, jedes Wort wird groß
-    geschrieben — AUCH kleine Füllwörter ("of" -> "Of", "Rain of Chaos" ->
-    "RainOfChaos") — und Satzzeichen INNERHALB eines Wortes fallen weg,
-    ohne das Wort zu zerteilen ("Hunter's Reward" -> "HuntersReward",
-    NICHT "HunterSReward" — das Apostroph trennt kein neues Wort ab)."""
+    Den Dateinamen liefert die API selbst mit (``artFilename``, real
+    geprüft an allen 976 Karten in Peters Cache) — er ist maßgeblich und
+    wird bevorzugt. Der Name der Karte taugt NICHT als Ersatz dafür: Bei
+    28 von 373 Kartentypen weichen beide voneinander ab, teils bis zur
+    Unkenntlichkeit ("Mawr Blaidd" -> "RussiaDivinationCard", "The
+    Cartographer" -> "TheMapmaker", "Rebirth" -> "BirthOfTheThree"), teils
+    durch Tippfehler auf GGGs Seite ("Light and Truth" ->
+    "LigthAndTruth"). Live gegen das CDN geprüft (2026-08-06): der aus dem
+    Namen gebaute Pfad liefert dort 404, der aus ``artFilename`` gebaute
+    200 — die Karte blieb also ohne Artwork.
+
+    Nur wenn ``artFilename`` fehlt, wird der Name umgeformt: PascalCase
+    ohne Trenner, live an zehn echten Karten verifiziert — Leerzeichen
+    verschwinden, jedes Wort wird groß geschrieben, AUCH kleine Füllwörter
+    ("of" -> "Of", "Rain of Chaos" -> "RainOfChaos"), und Satzzeichen
+    INNERHALB eines Wortes fallen weg, ohne das Wort zu zerteilen
+    ("Hunter's Reward" -> "HuntersReward", NICHT "HunterSReward" — das
+    Apostroph trennt kein neues Wort ab)."""
     if item.frameType != 6:
         return None
-    slug = "".join(_card_art_word(word) for word in item.display_name.split())
+    slug = item.artFilename.strip() or "".join(
+        _card_art_word(word) for word in item.display_name.split())
     return f"{_DIVINATION_CARD_ART_BASE}/{slug}.png" if slug else None

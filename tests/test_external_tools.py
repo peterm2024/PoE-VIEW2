@@ -143,3 +143,33 @@ def test_card_art_url_handles_more_than_two_words() -> None:
 
 def test_card_art_url_is_none_for_non_divination_card_items() -> None:
     assert external_tools.divination_card_art_url(_item(typeLine="Chaos Orb", frameType=5)) is None
+
+
+def test_card_art_url_prefers_the_filename_the_api_delivers() -> None:
+    """Die aus dem Namen gebauten Pfade oben stimmen — bei 345 von 373
+    Kartentypen. Die restlichen 28 heissen auf dem CDN voellig anders, und
+    dort liefert GGGs eigenes ``artFilename`` die einzige richtige
+    Antwort. Alle vier Faelle stammen aus Peters Cache und sind am
+    2026-08-06 live gegen das CDN geprueft: mit dem konstruierten Namen
+    404, mit ``artFilename`` 200."""
+    for name, art_filename in (
+        ("Mawr Blaidd", "RussiaDivinationCard"),    # gar kein Bezug zum Namen
+        ("The Cartographer", "TheMapmaker"),        # frueherer Kartenname
+        ("Rebirth", "BirthOfTheThree"),             # frueherer Kartenname
+        ("Light and Truth", "LigthAndTruth"),       # Tippfehler auf GGGs Seite
+    ):
+        card = _item(name=name, typeLine=name, baseType=name, frameType=6,
+                    artFilename=art_filename)
+        assert (external_tools.divination_card_art_url(card)
+                == f"https://web.poecdn.com/image/divination-card/{art_filename}.png")
+
+
+def test_card_art_url_falls_back_to_the_name_without_artfilename() -> None:
+    """``artFilename`` kam an allen 976 Karten im Cache vor, aber die
+    Rekonstruktion bleibt als Rueckfallebene stehen: Ein Feld, das die API
+    einmal weglaesst, soll kein Artwork kosten. Ein leeres Feld zaehlt
+    dabei wie ein fehlendes."""
+    card = _item(name="The Doctor", typeLine="The Doctor", baseType="The Doctor",
+                frameType=6, artFilename="   ")
+    assert (external_tools.divination_card_art_url(card)
+            == "https://web.poecdn.com/image/divination-card/TheDoctor.png")
