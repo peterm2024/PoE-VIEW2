@@ -294,6 +294,32 @@ class Item(BaseModel):
         return self.name or self.typeLine or self.baseType or "?"
 
     @property
+    def lookup_name(self) -> str:
+        """Der Name, unter dem ein Mensch dieses Item wiedererkennt.
+
+        Anders als ``display_name``, das nimmt, was die API zuerst
+        anbietet: Nur Uniques (frameType 3) haben einen Eigennamen, der
+        etwas aussagt. Rares TRAGEN zwar auch einen ``name``, aber der ist
+        eine zufällig gewürfelte Fantasiebezeichnung — real an Peters
+        Cache geprüft: "Vortex Bane" für ein Rare-Messer, während
+        ``baseType`` zuverlässig "Gutting Knife" trägt. Magic-Items haben
+        gar keinen ``name``, ihr ``typeLine`` enthält aber die gewürfelten
+        Präfix-/Suffix-Wörter mit im Text ("Fleet Citrine Amulet of the
+        Flatworm") — auch hier ist ``baseType`` die bereinigte Fassung.
+        Für alle übrigen Rarities ist ``baseType`` ohnehin schon der
+        Anzeigename.
+
+        Zwei Verwerter, eine Regel: die Rechtsklick-Verlinkung zu
+        Nachschlagewerken (``ui/external_tools.py``, wo die Regel entstand
+        — FALLSTRICKE #54, PoEDB fand Rares unter ihrem Fantasienamen
+        nicht) und die Beschriftung der Ausrüstungsplätze in der
+        Paperdoll, wo der Platz für "Flagellant's Quicksilver Flask of the
+        Kaleidoscope" ohnehin nicht reicht."""
+        if self.frameType == 3 and self.name:
+            return self.name
+        return self.baseType or self.typeLine or self.name or "?"
+
+    @property
     def rarity(self) -> str:
         return FRAME_TYPE_NAMES.get(self.frameType, f"frameType {self.frameType}")
 

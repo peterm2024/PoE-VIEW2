@@ -8,6 +8,13 @@ kommen ohnehin über ``FetchCharacterItemsJob``, siehe ARCHITEKTUR.md
 einen injizierten ``pixmap_for``-Callback (üblicherweise
 ``MainWindow.table_model.pixmap_for``), damit dieses Modul nichts vom
 Worker/Icon-Cache wissen muss.
+
+Drei Lesbarkeitsmängel wurden am 2026-08-06 behoben, alle an Peters
+echten Charakteren gemessen: Die Hälfte der Namen war abgeschnitten (87
+von 171 — vier Flaschen lasen sich allesamt als "Flagell…"), die
+Rarity-Farbe der Item-Tabelle fehlte, und die Juwelen waren als einzige
+Items im Fenster nicht anklickbar. Nach der Änderung: 0 von 204
+gekürzt.
 """
 
 from __future__ import annotations
@@ -15,35 +22,50 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from PySide6.QtCore import QSize, Qt, Signal
-from PySide6.QtGui import QIcon, QPixmap
+from PySide6.QtGui import QFontMetrics, QIcon, QPixmap
 from PySide6.QtWidgets import (QDialog, QGridLayout, QGroupBox, QHBoxLayout,
-                               QLabel, QScrollArea, QSplitter, QToolButton,
-                               QVBoxLayout, QWidget)
+                               QSplitter, QToolButton, QVBoxLayout, QWidget)
 
 from poe_view.api.models import Character, Item
 from poe_view.ui.item_detail import ItemDetail
+from poe_view.ui.theme import RARITY_COLORS
 
 # GGGs inventoryId-Werte für Ausrüstungs-Slots (real geprüft, Peters
 # Stash-Cache, 2026-07-31) — "Helm" nicht "Helmet", "Offhand"/"Offhand2"
-# statt "Shield"/"Shield2". Position im Grid folgt dem klassischen
-# PoE-Charakterbogen-Layout.
+# statt "Shield"/"Shield2".
 #
-# Die zweite Spalte ist die sichtbare Beschriftung des leeren Platzes und
+# Die Anordnung folgt PoEs eigenem Inventar-Fenster. Sie stand vorher nach
+# meiner Erinnerung im Code und war an zwei Stellen falsch (Peter schickte
+# am 2026-08-07 einen Screenshot seines laufenden Spiels): Die Ringe
+# flankieren die RÜSTUNG, nicht den Gürtel, und das Amulett sitzt RECHTS
+# NEBEN DEM HELM, nicht zwischen den Waffen. Handschuhe, Gürtel und
+# Stiefel liegen auf einer Höhe.
+#
+#        c0        c1        c2        c3        c4
+#   r0             ·        Helm     Amulet       ·
+#   r1   Weapon   Ring      Body     Ring2     Off Hand
+#   r2      ·    Gloves     Belt     Boots        ·
+#
+# Im Spiel sind Waffe und Zweithand vier Felder hoch und die Rüstung drei;
+# mit gleich großen Plätzen lässt sich das nicht nachbauen, wohl aber ihre
+# Lage zueinander — und darum geht es hier.
+#
+# Die letzte Spalte ist die sichtbare Beschriftung des leeren Platzes und
 # deshalb ENGLISCH (Oberfläche englisch, Kommentare deutsch — dieselbe
 # Trennung wie in ``help_dialog.py``/``settings_dialog.py``). Bewusst die
 # Slot-Namen aus dem Spiel selbst, nicht die der API: Ein Spieler kennt
 # "Off Hand", nicht "Offhand2".
 _DOLL_SLOTS = (
-    (0, 1, "Helm", "Helmet"),
+    (0, 2, "Helm", "Helmet"),
+    (0, 3, "Amulet", "Amulet"),
     (1, 0, "Weapon", "Weapon"),
-    (1, 1, "Amulet", "Amulet"),
-    (1, 2, "Offhand", "Off Hand"),
-    (2, 1, "BodyArmour", "Body Armour"),
-    (3, 0, "Ring", "Ring"),
-    (3, 1, "Belt", "Belt"),
-    (3, 2, "Ring2", "Ring"),
-    (4, 0, "Gloves", "Gloves"),
-    (4, 2, "Boots", "Boots"),
+    (1, 1, "Ring", "Ring"),
+    (1, 2, "BodyArmour", "Body Armour"),
+    (1, 3, "Ring2", "Ring"),
+    (1, 4, "Offhand", "Off Hand"),
+    (2, 1, "Gloves", "Gloves"),
+    (2, 2, "Belt", "Belt"),
+    (2, 3, "Boots", "Boots"),
 )
 
 # Nur gezeigt, wenn der Charakter tatsächlich etwas darin trägt — ein
@@ -56,6 +78,45 @@ _SWAP_SLOTS = (("Weapon2", "Weapon (swap)"), ("Offhand2", "Off Hand (swap)"))
 _TRINKET_SLOT = ("Trinket", "Trinket")
 
 
+# Ein Platz ist so breit, dass die üblichen Basis-Namen in zwei Zeilen
+# passen. Vorher waren es 88 px bei EINER Zeile — an Peters echten
+# Charakteren gemessen wurden dadurch 87 von 171 Ausrüstungsteilen
+# abgeschnitten, also die Hälfte. Vier Flaschen lasen sich allesamt als
+# "Flagell…" und waren nicht auseinanderzuhalten.
+_SLOT_WIDTH = 104
+_SLOT_HEIGHT = 104
+_ICON_SIZE = 48
+_NAME_LINES = 2
+
+# So breit wie die Ausrüstungspuppe darüber (fünf Plätze), damit das
+# Juwelen-Raster nicht aus dem Fenster ragt.
+_JEWELS_PER_ROW = 5
+
+
+def _fit_name(text: str, metrics: QFontMetrics, width: int) -> str:
+    """Namen auf höchstens ``_NAME_LINES`` Zeilen umbrechen, an
+    Wortgrenzen; passt das letzte Wort nicht mehr, wird nur DIESE Zeile
+    gekürzt.
+
+    Qts ``QToolButton`` kann nicht selbst umbrechen — es kürzt einzeilig
+    mit Auslassungspunkten. Ein manuell eingefügter Zeilenumbruch wird
+    dagegen gezeichnet."""
+    words = text.split()
+    if not words:
+        return text
+    lines: list[str] = [words[0]]
+    for word in words[1:]:
+        probe = f"{lines[-1]} {word}"
+        if metrics.horizontalAdvance(probe) <= width:
+            lines[-1] = probe
+        elif len(lines) < _NAME_LINES:
+            lines.append(word)
+        else:
+            lines[-1] = probe  # passt nicht mehr, wird unten gekürzt
+    lines[-1] = metrics.elidedText(lines[-1], Qt.TextElideMode.ElideRight, width)
+    return "\n".join(lines)
+
+
 class _SlotButton(QToolButton):
     """Ein Ausrüstungsplatz: Icon + Name, leer bleibt ein deaktivierter
     Platzhalter (kein Item zum Anzeigen)."""
@@ -64,8 +125,8 @@ class _SlotButton(QToolButton):
 
     def __init__(self, empty_label: str) -> None:
         super().__init__()
-        self.setFixedSize(88, 88)
-        self.setIconSize(QSize(48, 48))
+        self.setFixedSize(_SLOT_WIDTH, _SLOT_HEIGHT)
+        self.setIconSize(QSize(_ICON_SIZE, _ICON_SIZE))
         self.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
         self._empty_label = empty_label
         self.clicked.connect(self._on_clicked)
@@ -78,11 +139,22 @@ class _SlotButton(QToolButton):
             self.setIcon(QIcon())
             self.setEnabled(False)
             self.setToolTip("")
+            self.setStyleSheet("")
             return
         self.setEnabled(True)
-        self.setText(item.display_name)
+        # Beschriftet wird mit lookup_name, nicht display_name: Der
+        # gewürfelte Fantasiename eines Rares ("Vortex Bane") sagt nichts,
+        # seine Basis ("Gutting Knife") schon — und die Affix-Kette eines
+        # Magic-Items passt hier ohnehin nie hin. Der vollständige Name
+        # steht im Tooltip und beim Klick im Detail-Panel.
+        self.setText(_fit_name(item.lookup_name, self.fontMetrics(),
+                              _SLOT_WIDTH - 10))
         self.setToolTip(item.display_name)
         self.setIcon(QIcon(pixmap) if pixmap else QIcon())
+        # Rarity-Farbe wie in der Item-Tabelle — sonst sieht man der Puppe
+        # nicht an, welches Teil das Unique ist.
+        colour = RARITY_COLORS.get(item.frameType)
+        self.setStyleSheet(f"QToolButton {{ color: {colour}; }}" if colour else "")
 
     def _on_clicked(self) -> None:
         if self._item is not None:
@@ -140,17 +212,22 @@ class PaperdollDialog(QDialog):
         if extra_row.count() > 1:  # mehr als nur der abschließende Stretch
             left.addLayout(extra_row)
 
+        # Juwelen wie jeder andere Platz: anklickbar, mit Icon und
+        # Rarity-Farbe. Vorher standen sie als reine Textliste in einem
+        # Rollbereich darunter — die einzigen Items im Fenster, die auf
+        # einen Klick nicht reagierten, und die Liste schnitt regelmäßig
+        # mitten in einer Zeile ab. Ein Raster wächst stattdessen nach
+        # unten; ein Charakter trägt selten mehr als eine Handvoll.
         jewels = by_slot.get("PassiveJewels", [])
         if jewels:
             jewel_box = QGroupBox(f"Jewels in the passive tree ({len(jewels)})")
-            jewel_layout = QVBoxLayout(jewel_box)
-            jewel_list = QLabel("\n".join(j.display_name for j in jewels))
-            jewel_list.setWordWrap(True)
-            scroll = QScrollArea()
-            scroll.setWidget(jewel_list)
-            scroll.setWidgetResizable(True)
-            scroll.setMaximumHeight(120)
-            jewel_layout.addWidget(scroll)
+            jewel_grid = QGridLayout(jewel_box)
+            for index, jewel in enumerate(jewels):
+                btn = _SlotButton("Jewel")
+                btn.set_item(jewel, pixmap_for(jewel))
+                btn.picked.connect(self._show_detail)
+                jewel_grid.addWidget(btn, index // _JEWELS_PER_ROW,
+                                    index % _JEWELS_PER_ROW)
             left.addWidget(jewel_box)
 
         left_widget = QWidget()

@@ -88,6 +88,25 @@ nach [SemVer](https://semver.org/lang/de/).
 
 ### Geändert
 
+- Das Charakter-Fenster (Doppelklick auf einen Charakter) zeigt die
+  Ausrüstung endlich lesbar: Die Hälfte der Namen war abgeschnitten — an
+  einem echten Charaktersatz gemessen 87 von 171 Teilen, vier Flaschen
+  lasen sich allesamt als "Flagell…" und waren nicht auseinanderzuhalten.
+  Die Plätze sind jetzt breiter, brechen lange Namen auf zwei Zeilen um
+  und zeigen die Basis statt des gewürfelten Fantasienamens eines Rares
+  ("Gutting Knife" statt "Vortex Bane"); der vollständige Name steht im
+  Tooltip. Ergebnis: kein einziger gekürzter Name mehr.
+- Die Ausrüstungsplätze tragen jetzt die Rarity-Farben der Item-Tabelle —
+  vorher war alles weiß, und man sah der Puppe nicht an, welches Teil das
+  Unique ist.
+- Die Juwelen aus dem Passiv-Baum sind anklickbar wie jeder andere Platz,
+  mit Icon und Farbe. Vorher waren sie eine reine Textliste in einem
+  Rollbereich, die einzigen Items im Fenster ohne Reaktion auf einen
+  Klick, und die Liste schnitt regelmäßig mitten in einer Zeile ab.
+- Die Ausrüstungsplätze liegen jetzt so wie in PoEs eigenem
+  Inventar-Fenster: Ringe links und rechts der Rüstung, Amulett rechts
+  neben dem Helm, Handschuhe/Gürtel/Stiefel auf einer Höhe. Bisher stand
+  das Amulett zwischen den Waffen und die Ringe flankierten den Gürtel.
 - Statuszeile aufgeräumt: Die beiden Refresh-Angaben sind zu einer
   zusammengefasst ("Single — next update in 1s · 0/94 tabs"), und der
   Hinweis zur fehlenden Zugehörigkeit zu Grinding Gear Games steht jetzt

@@ -76,31 +76,18 @@ def _underscore_name(text: str) -> str:
     return slug.replace("(", "%28").replace(")", "%29")
 
 
-def _lookup_name(item: Item) -> str:
-    """Nur Uniques (frameType 3) haben einen Eigennamen, unter dem sich ein
-    Item in einem Nachschlagewerk gezielt finden lässt (Peter, 2026-08-01:
-    "Uniques können jedoch gezielt gesucht werden"). Rares TRAGEN zwar auch
-    einen ``name``, aber der ist eine zufällig gewürfelte
-    Fantasiebezeichnung ohne eigene Seite — real an Peters Cache geprüft:
-    ``name`` z. B. "Vortex Bane" für ein Rare-Messer, während ``baseType``
-    zuverlässig den Basis-Typ trägt ("Gutting Knife"). Magic-Items haben
-    gar keinen ``name``, aber ihr ``typeLine`` enthält die gewürfelten
-    Präfix-/Suffix-Wörter mit im Text ("Fleet Citrine Amulet of the
-    Flatworm") — auch hier ist ``baseType`` die bereinigte Fassung
-    ("Citrine Amulet"). Für alle anderen Rarities (Normal, Gems, Currency,
-    Divination Cards, …) ist ``baseType`` ohnehin schon der Anzeigename
-    (real geprüft, keine Affixe möglich)."""
-    if item.frameType == 3 and item.name:
-        return item.name
-    return item.baseType or item.typeLine or item.name or "?"
-
-
 def build_url(entry: ToolEntry, item: Item) -> str:
     """``{slug}`` in der Vorlage durch den (nach Rarity passenden, siehe
-    ``_lookup_name``) Item-Namen ersetzen (Leerzeichen -> Unterstrich).
+    ``Item.lookup_name``) Item-Namen ersetzen (Leerzeichen -> Unterstrich).
     Weitere Platzhalter gibt es bewusst nicht — das deckt Ein-Wert-Schemas
-    ab, wie sie MediaWiki-artige Seiten nutzen, siehe Modul-Docstring."""
-    return entry.url_template.replace("{slug}", _underscore_name(_lookup_name(item)))
+    ab, wie sie MediaWiki-artige Seiten nutzen, siehe Modul-Docstring.
+
+    Die Regel "Uniques unter ihrem Eigennamen, alles andere unter der
+    Basis" entstand hier (FALLSTRICKE #54: PoEDB fand Rares unter ihrem
+    gewürfelten Fantasienamen nicht), steht aber seit 2026-08-06 im Modell
+    — die Paperdoll beschriftet ihre Ausrüstungsplätze nach derselben
+    Überlegung."""
+    return entry.url_template.replace("{slug}", _underscore_name(item.lookup_name))
 
 
 def tools_to_json(entries: list[ToolEntry]) -> str:
