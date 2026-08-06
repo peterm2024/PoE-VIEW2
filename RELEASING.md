@@ -73,7 +73,16 @@ Changelog heraus. Alternativ lässt sich der Text manuell einfügen;
 
 ## 4. Einmalig: Repo-Metadaten für Auffindbarkeit
 
-Unabhängig vom Release, aber für die Auffindbarkeit entscheidend: Die
+**Die Repo-Beschreibung ("About") gehört auf Englisch** — sie steht
+neben der README und im GitHub-Suchergebnis, richtet sich also an
+dieselbe Leserschaft. Damit gilt hier dieselbe Grenze wie im ganzen
+Projekt: Oberfläche und alles nach außen Sichtbare englisch,
+Projektdoku und Code-Kommentare deutsch. Sie ist die einzige
+nutzersichtbare Stelle, die außerhalb des Repos liegt und deshalb von
+keinem Test erfasst wird (Peter fand sie am 2026-08-07 auf Deutsch,
+nachdem v0.6.0 schon veröffentlicht war).
+
+Für die Auffindbarkeit entscheidend: Die
 GitHub-Topics (Repo-Seite, Zahnrad neben "About") steuern die
 GitHub-interne Suche und die Indexierung durch Suchmaschinen. Git-Tags
 tun das nicht. Gesetzt sind (Stand 2026-08-03, GitHub erlaubt bis zu 20):
