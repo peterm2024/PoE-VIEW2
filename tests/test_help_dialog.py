@@ -48,12 +48,39 @@ def test_the_help_explains_what_the_player_test_stumbled_over(qapp) -> None:
 
 
 def test_the_help_explains_the_two_counts_in_load_all_tabs(qapp) -> None:
-    """Peters vertagter Punkt vom 2026-08-02: "Ich denke, dass die meisten
-    User mit den Zahlen nicht klar kommen." Section- und Tab-Zähler laufen
+    """Peters Punkt vom 2026-08-02: "Ich denke, dass die meisten User mit
+    den Zahlen nicht klar kommen." Abruf- und Tab-Zaehler laufen
     absichtlich auseinander."""
     text = _all_text()
-    assert "section" in text and "tab" in text
+    assert "requests" in text and "tab" in text
+    assert "section" in text                   # die Einheit dahinter
     assert "map" in text and "unique" in text  # Grund fuer die Differenz
+
+
+def test_the_help_does_not_describe_a_dialog_that_no_longer_exists(qapp) -> None:
+    """Der Fortschrittsdialog hiess bis 2026-08-06 "Section x of 1456" —
+    das Wort ist raus, weil es in PoEs Truhen-Oberflaeche keine
+    Entsprechung hat. Eine Hilfe, die Beschriftungen nennt, die es nicht
+    mehr gibt, ist schlimmer als gar keine: Sie schickt den Nutzer nach
+    etwas suchen, das er nie finden wird."""
+    text = _all_text()
+    assert "section x of" not in text
+
+
+def test_the_help_covers_what_came_after_it_was_written(qapp) -> None:
+    """Die Hilfe entstand am 2026-08-03. Alles, was danach an sichtbarer
+    Oberflaeche dazukam, muss nachgezogen werden — sonst waechst genau die
+    Luecke wieder, gegen die sie gebaut wurde."""
+    import re
+
+    # Zeilenumbruch normalisieren: Der Hilfetext ist auf Zeilenlaenge
+    # umbrochen, ein gesuchter Satz steht deshalb selten am Stueck.
+    text = re.sub(r"\s+", " ", _all_text())
+
+    assert "read-only" in text          # zweite Instanz auf demselben Konto
+    assert "pin" in text                # Spaltenfilter per Rechtsklick
+    assert "unchanged for" in text      # Statuszeile
+    assert "no prices for this league" in text  # SSF-Hinweis
 
 
 def test_the_help_explains_the_unchanged_hint_in_the_status_bar(qapp) -> None:

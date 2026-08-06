@@ -70,7 +70,13 @@ filled only for stackable items.</p>
 Settings, or quickly via right-click on a column header.</p>
 <p><b>Column filters</b> also live in that right-click menu. They accept
 comparisons, so <code>&gt;=20</code> on Quality or <code>&lt;45</code>
-on iLvl work as expected. A filtered column is marked with 🔍.</p>
+on iLvl work as expected. A filtered column is marked with 🔍. While you
+type, the field completes what you have started from the values actually
+present in that column — press Return or Tab to take the suggestion.</p>
+<p><b>📌 Pin</b> is the quick way to the same thing: right-click an item
+and pick it to filter that column down to exactly the value you clicked
+on. Right-clicking <code>MainInventory</code> in the Tab column leaves
+only items from there.</p>
 """),
     ("Type filters", """
 <h3>Type filters</h3>
@@ -132,15 +138,18 @@ it.</p>
 <p>The progress window shows two different counts, and they rarely
 match:</p>
 <ul>
-<li><b>Section x of y</b> — the actual requests. This is what the
-progress bar tracks and what the remaining time is based on.</li>
-<li><b>tab x of y</b> — your stash tabs.</li>
+<li><b>tab x of y</b> — your stash tabs, the ones you see in the game.</li>
+<li><b>x of y requests</b> — the actual calls to the API. This is what
+the progress bar tracks and what the remaining time is based on.</li>
 </ul>
-<p>The reason they differ: map and unique stash tabs are a single tab in
-your stash, but hold hundreds of sections that each need their own
-request. A stash of 500 tabs can easily mean 1000+ requests, which is
-why the tab counter can appear stuck while the section counter keeps
-moving. Nothing is wrong when that happens.</p>
+<p>The reason they differ: a map or unique stash is a single tab in your
+stash, but holds up to several hundred sections, and each one needs its
+own request. The window breaks the total down for you, so the numbers
+add up in front of you rather than looking like a contradiction. It also
+means the tab counter can sit still for a long while — that is the tool
+working through one big tab, not a hang.</p>
+<p>Remove-only tabs are fetched too. They can only shrink, never grow,
+but this button is the one you press when you want everything.</p>
 <p>You can close the window at any time; loading stops, and everything
 fetched so far is kept.</p>
 """),
@@ -204,6 +213,12 @@ it.</p>
 stored token. It does not revoke the authorisation on GGG's side — do
 that in your GGG account settings if you want it gone completely. Your
 loaded data is kept either way.</p>
+<p><b>A second window on the same account runs read-only</b>, and the
+status bar says so. Only one window may fetch and save, otherwise the
+two would write over each other and share the same request budget. The
+read-only one still browses everything already loaded — search, filters,
+item details, CSV export. Log in there with a different account and it
+becomes fully usable; accounts never get in each other's way.</p>
 <p>There is deliberately no delete function inside the program. If you
 want the local data gone, remove the folder above in Explorer.</p>
 """),

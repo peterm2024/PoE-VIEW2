@@ -46,6 +46,11 @@ nach [SemVer](https://semver.org/lang/de/).
   dort. Der Wert, nach dem man filtern will, steht meistens schon
   unter dem Mauszeiger — bisher musste man ihn im Header-Menü
   abtippen.
+- Das Hilfe-Fenster ist auf dem Stand der Oberfläche: Es beschrieb
+  noch den alten "Load All Tabs"-Dialog mit einem Zähler namens
+  "Section", den es nicht mehr gibt, und kannte weder den
+  Nur-Lese-Modus eines zweiten Fensters noch "Pin" und die
+  Vervollständigung im Spaltenfilter.
 - Die Symbole im Item-Verlauf (↑ ↓ ±) erklären sich jetzt per Tooltip.
 - In Ligen, für die poe.ninja keine Preise führt, steht in der
   Statuszeile "No prices for this league" statt einer wortlos leeren

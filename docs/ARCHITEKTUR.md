@@ -2535,6 +2535,20 @@ bleiben, an denen der Spielertest hängen geblieben ist.
 Reiter englisch, Fenstertitel und Fließtext deutsch. Das bricht dieselbe
 Grenze und ist noch offen.
 
+**Die Hilfe altert mit der Oberfläche mit — dagegen Tests.** Am
+2026-08-06 fiel bei Peters Rückfrage ("Muss die Hilfe aktualisiert
+werden?") auf, dass sie den Fortschrittsdialog noch mit einem Zähler
+namens "Section" beschrieb, den §4.32 gerade abgeschafft hatte. Eine
+Hilfe, die Beschriftungen nennt, die es nicht mehr gibt, ist schlimmer
+als gar keine: Sie schickt den Nutzer nach etwas suchen, das er nie
+finden wird. Seither sichern drei Tests das ab — einer prüft, dass die
+abgeschaffte Beschriftung NICHT mehr vorkommt, einer, dass die nach dem
+Bau der Hilfe hinzugekommenen Anzeigen (Nur-Lese-Modus, "Pin",
+"unchanged for", "No prices for this league") vorkommen, und einer hält
+die Sprachgrenze. Sie prüfen bewusst Stichworte, nicht Formulierungen:
+Die Hilfe soll umformuliert werden dürfen, ohne dass Tests brechen —
+aber nicht stillschweigend hinter der Oberfläche zurückbleiben.
+
 ### 4.29 "Updated HH:MM:SS" + Verlauf ohne gecachte Vergleichsbasis
 
 Zwei Beobachtungen Peters vom 2026-08-04, beide aus dem laufenden Spiel
