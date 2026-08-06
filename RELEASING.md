@@ -11,7 +11,13 @@ Versionsstand in `CHANGELOG.md` und in `poe_view/__init__.py`
 2. `CHANGELOG.md`: Abschnitt `[Unveröffentlicht]` in `## [X.Y.Z] - JJJJ-MM-TT`
    umbenennen, neuen leeren `[Unveröffentlicht]`-Abschnitt darüber anlegen.
 3. Tests ausführen (`pytest`). Nur bei vollständig grüner Suite weitermachen.
-4. Beide Dateien committen (z. B. `Release vX.Y.Z vorbereiten`).
+4. Hat sich die Oberfläche seit dem letzten Release sichtbar geändert:
+   `python tools/make_screenshots.py`. Das Skript erzeugt die drei
+   README-Bilder neu, aus erfundenen Daten und ohne Zugriff auf den
+   echten Cache — von Hand aufgenommene Bilder sind dagegen genau der
+   Weg, auf dem versehentlich echte Konto- oder Charakternamen in die
+   README geraten. Es läuft NICHT headless, das Fenster erscheint kurz.
+5. Geänderte Dateien committen (z. B. `Release vX.Y.Z vorbereiten`).
 
 ## 2. Windows-.exe bauen
 
