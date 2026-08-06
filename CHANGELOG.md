@@ -6,6 +6,8 @@ nach [SemVer](https://semver.org/lang/de/).
 
 ## [Unveröffentlicht]
 
+## [0.6.0] - 2026-08-07
+
 ### Hinzugefügt
 
 - Hilfe-Fenster (Fragezeichen-Knopf in der Toolbar) mit elf Themen: was
@@ -619,7 +621,8 @@ Erste veröffentlichte Version.
 Die technischen Hintergründe einzelner Entscheidungen stehen in
 [FALLSTRICKE_UND_WORKAROUNDS.md](FALLSTRICKE_UND_WORKAROUNDS.md).
 
-[Unveröffentlicht]: https://github.com/peterm2024/PoE-VIEW2/compare/v0.5.1...HEAD
+[Unveröffentlicht]: https://github.com/peterm2024/PoE-VIEW2/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/peterm2024/PoE-VIEW2/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/peterm2024/PoE-VIEW2/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/peterm2024/PoE-VIEW2/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/peterm2024/PoE-VIEW2/compare/v0.3.0...v0.4.0
