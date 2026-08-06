@@ -81,6 +81,20 @@ def test_the_help_covers_what_came_after_it_was_written(qapp) -> None:
     assert "pin" in text                # Spaltenfilter per Rechtsklick
     assert "unchanged for" in text      # Statuszeile
     assert "no prices for this league" in text  # SSF-Hinweis
+    assert "backup" in text             # Sicherungen beim Start
+
+
+def test_the_help_says_where_the_backups_are_and_how_to_use_one(qapp) -> None:
+    """Eine Sicherung, von der niemand weiss, ist keine. Es gibt bewusst
+    keinen Wiederherstellen-Knopf (dieselbe Ueberlegung wie beim
+    fehlenden Loeschen-Knopf) — dann muss die Hilfe den Weg von Hand
+    beschreiben, sonst ist die Funktion praktisch nicht vorhanden."""
+    import re
+
+    text = re.sub(r"\s+", " ", _all_text())
+    assert "backups" in text            # der Ordnername
+    assert "24 hours" in text           # die Aufbewahrungsfrist
+    assert "unpack" in text             # der Weg zurueck
 
 
 def test_the_help_explains_the_unchanged_hint_in_the_status_bar(qapp) -> None:

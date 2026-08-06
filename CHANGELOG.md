@@ -56,6 +56,14 @@ nach [SemVer](https://semver.org/lang/de/).
   Statuszeile "No prices for this league" statt einer wortlos leeren
   Wertspalte. Der Tooltip nennt den Grund: Solo Self-Found hat keinen
   Handel, aus dem sich Preise ableiten ließen.
+- **Der Daten-Cache wird bei jedem Programmstart gesichert**, bevor die
+  neue Sitzung etwas daran ändern kann — nach
+  `%LOCALAPPDATA%\PoE-VIEW2\backups`, gepackt auf etwa ein Zehntel
+  (67 MB werden zu 7,5 MB, in einer Drittelsekunde). Der Dateiname nennt
+  den Zeitpunkt. Sicherungen werden 24 Stunden aufbewahrt; die neueste
+  bleibt immer erhalten, egal wie alt sie ist. Hat sich seit der letzten
+  Sicherung nichts geändert, wird keine neue angelegt. Zurückgespielt
+  wird von Hand über den Explorer — das Hilfe-Fenster beschreibt den Weg.
 - Die vergrößerte Item-Ansicht (Doppelklick auf eine Zeile) zeigt jetzt
   den Spruchtext des Items — bei einer Divination Card das, was die Karte
   ausmacht, bei Uniques die Hintergrundgeschichte. Er steht zwischen Bild

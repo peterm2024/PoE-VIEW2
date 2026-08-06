@@ -166,6 +166,82 @@ def test_restore_cached_data_populates_state_at_startup(qapp, monkeypatch, tmp_p
     win.worker.wait(5000)
 
 
+def test_the_cache_is_backed_up_at_startup(qapp, monkeypatch, tmp_path) -> None:
+    """Peter, 2026-08-06, nach dem Schaden aus FALLSTRICKE #66. Der
+    Zeitpunkt ist der Kern der Sache: Beim Start traegt die Datei noch
+    garantiert den Stand der VORIGEN Sitzung — was diese hier anrichtet,
+    ist danach nicht mehr zu sichern. Deshalb prueft der Test nicht nur
+    DASS gesichert wird, sondern dass es VOR dem ersten Schreibvorgang
+    geschieht."""
+    from poe_view.services import cache_backup, data_cache
+
+    # Ein Bestand aus einer frueheren Sitzung, damit der Start eine
+    # Kontokennung findet — ohne die gaebe es keine Cache-Datei.
+    cache_path = tmp_path / "cache.json"
+    monkeypatch.setattr(data_cache, "_CACHE_FILE", cache_path)
+    data = data_cache.CachedData()
+    data.account_name = "Someone#1234"
+    data.characters = [make_char("A", "Standard")]
+    data_cache.save(data)
+
+    ereignisse: list[str] = []
+    monkeypatch.setattr(cache_backup, "run",
+                        lambda path, now=None: ereignisse.append(f"backup:{path.name}"))
+    monkeypatch.setattr(data_cache, "save",
+                        lambda data, path=None: ereignisse.append("save"))
+
+    win = MainWindow()
+    assert win._account_name == "Someone#1234"
+    win._persist_cache()
+
+    assert ereignisse and ereignisse[0] == "backup:data-cache-Someone#1234.json"
+    assert "save" in ereignisse
+    assert ereignisse.index("save") > 0  # gesichert wurde zuerst
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_no_backup_before_the_first_login(qapp, monkeypatch) -> None:
+    """Ohne Kontokennung gibt es keine kontospezifische Cache-Datei — und
+    nichts zu sichern."""
+    from poe_view.services import cache_backup
+
+    aufrufe = []
+    monkeypatch.setattr(cache_backup, "run",
+                        lambda path, now=None: aufrufe.append(path))
+
+    win = MainWindow()
+    win._account_name = ""
+    win._backup_cached_data()
+
+    assert aufrufe == []
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_a_failing_backup_does_not_prevent_the_program_from_starting(
+        qapp, monkeypatch) -> None:
+    """Ein misslungenes Backup ist aergerlich; ein Programm, das deswegen
+    nicht mehr startet, ist ein Totalausfall. ``cache_backup`` faengt
+    ``OSError`` selbst ab — hier geht es um alles andere, was aus einem
+    Dateizugriff kommen kann (Rechteprobleme, kaputte Pfade, ein
+    Programmfehler im Backup selbst)."""
+    from poe_view.services import cache_backup
+
+    def boom(*_args, **_kwargs):
+        raise RuntimeError("irgendwas ganz anderes")
+
+    monkeypatch.setattr(cache_backup, "run", boom)
+
+    win = MainWindow()          # darf nicht werfen
+    win._account_name = "Someone#1234"
+    win._backup_cached_data()   # auch direkt aufgerufen nicht
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
 def test_bootstrap_job_is_submitted_before_cached_league_restore_jobs(
         qapp, monkeypatch, tmp_path) -> None:
     """Regression (Rückfrage "warum wird mein Token zwischendurch

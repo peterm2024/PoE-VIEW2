@@ -27,7 +27,7 @@ from poe_view import __version__, config
 from poe_view.api.models import (Character, Item, StashTab,
                                  dominant_category, is_ggg_suffix)
 from poe_view.api.ninja import PriceIndex
-from poe_view.services import data_cache, icon_cache, price_cache
+from poe_view.services import cache_backup, data_cache, icon_cache, price_cache
 from poe_view.services.instance_lock import InstanceLock
 from poe_view.services.zone_watcher import ZoneWatcher, resolve_client_log_path
 from poe_view.services.api_worker import (ApiWorker, BootstrapJob,
@@ -381,6 +381,7 @@ class MainWindow(QMainWindow):
         self._read_only = False
         self._live_leagues: set[str] | None = None  # letzte /account/leagues-Antwort; None = noch unbekannt
         self._restore_cached_data()
+        self._backup_cached_data()
 
         self.worker = ApiWorker()
         # BootstrapJob muss als ERSTER Job in der Queue landen — vor jedem
@@ -502,6 +503,34 @@ class MainWindow(QMainWindow):
         log.info("Daten-Cache geladen: %d Charaktere, %d Liga(en), Umfang %d",
                  len(cached.characters), len(cached.stash_trees),
                  self._persisted_scale)
+
+    def _backup_cached_data(self) -> None:
+        """Sichert den geladenen Cache, bevor diese Sitzung schreiben kann.
+
+        Direkt nach ``_restore_cached_data`` und lange vor dem ersten
+        ``_persist_cache``: Genau hier trägt die Datei noch garantiert den
+        Stand der VORIGEN Sitzung. Was diese Sitzung anrichtet — ein
+        Programmfehler, ein Absturz mitten im Schreiben, eine Änderung am
+        Datenmodell, die beim Speichern Felder verliert (FALLSTRICKE
+        #66) —, ist damit rückholbar.
+
+        Kostet gemessene 0,33 s bei 67,5 MB und läuft absichtlich
+        synchron: Eine Sicherung, die nebenher im Hintergrund entsteht,
+        könnte mit dem ersten Schreibvorgang um dieselbe Datei rennen —
+        also mit genau dem, wogegen sie schützt.
+
+        Fehler bleiben folgenlos: ``cache_backup`` fängt Dateifehler
+        selbst ab, und der weite ``except`` hier deckt den Rest. Das ist
+        bewusst weit gefasst — ein misslungenes Backup ist ärgerlich, ein
+        Programm, das deswegen nicht mehr startet, ist ein Totalausfall.
+        Diese Funktion liefert der Anwendung nichts, was sie zum Laufen
+        braucht; sie darf sie deshalb auch nicht aufhalten."""
+        if not self._account_name:
+            return  # noch nie angemeldet, es gibt nichts zu sichern
+        try:
+            cache_backup.run(data_cache.path_for(self._account_name))
+        except Exception:  # noqa: BLE001 - siehe Docstring
+            log.exception("Cache-Backup beim Start fehlgeschlagen")
 
     def _claim_account(self, account_name: str) -> None:
         """Beansprucht das Konto für DIESE Instanz — oder schaltet auf

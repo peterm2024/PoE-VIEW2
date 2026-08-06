@@ -479,6 +479,44 @@ Datenumfang von einigen hundert Items rechtfertigt keine.
   wie beim pfad-unabhängigen Überschreibschutz (§4.24). Die gesperrten
   Knöpfe in der Oberfläche sind nur Höflichkeit, damit niemand ins Leere
   klickt.
+- **Sicherung bei jedem Start** (`services/cache_backup.py`, Peter
+  2026-08-06: "ein Backup mit Timestamp, das erst nach 24h gelöscht werden
+  darf"). `MainWindow._backup_cached_data` läuft direkt nach
+  `_restore_cached_data` und lange vor dem ersten `_persist_cache` — dem
+  einzigen Zeitpunkt, an dem die Datei garantiert den Stand der VORIGEN
+  Sitzung trägt.
+
+  Die drei vorigen Cache-Schäden (#62 Datenverlust beim Ab- und
+  Wieder-Anmelden, #65 zwei Instanzen, #66 ein Filter im Datenmodell, der
+  sich beim Speichern durchschrieb) wurden je mit einem gezielten Wächter
+  gegen genau ihren Fehler behoben. Die Sicherung ist die allgemeine
+  Antwort: Sie greift auch gegen den Fehler, den noch niemand
+  vorhergesehen hat.
+
+  **gzip -6, an der echten Datei gemessen** (67,5 MB, 2026-08-06):
+  kopieren 0,02 s / 67,5 MB · gzip -1 0,12 s / 12,4 MB · **gzip -6 0,33 s
+  / 7,5 MB** · gzip -9 0,51 s / 7,7 MB. `-9` ist hier langsamer UND
+  größer, kein Tippfehler. Erst durch die Kompression wird die
+  24-Stunden-Regel bezahlbar: ein Tag voller Sicherungen kostet Megabytes
+  statt Gigabytes. Bewusst synchron — eine Sicherung, die nebenher
+  entsteht, könnte mit dem ersten Schreibvorgang um dieselbe Datei rennen,
+  also mit genau dem, wogegen sie schützt.
+
+  Vier Regeln, jede aus einem konkreten Versagen heraus: **Anlegen vor
+  Aufräumen** (bräche das Anlegen ab, wären sonst die alten weg und die
+  neue nicht da). **Die neueste bleibt immer** (sonst stünde man nach zwei
+  Wochen Pause ganz ohne Sicherung da). **Unverändert wird nicht
+  gesichert** — verglichen wird die mtime der Quelle mit dem Zeitstempel
+  der neuesten Sicherung; ohne das verdrängten drei Neustarts hintereinander
+  ältere, tatsächlich verschiedene Stände. **Fremde Dateien werden nie
+  angefasst**: Der Zeitpunkt wird aus dem Dateinamen gelesen, was sich
+  nicht als unsere Sicherung ausweist, bleibt liegen.
+
+  `MAX_COUNT` ist nur eine Rückfallgrenze für den Fall, den die
+  Altersregel nicht abdeckt (Neustart im Minutentakt mit Abrufen
+  dazwischen). Zurückgespielt wird von Hand über den Explorer — kein
+  Knopf, dieselbe Überlegung wie beim fehlenden Löschen-Knopf (Peter,
+  2026-08-04: "zu gefährlich"). Das Hilfe-Fenster beschreibt den Weg.
 - **"Aktualisieren" räumt den Item-Cache NICHT mehr leer:** Seit es
   Refresh-Buttons je Tab gibt, ist ein globales Verwerfen aller Items
   unnötig — der globale Refresh aktualisiert nur noch Stash-Liste und

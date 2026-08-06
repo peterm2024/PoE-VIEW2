@@ -219,8 +219,18 @@ two would write over each other and share the same request budget. The
 read-only one still browses everything already loaded — search, filters,
 item details, CSV export. Log in there with a different account and it
 becomes fully usable; accounts never get in each other's way.</p>
-<p>There is deliberately no delete function inside the program. If you
-want the local data gone, remove the folder above in Explorer.</p>
+<p><b>A backup is written at every start</b>, before the new session can
+change anything, into the <code>backups</code> sub-folder. Each one is
+named after the moment it was taken and is compressed to about a tenth of
+the original size. Backups are kept for 24 hours; the most recent one is
+never removed, however old it is. Nothing is written when the data has
+not changed since the last backup.</p>
+<p>To go back to an earlier state: close PoE-VIEW2, unpack the backup you
+want with any archive program, rename the result to match the cache file
+next to the <code>backups</code> folder, and replace it.</p>
+<p>There is deliberately no delete or restore function inside the
+program. Both are one click away from destroying data that took hours of
+requests to gather — in Explorer you see exactly what you are doing.</p>
 """),
 
     ("About PoE-VIEW2", f"""
