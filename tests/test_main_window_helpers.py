@@ -6693,7 +6693,8 @@ def test_many_special_tabs_are_summarised_instead_of_listed(qapp) -> None:
     rows = win._bulk_breakdown(to_fetch)
 
     assert len(rows) == win._BULK_BREAKDOWN_MAX_ROWS
-    assert "further special tabs" in rows[-1][1]
+    # Die Sammelzeile nennt die Art mit, solange es nur eine gibt.
+    assert "further map tabs" in rows[-1][1]
     assert sum(count for count, _ in rows) == len(to_fetch)  # Summe geht trotzdem auf
 
     win.worker.stop()
@@ -6710,6 +6711,48 @@ def test_the_breakdown_table_ends_in_the_total(qapp) -> None:
     assert "3" in html and "17" in html
     assert "<b>20</b>" in html and "requests in total" in html
     assert html.index("17") < html.index("<b>20</b>")  # Summe zuletzt
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_the_summary_row_names_the_kind_when_it_is_the_only_one(qapp) -> None:
+    """Peter, 2026-08-06, nach dem ersten echten Lauf: "Was sind denn die
+    'further Special Tabs'?" — es waren zwoelf Unique-Faecher, und genau
+    das haette dastehen koennen. Die Zusammenfassung hatte die einzige
+    Information weggelassen, die noch fehlte."""
+    win = MainWindow()
+    win._current_league = "Standard"
+    win._stash_trees["Standard"] = (
+        [_stash("m1", "Maps", "MapStash")]
+        + [_stash(f"u{i}", f"Uniques {i}", "UniqueStash") for i in range(12)])
+    to_fetch = ([_stash(f"ms{j}", parent="m1") for j in range(365)]
+                + [_stash(f"s{i}-{j}", parent=f"u{i}")
+                   for i in range(12) for j in range(16)])
+
+    rows = win._bulk_breakdown(to_fetch)
+
+    assert "further unique tabs" in rows[-1][1]
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_mixed_kinds_keep_the_neutral_word(qapp) -> None:
+    """Sind es verschiedene Arten, stimmt nur noch "special" — dann darf
+    die Zeile sich nicht auf eine davon festlegen."""
+    win = MainWindow()
+    win._current_league = "Standard"
+    win._stash_trees["Standard"] = (
+        [_stash(f"m{i}", f"Maps {i}", "MapStash") for i in range(6)]
+        + [_stash("u1", "Uniques", "UniqueStash")])
+    to_fetch = ([_stash(f"ms{i}-{j}", parent=f"m{i}")
+                 for i in range(6) for j in range(10 - i)]
+                + [_stash(f"us{j}", parent="u1") for j in range(2)])
+
+    rows = win._bulk_breakdown(to_fetch)
+
+    assert "further special tabs" in rows[-1][1]
 
     win.worker.stop()
     win.worker.wait(5000)

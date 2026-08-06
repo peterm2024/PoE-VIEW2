@@ -2707,7 +2707,20 @@ Zusammensetzung steht mit `to_fetch` fest, `total_requests` wächst
 während des Laufs nicht. Ohne Spezial-Fach entfällt die Tabelle ganz —
 dann sind beide Zähler gleich und es gibt nichts zu erklären. Mehr als
 sechs Zeilen werden zusammengefasst, damit die Erklärung nicht länger
-wird als der Dialog.
+wird als der Dialog. Die Sammelzeile nennt dabei die Art mit, sofern es
+nur eine gibt ("192 sections in 12 further unique tabs"): Die erste
+Fassung sagte neutral "special tabs" und ließ damit genau die Frage
+offen, die Peter nach dem ersten echten Lauf stellen musste — es waren
+zwölf Unique-Fächer, und das hätte dastehen können. Bei gemischten Arten
+bleibt das neutrale Wort, weil dann nichts Genaueres stimmt.
+
+**Remove-only-Fächer lädt "Load All Tabs" bewusst mit.** In Peters
+SSF-Liga stecken 572 der 1110 Sektionen in Fächern, die nur noch
+schrumpfen können — über die Hälfte der Ladezeit. Ein Überspringen wurde
+erwogen und verworfen (Peter, 2026-08-06): "Den Button drückt man eh nur
+wenn man mal alles haben will, der Rest geht dann über die verschiedenen
+Modi." Der Hintergrund-Refresh behandelt sie ohnehin nachrangig (§4.8);
+der Komplett-Lauf soll komplett sein.
 
 **Die Restzeit nennt ihren Grund.** "about 4 h 12 min remaining (GGG rate
 limit)" — ohne den Zusatz liest sich die Zahl wie ein Defekt, obwohl sie

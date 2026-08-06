@@ -2443,14 +2443,28 @@ class MainWindow(QMainWindow):
         # Passt nicht alles, kostet die Sammelzeile selbst einen Platz.
         shown = biggest if len(biggest) <= budget else biggest[:budget - 1]
         for parent_id, count in shown:
-            parent = self._find_stash(tree, parent_id)
-            kind = (parent.type if parent is not None else "").replace("Stash", "").lower()
-            rows.append((count, f"sections in one {kind or 'special'} tab"))
+            rows.append((count, f"sections in one {self._special_tab_kind(tree, parent_id)} tab"))
         rest = biggest[len(shown):]
         if rest:
+            # Die Sammelzeile nennt die Art mit, sofern es nur eine gibt.
+            # "12 further special tabs" ließ genau die Frage offen, die
+            # Peter am 2026-08-06 dann stellen musste ("Was sind denn die
+            # further Special Tabs?") — es waren zwölf Unique-Fächer, und
+            # das hätte dastehen können. Nur bei gemischten Arten bleibt
+            # das neutrale Wort stehen, weil dann nichts Genaueres stimmt.
+            kinds = {self._special_tab_kind(tree, pid) for pid, _ in rest}
+            kind = kinds.pop() if len(kinds) == 1 else "special"
             rows.append((sum(c for _, c in rest),
-                         f"sections in {len(rest)} further special tabs"))
+                         f"sections in {len(rest)} further {kind} tabs"))
         return rows
+
+    def _special_tab_kind(self, tree: list[StashTab], parent_id: str) -> str:
+        """"map"/"unique" aus dem Typ des Spezial-Fachs ("MapStash" →
+        "map"). Unbekannt oder nicht gefunden → "special", das stimmt
+        immer."""
+        parent = self._find_stash(tree, parent_id)
+        kind = (parent.type if parent is not None else "").replace("Stash", "").lower()
+        return kind or "special"
 
     @staticmethod
     def _bulk_breakdown_html(rows: list[tuple[int, str]], total: int) -> str:
