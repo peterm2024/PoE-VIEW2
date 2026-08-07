@@ -35,6 +35,9 @@ load_dotenv(PROJECT_ROOT / ".env")
 # wir mitliefern. Ungepackt fallen beide auf dasselbe Verzeichnis zurück.
 BUNDLE_DIR = Path(getattr(sys, "_MEIPASS", PROJECT_ROOT))
 APP_ICON = BUNDLE_DIR / "assets" / "PoE-VIEW2.ico"
+# Einstufige Fassung fürs Hilfe-Fenster: Qts Rich Text nimmt aus einer
+# mehrstufigen .ico nur die erste Stufe (16 px) und zeigt sie verwaschen.
+APP_ICON_PNG = BUNDLE_DIR / "assets" / "PoE-VIEW2.png"
 
 # --- OAuth2 (PKCE, public client — kein Secret) ---
 CLIENT_ID = os.getenv("POE_CLIENT_ID", "poeview")

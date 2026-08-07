@@ -1,3 +1,5 @@
+<img src="assets/PoE-VIEW2.png" alt="" width="72" align="right">
+
 # PoE-VIEW2
 
 [![Release](https://img.shields.io/github/v/release/peterm2024/PoE-VIEW2?label=Release)](https://github.com/peterm2024/PoE-VIEW2/releases)

@@ -9,15 +9,20 @@ Windows Credential Manager) über einen dynamischen Plugin-Mechanismus
 lädt, den PyInstallers statische Analyse allein nicht findet — ohne das
 würde die gepackte .exe zur Laufzeit keinen Token speichern können.
 
-Das Icon wird zweifach gebraucht: `icon=` unten brennt es fest in die
-.exe (das ist es, was Explorer und Taskleiste anzeigen), der Eintrag in
-`datas` legt dieselbe Datei zusätzlich ins Bundle, weil `main.py` sie
-zur Laufzeit als Fenster-Icon setzt. Neu erzeugen lässt sie sich mit
-`python tools/make_icon.py`.
+Das Icon wird dreifach gebraucht: `icon=` unten brennt die .ico fest in
+die .exe (das ist es, was Explorer und Taskleiste anzeigen), der Eintrag
+in `datas` legt dieselbe Datei zusätzlich ins Bundle, weil `main.py` sie
+zur Laufzeit als Fenster-Icon setzt, und die .png daneben zeigt das
+Hilfe-Fenster unter "About" an (Qts Rich Text kommt mit einer
+mehrstufigen .ico nicht zurecht). **Fehlt die .png im Bundle, bleibt in
+der gepackten .exe ein leerer Rahmen stehen, während sie ungepackt
+sauber erscheint** — genau die Sorte Unterschied, die erst beim
+manuellen Test der .exe auffällt (RELEASING.md §2). Beide Dateien
+erzeugt `python tools/make_icon.py`.
 """
 from PyInstaller.utils.hooks import collect_all
 
-datas = [('assets/PoE-VIEW2.ico', 'assets')]
+datas = [('assets/PoE-VIEW2.ico', 'assets'), ('assets/PoE-VIEW2.png', 'assets')]
 binaries = []
 hiddenimports = ['keyring.backends.Windows']
 tmp_ret = collect_all('keyring')

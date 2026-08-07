@@ -19,13 +19,25 @@ Typ-Filter beim nächsten Farbwechsel aus dem Ruder.
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QUrl
 from PySide6.QtWidgets import (QDialog, QDialogButtonBox, QHBoxLayout,
                                QListWidget, QSplitter, QTextBrowser,
                                QVBoxLayout, QWidget)
 
 from poe_view import __version__, config
 from poe_view.ui.theme import RARITY_COLORS
+
+
+def _icon_src() -> str:
+    """Das Anwendungssymbol als ``file:``-Adresse fürs ``<img>`` im
+    About-Text. Qts Rich Text braucht eine echte URL, kein Windows-Pfad
+    (Backslashes und ein ``C:`` am Anfang landen sonst als relativer
+    Pfad im Nichts). Fehlt die Datei — in der gepackten .exe wäre das
+    ein vergessener ``datas``-Eintrag —, bleibt die Adresse leer und Qt
+    zeigt gar nichts an statt eines kaputten Bildrahmens."""
+    if not config.APP_ICON_PNG.exists():
+        return ""
+    return QUrl.fromLocalFile(str(config.APP_ICON_PNG)).toString()
 
 
 def _swatch(colour: str, label: str) -> str:
@@ -235,7 +247,9 @@ requests to gather — in Explorer you see exactly what you are doing.</p>
 
     ("About PoE-VIEW2", f"""
 <h3>About PoE-VIEW2</h3>
-<p><b>Version {__version__}</b> — a desktop viewer for Path of Exile
+<p><img src="{_icon_src()}" width="64" height="64" style="float: left"
+   align="left">
+<b>Version {__version__}</b> — a desktop viewer for Path of Exile
 stash tabs and characters, built on the official GGG API.</p>
 <p><b>{config.DISCLAIMER}</b> It is likewise not affiliated with or
 endorsed by poe.ninja, whose publicly available price data the optional

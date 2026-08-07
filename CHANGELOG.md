@@ -6,6 +6,14 @@ nach [SemVer](https://semver.org/lang/de/).
 
 ## [Unveröffentlicht]
 
+### Hinzugefügt
+
+- Das Anwendungssymbol erscheint jetzt auch in der README und im
+  Hilfe-Fenster unter "About". Dafür legt `tools/make_icon.py` neben der
+  mehrstufigen `.ico` eine einzelne `assets/PoE-VIEW2.png` an — weder
+  GitHubs Markdown noch Qts Rich Text kommen mit einer mehrstufigen
+  Icondatei zurecht.
+
 ## [0.6.0] - 2026-08-07
 
 ### Hinzugefügt

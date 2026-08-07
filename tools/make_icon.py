@@ -1,5 +1,6 @@
 """Baut aus den Quell-PNGs in ``assets/icon/`` die mehrstufige
-Windows-Icondatei ``assets/PoE-VIEW2.ico``.
+Windows-Icondatei ``assets/PoE-VIEW2.ico`` und daneben eine einzelne
+``assets/PoE-VIEW2.png`` für README und Hilfe-Fenster.
 
 Aufruf: python tools/make_icon.py
 
@@ -40,6 +41,17 @@ from PySide6.QtWidgets import QApplication
 ROOT = Path(__file__).resolve().parent.parent
 SRC_DIR = ROOT / "assets" / "icon"
 OUT_FILE = ROOT / "assets" / "PoE-VIEW2.ico"
+
+# Zusätzlich zur .ico eine einzelne PNG-Fassung: Windows braucht die
+# mehrstufige .ico, aber README und Hilfe-Fenster können damit nichts
+# anfangen — GitHubs Markdown zeigt .ico nicht an, und Qts Rich Text im
+# Hilfe-Fenster nimmt aus einer mehrstufigen Datei nur die erste Stufe
+# (16 px). 128 px reicht für beide Zwecke doppelt (README zeigt 32,
+# Hilfe 64) und bleibt auf einem hochauflösenden Bildschirm scharf. Die
+# Quelldateien selbst taugen nicht: ``PoEVIEW_256.png`` ist 1,2 MB groß.
+PNG_FILE = ROOT / "assets" / "PoE-VIEW2.png"
+PNG_SIZE = 128
+PNG_SOURCE = "PoEVIEW_256.png"
 
 # Zielgröße in Pixeln -> Vorlage. Mehrfachnennungen sind Absicht: für 24
 # reicht die reduzierteste Fassung, 64 profitiert noch von der mittleren.
@@ -153,6 +165,13 @@ def build() -> None:
     OUT_FILE.write_bytes(directory + b"".join(data for _, data in entries))
     print(f"\n{OUT_FILE.relative_to(ROOT)}: {len(entries)} Stufen, "
           f"{OUT_FILE.stat().st_size} Bytes")
+
+    source = QImage(str(SRC_DIR / PNG_SOURCE))
+    if source.isNull():
+        raise SystemExit(f"Quelldatei nicht lesbar: {SRC_DIR / PNG_SOURCE}")
+    PNG_FILE.write_bytes(as_png(square_scaled(source, PNG_SIZE)))
+    print(f"{PNG_FILE.relative_to(ROOT)}: {PNG_SIZE} px, "
+          f"{PNG_FILE.stat().st_size} Bytes")
 
 
 if __name__ == "__main__":

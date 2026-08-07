@@ -149,6 +149,55 @@ def test_the_about_topic_carries_the_disclaimer(qapp) -> None:
     assert "poe.ninja" in about  # zweite Nicht-Zugehoerigkeit, wie in der README
 
 
+def test_the_about_topic_shows_the_application_icon(qapp) -> None:
+    """Peter, 2026-08-07: "wir haben ja ein so schoenes Icon, das
+    koennten wir auch noch irgendwo dezent benutzen". Qts Rich Text
+    braucht dafuer eine echte file:-URL — ein roher Windows-Pfad mit
+    Backslashes wuerde als relative Adresse gelesen und blieb leer."""
+    from poe_view.ui.help_dialog import _icon_src
+
+    about = next(body for title, body in TOPICS if title.startswith("About"))
+    src = _icon_src()
+
+    assert src.startswith("file:///"), src
+    assert src.endswith("PoE-VIEW2.png"), src
+    assert f'<img src="{src}"' in about
+
+
+def test_qt_really_resolves_the_about_icon(qapp) -> None:
+    """Der Test oben prueft nur den Text. Ob Qt die Adresse auch
+    AUFLOESEN kann, ist eine andere Frage — genau daran scheitern
+    Windows-Pfade in Rich Text lautlos: das Bild fehlt einfach, ohne
+    Fehlermeldung. Hier wird das gerenderte Dokument befragt."""
+    from PySide6.QtCore import QUrl
+    from PySide6.QtGui import QTextDocument
+
+    from poe_view.ui.help_dialog import TOPICS, HelpDialog, _icon_src
+
+    dialog = HelpDialog()
+    dialog._topics.setCurrentRow(
+        next(i for i, (title, _) in enumerate(TOPICS) if title.startswith("About")))
+
+    loaded = dialog._text.document().resource(
+        QTextDocument.ResourceType.ImageResource, QUrl(_icon_src()))
+
+    assert loaded is not None and not loaded.isNull()
+    dialog.deleteLater()
+
+
+def test_the_about_icon_degrades_to_nothing_if_the_file_is_missing(
+        qapp, monkeypatch, tmp_path) -> None:
+    """In der gepackten .exe steckt die Datei nur dann im Bundle, wenn
+    sie in PoE-VIEW2.spec unter ``datas`` steht. Fehlt sie, soll das
+    Hilfe-Fenster sie weglassen statt einen leeren Bildrahmen zu
+    zeigen — der saehe nach Fehler aus, das Fehlen faellt nicht auf."""
+    from poe_view.ui import help_dialog
+
+    monkeypatch.setattr(help_dialog.config, "APP_ICON_PNG", tmp_path / "weg.png")
+
+    assert help_dialog._icon_src() == ""
+
+
 def test_the_disclaimer_is_no_longer_in_the_status_bar(qapp) -> None:
     """Gegenstueck zum Test oben: er darf genau einmal existieren, nicht
     an beiden Stellen — sonst waere die Platzersparnis wieder dahin."""

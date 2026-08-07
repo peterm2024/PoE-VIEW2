@@ -52,6 +52,23 @@ def test_the_icon_directory_is_structurally_intact() -> None:
     assert offset == len(raw), "hinter dem letzten Bild darf nichts übrig sein"
 
 
+def test_the_web_png_ships_and_is_a_single_readable_image(qapp) -> None:
+    """Die .png ist die Fassung für README und Hilfe-Fenster — beide
+    kommen mit einer mehrstufigen .ico nicht zurecht. Sie wird wie die
+    .ico als fertige Datei versioniert, hier fiele ihr Verlust auf."""
+    assert config.APP_ICON_PNG.is_file(), f"fehlt: {config.APP_ICON_PNG}"
+    image = QImage(str(config.APP_ICON_PNG))
+    assert not image.isNull()
+    assert (image.width(), image.height()) == (128, 128)
+
+
+def test_the_web_png_stays_small_enough_for_a_readme(qapp) -> None:
+    """Die Quellgrafiken in ``assets/icon/`` sind 0,4 bis 3 MB groß —
+    eine davon direkt einzubinden wäre der naheliegende Fehler. Beim
+    Regenerieren darf die Größenordnung nicht zurückrutschen."""
+    assert config.APP_ICON_PNG.stat().st_size < 100_000
+
+
 def _row_alpha_profile(image) -> list[int]:
     return [sum(image.pixelColor(x, y).alpha() for x in range(image.width()))
             for y in range(image.height())]
