@@ -6438,15 +6438,13 @@ def test_differing_fields_lists_only_the_fields_that_actually_differ() -> None:
 
 def test_equipped_item_change_shortly_after_a_zone_change_logs_the_field(
         qapp, caplog) -> None:
-    """Peter, 2026-08-10 (ToDo.md): 'Beim Refresh der Itemliste nach dem
-    Zonenwechsel aus einer Map ins Hideout werden auch die angelegten
-    Items als frisch erkannt.' Gegen Peters echte Logs geprüft: die
-    Zähl-Statistik allein erklärt sich vollständig durch normales Loot-
-    Verhalten (siehe Kommentar an ``_ZONE_EQUIP_DIFF_LOG_WINDOW_S``) — ob
-    stattdessen ein FELD eines getragenen Items zwischen zwei Abrufen
-    kippt, lässt sich daraus nicht ablesen. Dieser Test prüft nur den
-    MECHANISMUS der neuen Diagnose-Zeile, nicht eine echte Ursache (die
-    steht noch aus, siehe ToDo.md)."""
+    """Mechanismus-Test für die Diagnose-Zeile aus ARCHITEKTUR.md §4.33:
+    Eine ECHTE Feldänderung an einem Ausrüstungsteil (hier ``corrupted``,
+    stellvertretend für jedes Feld außerhalb von
+    ``_VOLATILE_LIST_ORDER_FIELDS``) soll weiterhin erkannt und geloggt
+    werden. Die ursprünglich vermutete Ursache (vertauschte Reihenfolge
+    von ``socketedItems``) ist eigens abgedeckt, siehe die Tests direkt
+    darunter."""
     import logging
 
     win = MainWindow()
@@ -6465,6 +6463,79 @@ def test_equipped_item_change_shortly_after_a_zone_change_logs_the_field(
     assert "Rat's Nest" in line
     assert "Helm" in line
     assert "corrupted" in line
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_reordered_socketed_gems_do_not_count_as_a_changed_item() -> None:
+    """Die gefundene Ursache selbst (ARCHITEKTUR.md §4.33): Peters echtes
+    Log zeigte am 2026-08-10 acht von acht sockelbaren Ausrüstungsteilen
+    gleichzeitig als 'geändert', jedes Mal exakt im Feld
+    'socketedItems' — beim selben Zonenwechsel acht Gems auf einmal
+    aufsteigen zu lassen wäre kein Zufall gewesen. Reproduziert: dieselben
+    zwei Gems, nur in vertauschter Reihenfolge, gelten über Pydantics
+    Listenvergleich als 'verschieden', obwohl nichts passiert ist."""
+    gem_a = {"id": "gem-a", "typeLine": "Fire Trap", "socket": 0}
+    gem_b = {"id": "gem-b", "typeLine": "Swift Affliction Support", "socket": 1}
+    previous = [Item.model_validate({"id": "helm-1", "typeLine": "Rat's Nest",
+                                     "inventoryId": "Helm",
+                                     "socketedItems": [gem_a, gem_b]})]
+    current = [Item.model_validate({"id": "helm-1", "typeLine": "Rat's Nest",
+                                    "inventoryId": "Helm",
+                                    "socketedItems": [gem_b, gem_a]})]
+
+    added_ids, changed_ids, removed_items = MainWindow._diff_character_items(previous, current)
+
+    assert added_ids == frozenset()
+    assert changed_ids == frozenset()
+    assert removed_items == []
+
+
+def test_a_genuine_change_inside_socketed_items_still_counts_as_changed() -> None:
+    """Gegenprobe zum Test oben: Die Normalisierung darf eine ECHTE
+    Änderung an einem Gem (hier eine Stufenaufstufung) nicht verstecken —
+    sie soll nur die Reihenfolge unwichtig machen, nicht den Inhalt."""
+    gem_a = {"id": "gem-a", "typeLine": "Fire Trap", "socket": 0}
+    gem_b = {"id": "gem-b", "typeLine": "Swift Affliction Support", "socket": 1}
+    gem_a_leveled = {"id": "gem-a", "typeLine": "Fire Trap", "socket": 0, "ilvl": 5}
+    previous = [Item.model_validate({"id": "helm-1", "typeLine": "Rat's Nest",
+                                     "inventoryId": "Helm",
+                                     "socketedItems": [gem_a, gem_b]})]
+    current = [Item.model_validate({"id": "helm-1", "typeLine": "Rat's Nest",
+                                    "inventoryId": "Helm",
+                                    "socketedItems": [gem_b, gem_a_leveled]})]
+
+    added_ids, changed_ids, removed_items = MainWindow._diff_character_items(previous, current)
+
+    assert changed_ids == frozenset({"helm-1"})
+
+
+def test_socketed_items_reordering_is_not_logged_as_an_equipment_change(
+        qapp, caplog) -> None:
+    """Ende-zu-Ende-Fassung des Fixes: die Diagnose-Zeile aus §4.33 soll
+    für den jetzt behobenen Fall nicht mehr feuern, auch dann nicht, wenn
+    der Zonenwechsel gerade erst stattgefunden hat."""
+    import logging
+
+    gem_a = {"id": "gem-a", "typeLine": "Fire Trap", "socket": 0}
+    gem_b = {"id": "gem-b", "typeLine": "Swift Affliction Support", "socket": 1}
+
+    win = MainWindow()
+    win._current_character_name = "WitchOfPeter"
+    win._on_character_items("WitchOfPeter", [
+        Item.model_validate({"id": "helm-1", "typeLine": "Rat's Nest",
+                             "inventoryId": "Helm", "socketedItems": [gem_a, gem_b]})], False)
+    win._on_zone_changed("Backstreet Hideout")
+
+    with caplog.at_level(logging.INFO, logger="poe_view.ui.main_window"):
+        win._on_character_items("WitchOfPeter", [
+            Item.model_validate({"id": "helm-1", "typeLine": "Rat's Nest",
+                                 "inventoryId": "Helm",
+                                 "socketedItems": [gem_b, gem_a]})], False)
+
+    assert not [m for m in caplog.messages if "als GEÄNDERT erkannt" in m]
+    assert not [m for m in caplog.messages if "als NEU erkannt" in m]
 
     win.worker.stop()
     win.worker.wait(5000)

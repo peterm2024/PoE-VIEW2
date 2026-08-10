@@ -2988,55 +2988,75 @@ Antwort, zwei Verwerter.
 
 ---
 
-### 4.33 Diagnose: Ausrüstung "als frisch erkannt" nach einem Zonenwechsel
+### 4.33 Ausrüstung "als frisch erkannt" nach einem Zonenwechsel: `socketedItems`-Reihenfolge
 
 Peter, 2026-08-10 (ToDo.md): "Beim Refresh der Itemliste nach dem
 Zonenwechsel aus einer Map ins Hideout werden auch die angelegten Items
 als frisch erkannt." Betrifft die Türkis-Hervorhebung aus §4.20 — sie
-soll geänderte/neue Items zeigen, meldet nach Peters Beobachtung aber
-auch bereits getragene Ausrüstung, mit der nichts geschehen ist.
+soll geänderte/neue Items zeigen, meldete nach Peters Beobachtung aber
+auch bereits getragene Ausrüstung, mit der nichts geschehen war.
 
-**Noch nicht gefixt, weil die Ursache noch nicht feststeht.** Gegen
-Peters echte Logs geprüft: `_log_publish_interval` (§_PublishWatch,
-2026-08-05) protokolliert für jede Inventaränderung Zu-/Abgänge in
-einer Zeile. Eine ID-Neuvergabe für Ausrüstung durch GGG bei einem
-Zonenwechsel müsste dort als GLEICHZEITIGER Zu- UND Abgang derselben
-Größenordnung auftauchen, direkt nach dem Zonenwechsel. Das Muster
-kommt in den Logs nicht vor — was dort steht (`+N/-0` während einer Map,
-ein späterer `+0/-N`-Sprung auf eine stabile Grundausstattung), erklärt
-sich vollständig durch normales Loot-Sammeln und den Truhen-Abwurf im
-Hideout, danach eine neue Map mit leerem Rucksack. Die reine
-Zähl-Statistik kann aber nicht zeigen, ob stattdessen ein FELD eines
-bereits getragenen Items zwischen zwei Abrufen kippt (Flaschenladung,
-Sockel-Gem-Erfahrung, …) und dadurch `changed_ids` in
-`_diff_character_items` (§4.20) auslöst — dafür fehlt in der Zähl-Zeile
-das Feld selbst.
+**Erste Vermutung (GGG vergibt Ausrüstung bei Zonenwechseln neue
+Item-IDs) widerlegt, bevor irgendetwas geändert wurde.** Gegen Peters
+echte Logs geprüft: `_log_publish_interval` (§_PublishWatch, 2026-08-05)
+protokolliert für jede Inventaränderung Zu-/Abgänge in einer Zeile. Eine
+ID-Neuvergabe müsste dort als GLEICHZEITIGER Zu- UND Abgang derselben
+Größenordnung direkt nach einem Zonenwechsel auftauchen. Das Muster kam
+in den Logs nicht vor — was dort steht (`+N/-0` während einer Map, ein
+späterer `+0/-N`-Sprung auf die Grundausstattung), erklärt sich
+vollständig durch normales Loot-Sammeln und den Truhen-Abwurf im
+Hideout. Die reine Zähl-Statistik konnte aber nicht zeigen, ob
+stattdessen ein FELD eines bereits getragenen Items zwischen zwei
+Abrufen kippt — dafür fehlte das Feld selbst.
 
-**Deshalb zunächst nur instrumentiert, nicht geraten gefixt** —
-dieselbe Reihenfolge wie bei der Zonenwechsel-Frage in §_PublishWatch:
-erst Sichtbarkeit schaffen, dann urteilen. `MainWindow.
-_log_equipped_item_diff()` protokolliert bei Gelegenheit eine INFO-Zeile,
-wenn ein Item auf einem Ausrüstungs-Slot (`paperdoll.EQUIPPED_SLOTS` —
-dieselbe Liste, die auch die Puppe aus §4.16 befüllt, keine zweite
-gepflegte Kopie) innerhalb von `_ZONE_EQUIP_DIFF_LOG_WINDOW_S = 5s` nach
-dem letzten bekannten Zonenwechsel als neu oder geändert auffällt:
+**Deshalb zunächst instrumentiert statt geraten gefixt** — dieselbe
+Reihenfolge wie bei der Zonenwechsel-Frage in §_PublishWatch: erst
+Sichtbarkeit schaffen, dann urteilen. `MainWindow._log_equipped_item_
+diff()` protokolliert seither bei Gelegenheit eine INFO-Zeile, wenn ein
+Item auf einem Ausrüstungs-Slot (`paperdoll.EQUIPPED_SLOTS` — dieselbe
+Liste, die auch die Puppe aus §4.16 befüllt) innerhalb von
+`_ZONE_EQUIP_DIFF_LOG_WINDOW_S = 5s` nach dem letzten Zonenwechsel als
+neu oder geändert auffällt, im zweiten Fall mit den tatsächlich
+abweichenden Feldnamen (`_differing_fields`), nie mit den Werten.
 
-- **Neue ID** (`added_ids`): loggt nur, dass die vorherige ID unbekannt
-  war — das wäre der Beleg für eine GGG-seitige ID-Neuvergabe.
-- **Geänderte ID** (`changed_ids`): loggt die tatsächlich abweichenden
-  Feldnamen (`_differing_fields`, Vergleich über `model_dump()` inkl.
-  `extra="allow"`-Felder), NICHT deren Werte — reicht, um beim nächsten
-  Auftreten gezielt nachzusehen, ohne Mod-Text o. Ä. ins Log zu
-  schreiben.
+**Noch am selben Tag geliefert: 8 von 8 sockelbaren Ausrüstungsteilen,
+alle im selben Feld.** Peters nächster Spielabend zeigte beim Zonenwechsel
+"The Sarn Encampment" acht INFO-Zeilen binnen 2 Millisekunden, jede mit
+demselben Befund: `abweichende Felder: socketedItems`. Betroffen waren
+ausschließlich die Slots, die überhaupt Sockel haben können (Weapon,
+Weapon2, Offhand, Offhand2, Gloves, Boots, Helm, BodyArmour) —
+Amulett, Ringe, Gürtel und Flaschen (nicht sockelbar) blieben unauffällig.
+Acht verschiedene Sockel-Gems hätten nicht im selben Sekundenbruchteil
+zufällig gleichzeitig eine echte inhaltliche Änderung erfahren; das
+Muster zeigt stattdessen etwas Strukturelles.
 
-Bewusst eng auf Ausrüstung UND ein 5-Sekunden-Fenster begrenzt: Peters
-Beschwerde galt ausdrücklich "angelegten" Items, nicht dem Rucksack, und
-ohne das Zeitfenster würde jede spätere, gewöhnliche Flaschenladung
-mitten in der nächsten Map ebenfalls eine Zeile erzeugen und das Log
-fluten. Nach dem nächsten Spielabend mit dieser Zeile im Log lässt sich
-der eigentliche Fix zielgerichtet bauen statt zu raten. Getestet:
-`tests/test_main_window_helpers.py` (Mechanismus, Zeitfenster,
-Beschränkung auf Ausrüstungs-Slots, beide Auslöser).
+**Reproduziert und bestätigt:** GGGs API liefert die Reihenfolge der
+Einträge in `socketedItems` nicht stabil zwischen zwei Abrufen. Ein
+minimaler Test mit zwei identischen Gems in vertauschter Reihenfolge
+genügt, damit Pydantics Listenvergleich (`Item.__eq__`, feldweise über
+alle Attribute inkl. `extra="allow"`) die beiden Item-Zustände als
+"verschieden" einstuft — obwohl inhaltlich nichts geschah.
+
+**Fix:** `_stable_item_dump(item)` (Modulebene, `main_window.py`) ersetzt
+in `_diff_character_items` den rohen Pydantic-Vergleich. Sie ruft
+`item.model_dump()` und sortiert darin jedes Feld aus
+`_VOLATILE_LIST_ORDER_FIELDS = ("socketedItems",)` nach der `id` jedes
+Eintrags, bevor zwei Zustände verglichen werden. Eine reine Sortierung
+kann eine ECHTE Änderung nicht verstecken — ein Gem, das tatsächlich
+aufgestuft wurde, bleibt unter seiner eigenen `id` weiterhin anders,
+nur seine Position in der umgebenden Liste zählt nicht mehr mit.
+`_differing_fields` (die Diagnose-Zeile von oben) nutzt dieselbe
+Normalisierung, sonst würde sie nach dem Fix weiterhin "geändert"
+behaupten, obwohl der eigentliche Vergleich das längst nicht mehr so
+sieht.
+
+Die Diagnose-Zeile selbst bleibt bestehen: Fällt sie künftig noch
+einmal an, ist es eine ANDERE, noch unbekannte Ursache, kein Rückfall
+der hier behobenen. Getestet: `tests/test_main_window_helpers.py` —
+Mechanismus der Diagnose-Zeile, das reproduzierte `socketedItems`-Muster
+(vertauschte Reihenfolge zählt nicht als Änderung), die Gegenprobe
+(eine echte Änderung INNERHALB der Liste zählt weiterhin), Zeitfenster,
+Beschränkung auf Ausrüstungs-Slots.
 
 ---
 

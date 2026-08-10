@@ -14,6 +14,16 @@ nach [SemVer](https://semver.org/lang/de/).
   GitHubs Markdown noch Qts Rich Text kommen mit einer mehrstufigen
   Icondatei zurecht.
 
+### Behoben
+
+- Nach einem Zonenwechsel leuchtete oft die halbe Ausrüstung türkis auf,
+  als wäre gerade etwas Neues passiert, obwohl nichts geschehen war.
+  Ursache: GGGs API liefert die Reihenfolge der sozialisierten Gems
+  eines Items nicht stabil zwischen zwei Abrufen — dieselben Gems in
+  vertauschter Reihenfolge galten als "geändertes Item". Betroffen war
+  jedes sockelbare Ausrüstungsteil (Waffen, Schild, Handschuhe, Stiefel,
+  Helm, Rüstung).
+
 ## [0.6.0] - 2026-08-07
 
 ### Hinzugefügt

@@ -185,6 +185,39 @@ class _PublishWatch:
     from_session_start: bool = True
 
 
+# Felder, deren Listen-Reihenfolge GGG zwischen zwei Abrufen NICHT stabil
+# hält, obwohl sich am Inhalt nichts geändert hat. Real beobachtet (Peter,
+# 2026-08-10, echtes Spiel, ARCHITEKTUR.md §4.33): Beim selben Zonenwechsel
+# lösten 8 von 8 sockelbaren Ausrüstungsteilen gleichzeitig eine Änderung
+# aus, jedes Mal exakt im Feld "socketedItems" — bei einer echten
+# Gem-Levelaufstufung wäre das nie alle acht auf einmal. Reproduziert: zwei
+# Items mit denselben Sockel-Gems, nur in vertauschter Reihenfolge, gelten
+# über Pydantics Listenvergleich als "verschieden", obwohl nichts passiert
+# ist.
+_VOLATILE_LIST_ORDER_FIELDS = ("socketedItems",)
+
+
+def _stable_item_dump(item: Item) -> dict:
+    """``item.model_dump()``, aber mit den Feldern aus
+    ``_VOLATILE_LIST_ORDER_FIELDS`` sortiert nach der ``id`` jedes
+    Eintrags, bevor verglichen wird. Grundlage für ``_diff_character_
+    items`` UND ``MainWindow._differing_fields`` — dieselbe
+    Normalisierung an beiden Stellen, sonst würde die Diagnose-Zeile aus
+    §4.33 weiterhin "geändert" behaupten, obwohl der eigentliche
+    Änderungs-Vergleich das längst nicht mehr so sieht.
+
+    Eine reine Sortierung kann eine ECHTE Änderung nicht verstecken: Ein
+    Gem, das tatsächlich aufgestuft wurde, unterscheidet sich unter
+    seiner eigenen ``id`` weiterhin vom vorigen Stand — nur seine
+    Position in der umgebenden Liste zählt nicht mehr mit."""
+    dump = item.model_dump()
+    for field in _VOLATILE_LIST_ORDER_FIELDS:
+        value = dump.get(field)
+        if isinstance(value, list) and value and isinstance(value[0], dict):
+            dump[field] = sorted(value, key=lambda entry: entry.get("id") or "")
+    return dump
+
+
 class MainWindow(QMainWindow):
     # Hintergrund-Auto-Refresh: nie jünger als 1 Tag anfassen
     # (dafür reicht der manuelle Refresh völlig). Pro Tick können jetzt BIS
@@ -3005,7 +3038,14 @@ class MainWindow(QMainWindow):
           hängt sie ans Ende der angezeigten Liste an, damit sie für GENAU
           EINEN Refresh-Zyklus sichtbar bleiben (sie stecken nicht in
           ``self._character_items``, der eigentlichen Diff-Basis, also
-          fallen sie beim nächsten Refresh von selbst wieder raus)."""
+          fallen sie beim nächsten Refresh von selbst wieder raus).
+
+        Der Vergleich läuft über ``_stable_item_dump`` statt über rohe
+        Pydantic-Gleichheit (Peter, 2026-08-10, ARCHITEKTUR.md §4.33):
+        GGGs API liefert die Reihenfolge von ``socketedItems`` nicht
+        stabil zwischen zwei Abrufen, was sonst jedes sockelbare
+        Ausrüstungsteil bei praktisch jedem Refresh als "geändert"
+        markiert hätte, obwohl an den Gems selbst nichts geschah."""
         if previous_items is None:
             return frozenset(), frozenset(), []
         previous_by_id = {item.id: item for item in previous_items if item.id}
@@ -3014,7 +3054,8 @@ class MainWindow(QMainWindow):
                               if item.id and item.id not in previous_by_id)
         changed_ids = frozenset(
             item.id for item in items
-            if item.id and item.id in previous_by_id and item != previous_by_id[item.id]
+            if item.id and item.id in previous_by_id
+            and _stable_item_dump(item) != _stable_item_dump(previous_by_id[item.id])
         )
         removed_items = [item for item_id, item in previous_by_id.items()
                          if item_id not in current_ids]
@@ -3022,35 +3063,32 @@ class MainWindow(QMainWindow):
 
     # Peter, 2026-08-10 (ToDo.md): "Beim Refresh der Itemliste nach dem
     # Zonenwechsel aus einer Map ins Hideout werden auch die angelegten
-    # Items als frisch erkannt." Gegen Peters echte Logs geprüft: Die
-    # Anzahl-Statistik aus ``_log_publish_interval`` zeigt an keiner Stelle
-    # ein Muster, das zur behaupteten ID-Neuvergabe passen würde (Zu- UND
-    # Abgänge in gleicher Zahl direkt nach einem Zonenwechsel) — was dort
-    # tatsächlich passiert (Loot während einer Map sammelt sich an, der
-    # Sprung zurück auf die Grundausstattung fällt beim Betreten der
-    # NÄCHSTEN Map auf, sobald zwischendurch in der Truhe abgeladen wurde)
-    # erklärt sich vollständig durch normales Spielen. Ob stattdessen ein
-    # WERT eines bereits getragenen Items sich zwischen zwei Abrufen ändert
-    # (Ladung einer Flasche, EP eines Sockel-Gems, …) und ``changed_ids``
-    # auslöst, lässt sich aus den Zähl-Logs nicht ablesen — dafür bräuchte
-    # es das Feld selbst. Statt zu raten, protokolliert
-    # ``_log_equipped_item_diff`` deshalb bei Gelegenheit die tatsächlich
-    # abweichenden Felder, eng zeitlich um einen Zonenwechsel begrenzt,
-    # damit das Log nicht bei jedem gewöhnlichen Flaschenschluck vollläuft.
+    # Items als frisch erkannt." GEFUNDEN UND BEHOBEN, noch am selben Tag:
+    # die neu eingeführte Diagnose-Zeile unten zeigte beim nächsten
+    # Spielabend, dass 8 von 8 sockelbaren Ausrüstungsteilen gleichzeitig
+    # im selben Feld auffielen — ``socketedItems``. Reproduziert:
+    # ``_stable_item_dump`` oben normalisiert genau diese Listen-Reihenfolge
+    # jetzt vor jedem Vergleich, siehe ARCHITEKTUR.md §4.33. Die
+    # Diagnose-Zeile bleibt trotzdem bestehen: Fällt sie künftig noch
+    # einmal an, ist es eine ANDERE, noch unbekannte Ursache, kein
+    # Rückfall der hier behobenen — eng auf ein Zeitfenster um den
+    # Zonenwechsel begrenzt, damit das Log nicht bei jeder gewöhnlichen
+    # Änderung während des Mappens vollläuft.
     _ZONE_EQUIP_DIFF_LOG_WINDOW_S = 5.0
 
     @staticmethod
     def _differing_fields(previous: Item, current: Item) -> list[str]:
         """Namen der Felder, in denen sich zwei sonst identisch geführte
         Item-Zustände unterscheiden — für die Log-Zeile unten. Über
-        ``model_dump()`` statt einzelner Attribute, damit auch über
-        ``extra="allow"`` mitgeführte, in ``Item`` nicht deklarierte
-        API-Felder erfasst sind (siehe ``Item.model_config``). Nur die
-        FELDNAMEN werden geloggt, nicht ihre Werte — reicht, um beim
-        nächsten Auftreten gezielt nachzusehen, ohne Mod-Texte o. Ä. ins
-        Log zu schreiben."""
-        old_dump = previous.model_dump()
-        new_dump = current.model_dump()
+        ``_stable_item_dump`` statt rohem ``model_dump()``, damit diese
+        Diagnose dieselbe Normalisierung sieht wie der eigentliche
+        Änderungs-Vergleich in ``_diff_character_items`` — sonst würde
+        die Zeile weiterhin "geändert" behaupten für Fälle, die dort
+        längst nicht mehr als Änderung zählen. Nur die FELDNAMEN werden
+        geloggt, nicht ihre Werte — reicht, um beim nächsten Auftreten
+        gezielt nachzusehen, ohne Mod-Texte o. Ä. ins Log zu schreiben."""
+        old_dump = _stable_item_dump(previous)
+        new_dump = _stable_item_dump(current)
         keys = sorted(set(old_dump) | set(new_dump))
         return [k for k in keys if old_dump.get(k) != new_dump.get(k)]
 
