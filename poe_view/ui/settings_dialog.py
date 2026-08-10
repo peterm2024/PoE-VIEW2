@@ -165,14 +165,16 @@ class SettingsDialog(QDialog):
         tab = QWidget()
         layout = QVBoxLayout(tab)
         layout.addWidget(QLabel(
-            "Path of Exile records every zone change in its own Client.txt. "
-            "PoE-VIEW2 only reads that file,\nwhich GGG permits. Watching it "
-            "refreshes the open stash tab or character at the moment\nnew "
-            "data actually appears, instead of polling and hoping. Off by "
-            "default — the path is yours to point at."))
+            "Path of Exile records every zone change in its own Client.txt, "
+            "along with vendor sales\nand item identification. PoE-VIEW2 only "
+            "reads that file, which GGG permits. Watching it\nrefreshes the "
+            "open stash tab or character at the moment new data actually "
+            "appears,\ninstead of polling and hoping. Off by default — the "
+            "path is yours to point at."))
 
         self._zone_enabled_check = QCheckBox(
-            "Refresh the current view when the zone changes")
+            "Refresh the current view on zone changes, vendor sales and "
+            "identifying")
         self._zone_enabled_check.setChecked(enabled)
         layout.addWidget(self._zone_enabled_check)
 

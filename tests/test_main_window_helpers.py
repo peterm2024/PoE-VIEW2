@@ -5733,6 +5733,187 @@ def test_zone_watcher_end_to_end_triggers_a_refresh(qapp, tmp_path, monkeypatch)
     win.worker.wait(5000)
 
 
+# --- Händler-Trigger und Burst-Budget (Peter, 2026-08-10) ----------------- #
+#
+# "Ich denke, wir können den Händler-Trigger einbauen, und die dadurch
+# gesparte Zeit auf den Timer zum nächsten Trigger addieren. Dann haben
+# wir meinetwegen 4 Trigger kurz hintereinander, aber der 5. Trigger
+# kommt dann trotzdem erst nach 60 Sekunden und ab dann wieder alle 15
+# Sekunden oder so."
+
+def test_an_inventory_event_refreshes_the_currently_open_view(qapp, monkeypatch) -> None:
+    """Derselbe gezielte Einzel-Refresh wie beim Zonenwechsel, nur ein
+    anderer Anlass — ein Verkauf beim Händler."""
+    win = MainWindow()
+    _ready_for_zone_refresh(win)
+    submitted = []
+    monkeypatch.setattr(win.worker, "submit", lambda job: submitted.append(job))
+
+    win._on_inventory_event("Trade accepted")
+
+    stash_jobs = [j for j in submitted if hasattr(j, "stash_id")]
+    assert len(stash_jobs) == 1
+    assert stash_jobs[0].silent is True
+    assert "Trade accepted" in win._status_msg.text()
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_an_inventory_event_does_nothing_while_paused(qapp, monkeypatch) -> None:
+    """Pause heisst "keine Hintergrund-Anfragen" — eine ausdrueckliche
+    Nutzerwahl, an der auch ein Haendler-Ereignis nichts aendert."""
+    win = MainWindow()
+    _ready_for_zone_refresh(win)
+    win._refresh_mode = "pause"
+    submitted = []
+    monkeypatch.setattr(win.worker, "submit", lambda job: submitted.append(job))
+
+    win._on_inventory_event("Trade accepted")
+
+    assert submitted == []
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_an_early_trigger_pushes_the_next_beat_instead_of_resetting_it(
+        qapp, monkeypatch) -> None:
+    """Peters Kern-Idee: "die dadurch gesparte Zeit auf den Timer zum
+    naechsten Trigger addieren". Ein vorgezogener Abruf stellt die Uhr
+    nicht auf null, sondern zahlt seine Ersparnis zurueck — der naechste
+    regulaere Takt liegt danach ein volles Intervall hinter dem BISHERIGEN
+    Termin, nicht hinter dem Jetzt."""
+    win = MainWindow()
+    _ready_for_zone_refresh(win)
+    monkeypatch.setattr(win.worker.rate_limiter, "steady_pace_interval_s",
+                        lambda *_: 15.0)
+    now = time.monotonic()
+    win._refresh_mode_next_due = now + 12.0  # noch 12s bis zum regulaeren Takt
+
+    win._note_refresh_mode_job_done()  # Antwort auf den vorgezogenen Abruf
+
+    assert win._refresh_mode_next_due - now == pytest.approx(27.0, abs=0.5)
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_a_regular_beat_still_counts_from_now(qapp, monkeypatch) -> None:
+    """Gegenprobe: Im gewoehnlichen Fall aendert die Schuldenrechnung
+    nichts. Der Job lief ja, WEIL er faellig war — dann liegt der alte
+    Termin bereits in der Vergangenheit und der naechste Takt zaehlt wie
+    bisher ab jetzt."""
+    win = MainWindow()
+    _ready_for_zone_refresh(win)
+    monkeypatch.setattr(win.worker.rate_limiter, "steady_pace_interval_s",
+                        lambda *_: 15.0)
+    now = time.monotonic()
+    win._refresh_mode_next_due = now - 3.0  # war faellig, Job lief daraufhin
+
+    win._note_refresh_mode_job_done()
+
+    assert win._refresh_mode_next_due - now == pytest.approx(15.0, abs=0.5)
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_a_burst_of_triggers_is_cut_off_once_the_schedule_is_far_enough_ahead(
+        qapp, monkeypatch) -> None:
+    """Peters Zahlenbeispiel nachgestellt: Bei 15s Takt duerfen vier
+    Trigger dicht hintereinander durch, der fuenfte nicht mehr — bis dahin
+    liegt der naechste regulaere Takt rund eine Minute voraus."""
+    win = MainWindow()
+    _ready_for_zone_refresh(win)
+    monkeypatch.setattr(win.worker.rate_limiter, "steady_pace_interval_s",
+                        lambda *_: 15.0)
+    submitted = []
+    monkeypatch.setattr(win.worker, "submit", lambda job: submitted.append(job))
+    win._refresh_mode_next_due = time.monotonic()  # gerade eben getaktet
+
+    for _ in range(6):
+        before = len(submitted)
+        win._on_inventory_event("Trade accepted")
+        if len(submitted) > before:
+            win._note_refresh_mode_job_done()  # Antwort trifft ein, Schuld waechst
+
+    assert len(submitted) == 4
+    assert win._refresh_mode_next_due - time.monotonic() == pytest.approx(60.0, abs=1.0)
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_the_burst_budget_recovers_once_the_schedule_has_caught_up(
+        qapp, monkeypatch) -> None:
+    """"und ab dann wieder alle 15 Sekunden oder so" — sobald die Zeit die
+    aufgelaufene Schuld eingeholt hat, greifen Trigger wieder normal."""
+    win = MainWindow()
+    _ready_for_zone_refresh(win)
+    monkeypatch.setattr(win.worker.rate_limiter, "steady_pace_interval_s",
+                        lambda *_: 15.0)
+    submitted = []
+    monkeypatch.setattr(win.worker, "submit", lambda job: submitted.append(job))
+
+    win._refresh_mode_next_due = time.monotonic() + 60.0  # Budget aufgebraucht
+    win._on_inventory_event("Trade accepted")
+    assert submitted == []
+
+    win._refresh_mode_next_due = time.monotonic() + 30.0  # Zeit hat aufgeholt
+    win._on_inventory_event("Trade accepted")
+    assert len(submitted) == 1
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_zone_changes_share_the_same_burst_budget(qapp, monkeypatch) -> None:
+    """Eine Ausnahme fuer den Zonenwechsel waere ein Loch in genau der
+    Grenze, die das Budget zieht: Wer zwischen Hideout und Map hin- und
+    herportet, loeste sonst beliebig viele Abrufe aus."""
+    win = MainWindow()
+    _ready_for_zone_refresh(win)
+    monkeypatch.setattr(win.worker.rate_limiter, "steady_pace_interval_s",
+                        lambda *_: 15.0)
+    submitted = []
+    monkeypatch.setattr(win.worker, "submit", lambda job: submitted.append(job))
+    win._refresh_mode_next_due = time.monotonic() + 60.0
+
+    win._on_zone_changed("The Coast")
+
+    assert submitted == []
+    assert win._zone_label.text() == "The Coast"  # erkannt wurde er trotzdem
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_the_vendor_trigger_reaches_the_window_through_the_watcher(
+        qapp, tmp_path, monkeypatch) -> None:
+    """Volle Kette wie beim Zonenwechsel: Zeile an die beobachtete Datei
+    anhaengen -> Signal -> Refresh."""
+    log = tmp_path / "Client.txt"
+    log.write_text("", encoding="utf-8")
+    win = MainWindow()
+    _ready_for_zone_refresh(win)
+    win._apply_zone_watcher_config(True, str(tmp_path))
+    submitted = []
+    monkeypatch.setattr(win.worker, "submit", lambda job: submitted.append(job))
+
+    with log.open("a", encoding="utf-8") as f:
+        f.write("2026/08/10 21:06:08 15181674 cffb0658 [INFO Client 18604] "
+               ": 2 Items identified\n")
+    win._zone_watcher.check_now()
+
+    stash_jobs = [j for j in submitted if hasattr(j, "stash_id")]
+    assert len(stash_jobs) == 1
+    assert "2 Items identified" in win._status_msg.text()
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
 # --- CSV-Export aus dem Kontextmenü (Peter, 2026-08-02) ------------------- #
 
 class _NoExecMenu(QMenu):
@@ -6645,12 +6826,12 @@ def test_equipped_item_change_long_after_a_zone_change_is_not_logged(
 def test_a_changed_inventory_item_is_logged_but_not_as_equipment(
         qapp, caplog) -> None:
     """Die Diagnose galt zunaechst nur der Ausruestung (Peters Wortlaut:
-    'die ANGELEGTEN Items'). Nach seiner zweiten Meldung mit Screenshot —
-    auch Ringe und Flaschen leuchteten tuerkis — deckt sie ALLE Slots ab,
-    denn ein Slot ohne Sockel kann unmoeglich an der Gem-Erfahrung
-    haengen. Die Ausruestung bleibt in der Zeile trotzdem als solche
-    erkennbar, sonst waere der urspruengliche Fall im Log nicht mehr von
-    einem beliebigen Rucksack-Item zu unterscheiden."""
+    'die ANGELEGTEN Items') und deckt seit seiner zweiten Meldung ALLE
+    Slots ab: Die Beschraenkung war eine Wette darauf, WO der Fehler
+    steckt, und die kostet beim naechsten Mal einen ganzen Spielabend,
+    wenn sie danebenliegt. Die Ausruestung bleibt in der Zeile trotzdem
+    als solche erkennbar, sonst waere der urspruengliche Fall im Log
+    nicht mehr von einem beliebigen Rucksack-Item zu unterscheiden."""
     import logging
 
     win = MainWindow()
@@ -6674,14 +6855,14 @@ def test_a_changed_inventory_item_is_logged_but_not_as_equipment(
 
 
 def test_the_highlight_summary_reports_how_many_rows_are_marked(qapp, caplog) -> None:
-    """Peters zweite Meldung mit Screenshot zeigte praktisch die ganze
-    Tabelle tuerkis, obwohl ein Vergleich seines echten Caches ueber
-    zwanzig Minuten Spielzeit an Ringen, Amulett und Flaschen kein
-    einziges abweichendes Feld fand. Diese Zusammenfassung haelt fest,
-    wie viele Zeilen die Anzeige selbst fuer hervorgehoben haelt — weicht
+    """Entstanden aus einem Widerspruch, der sich als Fehldeutung eines
+    Screenshots herausstellte (§4.33): Diese Zusammenfassung haelt fest,
+    wie viele Zeilen die Anzeige SELBST fuer hervorgehoben haelt — weicht
     das von dem ab, was auf dem Bildschirm zu sehen ist, liegt der Fehler
-    in der Darstellung und nicht im Vergleich. Bewusst OHNE Bindung an
-    einen Zonenwechsel, sie soll bei jedem Refresh mitlaufen."""
+    in der Darstellung und nicht im Vergleich. Genau diese Frage hat
+    damals einen Cache-Vergleich und eine Rueckfrage gekostet. Bewusst
+    OHNE Bindung an einen Zonenwechsel, sie soll bei jedem Refresh
+    mitlaufen."""
     import logging
 
     win = MainWindow()

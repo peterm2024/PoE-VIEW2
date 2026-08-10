@@ -23,6 +23,14 @@ nach [SemVer](https://semver.org/lang/de/).
   gem-xp-log.csv`), inklusive einer Markierung für Gems, die gerade
   nicht weiterleveln können, weil eine Voraussetzung (meist ein
   Attribut) fehlt.
+- Der Live-Refresh reagiert jetzt nicht mehr nur auf Zonenwechsel,
+  sondern auch auf Händler-Verkäufe und das Identifizieren von Items —
+  beides steht in PoEs eigener `Client.txt`, die für den Zonenwechsel
+  ohnehin schon gelesen wird. Damit die zusätzlichen Anlässe kein
+  Rate-Limit-Budget verbrennen, verschiebt jeder vorgezogene Abruf den
+  nächsten regulären Takt um die eingesparte Zeit; eine Serie von
+  Ereignissen ist auf vier Abrufe begrenzt, danach wird gewartet, bis
+  der Takt wieder aufgeholt hat.
 
 ### Behoben
 

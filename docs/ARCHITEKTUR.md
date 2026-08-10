@@ -3077,20 +3077,27 @@ Normalisierung, sonst würde sie nach dem Fix weiterhin "geändert"
 behaupten, obwohl der eigentliche Vergleich das längst nicht mehr so
 sieht.
 
-**Was Peters Screenshot noch offenlässt.** Auf seinem Bild vom 21:12 war
-praktisch die ganze Tabelle türkis, auch Ringe, Amulett und Flaschen —
-Slots ohne Sockel, für die die Gem-Erfahrung als Erklärung ausscheidet.
-Ein feldweiser Vergleich seines echten Caches über zwanzig Minuten
-Spielzeit fand an genau diesen Items **kein einziges** abweichendes Feld;
-was dort leuchtete, lässt sich aus den Daten allein also nicht erklären.
-Statt zu raten, deckt die Diagnose seither ALLE Slots ab (nicht mehr nur
-`EQUIPPED_SLOTS`, die Zeile benennt die Ausrüstung aber weiterhin als
-solche) und schreibt bei jedem Refresh eine Zusammenfassung
-"Türkis-Hervorhebung *Charakter*: N von M angezeigten Zeilen (X neu, Y
-geändert)". Weicht dieses N von dem ab, was auf dem Bildschirm türkis
-ist, liegt der Fehler nicht im Vergleich, sondern in der Darstellung —
-diese eine Zeile trennt die beiden Möglichkeiten beim nächsten Auftreten
-sofort.
+**Zwischenschritt, der sich als Fehlspur erwies — und trotzdem bleibt.**
+Auf Peters Screenshot schien die ganze Tabelle türkis, auch Ringe und
+Flaschen, also Slots ohne Sockel, für die die Gem-Erfahrung als Erklärung
+ausscheidet. Ein feldweiser Vergleich seines echten Caches über zwanzig
+Minuten Spielzeit fand an genau diesen Items **kein einziges**
+abweichendes Feld — ein Widerspruch, der sich auflöste, als Peter selbst
+klarstellte: "Schau dir den Screenshot nochmal genau an, die Ringe und Co.
+leuchten gar nicht." Betroffen war nur die Ausrüstung, der Fix greift also
+vollständig.
+
+Die daraufhin gebaute Erweiterung der Diagnose bleibt trotzdem bestehen:
+Sie deckt jetzt ALLE Slots ab statt nur `EQUIPPED_SLOTS` (die Zeile
+benennt die Ausrüstung weiterhin als solche) und schreibt bei jedem
+Refresh eine Zusammenfassung "Türkis-Hervorhebung *Charakter*: N von M
+angezeigten Zeilen (X neu, Y geändert)". Die alte Beschränkung war eine
+Wette darauf, WO der Fehler steckt; liegt sie daneben, kostet das einen
+ganzen Spielabend Wartezeit. Und die Zusammenfassung hätte den
+Widerspruch oben in einer Zeile aufgelöst, statt ihn über einen
+Cache-Vergleich und eine Rückfrage zu klären: Weicht ihr N von dem ab,
+was auf dem Bildschirm zu sehen ist, liegt der Fehler in der Darstellung
+statt im Vergleich.
 
 Getestet: `tests/test_main_window_helpers.py` — mitzählende Gem-Erfahrung
 zählt nicht als Änderung, Gegenprobe Stufenaufstieg zählt weiterhin, die
@@ -3244,6 +3251,87 @@ Voraussetzung blockiertes —, mehrere Charaktere in einer Datei, keine
 Zeile ohne Sockel-Gems, Gegenprobe für `capped_by_requirement`),
 `tests/test_main_window_helpers.py` (Ende-zu-Ende-Verdrahtung über
 `_on_character_items`).
+
+---
+
+### 4.36 Händler-Trigger und das Burst-Budget der Ereignis-Refreshes
+
+Peter, 2026-08-10, aus der Beobachtung heraus: "Die Interaktion mit einem
+Händler, Verkaufen, Identifizieren, ... triggert auch das Senden der
+neuesten Items von GGG-Seite. Gibt es dabei einen Clients.txt-Eintrag?"
+Derselbe Gedanke wie beim Zonenwechsel (§ZoneWatcher, FALLSTRICKE #58):
+nicht öfter fragen, sondern **zu den Zeitpunkten fragen, an denen GGG
+überhaupt etwas Neues zu liefern hat**.
+
+**Die Frage war beantwortbar, ohne zu raten.** Peters echte Client.txt
+(81.639 Zeilen) durchgezählt:
+
+| Zeile | Häufigkeit | Verwendet |
+|---|---|---|
+| `: Trade accepted.` | 1028× | ja — Verkauf an NPC *und* Spielerhandel |
+| `: N Items identified` | 821× | ja |
+| `: 1 Item identified` | 78× | ja (eigene Schreibweise!) |
+| `: Trade cancelled.` | 60× | **nein** — dabei ändert sich nichts |
+
+`_INVENTORY_LINES` im `ZoneWatcher` erkennt die drei oberen und meldet sie
+über ein eigenes Signal `inventory_event(beschreibung)`. Getrennt von
+`zone_changed`, weil der Zonenwechsel zusätzlich die Zonen-Anzeige und die
+Messungen aus §_PublishWatch füttert — ein Händler-Verkauf hat dort nichts
+verloren. Der Refresh selbst ist für beide derselbe
+(`_refresh_current_view`). Kosten: null zusätzliche Datei-Zugriffe, die
+Client.txt wird ohnehin alle 2 s auf neue Bytes geprüft.
+
+**Das Rate-Limit-Problem und Peters Lösung dafür.** Mehr Trigger heißt
+mehr Requests in genau dem 300s-Fenster, das der gleichmäßige Takt
+(§_drive_refresh_mode) sorgfältig freihält — und "Trade accepted" kommt
+beim Ausräumen des Rucksacks in schneller Folge. Peters Vorschlag:
+
+> "Die dadurch gesparte Zeit auf den Timer zum nächsten Trigger addieren.
+> Dann haben wir meinetwegen 4 Trigger kurz hintereinander, aber der 5.
+> Trigger kommt dann trotzdem erst nach 60 Sekunden und ab dann wieder
+> alle 15 Sekunden oder so."
+
+Zwei Teile, beide umgesetzt:
+
+1. **Schuldenrechnung.** `_note_refresh_mode_job_done` setzt die
+   Fälligkeit auf `max(jetzt, bisheriger Termin) + Intervall` statt auf
+   `jetzt + Intervall`. Im gewöhnlichen Fall ändert das nichts (der Job
+   lief ja, WEIL er fällig war, dann liegt der alte Termin bereits in der
+   Vergangenheit). Ein vorgezogener Abruf zahlt dagegen seine Ersparnis
+   zurück, statt die Uhr auf null zu stellen — der Gesamtdurchsatz bleibt
+   damit exakt der des ungetriggerten Takts, nur anders verteilt.
+2. **Burst-Grenze.** Die Schuldenrechnung allein hält keinen einzigen
+   Trigger auf; sie verschiebt nur den nächsten Takt. Zwanzig Verkäufe in
+   Folge wären zwanzig Requests in wenigen Sekunden und damit sofort
+   GGGs 5-pro-10s-Regel. `_trigger_budget_spent()` lässt einen Trigger
+   deshalb nur durch, solange der Takt weniger als
+   `_TRIGGER_BURST_INTERVALS = 4` Intervalle voraus ist.
+
+Die Grenze steht in **Intervallen**, nicht in festen 60 Sekunden: Das
+Takt-Intervall berechnet der Rate-Limiter live aus GGGs tatsächlich
+gemeldeten Regeln (`steady_pace_interval_s`, bei "30 Treffer/300s" rund
+10-15 s). Peters Verhältnis bleibt damit auch dann erhalten, wenn GGG die
+Regel ändert, während eine fest verdrahtete Minute stillschweigend zu
+großzügig oder zu knapp würde. Verglichen wird gegen ein **halbes**
+Intervall vor dem vollen Vielfachen — nach vier Triggern steht die Schuld
+exakt auf vier Intervallen, und ein Vergleich genau auf diesen Wert
+entschiede über Mikrosekunden Uhrdrift, ob der fünfte noch durchrutscht.
+
+**Der Zonenwechsel teilt sich dasselbe Budget.** Er war bis dahin
+ungedeckelt; seit beide Trigger dieselbe Schuldenrechnung füttern, wäre
+eine Ausnahme für ihn ein Loch in genau der Grenze, die sie zieht — wer
+zwischen Hideout und Map hin- und herportet, löste sonst beliebig viele
+Abrufe aus. Die gemeinsamen Abbruchgründe (Pause-Modus, laufendes "Load
+All Tabs", kein Login, `pacing_blocked()`) stehen dafür jetzt in
+`_event_refresh_blocked()` statt zweimal ausgeschrieben.
+
+Getestet: `tests/test_zone_watcher.py` (beide Schreibweisen des
+Identifizierens, abgebrochener Handel löst nichts aus, getrennte
+Signale), `tests/test_main_window_helpers.py` (Trigger löst Refresh aus,
+Pause blockiert, vorgezogener Abruf verschiebt statt zurückzusetzen,
+regulärer Takt zählt weiterhin ab jetzt, Peters Zahlenbeispiel mit vier
+durchgelassenen und dem fünften geblockten Trigger, Erholung des Budgets,
+Zonenwechsel im selben Budget, volle Kette über den Watcher).
 
 ---
 

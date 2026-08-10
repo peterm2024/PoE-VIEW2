@@ -129,12 +129,14 @@ non-empty tabs first.</li>
 <li><b>Pause</b> — no background requests at all. Clicks and
 "Load All Tabs" still work and get the full budget.</li>
 </ul>
-<p>GGG's API tends to publish new stash contents only after you change
-zone in the game. PoE-VIEW2 can watch the game's own
-<code>Client.txt</code> for that and refresh at exactly the right
-moment — off by default, switch it on under
-<i>Settings &gt; Zone Refresh</i>. The toolbar then shows the zone last
-detected.</p>
+<p>GGG's API tends to publish new stash contents only after something
+happens in the game — changing zone, selling to a vendor, identifying
+items. PoE-VIEW2 can watch the game's own <code>Client.txt</code> for
+those moments and refresh at exactly the right time — off by default,
+switch it on under <i>Settings &gt; Zone Refresh</i>. The toolbar then
+shows the zone last detected. A burst of events in quick succession is
+capped at four refreshes, so it never eats into the request budget your
+own clicks need.</p>
 <p>The status bar tells you how that is going. <b>Updated 14:23:05</b> is
 when the table was last rebuilt; if <b>unchanged for 12m</b> appears next
 to it, data kept arriving but stayed identical — almost always the

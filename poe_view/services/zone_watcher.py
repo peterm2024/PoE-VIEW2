@@ -1,9 +1,11 @@
-"""Beobachtet PoEs eigene ``Client.txt`` auf Zonenwechsel, um den
-Live-Refresh gezielter zu takten (Peter, 2026-08-01: "Erst nach
-Zonenwechsel gibt es einen Refresh" — live an einem Beobachtungsskript
-gegen Peters echte Client.txt bestätigt, siehe FALLSTRICKE #58). GGGs
-Stash-API liefert neue Daten offenbar erst, nachdem der Server einen
-Zonenwechsel committet hat; Polling dazwischen ändert nichts.
+"""Beobachtet PoEs eigene ``Client.txt`` auf die Ereignisse, nach denen
+GGG neue Item-Daten hat, um den Live-Refresh gezielter zu takten (Peter,
+2026-08-01: "Erst nach Zonenwechsel gibt es einen Refresh" — live an
+einem Beobachtungsskript gegen Peters echte Client.txt bestätigt, siehe
+FALLSTRICKE #58). GGGs Stash-API liefert neue Daten offenbar erst,
+nachdem der Server einen Zonenwechsel committet hat; Polling dazwischen
+ändert nichts. Seit 2026-08-10 zählen auch Händler-Verkauf und
+Identifizieren dazu (§``_INVENTORY_LINES``, Peters zweite Beobachtung).
 
 Reines LESEN einer Text-Logdatei — von GGG ausdrücklich erlaubt, anders
 als Speicherzugriffe auf den laufenden Client-Prozess (das wäre ein
@@ -47,6 +49,25 @@ _POLL_INTERVAL_MS = 2000
 # entered Lioneye's Watch."
 _ZONE_LINE = re.compile(r": You have entered (.+)\.\s*$")
 
+# Peter, 2026-08-10: "Die Interaktion mit einem Händler, Verkaufen,
+# Identifizieren, ... triggert auch das Senden der neuesten Items von
+# GGG-Seite. Gibt es dabei einen Clients.txt-Eintrag?" — ja, beide. In
+# Peters echter Client.txt nachgezählt (81.639 Zeilen): "Trade accepted."
+# 1028x, "N Items identified" 821x, "1 Item identified" 78x. Das ist
+# derselbe Gedanke wie beim Zonenwechsel: nicht öfter fragen, sondern zu
+# den Zeitpunkten fragen, an denen GGG überhaupt etwas Neues zu liefern
+# hat.
+#
+# "Trade accepted." deckt den Verkauf an einen NPC UND den Handel mit
+# Spielern ab — beides ändert das Inventar, für den Refresh macht die
+# Unterscheidung also keinen Unterschied. Das ebenfalls vorhandene
+# "Trade cancelled." (60x) ausdrücklich NICHT: dabei ändert sich nichts,
+# ein Abruf darauf wäre reine Rate-Limit-Verschwendung.
+_INVENTORY_LINES = (
+    re.compile(r": (Trade accepted)\.\s*$"),
+    re.compile(r": (\d+ Items? identified)\s*$"),
+)
+
 
 def resolve_client_log_path(configured_path: str) -> Path | None:
     """Peter darf entweder direkt die Client.txt angeben oder nur den
@@ -69,7 +90,14 @@ def resolve_client_log_path(configured_path: str) -> Path | None:
 
 
 class ZoneWatcher(QObject):
-    """Meldet jeden erkannten Zonenwechsel über ``zone_changed(zone_name)``.
+    """Meldet jeden erkannten Zonenwechsel über ``zone_changed(zone_name)``
+    und jedes andere Ereignis, nach dem GGG neue Item-Daten hat, über
+    ``inventory_event(beschreibung)`` (§``_INVENTORY_LINES``).
+
+    Getrennte Signale statt eines gemeinsamen: Der Zonenwechsel füttert
+    zusätzlich die Zonen-Anzeige und die Messungen aus §_PublishWatch, ein
+    Händler-Verkauf hat dort nichts verloren. Der Refresh selbst ist für
+    beide derselbe.
 
     Startet am AKTUELLEN Dateiende — Zeilen von vor dem Start interessieren
     nicht, und ein mehrere MB großes Log von Beginn an einzulesen wäre
@@ -80,6 +108,7 @@ class ZoneWatcher(QObject):
     beschleunigende Zugabe, falls sie auf dem System doch feuert."""
 
     zone_changed = Signal(str)
+    inventory_event = Signal(str)
 
     def __init__(self, log_path: Path, parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -143,3 +172,10 @@ class ZoneWatcher(QObject):
             if match:
                 log.info("Zonenwechsel erkannt: %s", match.group(1))
                 self.zone_changed.emit(match.group(1))
+                continue
+            for pattern in _INVENTORY_LINES:
+                match = pattern.search(line)
+                if match:
+                    log.info("Inventar-Ereignis erkannt: %s", match.group(1))
+                    self.inventory_event.emit(match.group(1))
+                    break

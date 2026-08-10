@@ -147,3 +147,89 @@ def test_a_truncated_or_replaced_file_is_watched_from_the_start_again(tmp_path, 
     watcher.zone_changed.connect(seen.append)
     watcher.check_now()
     assert seen == ["Backstreet Hideout"]
+
+
+# --- Inventar-Ereignisse: Haendler-Verkauf und Identifizieren --- #
+#
+# Die Zeilenformate stammen 1:1 aus Peters echter Client.txt (dort
+# nachgezaehlt: "Trade accepted." 1028x, "N Items identified" 821x,
+# "1 Item identified" 78x, "Trade cancelled." 60x).
+
+_TRADE_LINE = ('2026/08/10 21:06:27 15181673 cffb0658 [INFO Client 18604] '
+               ': Trade accepted.\n')
+_IDENTIFY_LINE = ('2026/08/10 21:06:08 15181674 cffb0658 [INFO Client 18604] '
+                  ': 2 Items identified\n')
+_IDENTIFY_ONE_LINE = ('2026/08/10 21:06:09 15181675 cffb0658 [INFO Client 18604] '
+                      ': 1 Item identified\n')
+_TRADE_CANCELLED_LINE = ('2026/08/10 21:06:30 15181676 cffb0658 [INFO Client 18604] '
+                         ': Trade cancelled.\n')
+
+
+def test_a_completed_trade_is_reported_as_an_inventory_event(tmp_path, qapp) -> None:
+    """Peter, 2026-08-10: "Die Interaktion mit einem Haendler, Verkaufen,
+    Identifizieren, ... triggert auch das Senden der neuesten Items von
+    GGG-Seite." — "Trade accepted." deckt Verkauf an NPC UND Spielerhandel
+    ab; fuer den Refresh macht die Unterscheidung keinen Unterschied."""
+    log = tmp_path / "Client.txt"
+    _write(log, "")
+    watcher = ZoneWatcher(log)
+
+    seen = []
+    watcher.inventory_event.connect(seen.append)
+    with log.open("a", encoding="utf-8") as f:
+        f.write(_TRADE_LINE)
+    watcher.check_now()
+    assert seen == ["Trade accepted"]
+
+
+def test_identifying_items_is_reported_in_both_singular_and_plural(tmp_path, qapp) -> None:
+    """Beide Schreibweisen kommen in Peters Log real vor — eine davon zu
+    uebersehen hiesse, jeden Einzel-Identify stillschweigend zu verpassen."""
+    log = tmp_path / "Client.txt"
+    _write(log, "")
+    watcher = ZoneWatcher(log)
+
+    seen = []
+    watcher.inventory_event.connect(seen.append)
+    with log.open("a", encoding="utf-8") as f:
+        f.write(_IDENTIFY_LINE)
+        f.write(_IDENTIFY_ONE_LINE)
+    watcher.check_now()
+    assert seen == ["2 Items identified", "1 Item identified"]
+
+
+def test_a_cancelled_trade_is_not_an_inventory_event(tmp_path, qapp) -> None:
+    """Gegenprobe: Bei "Trade cancelled." aendert sich nichts — ein Abruf
+    darauf waere reine Rate-Limit-Verschwendung."""
+    log = tmp_path / "Client.txt"
+    _write(log, "")
+    watcher = ZoneWatcher(log)
+
+    seen = []
+    watcher.inventory_event.connect(seen.append)
+    with log.open("a", encoding="utf-8") as f:
+        f.write(_TRADE_CANCELLED_LINE)
+        f.write(_OTHER_LINE)
+    watcher.check_now()
+    assert seen == []
+
+
+def test_zone_changes_and_inventory_events_stay_on_separate_signals(tmp_path, qapp) -> None:
+    """Getrennte Signale, weil der Zonenwechsel zusaetzlich die
+    Zonen-Anzeige und die Messungen aus §_PublishWatch fuettert — ein
+    Haendler-Verkauf hat dort nichts verloren, obwohl beide denselben
+    Refresh ausloesen."""
+    log = tmp_path / "Client.txt"
+    _write(log, "")
+    watcher = ZoneWatcher(log)
+
+    zones, events = [], []
+    watcher.zone_changed.connect(zones.append)
+    watcher.inventory_event.connect(events.append)
+    with log.open("a", encoding="utf-8") as f:
+        f.write(_ZONE_LINE)
+        f.write(_TRADE_LINE)
+    watcher.check_now()
+
+    assert zones == ["The Coast"]
+    assert events == ["Trade accepted"]

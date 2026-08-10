@@ -2174,10 +2174,24 @@ class MainWindow(QMainWindow):
         längst abgelaufen — der nächste Pick feuerte dann sofort hinterher.
         Genau das hat sich real hochgeschaukelt: 300s-Sperre → Doppel-Request
         beim Wiederanlauf → dadurch erneut 29 Treffer im Fenster → wieder
-        Sperre, endlos (FALLSTRICKE #34)."""
+        Sperre, endlos (FALLSTRICKE #34).
+
+        **Die Fälligkeit wächst ab dem bisherigen Termin, nicht ab jetzt**,
+        sobald ein Ereignis-Trigger (Zonenwechsel, Händler) vorgezogen hat
+        — Peter, 2026-08-10: "die dadurch gesparte Zeit auf den Timer zum
+        nächsten Trigger addieren". Im gewöhnlichen Fall ändert das nichts
+        (der Job lief ja, WEIL er fällig war, dann ist ``now`` bereits
+        später als der Termin). Ein vorgezogener Abruf zahlt seine
+        Ersparnis dagegen zurück, statt die Uhr auf null zu stellen: Vier
+        Trigger dicht hintereinander verschieben den nächsten regulären
+        Takt auf rund eine Minute, danach läuft alles wie zuvor weiter.
+        Ohne das wäre jeder Trigger ein geschenkter Request gewesen und
+        eine Serie davon (Rucksack beim Händler ausräumen) hätte genau das
+        300s-Fenster gefüllt, das der Takt sonst sorgfältig freihält."""
         self._refresh_mode_pending = False
-        self._refresh_mode_next_due = time.monotonic() + \
-            self.worker.rate_limiter.steady_pace_interval_s(self._refresh_mode_policy)
+        interval = self.worker.rate_limiter.steady_pace_interval_s(self._refresh_mode_policy)
+        self._refresh_mode_next_due = max(time.monotonic(),
+                                          self._refresh_mode_next_due) + interval
         self._drive_refresh_mode()
 
     def _on_stash_items(self, league: str, stash_id: str, name: str,
@@ -3181,17 +3195,15 @@ class MainWindow(QMainWindow):
     # (``_VOLATILE_GEM_PROPERTIES``, ARCHITEKTUR.md §4.33).
     #
     # Die Diagnose bleibt bestehen und deckt seit Peters zweiter Meldung
-    # ("meine angelegten Gegenstände werden immer noch markiert", mit
-    # Screenshot: auch Ringe und Flaschen türkis) ALLE Slots ab, nicht mehr
-    # nur die Ausrüstung: Ein Ring hat keine Sockel, für ihn kann die
-    # Gem-Erfahrung also nie die Erklärung sein. Ein Vergleich von Peters
-    # echtem Cache über zwanzig Minuten Spielzeit fand an Ringen, Amulett,
-    # Gürtel und Flaschen kein einziges abweichendes Feld — was auf dem
-    # Bildschirm türkis war, lässt sich damit allein aus den Daten NICHT
-    # erklären. Die Zusammenfassungszeile unten sagt darum bei jedem
-    # Refresh, wie viele Zeilen die Anzeige selbst für hervorgehoben hält:
-    # Weicht das von dem ab, was Peter sieht, liegt der Fehler nicht im
-    # Vergleich, sondern in der Darstellung.
+    # ("meine angelegten Gegenstände werden immer noch markiert") ALLE
+    # Slots ab statt nur der Ausrüstung, plus eine Zusammenfassungszeile
+    # bei jedem Refresh. Nicht, weil dort ein Fehler vermutet würde — die
+    # Beschränkung auf Ausrüstung war schlicht eine Wette darauf, WO der
+    # Fehler steckt, und die kostet beim nächsten Mal einen ganzen
+    # Spielabend, wenn sie danebenliegt. Die Zusammenfassung sagt, wie
+    # viele Zeilen die Anzeige selbst für hervorgehoben hält: Weicht das
+    # von dem ab, was auf dem Bildschirm zu sehen ist, liegt der Fehler
+    # nicht im Vergleich, sondern in der Darstellung.
     _ZONE_EQUIP_DIFF_LOG_WINDOW_S = 5.0
 
     @staticmethod
@@ -3625,16 +3637,80 @@ class MainWindow(QMainWindow):
             return
         self._zone_watcher = ZoneWatcher(resolved, self)
         self._zone_watcher.zone_changed.connect(self._on_zone_changed)
+        self._zone_watcher.inventory_event.connect(self._on_inventory_event)
+
+    # Wie weit dürfen Ereignis-Trigger den regulären Takt vor sich her
+    # schieben, ausgedrückt in ganzen Takt-Intervallen? Peter, 2026-08-10:
+    # "Dann haben wir meinetwegen 4 Trigger kurz hintereinander, aber der
+    # 5. Trigger kommt dann trotzdem erst nach 60 Sekunden und ab dann
+    # wieder alle 15 Sekunden oder so." Bewusst als ANZAHL INTERVALLE statt
+    # als feste 60 Sekunden: Das Takt-Intervall berechnet der Rate-Limiter
+    # live aus GGGs tatsächlich gemeldeten Regeln (bei "30 Treffer/300s"
+    # rund 10-15s) — Peters Verhältnis bleibt damit auch dann erhalten,
+    # wenn GGG die Regel ändert, während eine fest verdrahtete Minute
+    # stillschweigend zu großzügig oder zu knapp würde.
+    _TRIGGER_BURST_INTERVALS = 4
+
+    def _trigger_budget_spent(self) -> bool:
+        """Hat die Ereignis-Serie den regulären Takt schon so weit vor sich
+        her geschoben, dass weitere Trigger warten müssen? Ohne diese
+        Grenze bliebe die Schuldenrechnung aus ``_note_refresh_mode_job_
+        done`` zahnlos: Sie verschiebt zwar den nächsten Takt, hält aber
+        keinen einzigen Trigger auf — zwanzig Verkäufe in Folge wären
+        zwanzig Requests in wenigen Sekunden und damit sofort die
+        5-pro-10s-Grenze.
+
+        Die Grenze liegt bewusst ein HALBES Intervall vor dem vollen
+        Vielfachen: Nach vier Triggern steht die Schuld exakt auf vier
+        Intervallen, und ein Vergleich genau auf diesen Wert entschiede
+        über Mikrosekunden Uhrdrift, ob der fünfte noch durchrutscht.
+        Zwischen dem vierten und fünften Intervall gibt es dagegen nichts
+        zu verwechseln."""
+        interval = self.worker.rate_limiter.steady_pace_interval_s(self._refresh_mode_policy)
+        ahead = self._refresh_mode_next_due - time.monotonic()
+        return ahead >= interval * (self._TRIGGER_BURST_INTERVALS - 0.5)
+
+    def _event_refresh_blocked(self) -> bool:
+        """Gemeinsame Abbruchgründe für alle Ereignis-Trigger
+        (Zonenwechsel wie Händler): Pause-Modus als ausdrückliche
+        Nutzerwahl "keine Hintergrund-Anfragen", ein laufendes "Load All
+        Tabs" (das taktet sich selbst und verdoppelte sonst die Rate),
+        kein Login/keine aktive Liga — und die harte
+        Rate-Limit-Obergrenze."""
+        return (self._refresh_mode == "pause" or self._bulk_dialog is not None
+                or not self._logged_in or not self._current_league
+                or self._current_league_is_archived()
+                or self.worker.rate_limiter.pacing_blocked())
+
+    def _on_inventory_event(self, description: str) -> None:
+        """Peter, 2026-08-10: "Die Interaktion mit einem Händler,
+        Verkaufen, Identifizieren, ... triggert auch das Senden der
+        neuesten Items von GGG-Seite." Derselbe gezielte Einzel-Refresh
+        wie beim Zonenwechsel, nur ein anderer Anlass —
+        ``_INVENTORY_LINES`` im ZoneWatcher liest ihn aus derselben
+        Client.txt, die ohnehin schon alle 2s auf neue Bytes geprüft wird.
+
+        Anders als der Zonenwechsel läuft dieser Trigger NUR innerhalb des
+        Burst-Budgets (``_trigger_budget_spent``): Beim Ausräumen des
+        Rucksacks kommen "Trade accepted"-Zeilen in schneller Folge, und
+        jede einzelne davon zu bedienen brächte kaum neue Erkenntnis,
+        kostete aber je einen Request."""
+        if self._event_refresh_blocked() or self._trigger_budget_spent():
+            return
+        if self._refresh_current_view():
+            self._on_status(f"{description} — refreshing current view")
 
     def _on_zone_changed(self, zone_name: str) -> None:
         """Peter, 2026-08-01: "Erst nach Zonenwechsel gibt es einen
         Refresh" — live bestätigt (FALLSTRICKE #58). Lädt NUR die gerade
         offene Ansicht neu (wie der gezielte Teil von
         ``_maybe_auto_refresh``), kein Sweep, kein Burst — ein einzelner
-        Request pro Zonenwechsel. Respektiert den Pause-Modus (explizite
-        Nutzerwahl "keine Hintergrund-Anfragen") und die harte
-        Rate-Limit-Obergrenze, sonst identisch zu jedem anderen stillen
-        Refresh."""
+        Request pro Zonenwechsel. Abbruchgründe und Burst-Budget teilt er
+        sich mit dem Händler-Trigger (``_on_inventory_event``): Seit
+        beide dieselbe Schuldenrechnung füttern, wäre eine Ausnahme für
+        den Zonenwechsel ein Loch in genau der Grenze, die sie zieht —
+        wer zwischen Hideout und Map hin- und herportet, löst sonst
+        beliebig viele Abrufe aus."""
         self._zone_label.setText(zone_name)
         # VOR den Abbruchbedingungen: Für die Messung zählt, dass ein
         # Zonenwechsel stattgefunden hat — nicht, ob daraufhin ein
@@ -3643,10 +3719,7 @@ class MainWindow(QMainWindow):
         self._zone_changes += 1
         self._last_zone_at = time.monotonic()
         self._last_zone_name = zone_name
-        if (self._refresh_mode == "pause" or self._bulk_dialog is not None
-                or not self._logged_in or not self._current_league
-                or self._current_league_is_archived()
-                or self.worker.rate_limiter.pacing_blocked()):
+        if self._event_refresh_blocked() or self._trigger_budget_spent():
             return
         if self._refresh_current_view():
             self._on_status(f"Zone changed to {zone_name!r} — refreshing current view")
