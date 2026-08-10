@@ -27,7 +27,7 @@ from poe_view import __version__, config
 from poe_view.api.models import (Character, Item, StashTab,
                                  dominant_category, is_ggg_suffix)
 from poe_view.api.ninja import PriceIndex
-from poe_view.services import cache_backup, data_cache, icon_cache, price_cache
+from poe_view.services import cache_backup, data_cache, gem_xp_log, icon_cache, price_cache
 from poe_view.services.instance_lock import InstanceLock
 from poe_view.services.zone_watcher import ZoneWatcher, resolve_client_log_path
 from poe_view.services.api_worker import (ApiWorker, BootstrapJob,
@@ -3043,6 +3043,7 @@ class MainWindow(QMainWindow):
         watch.fetches += 1
         self._character_items[name] = items
         self._character_items_loaded[name] = datetime.now(timezone.utc).isoformat()
+        gem_xp_log.append(name, items)
         self._log_character_item_history(name, previous_items, items, stale_baseline)
         self._persist_cache()
         if silent:

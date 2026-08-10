@@ -3143,6 +3143,69 @@ ToDo.md).
 
 ---
 
+### 4.35 Gem-XP-Mitschrift für die Messung (`services/gem_xp_log.py`)
+
+Peter, 2026-08-10, noch am selben Abend: "Ich werde demnächst eine Runde
+spielen, da können wir mal die XP/h pro Gem messen. Die genauen Werte
+bzw. der Verlauf würde mich interessieren." Vorbereitung auf genau die
+Messung, die §4.34 als Voraussetzung für eine PRO-GEM-Anzeige nennt —
+ohne echte Zeitreihe lässt sich die dort widerlegte "ein Gem reicht"-
+Annahme nicht weiter auswerten.
+
+**Zwei Fälle sollten unterscheidbar sein, die Peter ausdrücklich nannte:**
+ein Gem, das absichtlich nicht weitergelevelt wird, und eines, das gerade
+NICHT weiterleveln KANN, weil eine Voraussetzung (meist ein Attribut)
+fehlt. Nachgesehen, bevor irgendetwas gebaut wurde: In Peters echtem
+Cache tragen genau die drei Level-1-Gems aus §4.34 (`Blood Rage`,
+`Frostblink`, ein zweites `Lifetap Support`) zusätzlich ein Feld
+`nextLevelRequirements` und stehen mit `progress: 1` auf ihrer
+Experience — die Erfahrung für die aktuelle Stufe ist bereits VOLL, nur
+eine Voraussetzung für die nächste fehlt (bei `Blood Rage`: Charakterlevel
+20 und 50 Dex, Peters Charakter hat nur 41). Das ist real gefunden, kein
+Rätselraten. Für Peters ANDERE Vermutung — ein eigener Schalter "EP-Zuwachs
+deaktivieren" — ließ sich weder im Rohdatensatz noch in der öffentlichen
+Doku ein Feld dafür bestätigen. **Deshalb bewusst nicht geraten:** Statt
+eine Erkennung für ein möglicherweise gar nicht existierendes Flag zu
+bauen, schreibt das Log einfach ALLE relevanten Rohfelder mit. Bleibt die
+Erfahrung eines Gems über die Spielrunde flach, ohne dass
+`capped_by_requirement` gesetzt ist, ist GENAU DAS der Kandidat für
+Peters zweiten Fall — die Unterscheidung fällt beim Auswerten der Daten,
+nicht beim Schreiben des Codes.
+
+**Eine Zeile pro Sockel-Gem, bei jedem Charakter-Abruf** (`gem_xp_log.
+append()`, verdrahtet in `_on_character_items`) — auch im stillen
+Hintergrund-Refresh, unabhängig davon, welcher Charakter gerade angezeigt
+wird (mehr Messpunkte für den Verlauf). Spalten: Zeitstempel, Charakter,
+Slot, Gem-ID/-Name, Support-Flag, Level, Qualität, Erfahrung (aktuell/
+Maximum/Anteil), `capped_by_requirement` und die lesbare Fassung von
+`nextLevelRequirements`. Reine CSV statt eines eigenen Zeitreihen-Formats
+— für eine Handvoll Spielstunden zieht man das genauso gut in jede
+Tabellenkalkulation, und es ist in einer Zeile erklärt. Ohne Sockel-Gems
+(Ringe, Amulett, Rucksack) wird nichts geschrieben, auch keine leere
+Zeile.
+
+**`log_path()` ist eine Funktion, keine Konstante** — dieselbe Falle wie
+bei `cache_backup.directory()`: `config.LOG_DIR` wird beim Import von
+`config.py` EINMAL aus dem damaligen `APP_DATA_DIR` berechnet und ändert
+sich nicht mehr mit, wenn ein Test später `APP_DATA_DIR` umbiegt. Das fiel
+erst beim Testen selbst auf: Der bestehende, seit §_isolated_local_state
+laufende Test-Schutz patcht `APP_DATA_DIR`, aber `LOG_DIR` blieb davon
+unberührt — jeder Test, der eine Charakter-Aktualisierung simuliert
+(Dutzende in `test_main_window_helpers.py`), hätte sonst in Peters ECHTEN
+Log-Ordner geschrieben. `tests/conftest.py`s Autouse-Fixture patcht
+`config.LOG_DIR` deshalb jetzt zusätzlich und direkt, nicht nur
+`APP_DATA_DIR` — ein systemischer Fix, der jeden künftigen Code vor
+demselben Fehler schützt, nicht nur diesen einen.
+
+Getestet: `tests/test_gem_xp_log.py` (Header nur einmal, beide Fälle aus
+Peters echten Daten nachgebildet — normal levelndes Gem vs. durch eine
+Voraussetzung blockiertes —, mehrere Charaktere in einer Datei, keine
+Zeile ohne Sockel-Gems, Gegenprobe für `capped_by_requirement`),
+`tests/test_main_window_helpers.py` (Ende-zu-Ende-Verdrahtung über
+`_on_character_items`).
+
+---
+
 ## 5. UI-Konzept (Oberflächenvorschlag)
 
 Ein Hauptfenster: Navigation links (Charaktere + Stash getrennt), Items

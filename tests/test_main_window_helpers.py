@@ -7167,3 +7167,28 @@ def test_character_status_bar_shows_xp_rate_from_the_second_refresh_on(
 
     win.worker.stop()
     win.worker.wait(5000)
+
+
+def test_character_refresh_writes_to_the_gem_xp_log(qapp, monkeypatch, tmp_path) -> None:
+    """Ende-zu-Ende: Peter, 2026-08-10, soll beim Spielen automatisch
+    mitgeschrieben werden, ohne dass er selbst etwas dafuer tun muss."""
+    from poe_view.services import gem_xp_log
+
+    monkeypatch.setattr(gem_xp_log.config, "LOG_DIR", tmp_path)
+    win = MainWindow()
+    helm = Item.model_validate({
+        "id": "helm-1", "typeLine": "Rat's Nest", "inventoryId": "Helm",
+        "socketedItems": [{
+            "id": "gem-a", "typeLine": "Fire Trap", "support": False,
+            "additionalProperties": [
+                {"name": "Experience", "values": [["100/200", 0]], "progress": 0.5}],
+        }],
+    })
+
+    win._on_character_items("WitchOfPeter", [helm], False)
+
+    assert gem_xp_log.log_path().exists()
+    assert "Fire Trap" in gem_xp_log.log_path().read_text(encoding="utf-8")
+
+    win.worker.stop()
+    win.worker.wait(5000)

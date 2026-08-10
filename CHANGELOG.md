@@ -18,6 +18,11 @@ nach [SemVer](https://semver.org/lang/de/).
   API-Request (Level und Erfahrung stecken bereits in der Antwort, die
   für die Ausrüstung ohnehin geladen wird). Erster Schritt einer
   größeren, noch offenen Idee (Gem-XP/h, ein echter Graph).
+- Für dieselbe Idee: eine CSV-Mitschrift der Erfahrung jedes
+  Sockel-Gems über die Zeit (`%LOCALAPPDATA%\PoE-VIEW2\logs\
+  gem-xp-log.csv`), inklusive einer Markierung für Gems, die gerade
+  nicht weiterleveln können, weil eine Voraussetzung (meist ein
+  Attribut) fehlt.
 
 ### Behoben
 
