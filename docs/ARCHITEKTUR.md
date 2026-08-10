@@ -3271,7 +3271,14 @@ die andere Richtung: Liegt die Anforderung UNTER etwas, das der Charakter
 ohnehin trägt, ist sie sicher erfüllt. Für alles andere steht die
 Untergrenze selbst in der Zeile (`attribute_floor`) — damit lässt sich
 beim Auswerten gegen den tatsächlichen Attributwert rechnen, den nur der
-Charakterbogen im Spiel kennt. Die Slot-Liste
+Charakterbogen im Spiel kennt.
+
+Peter hat seine echten Werte anschließend genannt, womit die Ableitung
+einmal gegengeprüft ist: Str 280 gegen eine Untergrenze von 151, Int 145
+gegen 131, Dex 114 gegen 108. Alle drei Grenzen halten, und der Abstand
+zeigt zugleich, warum die Gegenrichtung nicht funktioniert — bei Str
+liegen 129 Punkte zwischen Beleg und Wirklichkeit. Nur bei seinem
+schwächsten Attribut ist die Grenze fast exakt. Die Slot-Liste
 dafür (`_WORN_SLOTS`) ist bewusst eine eigene, knappe — nicht
 `paperdoll.EQUIPPED_SLOTS`: Ein Import aus dem UI-Paket zöge Qt-Widgets
 in einen reinen Service, und die beiden Listen haben gegenläufige
