@@ -18,7 +18,7 @@ from poe_view.services import price_cache
 from poe_view.services.api_worker import FetchPricesJob, FetchStashListJob
 from poe_view.ui import external_tools
 from poe_view.ui.item_table import CONFIGURABLE_COLUMNS
-from poe_view.ui.main_window import MainWindow
+from poe_view.ui.main_window import MainWindow, _stable_item_dump
 
 NESTED = [
     {"id": "root1", "name": "#", "type": "QuadStash", "metadata": {}},
@@ -6511,6 +6511,80 @@ def test_a_genuine_change_inside_socketed_items_still_counts_as_changed() -> Non
     assert changed_ids == frozenset({"helm-1"})
 
 
+def _gem_with_experience(gem_id: str, name: str, experience: int, level: str = "18") -> dict:
+    """Sockel-Gem im Aufbau von Peters echten Daten (Feldnamen und
+    Verschachtelung 1:1 aus seinem Cache uebernommen, siehe
+    ``services/gem_xp_log.py``) — die Erfahrung steckt als
+    ``current/max``-Zeichenkette in ``additionalProperties``."""
+    return {
+        "id": gem_id, "typeLine": name, "socket": 0,
+        "properties": [{"name": "Level", "values": [[level, 0]]}],
+        "additionalProperties": [
+            {"name": "Experience", "values": [[f"{experience}/226180911", 0]],
+             "progress": experience / 226180911},
+        ],
+    }
+
+
+def test_growing_gem_experience_does_not_count_as_a_changed_item() -> None:
+    """DIE Ursache dafuer, dass nach jedem Zonenwechsel praktisch die
+    ganze Ausruestung tuerkis aufleuchtete (Peter, 2026-08-10,
+    ARCHITEKTUR.md §4.33). Gemessen an seiner echten Spielrunde: Zwischen
+    zwei zwoelf Sekunden auseinanderliegenden Abrufen hatten 25 von 29
+    Sockel-Gems neue Erfahrungswerte — damit gilt jedes sockelbare
+    Ausruestungsteil beim Spielen dauernd als 'geaendert', ohne dass an
+    der Ausruestung selbst irgendetwas passiert waere."""
+    previous = [Item.model_validate({"id": "helm-1", "typeLine": "Rat's Nest",
+                                     "inventoryId": "Helm",
+                                     "socketedItems": [
+                                         _gem_with_experience("gem-a", "Fire Trap", 66921722)]})]
+    current = [Item.model_validate({"id": "helm-1", "typeLine": "Rat's Nest",
+                                    "inventoryId": "Helm",
+                                    "socketedItems": [
+                                        _gem_with_experience("gem-a", "Fire Trap", 68417244)]})]
+
+    added_ids, changed_ids, removed_items = MainWindow._diff_character_items(previous, current)
+
+    assert added_ids == frozenset()
+    assert changed_ids == frozenset()
+    assert removed_items == []
+
+
+def test_a_gem_level_up_still_counts_as_a_changed_item() -> None:
+    """Gegenprobe: Nur der Erfahrungsbalken faellt aus dem Vergleich, die
+    Gem-STUFE ausdruecklich nicht — ein Gem, das tatsaechlich aufsteigt,
+    ist eine echte Aenderung, die Peter sehen soll."""
+    previous = [Item.model_validate({"id": "helm-1", "typeLine": "Rat's Nest",
+                                     "inventoryId": "Helm",
+                                     "socketedItems": [
+                                         _gem_with_experience("gem-a", "Fire Trap", 66921722,
+                                                              level="18")]})]
+    current = [Item.model_validate({"id": "helm-1", "typeLine": "Rat's Nest",
+                                    "inventoryId": "Helm",
+                                    "socketedItems": [
+                                        _gem_with_experience("gem-a", "Fire Trap", 12,
+                                                             level="19")]})]
+
+    _, changed_ids, _ = MainWindow._diff_character_items(previous, current)
+
+    assert changed_ids == frozenset({"helm-1"})
+
+
+def test_stripping_gem_experience_leaves_the_cached_item_untouched() -> None:
+    """``model_dump()`` reicht die ueber ``extra="allow"`` mitgefuehrten
+    Rohfelder unkopiert durch — wuerde die Normalisierung die Gem-Dicts an
+    Ort und Stelle aendern, verstuemmelte sie den zwischengespeicherten
+    Item-Zustand selbst und damit die Grundlage der Gem-XP-Mitschrift."""
+    gem = _gem_with_experience("gem-a", "Fire Trap", 66921722)
+    item = Item.model_validate({"id": "helm-1", "typeLine": "Rat's Nest",
+                                "inventoryId": "Helm", "socketedItems": [gem]})
+
+    _stable_item_dump(item)
+
+    names = [p["name"] for p in item.socketedItems[0]["additionalProperties"]]
+    assert names == ["Experience"]
+
+
 def test_socketed_items_reordering_is_not_logged_as_an_equipment_change(
         qapp, caplog) -> None:
     """Ende-zu-Ende-Fassung des Fixes: die Diagnose-Zeile aus §4.33 soll
@@ -6568,12 +6642,15 @@ def test_equipped_item_change_long_after_a_zone_change_is_not_logged(
     win.worker.wait(5000)
 
 
-def test_inventory_item_change_shortly_after_a_zone_change_is_not_logged(
+def test_a_changed_inventory_item_is_logged_but_not_as_equipment(
         qapp, caplog) -> None:
-    """Die Diagnose gilt ausdrücklich nur Ausrüstung (Peters Wortlaut:
-    'die ANGELEGTEN Items') — ein ganz normales Rucksack-Item, das sich
-    aendert (z. B. weil es identifiziert wurde), ist kein Fall dieses
-    Bugs und soll das Log nicht fuellen."""
+    """Die Diagnose galt zunaechst nur der Ausruestung (Peters Wortlaut:
+    'die ANGELEGTEN Items'). Nach seiner zweiten Meldung mit Screenshot —
+    auch Ringe und Flaschen leuchteten tuerkis — deckt sie ALLE Slots ab,
+    denn ein Slot ohne Sockel kann unmoeglich an der Gem-Erfahrung
+    haengen. Die Ausruestung bleibt in der Zeile trotzdem als solche
+    erkennbar, sonst waere der urspruengliche Fall im Log nicht mehr von
+    einem beliebigen Rucksack-Item zu unterscheiden."""
     import logging
 
     win = MainWindow()
@@ -6588,7 +6665,65 @@ def test_inventory_item_change_shortly_after_a_zone_change_is_not_logged(
             Item.model_validate({"id": "bag-1", "typeLine": "Chaos Orb",
                                  "inventoryId": "MainInventory", "identified": True})], False)
 
-    assert not [m for m in caplog.messages if "als GEÄNDERT erkannt" in m]
+    line = next(m for m in caplog.messages if "als GEÄNDERT erkannt" in m)
+    assert line.startswith("Item als GEÄNDERT")
+    assert "identified" in line
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_the_highlight_summary_reports_how_many_rows_are_marked(qapp, caplog) -> None:
+    """Peters zweite Meldung mit Screenshot zeigte praktisch die ganze
+    Tabelle tuerkis, obwohl ein Vergleich seines echten Caches ueber
+    zwanzig Minuten Spielzeit an Ringen, Amulett und Flaschen kein
+    einziges abweichendes Feld fand. Diese Zusammenfassung haelt fest,
+    wie viele Zeilen die Anzeige selbst fuer hervorgehoben haelt — weicht
+    das von dem ab, was auf dem Bildschirm zu sehen ist, liegt der Fehler
+    in der Darstellung und nicht im Vergleich. Bewusst OHNE Bindung an
+    einen Zonenwechsel, sie soll bei jedem Refresh mitlaufen."""
+    import logging
+
+    win = MainWindow()
+    win._current_character_name = "WitchOfPeter"
+    win._on_character_items("WitchOfPeter", [
+        Item.model_validate({"id": "ring-1", "typeLine": "Amethyst Ring",
+                             "inventoryId": "Ring"}),
+        Item.model_validate({"id": "bag-1", "typeLine": "Chaos Orb",
+                             "inventoryId": "MainInventory", "stackSize": 1})], False)
+
+    with caplog.at_level(logging.INFO, logger="poe_view.ui.main_window"):
+        win._on_character_items("WitchOfPeter", [
+            Item.model_validate({"id": "ring-1", "typeLine": "Amethyst Ring",
+                                 "inventoryId": "Ring"}),
+            Item.model_validate({"id": "bag-1", "typeLine": "Chaos Orb",
+                                 "inventoryId": "MainInventory", "stackSize": 2}),
+            Item.model_validate({"id": "bag-2", "typeLine": "Portal Scroll",
+                                 "inventoryId": "MainInventory"})], False)
+
+    line = next(m for m in caplog.messages if "Türkis-Hervorhebung" in m)
+    assert "2 von 3 angezeigten Zeilen" in line
+    assert "1 neu, 1 geändert" in line
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_an_unchanged_refresh_writes_no_highlight_summary(qapp, caplog) -> None:
+    """Gegenprobe: Solange nichts hervorgehoben wird, soll die
+    Zusammenfassung schweigen — sonst stuende bei jedem der alle paar
+    Sekunden laufenden Hintergrund-Refreshes eine Zeile im Log."""
+    import logging
+
+    win = MainWindow()
+    win._current_character_name = "WitchOfPeter"
+    item = {"id": "ring-1", "typeLine": "Amethyst Ring", "inventoryId": "Ring"}
+    win._on_character_items("WitchOfPeter", [Item.model_validate(item)], False)
+
+    with caplog.at_level(logging.INFO, logger="poe_view.ui.main_window"):
+        win._on_character_items("WitchOfPeter", [Item.model_validate(item)], False)
+
+    assert not [m for m in caplog.messages if "Türkis-Hervorhebung" in m]
 
     win.worker.stop()
     win.worker.wait(5000)

@@ -214,36 +214,70 @@ class _XpWatch:
     current_experience: int = 0
 
 
-# Felder, deren Listen-Reihenfolge GGG zwischen zwei Abrufen NICHT stabil
-# hält, obwohl sich am Inhalt nichts geändert hat. Real beobachtet (Peter,
-# 2026-08-10, echtes Spiel, ARCHITEKTUR.md §4.33): Beim selben Zonenwechsel
-# lösten 8 von 8 sockelbaren Ausrüstungsteilen gleichzeitig eine Änderung
-# aus, jedes Mal exakt im Feld "socketedItems" — bei einer echten
-# Gem-Levelaufstufung wäre das nie alle acht auf einmal. Reproduziert: zwei
-# Items mit denselben Sockel-Gems, nur in vertauschter Reihenfolge, gelten
-# über Pydantics Listenvergleich als "verschieden", obwohl nichts passiert
-# ist.
+# Listenfelder, die vor dem Vergleich nach der ``id`` ihrer Einträge
+# sortiert werden. Reine Vorsichtsmaßnahme: Über 47 aufeinanderfolgende
+# Messpunkte aus Peters echter Spielrunde (gem-xp-log.csv, 2026-08-10) war
+# die Reihenfolge von ``socketedItems`` AUSNAHMSLOS stabil — die zunächst
+# vermutete Reihenfolge-Instabilität ließ sich also NICHT bestätigen. Die
+# Sortierung kostet nichts und hält den Vergleich unabhängig davon, bleibt
+# aber ausdrücklich unbelegt, damit sie niemand später als gemessene
+# Tatsache weiterträgt.
 _VOLATILE_LIST_ORDER_FIELDS = ("socketedItems",)
+
+# Gem-Eigenschaften, die sich bei JEDEM Abruf ändern, während gespielt
+# wird, ohne dass an der Ausrüstung etwas passiert ist: die Erfahrung der
+# Sockel-Gems. DAS war die eigentliche Ursache dafür, dass nach jedem
+# Zonenwechsel praktisch die gesamte Ausrüstung türkis aufleuchtete
+# (Peter, 2026-08-10, ARCHITEKTUR.md §4.33). Gemessen, nicht vermutet:
+# zwischen zwei zwölf Sekunden auseinanderliegenden Abrufen hatten 25 von
+# 29 Sockel-Gems neue Erfahrungswerte — jedes sockelbare Ausrüstungsteil
+# gilt damit über Pydantics Gleichheit dauernd als "geändert".
+#
+# Die Gem-STUFE bleibt bewusst im Vergleich: Ein Gem, das tatsächlich
+# aufsteigt, ist eine echte Änderung, die Peter sehen soll. Nur der
+# Erfahrungsbalken darauf hin fliegt raus.
+_VOLATILE_GEM_PROPERTIES = ("Experience",)
+
+
+def _gem_without_experience(gem: dict) -> dict:
+    """``gem`` ohne die Einträge aus ``_VOLATILE_GEM_PROPERTIES`` in
+    ``additionalProperties``. Gibt bewusst eine NEUE Dict-Ebene zurück,
+    statt zu filtern und zurückzuschreiben: ``model_dump()`` reicht die
+    über ``extra="allow"`` mitgeführten Rohfelder unkopiert durch (sie
+    sind keine Pydantic-Modelle), eine Änderung an Ort und Stelle würde
+    also den zwischengespeicherten Item-Zustand selbst verstümmeln."""
+    properties = gem.get("additionalProperties")
+    if not isinstance(properties, list):
+        return gem
+    kept = [p for p in properties
+            if not (isinstance(p, dict) and p.get("name") in _VOLATILE_GEM_PROPERTIES)]
+    if len(kept) == len(properties):
+        return gem
+    return {**gem, "additionalProperties": kept}
 
 
 def _stable_item_dump(item: Item) -> dict:
-    """``item.model_dump()``, aber mit den Feldern aus
-    ``_VOLATILE_LIST_ORDER_FIELDS`` sortiert nach der ``id`` jedes
-    Eintrags, bevor verglichen wird. Grundlage für ``_diff_character_
-    items`` UND ``MainWindow._differing_fields`` — dieselbe
-    Normalisierung an beiden Stellen, sonst würde die Diagnose-Zeile aus
-    §4.33 weiterhin "geändert" behaupten, obwohl der eigentliche
-    Änderungs-Vergleich das längst nicht mehr so sieht.
+    """``item.model_dump()``, aber um alles bereinigt, was sich beim
+    Spielen ohnehin ständig ändert, bevor zwei Item-Zustände verglichen
+    werden: die Erfahrung der Sockel-Gems fällt raus, die Reihenfolge der
+    Felder aus ``_VOLATILE_LIST_ORDER_FIELDS`` wird vereinheitlicht.
+    Grundlage für ``_diff_character_items`` UND
+    ``MainWindow._differing_fields`` — dieselbe Normalisierung an beiden
+    Stellen, sonst würde die Diagnose-Zeile aus §4.33 weiterhin
+    "geändert" behaupten, obwohl der eigentliche Änderungs-Vergleich das
+    längst nicht mehr so sieht.
 
-    Eine reine Sortierung kann eine ECHTE Änderung nicht verstecken: Ein
-    Gem, das tatsächlich aufgestuft wurde, unterscheidet sich unter
-    seiner eigenen ``id`` weiterhin vom vorigen Stand — nur seine
-    Position in der umgebenden Liste zählt nicht mehr mit."""
+    Beides kann eine ECHTE Änderung nicht verstecken: Ein Gem, das
+    aufgestuft oder ausgetauscht wurde, unterscheidet sich weiterhin in
+    seiner Stufe bzw. seiner ``id`` — nur sein Erfahrungsstand und seine
+    Position in der umgebenden Liste zählen nicht mehr mit."""
     dump = item.model_dump()
     for field in _VOLATILE_LIST_ORDER_FIELDS:
         value = dump.get(field)
         if isinstance(value, list) and value and isinstance(value[0], dict):
-            dump[field] = sorted(value, key=lambda entry: entry.get("id") or "")
+            dump[field] = sorted((_gem_without_experience(entry) for entry in value
+                                  if isinstance(entry, dict)),
+                                 key=lambda entry: entry.get("id") or "")
     return dump
 
 
@@ -3140,17 +3174,24 @@ class MainWindow(QMainWindow):
 
     # Peter, 2026-08-10 (ToDo.md): "Beim Refresh der Itemliste nach dem
     # Zonenwechsel aus einer Map ins Hideout werden auch die angelegten
-    # Items als frisch erkannt." GEFUNDEN UND BEHOBEN, noch am selben Tag:
-    # die neu eingeführte Diagnose-Zeile unten zeigte beim nächsten
-    # Spielabend, dass 8 von 8 sockelbaren Ausrüstungsteilen gleichzeitig
-    # im selben Feld auffielen — ``socketedItems``. Reproduziert:
-    # ``_stable_item_dump`` oben normalisiert genau diese Listen-Reihenfolge
-    # jetzt vor jedem Vergleich, siehe ARCHITEKTUR.md §4.33. Die
-    # Diagnose-Zeile bleibt trotzdem bestehen: Fällt sie künftig noch
-    # einmal an, ist es eine ANDERE, noch unbekannte Ursache, kein
-    # Rückfall der hier behobenen — eng auf ein Zeitfenster um den
-    # Zonenwechsel begrenzt, damit das Log nicht bei jeder gewöhnlichen
-    # Änderung während des Mappens vollläuft.
+    # Items als frisch erkannt." Die Diagnose-Zeile unten zeigte am selben
+    # Abend acht von acht sockelbaren Ausrüstungsteilen gleichzeitig, jedes
+    # Mal exakt im Feld ``socketedItems`` — Ursache war die Erfahrung der
+    # Sockel-Gems, die beim Spielen bei praktisch jedem Abruf hochzählt
+    # (``_VOLATILE_GEM_PROPERTIES``, ARCHITEKTUR.md §4.33).
+    #
+    # Die Diagnose bleibt bestehen und deckt seit Peters zweiter Meldung
+    # ("meine angelegten Gegenstände werden immer noch markiert", mit
+    # Screenshot: auch Ringe und Flaschen türkis) ALLE Slots ab, nicht mehr
+    # nur die Ausrüstung: Ein Ring hat keine Sockel, für ihn kann die
+    # Gem-Erfahrung also nie die Erklärung sein. Ein Vergleich von Peters
+    # echtem Cache über zwanzig Minuten Spielzeit fand an Ringen, Amulett,
+    # Gürtel und Flaschen kein einziges abweichendes Feld — was auf dem
+    # Bildschirm türkis war, lässt sich damit allein aus den Daten NICHT
+    # erklären. Die Zusammenfassungszeile unten sagt darum bei jedem
+    # Refresh, wie viele Zeilen die Anzeige selbst für hervorgehoben hält:
+    # Weicht das von dem ab, was Peter sieht, liegt der Fehler nicht im
+    # Vergleich, sondern in der Darstellung.
     _ZONE_EQUIP_DIFF_LOG_WINDOW_S = 5.0
 
     @staticmethod
@@ -3169,38 +3210,57 @@ class MainWindow(QMainWindow):
         keys = sorted(set(old_dump) | set(new_dump))
         return [k for k in keys if old_dump.get(k) != new_dump.get(k)]
 
-    def _log_equipped_item_diff(self, name: str, previous_items: list[Item] | None,
-                                items: list[Item], added_ids: frozenset[str],
-                                changed_ids: frozenset[str]) -> None:
-        """Diagnose-Zeile für ToDo.md/Peter, 2026-08-10 (siehe Kommentar
-        oben an ``_ZONE_EQUIP_DIFF_LOG_WINDOW_S``). Beschränkt auf
-        Ausrüstungs-Slots (``paperdoll.EQUIPPED_SLOTS`` — dieselbe Liste,
-        die auch die Puppe befüllt, nicht neu erfunden) und auf ein enges
-        Zeitfenster nach dem letzten bekannten Zonenwechsel, sonst würde
-        jede normale Flaschenladung während des Mappens eine Zeile
-        erzeugen. Läuft nur, solange überhaupt schon ein Zonenwechsel
-        beobachtet wurde (``_last_zone_at``)."""
+    def _log_character_item_diff(self, name: str, previous_items: list[Item] | None,
+                                 items: list[Item], added_ids: frozenset[str],
+                                 changed_ids: frozenset[str]) -> None:
+        """Diagnose für ToDo.md/Peter, 2026-08-10 (siehe Kommentar oben an
+        ``_ZONE_EQUIP_DIFF_LOG_WINDOW_S``).
+
+        Zwei Ebenen:
+
+        - Eine Zusammenfassung bei JEDEM Refresh, sobald überhaupt etwas
+          hervorgehoben wird — sie hält fest, wie viele der angezeigten
+          Zeilen die Anzeige selbst für neu bzw. geändert hält. Genau
+          dieser Abgleich mit dem, was auf dem Bildschirm türkis ist,
+          trennt einen Fehler im Vergleich von einem in der Darstellung.
+        - Je eine Zeile pro betroffenem Item mit den abweichenden
+          FELDNAMEN, begrenzt auf ein enges Zeitfenster nach dem letzten
+          Zonenwechsel — sonst schriebe jede eingesammelte Währung während
+          des Mappens mit. Läuft nur, solange überhaupt schon ein
+          Zonenwechsel beobachtet wurde (``_last_zone_at``).
+
+        Nur Feldnamen, keine Werte: reicht, um gezielt nachzusehen, ohne
+        Mod-Texte o. Ä. ins Log zu schreiben."""
+        if previous_items is None or not (added_ids or changed_ids):
+            return
+        log.info("Türkis-Hervorhebung %s: %d von %d angezeigten Zeilen "
+                 "(%d neu, %d geändert)",
+                 name, len(added_ids | changed_ids), len(items),
+                 len(added_ids), len(changed_ids))
         if self._last_zone_at is None:
             return
         if time.monotonic() - self._last_zone_at > self._ZONE_EQUIP_DIFF_LOG_WINDOW_S:
             return
-        previous_by_id = {item.id: item for item in (previous_items or []) if item.id}
+        previous_by_id = {item.id: item for item in previous_items if item.id}
         for item in items:
-            if item.inventoryId not in EQUIPPED_SLOTS:
-                continue
+            # Ausrüstung ausdrücklich benennen (``paperdoll.EQUIPPED_SLOTS``
+            # — dieselbe Liste, die auch die Puppe befüllt, nicht neu
+            # erfunden), damit die Zeilen weiter unterscheidbar bleiben,
+            # nachdem die Diagnose auf alle Slots ausgeweitet wurde.
+            kind = "Ausrüstung" if item.inventoryId in EQUIPPED_SLOTS else "Item"
             if item.id in added_ids:
-                log.info("Ausrüstung als NEU erkannt kurz nach Zonenwechsel (%s, %s in %s): "
+                log.info("%s als NEU erkannt kurz nach Zonenwechsel (%s, %s in %s): "
                         "vorherige ID unbekannt — evtl. vergibt GGG bei Zonenwechseln neue "
-                        "Item-IDs für Ausrüstung.",
-                        name, item.typeLine or item.name or "?", item.inventoryId)
+                        "Item-IDs.",
+                        kind, name, item.typeLine or item.name or "?", item.inventoryId)
             elif item.id in changed_ids:
                 previous = previous_by_id.get(item.id)
                 if previous is None:
                     continue
                 diff = self._differing_fields(previous, item)
-                log.info("Ausrüstung als GEÄNDERT erkannt kurz nach Zonenwechsel "
+                log.info("%s als GEÄNDERT erkannt kurz nach Zonenwechsel "
                         "(%s, %s in %s): abweichende Felder: %s",
-                        name, item.typeLine or item.name or "?", item.inventoryId,
+                        kind, name, item.typeLine or item.name or "?", item.inventoryId,
                         ", ".join(diff) or "(keine? bitte Item.__eq__ prüfen)")
 
     @staticmethod
@@ -3341,7 +3401,7 @@ class MainWindow(QMainWindow):
         self._current_stash_selection = None
         self.table.setColumnHidden(TAB_COL, False)
         added_ids, changed_ids, removed_items = self._diff_character_items(previous_items, items)
-        self._log_equipped_item_diff(name, previous_items, items, added_ids, changed_ids)
+        self._log_character_item_diff(name, previous_items, items, added_ids, changed_ids)
         display_items = items + removed_items
         sources = [item.inventoryId or "?" for item in display_items]
         removed_ids = frozenset(item.id for item in removed_items if item.id)

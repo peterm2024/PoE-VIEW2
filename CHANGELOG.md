@@ -26,13 +26,15 @@ nach [SemVer](https://semver.org/lang/de/).
 
 ### Behoben
 
-- Nach einem Zonenwechsel leuchtete oft die halbe Ausrüstung türkis auf,
-  als wäre gerade etwas Neues passiert, obwohl nichts geschehen war.
-  Ursache: GGGs API liefert die Reihenfolge der sozialisierten Gems
-  eines Items nicht stabil zwischen zwei Abrufen — dieselben Gems in
-  vertauschter Reihenfolge galten als "geändertes Item". Betroffen war
-  jedes sockelbare Ausrüstungsteil (Waffen, Schild, Handschuhe, Stiefel,
-  Helm, Rüstung).
+- Beim Spielen leuchtete ständig die halbe Ausrüstung türkis auf, als
+  wäre gerade etwas Neues passiert, obwohl nichts geschehen war.
+  Ursache: Die Erfahrung der Sockel-Gems zählt permanent hoch und ist
+  Teil der Item-Daten — damit galt jedes sockelbare Ausrüstungsteil bei
+  fast jedem Refresh als "geändertes Item" (in Peters Spielrunde
+  gemessen: 25 von 29 Gems mit neuen Erfahrungswerten binnen zwölf
+  Sekunden). Der Erfahrungsstand zählt für die Hervorhebung jetzt nicht
+  mehr mit; ein Gem, das tatsächlich eine Stufe aufsteigt, wird
+  weiterhin angezeigt.
 
 ## [0.6.0] - 2026-08-07
 

@@ -2988,7 +2988,7 @@ Antwort, zwei Verwerter.
 
 ---
 
-### 4.33 Ausrüstung "als frisch erkannt" nach einem Zonenwechsel: `socketedItems`-Reihenfolge
+### 4.33 Ausrüstung "als frisch erkannt" nach einem Zonenwechsel: mitzählende Gem-Erfahrung
 
 Peter, 2026-08-10 (ToDo.md): "Beim Refresh der Itemliste nach dem
 Zonenwechsel aus einer Map ins Hideout werden auch die angelegten Items
@@ -3011,9 +3011,9 @@ Abrufen kippt — dafür fehlte das Feld selbst.
 
 **Deshalb zunächst instrumentiert statt geraten gefixt** — dieselbe
 Reihenfolge wie bei der Zonenwechsel-Frage in §_PublishWatch: erst
-Sichtbarkeit schaffen, dann urteilen. `MainWindow._log_equipped_item_
-diff()` protokolliert seither bei Gelegenheit eine INFO-Zeile, wenn ein
-Item auf einem Ausrüstungs-Slot (`paperdoll.EQUIPPED_SLOTS` — dieselbe
+Sichtbarkeit schaffen, dann urteilen. `MainWindow._log_character_item_
+diff()` protokolliert seither eine INFO-Zeile, wenn ein Item (anfangs nur
+auf einem Ausrüstungs-Slot, `paperdoll.EQUIPPED_SLOTS` — dieselbe
 Liste, die auch die Puppe aus §4.16 befüllt) innerhalb von
 `_ZONE_EQUIP_DIFF_LOG_WINDOW_S = 5s` nach dem letzten Zonenwechsel als
 neu oder geändert auffällt, im zweiten Fall mit den tatsächlich
@@ -3030,33 +3030,74 @@ Acht verschiedene Sockel-Gems hätten nicht im selben Sekundenbruchteil
 zufällig gleichzeitig eine echte inhaltliche Änderung erfahren; das
 Muster zeigt stattdessen etwas Strukturelles.
 
-**Reproduziert und bestätigt:** GGGs API liefert die Reihenfolge der
-Einträge in `socketedItems` nicht stabil zwischen zwei Abrufen. Ein
-minimaler Test mit zwei identischen Gems in vertauschter Reihenfolge
-genügt, damit Pydantics Listenvergleich (`Item.__eq__`, feldweise über
-alle Attribute inkl. `extra="allow"`) die beiden Item-Zustände als
-"verschieden" einstuft — obwohl inhaltlich nichts geschah.
+**Erste Erklärung (instabile Listen-Reihenfolge) war naheliegend — und
+falsch.** Dass zwei identische Gems in vertauschter Reihenfolge über
+Pydantics Listenvergleich (`Item.__eq__`, feldweise über alle Attribute
+inkl. `extra="allow"`) als "verschieden" gelten, ließ sich zwar in einem
+Minimaltest zeigen; dass GGG tatsächlich umsortiert, aber nicht. Der
+erste Versuch normalisierte deshalb nur die Reihenfolge — und Peter
+meldete beim nächsten Spielabend: "Meine angelegten Gegenstände werden
+immer noch markiert."
+
+**Nachgemessen statt nachgebessert.** Die inzwischen laufende
+Gem-XP-Mitschrift (§4.35) hatte 47 aufeinanderfolgende Messpunkte aus
+Peters echter Spielrunde aufgezeichnet, samt der Reihenfolge, in der die
+Gems je Slot ankamen. Auswertung: **null** reine
+Reihenfolge-Änderungen über alle 47 Punkte — die Vermutung war
+widerlegt. Dieselben Daten zeigten dafür die echte Ursache: Zwischen
+zwei nur zwölf Sekunden auseinanderliegenden Abrufen hatten **25 von 29
+Sockel-Gems neue Erfahrungswerte**. Die Erfahrung zählt beim Spielen
+schlicht permanent hoch, steckt in `socketedItems` — und macht damit
+jedes sockelbare Ausrüstungsteil bei praktisch jedem Refresh zu einem
+"geänderten" Item. Genau acht Slots, genau die sockelbaren, genau das
+beobachtete Muster.
 
 **Fix:** `_stable_item_dump(item)` (Modulebene, `main_window.py`) ersetzt
 in `_diff_character_items` den rohen Pydantic-Vergleich. Sie ruft
-`item.model_dump()` und sortiert darin jedes Feld aus
+`item.model_dump()` und entfernt darin über `_gem_without_experience()`
+aus jedem Sockel-Gem die Einträge aus
+`_VOLATILE_GEM_PROPERTIES = ("Experience",)`; zusätzlich sortiert sie
 `_VOLATILE_LIST_ORDER_FIELDS = ("socketedItems",)` nach der `id` jedes
-Eintrags, bevor zwei Zustände verglichen werden. Eine reine Sortierung
-kann eine ECHTE Änderung nicht verstecken — ein Gem, das tatsächlich
-aufgestuft wurde, bleibt unter seiner eigenen `id` weiterhin anders,
-nur seine Position in der umgebenden Liste zählt nicht mehr mit.
+Eintrags. Die Sortierung bleibt als kostenlose Vorsichtsmaßnahme
+bestehen, ist aber ausdrücklich als **unbelegt** gekennzeichnet, damit
+sie niemand später als gemessene Tatsache weiterträgt.
+
+Beides kann eine ECHTE Änderung nicht verstecken: Die Gem-STUFE bleibt
+im Vergleich (ein Gem, das aufsteigt, soll sichtbar sein — nur sein
+Erfahrungsbalken fliegt raus), ein ausgetauschtes Gem unterscheidet sich
+weiter in seiner `id`. `_gem_without_experience()` gibt bewusst eine neue
+Dict-Ebene zurück, statt zu filtern und zurückzuschreiben: `model_dump()`
+reicht die über `extra="allow"` mitgeführten Rohfelder unkopiert durch,
+eine Änderung an Ort und Stelle verstümmelte also den
+zwischengespeicherten Item-Zustand — und damit ausgerechnet die
+Grundlage der Mitschrift aus §4.35.
+
 `_differing_fields` (die Diagnose-Zeile von oben) nutzt dieselbe
 Normalisierung, sonst würde sie nach dem Fix weiterhin "geändert"
 behaupten, obwohl der eigentliche Vergleich das längst nicht mehr so
 sieht.
 
-Die Diagnose-Zeile selbst bleibt bestehen: Fällt sie künftig noch
-einmal an, ist es eine ANDERE, noch unbekannte Ursache, kein Rückfall
-der hier behobenen. Getestet: `tests/test_main_window_helpers.py` —
-Mechanismus der Diagnose-Zeile, das reproduzierte `socketedItems`-Muster
-(vertauschte Reihenfolge zählt nicht als Änderung), die Gegenprobe
-(eine echte Änderung INNERHALB der Liste zählt weiterhin), Zeitfenster,
-Beschränkung auf Ausrüstungs-Slots.
+**Was Peters Screenshot noch offenlässt.** Auf seinem Bild vom 21:12 war
+praktisch die ganze Tabelle türkis, auch Ringe, Amulett und Flaschen —
+Slots ohne Sockel, für die die Gem-Erfahrung als Erklärung ausscheidet.
+Ein feldweiser Vergleich seines echten Caches über zwanzig Minuten
+Spielzeit fand an genau diesen Items **kein einziges** abweichendes Feld;
+was dort leuchtete, lässt sich aus den Daten allein also nicht erklären.
+Statt zu raten, deckt die Diagnose seither ALLE Slots ab (nicht mehr nur
+`EQUIPPED_SLOTS`, die Zeile benennt die Ausrüstung aber weiterhin als
+solche) und schreibt bei jedem Refresh eine Zusammenfassung
+"Türkis-Hervorhebung *Charakter*: N von M angezeigten Zeilen (X neu, Y
+geändert)". Weicht dieses N von dem ab, was auf dem Bildschirm türkis
+ist, liegt der Fehler nicht im Vergleich, sondern in der Darstellung —
+diese eine Zeile trennt die beiden Möglichkeiten beim nächsten Auftreten
+sofort.
+
+Getestet: `tests/test_main_window_helpers.py` — mitzählende Gem-Erfahrung
+zählt nicht als Änderung, Gegenprobe Stufenaufstieg zählt weiterhin, die
+Normalisierung lässt den zwischengespeicherten Item-Zustand unberührt,
+Mechanismus und Zeitfenster der Diagnose-Zeile, Rucksack-Items werden
+mitgeloggt aber nicht als Ausrüstung benannt, Zusammenfassung mit
+Gegenprobe (ohne Hervorhebung keine Zeile).
 
 ---
 
