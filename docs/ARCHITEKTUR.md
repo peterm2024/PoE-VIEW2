@@ -3215,6 +3215,14 @@ snapshot()` läuft bei JEDEM Abruf mit, auch beim stillen Hintergrund-
 Refresh eines nicht angezeigten Charakters — mehr Messpunkte für eine
 stabilere Rate, unabhängig davon, was gerade sichtbar ist.
 
+An Peters nächster Runde nachgerechnet, wie groß der Unterschied
+ausfällt: Im Abschnitt 22:30–23:10 kamen 3.140.232 Gem-XP in drei
+Schüben zwischen 22:45 und 23:00 an. Über die Uhrzeit gerechnet ergibt
+das 4,8 Mio. XP/h, über die Spanne der Veröffentlichungen 11,0 Mio. —
+die ersten fünfzehn Minuten hatte er in der Stadt identifiziert und
+verkauft, was die Rate nach der alten Rechnung mehr als halbiert hätte,
+obwohl sie über das Spielen selbst nichts aussagt.
+
 Angezeigt (erst ab der zweiten beobachteten Änderung, vorher `None`,
 keine Falschbehauptung wie "0 XP/h"): in der Statuszeile neben der
 Item-Anzahl, sobald ein Charakter offen ist — `_format_xp_rate()` wählt
@@ -3359,6 +3367,31 @@ Messpunkte, keine Lücke) — die Grundlage für jede weitere Arbeit an §4.34:
   oder eine Glättung über mindestens 10–15 Minuten; eine Momentanrate
   zwischen zwei Abrufen wäre fast immer null.
 
+**Der Blockade-Fall, erstmals beobachtet (2026-08-10, 23:21:58).** Peter
+hat ihn eigens erzeugt: "Ich werde jetzt einfach mal einen Gem leveln,
+dessen Bedingungen ich irgendwann nicht mehr erfülle." Ein Vaal Blade
+Vortex, über eine knappe Stunde von Stufe 5 auf 12 hochgeklickt, steht
+seither mit vollem Balken und `nextLevelRequirements: Level 53; Dex 119`
+— bei tatsächlichen 114 Dex. Zum ersten Mal hängt ein Gem wirklich fest
+statt nur zu warten.
+
+Die Spalten verhalten sich dabei genau wie entworfen: Bei den drei
+absichtlich auf Stufe 1 gehaltenen Gems steht `requirement_met = True`
+(50 Dex, 21 Str, 20 Int liegen unter der belegten Untergrenze, sie
+warten also nachweislich freiwillig), beim Blade Vortex bleibt die
+Spalte leer — 119 Dex liegt über der Untergrenze von 108, und mehr gibt
+die Ausrüstung nicht her. Zusammen mit `attribute_floor` in derselben
+Zeile ist der Fall mit einer einzigen Zahl von außen entschieden.
+
+Nebenbefund für eine mögliche Verfeinerung: Ein Sockel-Gem trägt auch
+seine EIGENEN `requirements` (der Blade Vortex auf Stufe 12: Dex 113).
+Steigt ein Gem beobachtet eine Stufe auf, sind dessen Anforderungen in
+diesem Moment zwingend erfüllt — daraus ließe sich eine deutlich engere
+Untergrenze gewinnen als aus der Ausrüstung. Im vorliegenden Fall wären
+das 113 statt 108 gewesen, was den Blade Vortex mit seinen geforderten
+119 aber immer noch nicht entschieden hätte. Deshalb vorerst nicht
+gebaut.
+
 Getestet: `tests/test_gem_xp_log.py` (Header nur einmal, normal
 levelndes Gem vs. wartendes, nachweislich erfüllte Anforderung, der
 offene Fall über der Untergrenze, ein Attribut ohne jeden Beleg, nur
@@ -3483,6 +3516,24 @@ reguläre Takt ohnehin ein. (Peters Beobachtung kam übrigens NICHT vom
 neuen Trigger — sein laufendes Programm stammt von vor diesem Commit, im
 Log steht keine einzige `Inventar-Ereignis erkannt`-Zeile. Was er sah,
 war der gewöhnliche 16-Sekunden-Takt.)
+
+**In Peters Spielrunde bestätigt (2026-08-10, 22:30–23:24).** Zwölf
+erkannte Ereignisse, davon **zwei Volltreffer**: Bei `12 Items
+identified` (22:54:30) und `4 Items identified` (23:00:04) lagen die
+neuen Daten **0,4 Sekunden später** vor. Beide fielen in genau die
+Lücke, die Peter beschrieben hatte — die App hatte davor 35 bzw. 9 Mal
+vergeblich gefragt, und ein Zonenwechsel war nicht in Sicht (das Log
+vermerkt "kein Zonenwechsel bekannt"). Ohne den Trigger hätte er auf den
+nächsten Zonenwechsel warten müssen, im ersten Fall neun Minuten lang.
+
+Der Unterschied zwischen den beiden Zeilenarten ist dabei deutlich und
+war nicht vorhersehbar: **Identifizieren veröffentlicht sofort, ein
+Verkauf nicht.** Kein einziges `Trade accepted` lieferte unmittelbar
+Daten (gemessen 17 s, 32 s oder erst mit dem nächsten Zonenwechsel).
+Beide Muster bleiben trotzdem drin — ein Trigger, der ins Leere läuft,
+kostet einen Request aus dem ohnehin gedeckelten Budget, während der
+Verzicht auf ihn die Fälle verschenkte, in denen GGG doch sofort
+liefert.
 
 Getestet: `tests/test_zone_watcher.py` (beide Schreibweisen des
 Identifizierens, abgebrochener Handel löst nichts aus, getrennte
