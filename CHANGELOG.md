@@ -14,10 +14,13 @@ nach [SemVer](https://semver.org/lang/de/).
   GitHubs Markdown noch Qts Rich Text kommen mit einer mehrstufigen
   Icondatei zurecht.
 - Charakter-XP/h in der Statuszeile, sobald ein Charakter offen ist —
-  der Session-Durchschnitt seit dem ersten Abruf, ohne zusätzlichen
-  API-Request (Level und Erfahrung stecken bereits in der Antwort, die
-  für die Ausrüstung ohnehin geladen wird). Erster Schritt einer
-  größeren, noch offenen Idee (Gem-XP/h, ein echter Graph).
+  ohne zusätzlichen API-Request (Level und Erfahrung stecken bereits in
+  der Antwort, die für die Ausrüstung ohnehin geladen wird). Der Wert
+  friert von selbst ein, wenn keine Erfahrung mehr eintrifft: Gemessen
+  wird die Spanne zwischen der ersten und der letzten beobachteten
+  Änderung, nicht die Zeit bis jetzt — eine Pause verwässert die Rate
+  also nicht. Erster Schritt einer größeren, noch offenen Idee
+  (Gem-XP/h, ein echter Graph).
 - Für dieselbe Idee: eine CSV-Mitschrift der Erfahrung jedes
   Sockel-Gems über die Zeit (`%LOCALAPPDATA%\PoE-VIEW2\logs\
   gem-xp-log.csv`). Sie hält fest, ob ein Gem gerade auf einen

@@ -200,18 +200,46 @@ class _XpWatch:
     ausgewiesen (derselbe Grund wie beim Item-Verlauf, siehe
     ``_log_character_item_history``/``stale_baseline``).
 
-    Bewusst der SESSION-DURCHSCHNITT seit dem ersten Abruf dieser Sitzung,
-    keine gleitende Rate der letzten Minuten — die einfachste Variante für
-    den ersten Schritt (Peter: "Charakter-XP/h zuerst"), die sich mit der
-    Zeit von selbst stabilisiert. Ein Fenster über die letzten N Minuten
-    wäre die naheliegende Verfeinerung, sobald der eigentliche Graph gebaut
-    wird — dafür reicht ein Wert pro Charakter nicht, dann bräuchte es eine
-    Zeitreihe."""
+    **Gemessen wird von Veröffentlichung zu Veröffentlichung, nicht bis
+    "jetzt"** (Peter, 2026-08-10: "Wir müssen die XP-Berechnung pausieren,
+    sobald sie sich nicht mehr ändert"). Die erste Fassung teilte den
+    Zuwachs durch die verstrichene Uhrzeit seit dem ersten Abruf — steht
+    der Charakter still, wächst dabei nur der Nenner, und die angezeigte
+    Rate sinkt, obwohl gar nichts passiert ist.
+
+    Die Messung aus §4.35 zeigt, warum eine simple Pausenerkennung ("seit
+    N Sekunden keine Änderung") der falsche Weg gewesen wäre: GGG
+    veröffentlicht die Erfahrung in Schüben, in einer Spielstunde nur
+    achtmal, mit Abständen von anderthalb bis SIEBZEHN Minuten. Jede
+    Schwelle unterhalb von zwanzig Minuten hätte mitten im Spielen
+    pausiert, jede darüber die echte Pause zu spät bemerkt.
+
+    Deshalb ohne Schwelle: Gezählt wird der Zuwachs zwischen der ERSTEN
+    und der LETZTEN beobachteten Änderung, geteilt durch genau diese
+    Spanne. Hört die Erfahrung auf zu kommen, hört auch die Spanne auf zu
+    wachsen — die Anzeige friert von selbst auf ihrem letzten Wert ein,
+    ohne dass irgendwo "pausiert" entschieden werden müsste. Und die
+    gezählte Erfahrung ist sauber eingerahmt: Was in der ersten
+    beobachteten Veröffentlichung steckt, wurde teils vor dem Start der
+    Sitzung verdient und zählt darum NICHT mit; alles danach fiel
+    nachweislich in die gemessene Spanne.
+
+    Weiterhin der Durchschnitt über die ganze Sitzung, keine gleitende
+    Rate der letzten Minuten — die wäre die naheliegende Verfeinerung,
+    sobald der eigentliche Graph gebaut wird; dafür reicht ein Wert pro
+    Charakter nicht, dann bräuchte es eine Zeitreihe."""
 
     since: float                # time.monotonic() des ersten Abrufs dieser Sitzung
     since_experience: int
     level: int = 0
     current_experience: int = 0
+    # Erste und letzte beobachtete ÄNDERUNG der Erfahrung — die Grundlage
+    # der Rate. Solange nur eine (oder gar keine) vorliegt, gibt es noch
+    # keine Spanne und damit keine Rate.
+    first_change_at: float | None = None
+    first_change_experience: int = 0
+    last_change_at: float | None = None
+    last_change_experience: int = 0
 
 
 # Listenfelder, die vor dem Vergleich nach der ``id`` ihrer Einträge
@@ -3032,36 +3060,50 @@ class MainWindow(QMainWindow):
         gerade angezeigt oder ein stiller Hintergrund-Refresh — anders als
         die Türkis-Hervorhebung, die nur die offene Ansicht betrifft
         (§4.20). Der erste Abruf eines Charakters in dieser Sitzung setzt
-        NUR die Basis (siehe ``_XpWatch``), erst ab dem zweiten liefert
-        ``_xp_per_hour`` eine Rate."""
+        NUR die Basis (siehe ``_XpWatch``), eine Rate gibt es erst, wenn
+        sich die Erfahrung zweimal geändert hat.
+
+        Ein RÜCKGANG zählt als Änderung wie jeder andere: Ab Akt 5 kostet
+        der Tod in PoE Erfahrung, das ist ein echtes Ereignis und gehört
+        in die Rechnung, nicht herausgefiltert."""
         watch = self._xp_watch.get(name)
         if watch is None:
             self._xp_watch[name] = _XpWatch(since=time.monotonic(), since_experience=experience,
                                             level=level, current_experience=experience)
             return
         watch.level = level
+        if experience != watch.current_experience:
+            now = time.monotonic()
+            if watch.first_change_at is None:
+                watch.first_change_at = now
+                watch.first_change_experience = experience
+            else:
+                watch.last_change_at = now
+                watch.last_change_experience = experience
         watch.current_experience = experience
 
     def _xp_per_hour(self, name: str) -> float | None:
-        """Session-Durchschnitt seit dem ersten Abruf, ``None`` ohne
-        mindestens zwei Messpunkte (siehe ``_XpWatch``)."""
+        """Durchschnitt über die Spanne zwischen der ersten und der letzten
+        beobachteten Erfahrungs-Änderung — ``None``, solange es weniger als
+        zwei gibt. Der Wert friert von selbst ein, sobald keine Erfahrung
+        mehr eintrifft; die ausführliche Begründung steht an ``_XpWatch``."""
         watch = self._xp_watch.get(name)
-        if watch is None:
+        if watch is None or watch.first_change_at is None or watch.last_change_at is None:
             return None
-        elapsed_h = (time.monotonic() - watch.since) / 3600
+        elapsed_h = (watch.last_change_at - watch.first_change_at) / 3600
         if elapsed_h <= 0:
             return None
-        return (watch.current_experience - watch.since_experience) / elapsed_h
+        return (watch.last_change_experience - watch.first_change_experience) / elapsed_h
 
     @staticmethod
     def _format_xp_rate(rate: float) -> str:
         """"12.4M XP/h" — die Größenordnung, in der PoEs kumulierte
         Erfahrung üblicherweise anfällt (zweistellige Millionen pro
         Stunde bei einem eingespielten Charakter). Ein negativer Wert
-        käme nur zustande, wenn ``experience`` zwischen zwei Abrufen
-        SINKT — in echten Daten nie beobachtet, PoEs Erfahrung wächst
-        monoton — taucht deshalb unverändert mit Vorzeichen auf, statt
-        ihn zu verstecken."""
+        kommt zustande, wenn ``experience`` unterm Strich SINKT — ab Akt 5
+        kostet der Tod in PoE Erfahrung. Er taucht unverändert mit
+        Vorzeichen auf, statt versteckt zu werden: Eine Stunde, in der
+        mehr gestorben als verdient wurde, ist eine Aussage."""
         sign = "-" if rate < 0 else ""
         magnitude = abs(rate)
         if magnitude >= 1_000_000_000:

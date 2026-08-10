@@ -3175,10 +3175,38 @@ Verwerter (u. a. `_on_character_items`, in Dutzenden Tests direkt
 aufgerufen) unangetastet bleiben.
 
 **`_XpWatch` (Dataclass) hält pro Charakter EINEN Session-Durchschnitt**
-seit dem ersten Abruf dieser Sitzung — bewusst keine gleitende Rate der
-letzten Minuten, das wäre die naheliegende Verfeinerung, sobald der
-eigentliche Graph gebaut wird (dafür reicht ein Wert pro Charakter
-nicht mehr, dann braucht es eine echte Zeitreihe). Dieselbe
+— bewusst keine gleitende Rate der letzten Minuten, das wäre die
+naheliegende Verfeinerung, sobald der eigentliche Graph gebaut wird
+(dafür reicht ein Wert pro Charakter nicht mehr, dann braucht es eine
+echte Zeitreihe).
+
+**Gemessen wird von Veröffentlichung zu Veröffentlichung, nicht bis
+"jetzt".** Peter, 2026-08-10: "Wir müssen die XP-Berechnung pausieren,
+sobald sie sich nicht mehr ändert." Die erste Fassung teilte den Zuwachs
+durch die verstrichene Uhrzeit seit dem ersten Abruf — steht der
+Charakter still, wächst dabei nur der Nenner und die Anzeige sinkt,
+obwohl gar nichts passiert ist.
+
+Die Messung aus §4.35 zeigt, warum eine Pausenerkennung über eine
+Schwelle ("seit N Sekunden keine Änderung") der falsche Weg gewesen
+wäre: GGG veröffentlicht die Erfahrung in Schüben, in einer Spielstunde
+nur achtmal, mit Abständen von anderthalb bis **siebzehn** Minuten. Jede
+Schwelle unter zwanzig Minuten hätte mitten im Spielen pausiert, jede
+darüber die echte Pause zu spät bemerkt.
+
+Deshalb ohne Schwelle: gezählt wird der Zuwachs zwischen der ERSTEN und
+der LETZTEN beobachteten Änderung, geteilt durch genau diese Spanne.
+Hört die Erfahrung auf zu kommen, hört auch die Spanne auf zu wachsen —
+die Anzeige friert von selbst auf ihrem letzten Wert ein, ohne dass
+irgendwo "pausiert" entschieden werden müsste. Nebeneffekt, der die
+Zahl zusätzlich ehrlicher macht: Die erste beobachtete Veröffentlichung
+enthält Erfahrung, die teils VOR dem Sitzungsstart verdient wurde; als
+Startpunkt statt als Zuwachs verwendet, fällt sie sauber heraus. Ein
+Rückgang zählt wie jede andere Änderung — ab Akt 5 kostet der Tod
+Erfahrung, und eine Stunde, in der mehr gestorben als verdient wurde,
+ist eine Aussage.
+
+Dieselbe
 Session-lokal-Regel wie überall sonst in diesem Bereich (`_PublishWatch`,
 `stale_baseline`): ein aus der Datei geladener alter Stand taugt nicht
 als Basis, sonst würde ein Levelaufstieg während einer Pause vor dem
@@ -3187,23 +3215,23 @@ snapshot()` läuft bei JEDEM Abruf mit, auch beim stillen Hintergrund-
 Refresh eines nicht angezeigten Charakters — mehr Messpunkte für eine
 stabilere Rate, unabhängig davon, was gerade sichtbar ist.
 
-Angezeigt (nur ab dem zweiten Abruf, vorher `None`, keine
-Falschbehauptung wie "0 XP/h"): in der Statuszeile neben der
+Angezeigt (erst ab der zweiten beobachteten Änderung, vorher `None`,
+keine Falschbehauptung wie "0 XP/h"): in der Statuszeile neben der
 Item-Anzahl, sobald ein Charakter offen ist — `_format_xp_rate()` wählt
 automatisch K/M/B passend zur Größenordnung von PoEs kumulierter
 Erfahrung (typischerweise zweistellige Millionen pro Stunde).
 
 Getestet: `tests/test_client.py`, `tests/test_api_worker.py` (die neue
 Signal-Emission), `tests/test_main_window_helpers.py` (Baseline ohne
-Rate, Session-Durchschnitt über zwei Messpunkte, Gegenprobe gegen eine
-naive Rate "seit dem letzten Abruf" — die würde bei einem Abruf ohne
-Fortschritt sofort auf 0 fallen statt sich nur zu verlangsamen —,
-Formatierung, Statuszeilen-Text).
+Rate, eine einzelne Änderung reicht noch nicht, Spanne über zwei
+Änderungen mit unveränderten Abrufen dazwischen, Einfrieren nach drei
+Stunden Stillstand, ein Rückgang durch Tod, Formatierung,
+Statuszeilen-Text). Gegenprobe gefahren: Mit der alten Rechnung "seit
+dem ersten Abruf" schlägt der Einfrier-Test fehl.
 
 **Offen für eine Fortsetzung:** Gem-XP/h pro Gem (kein Stellvertreter),
 ein echter Zeitreihen-Speicher fürs Diagramm selbst, die Stufe-20-
-Benachrichtigung, die Pausiert-Erkennung (noch nicht geprüft, wie sich
-das im Rohdatensatz zeigt), sowie die von Peter zusätzlich
+Benachrichtigung, sowie die von Peter zusätzlich
 vorgeschlagene, aber vorerst zurückgestellte "reduzierte/angepasste"
 Charakter-XP/h nach Level und Zone (PoEs Erfahrungs-Straf-Formel — nicht
 zuverlässig genug bekannt, um sie ungeprüft zu implementieren, siehe
