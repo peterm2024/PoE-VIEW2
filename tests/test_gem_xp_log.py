@@ -79,7 +79,7 @@ def test_a_normally_leveling_gem_is_not_marked_as_waiting(log_dir) -> None:
     assert row["experience_max"] == "212046017"
     assert row["progress"] == "0.32"
     assert row["waiting_for_levelup"] == "False"
-    assert row["requirement_unmet"] == ""
+    assert row["requirement_met"] == ""
     assert row["next_level_requirements"] == ""
 
 
@@ -98,61 +98,66 @@ def test_a_gem_with_a_full_bar_is_marked_as_waiting_for_a_levelup(log_dir) -> No
     assert row["next_level_requirements"] == "Level 20; Dex 50"
 
 
+def _boots(**requirements: int) -> Item:
+    return Item.model_validate({
+        "id": "boots-1", "typeLine": "Soldier Boots", "inventoryId": "Boots",
+        "requirements": [{"name": n, "values": [[str(v), 0]]}
+                         for n, v in requirements.items()]})
+
+
 def test_a_met_requirement_proves_the_gem_waits_voluntarily(log_dir) -> None:
     """Der Abgleich, der Peters zwei Faelle trennt: Traegt der Charakter
     Ausruestung, die 108 Dex verlangt, dann sind die 50 Dex der naechsten
     Gem-Stufe zwingend erfuellt — das Gem wartet also freiwillig. Genau
     dieser Fall lag bei allen vier wartenden Gems seiner Messstunde vor."""
-    boots = Item.model_validate({
-        "id": "boots-1", "typeLine": "Soldier Boots", "inventoryId": "Boots",
-        "requirements": [{"name": "Level", "values": [["69", 0]]},
-                         {"name": "Dex", "values": [["108", 0]]}]})
-
-    gem_xp_log.append("WitchOfPeter", [_helm(_CAPPED_GEM), boots])
+    gem_xp_log.append("WitchOfPeter", [_helm(_CAPPED_GEM), _boots(Level=69, Dex=108)])
 
     with gem_xp_log.log_path().open(encoding="utf-8") as f:
         row = next(r for r in csv.DictReader(f) if r["gem"] == "Blood Rage")
 
     assert row["waiting_for_levelup"] == "True"
-    assert row["requirement_unmet"] == "False"
+    assert row["requirement_met"] == "True"
+    assert row["attribute_floor"] == "Level 69; Dex 108"
 
 
-def test_a_requirement_above_the_proven_floor_marks_the_gem_as_blocked(log_dir) -> None:
-    """Gegenprobe und Peters urspruenglich vermuteter Fall: Reicht die aus
-    der getragenen Ausruestung belegte Untergrenze nicht an die geforderte
-    Dex heran, haengt das Gem wirklich fest."""
-    boots = Item.model_validate({
-        "id": "boots-1", "typeLine": "Soldier Boots", "inventoryId": "Boots",
-        "requirements": [{"name": "Level", "values": [["69", 0]]},
-                         {"name": "Dex", "values": [["30", 0]]}]})
-
-    gem_xp_log.append("WitchOfPeter", [_helm(_CAPPED_GEM), boots])
+def test_a_requirement_above_the_floor_stays_undecided_rather_than_blocked(log_dir) -> None:
+    """Der Fehlschluss, den die erste Fassung machte: Ueber der
+    Untergrenze zu liegen beweist NICHT, dass die Anforderung unerfuellt
+    ist — es heisst nur, dass die getragene Ausruestung nichts darueber
+    aussagt. Peters echte Attribute liegen weit ueber dem, was seine
+    Ausruestung verlangt (Passivbaum, Juwelen); "ueber der Untergrenze,
+    also blockiert" haette reihenweise Gems falsch gemeldet. Statt einer
+    Behauptung steht die Untergrenze selbst in der Zeile."""
+    gem_xp_log.append("WitchOfPeter", [_helm(_CAPPED_GEM), _boots(Level=69, Dex=30)])
 
     with gem_xp_log.log_path().open(encoding="utf-8") as f:
         row = next(r for r in csv.DictReader(f) if r["gem"] == "Blood Rage")
 
-    assert row["requirement_unmet"] == "True"
+    assert row["waiting_for_levelup"] == "True"
+    assert row["requirement_met"] == ""
+    assert row["next_level_requirements"] == "Level 20; Dex 50"
+    assert row["attribute_floor"] == "Level 69; Dex 30"
 
 
-def test_an_undecidable_requirement_stays_empty_rather_than_guessing(log_dir) -> None:
-    """Eine Untergrenze kann "erfuellt" beweisen, "nicht erfuellt" aber nur
-    fuer die Werte, die sie kennt. Ohne ein einziges getragenes Teil mit
-    Dex-Anforderung bleibt die Spalte leer statt auf True oder False zu
-    raten — der Unterschied gehoert in die Daten."""
-    gem_xp_log.append("WitchOfPeter", [_helm(_CAPPED_GEM)])
+def test_an_unknown_attribute_leaves_the_verdict_open(log_dir) -> None:
+    """Ohne ein einziges getragenes Teil mit Dex-Anforderung laesst sich
+    ueber die geforderte Dex gar nichts sagen — auch dann keine
+    Behauptung."""
+    gem_xp_log.append("WitchOfPeter", [_helm(_CAPPED_GEM), _boots(Level=69)])
 
     with gem_xp_log.log_path().open(encoding="utf-8") as f:
-        row = next(csv.DictReader(f))
+        row = next(r for r in csv.DictReader(f) if r["gem"] == "Blood Rage")
 
     assert row["waiting_for_levelup"] == "True"
-    assert row["requirement_unmet"] == ""
+    assert row["requirement_met"] == ""
+    assert row["attribute_floor"] == "Level 69"
 
 
 def test_only_worn_items_count_towards_the_attribute_floor(log_dir) -> None:
     """Ein Item im Rucksack beweist gar nichts — der Charakter kann es
     aufgehoben haben, ohne seine Anforderungen zu erfuellen. Zaehlte es
-    mit, wuerde aus einem blockierten Gem faelschlich ein freiwillig
-    wartendes."""
+    mit, wuerde aus einem moeglicherweise blockierten Gem faelschlich ein
+    nachweislich freiwillig wartendes."""
     in_backpack = Item.model_validate({
         "id": "bag-1", "typeLine": "Soldier Boots", "inventoryId": "MainInventory",
         "requirements": [{"name": "Dex", "values": [["108", 0]]}]})
@@ -162,7 +167,8 @@ def test_only_worn_items_count_towards_the_attribute_floor(log_dir) -> None:
     with gem_xp_log.log_path().open(encoding="utf-8") as f:
         row = next(csv.DictReader(f))
 
-    assert row["requirement_unmet"] == ""
+    assert row["requirement_met"] == ""
+    assert row["attribute_floor"] == ""
 
 
 def test_an_older_log_with_different_columns_is_set_aside(log_dir) -> None:

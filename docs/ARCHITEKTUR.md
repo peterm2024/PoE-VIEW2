@@ -3257,12 +3257,21 @@ nachgewiesen, dem nach zehn Minuten draußen exakt der eine Schub von
 Peters ursprünglicher zweiter Fall bleibt trotzdem darstellbar, nur
 braucht er einen Abgleich statt eines Feldes: `_attribute_floor()` leitet
 aus der GETRAGENEN Ausrüstung eine sichere Untergrenze für Level, Str,
-Dex und Int ab (was der Charakter trägt, erfüllt er zwingend) und
-`requirement_unmet` vergleicht die Gem-Anforderung dagegen — `True` nur
-bei nachweislicher Unterschreitung, `False` bei nachweislicher Erfüllung,
-leer, wenn die Daten es nicht hergeben. Eine Untergrenze kann "erfüllt"
-beweisen, "nicht erfüllt" aber nur für Werte, die sie kennt; dieser
-Unterschied gehört in die Daten statt unter den Teppich. Die Slot-Liste
+Dex und Int ab (was der Charakter trägt, erfüllt er zwingend), und
+`requirement_met` hält die Gem-Anforderung dagegen.
+
+**Diese Spalte kennt nur `True` und leer, und das ist der Punkt.** Die
+erste Fassung hieß `requirement_unmet` und meldete `True`, sobald eine
+Anforderung die Untergrenze übersteigt — ein Fehlschluss: Über einer
+UNTERgrenze zu liegen sagt nichts darüber aus, ob der Charakter den Wert
+erreicht. Peters echte Attribute liegen weit über dem, was seine
+Ausrüstung verlangt (Passivbaum, Juwelen), die Spalte hätte also
+reihenweise Gems fälschlich als festhängend gemeldet. Beweisbar ist nur
+die andere Richtung: Liegt die Anforderung UNTER etwas, das der Charakter
+ohnehin trägt, ist sie sicher erfüllt. Für alles andere steht die
+Untergrenze selbst in der Zeile (`attribute_floor`) — damit lässt sich
+beim Auswerten gegen den tatsächlichen Attributwert rechnen, den nur der
+Charakterbogen im Spiel kennt. Die Slot-Liste
 dafür (`_WORN_SLOTS`) ist bewusst eine eigene, knappe — nicht
 `paperdoll.EQUIPPED_SLOTS`: Ein Import aus dem UI-Paket zöge Qt-Widgets
 in einen reinen Service, und die beiden Listen haben gegenläufige
@@ -3273,8 +3282,9 @@ append()`, verdrahtet in `_on_character_items`) — auch im stillen
 Hintergrund-Refresh, unabhängig davon, welcher Charakter gerade angezeigt
 wird (mehr Messpunkte für den Verlauf). Spalten: Zeitstempel, Charakter,
 Slot, Gem-ID/-Name, Support-Flag, Level, Qualität, Erfahrung (aktuell/
-Maximum/Anteil), `waiting_for_levelup`, `requirement_unmet` und die
-lesbare Fassung von `nextLevelRequirements`. Ändern sich die Spalten,
+Maximum/Anteil), `waiting_for_levelup`, `requirement_met`, die lesbare
+Fassung von `nextLevelRequirements` und die belegte Attribut-Untergrenze
+`attribute_floor`. Ändern sich die Spalten,
 legt `_retire_foreign_header()` eine vorhandene Mitschrift unter ihrem
 Zeitstempel beiseite, statt Zeilen unter fremde Überschriften zu
 schreiben — sonst wäre die Datei stillschweigend unbrauchbar, und zwar
@@ -3315,9 +3325,9 @@ Messpunkte, keine Lücke) — die Grundlage für jede weitere Arbeit an §4.34:
   zwischen zwei Abrufen wäre fast immer null.
 
 Getestet: `tests/test_gem_xp_log.py` (Header nur einmal, normal
-levelndes Gem vs. wartendes, Attribut-Abgleich in beide Richtungen plus
-der unentscheidbare Fall, nur getragene Teile zählen für die
-Untergrenze, ältere Mitschrift mit anderen Spalten wird beiseitegelegt,
+levelndes Gem vs. wartendes, nachweislich erfüllte Anforderung, der
+offene Fall über der Untergrenze, ein Attribut ohne jeden Beleg, nur
+getragene Teile zählen für die Untergrenze, ältere Mitschrift mit anderen Spalten wird beiseitegelegt,
 mehrere Charaktere in einer Datei, keine Zeile ohne Sockel-Gems),
 `tests/test_main_window_helpers.py` (Ende-zu-Ende-Verdrahtung über
 `_on_character_items`).

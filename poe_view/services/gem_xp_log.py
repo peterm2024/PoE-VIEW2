@@ -37,11 +37,17 @@ Auseinanderhalten lässt sich beides nur, indem man diese Anforderung
 gegen die Attribute des Charakters hält — die GGGs Charakter-Endpunkt
 nicht liefert. Dafür `_attribute_floor()`: Was der Charakter TRÄGT, muss
 er auch erfüllen, das ergibt eine sichere Untergrenze (bei Peter Str≥151,
-Dex≥108, Int≥131). `requirement_unmet` sagt darum True nur, wenn eine
-Anforderung diese Untergrenze nachweislich übersteigt, False, wenn sie
-nachweislich erfüllt ist, und bleibt leer, wenn die Daten es nicht
-hergeben. In der gemessenen Stunde war es nie True — alle vier wartenden
-Gems warten freiwillig.
+Dex≥108, Int≥131).
+
+`requirement_met` sagt deshalb nur `True` oder gar nichts — eine
+Untergrenze kann "erfüllt" beweisen, "nicht erfüllt" aber grundsätzlich
+nicht. Peters echte Attribute liegen weit über dem, was seine Ausrüstung
+verlangt (Passivbaum, Juwelen); "liegt über der Untergrenze, also
+blockiert" wäre ein Fehlschluss gewesen und hätte reihenweise Gems
+fälschlich als festhängend gemeldet. Für die offenen Fälle steht die
+Untergrenze selbst in der Spalte `attribute_floor`, sodass sich beim
+Auswerten gegen den tatsächlichen Attributwert rechnen lässt — den kennt
+nur der Charakterbogen im Spiel.
 """
 
 from __future__ import annotations
@@ -59,7 +65,8 @@ log = logging.getLogger(__name__)
 FIELDNAMES = [
     "timestamp", "character", "slot", "gem_id", "gem", "support",
     "level", "quality", "experience", "experience_max", "progress",
-    "waiting_for_levelup", "requirement_unmet", "next_level_requirements",
+    "waiting_for_levelup", "requirement_met", "next_level_requirements",
+    "attribute_floor",
 ]
 
 # Fast voll gilt als voll — Fließkomma-Werte aus der API landen nicht
@@ -152,28 +159,40 @@ def _attribute_floor(items: list[Item]) -> dict[str, int]:
     return floor
 
 
-def _requirement_unmet(entries: list[dict] | None, floor: dict[str, int]) -> str:
-    """``"True"``, wenn eine Anforderung der nächsten Gem-Stufe die
-    Untergrenze aus ``_attribute_floor`` nachweislich übersteigt — dann
-    hängt das Gem wirklich fest. ``"False"``, wenn alle Anforderungen
-    nachweislich erfüllt sind (dann wartet es nur auf einen Klick).
-    Leerer String, wenn mindestens eine Anforderung sich nicht entscheiden
-    lässt: Eine Untergrenze kann "erfüllt" beweisen, "nicht erfüllt" aber
-    nur für die Werte, die sie überhaupt kennt — der Unterschied gehört in
-    die Daten, nicht unter den Teppich."""
+def _requirement_met(entries: list[dict] | None, floor: dict[str, int]) -> str:
+    """``"True"``, wenn ALLE Anforderungen der nächsten Gem-Stufe
+    nachweislich erfüllt sind — dann wartet das Gem nur auf einen Klick.
+    Sonst leer.
+
+    **Bewusst nur diese eine Richtung.** Eine Untergrenze kann "erfüllt"
+    beweisen (die Anforderung liegt unter etwas, das der Charakter
+    ohnehin schon trägt), "nicht erfüllt" dagegen NICHT: Über der
+    Untergrenze zu liegen heißt bloß, dass die getragene Ausrüstung
+    nichts darüber aussagt. Peters echte Werte liegen weit über dem, was
+    seine Ausrüstung verlangt (Passivbaum, Juwelen) — ein "übersteigt die
+    Untergrenze, also blockiert" hätte reihenweise Gems fälschlich als
+    festhängend gemeldet. Die erste Fassung dieser Funktion tat genau
+    das; die Spalte hieß entsprechend ``requirement_unmet`` und war ein
+    Fehlschluss.
+
+    Für die Fälle, die offen bleiben, steht die Untergrenze selbst mit in
+    der Zeile (``attribute_floor``) — damit lässt sich beim Auswerten
+    gegen den tatsächlichen Attributwert rechnen, den nur der Charakter-
+    bogen im Spiel kennt."""
     if not entries:
         return ""
-    undecidable = False
     for entry in entries:
         name = entry.get("name")
         values = entry.get("values") or []
         needed = _as_int(values[0][0]) if values else None
-        if needed is None or name not in floor:
-            undecidable = True
-            continue
-        if needed > floor[name]:
-            return "True"
-    return "" if undecidable else "False"
+        if needed is None or name not in floor or needed > floor[name]:
+            return ""
+    return "True"
+
+
+def _format_floor(floor: dict[str, int]) -> str:
+    return "; ".join(f"{name} {floor[name]}"
+                     for name in _BOUNDED_REQUIREMENTS if name in floor)
 
 
 def _format_requirements(entries: list[dict] | None) -> str:
@@ -214,8 +233,9 @@ def _gem_rows(character: str, timestamp: str, item: Item,
             "experience_max": experience_max,
             "progress": progress,
             "waiting_for_levelup": waiting,
-            "requirement_unmet": _requirement_unmet(next_requirements, floor) if waiting else "",
+            "requirement_met": _requirement_met(next_requirements, floor) if waiting else "",
             "next_level_requirements": _format_requirements(next_requirements),
+            "attribute_floor": _format_floor(floor) if waiting else "",
         })
     return rows
 
