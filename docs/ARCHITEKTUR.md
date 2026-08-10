@@ -3418,10 +3418,26 @@ fehlte (in einer normalen Stadt lagen zwischen "Trade accepted" und der
 neuen Antwort gemessene 9 bis 30 Sekunden), und in den Modi, die
 seltener als das fragen (Auto: 40 s).
 
-Daraus folgt auch, dass der Trigger **zu früh feuert**: 1–3 Sekunden
-nach der Zeile, während die Daten erst 9–57 Sekunden später da sind.
-Eine Verzögerung von rund einer halben Minute wäre die naheliegende
-Verbesserung — noch nicht umgesetzt, das ist Peters Entscheidung.
+**Eine feste Verzögerung wäre trotzdem falsch.** Der erste Blick auf die
+Daten legte sie nahe (9–57 Sekunden zwischen "Trade accepted" und den
+neuen Daten, also feuert ein Trigger nach 1–3 Sekunden zu früh). Eine
+Stunde später widersprach Peter: "Jetzt gerade habe ich Items
+identifiziert, nachdem ich aus der Mine gekommen bin, und konnte sie
+sofort im Tool sehen." Nachgesehen — und beides stimmt, die Spanne ist
+nur viel größer als gedacht:
+
+| Ereignis | Neue Daten sichtbar | Abstand |
+|---|---|---|
+| 22:21:35 `Trade accepted` | 22:25:18 | 3 min 43 s |
+| 22:26:04 `11 Items identified` | 22:26:07 | 3 s |
+
+Bei einer Streuung von drei Sekunden bis knapp vier Minuten trifft keine
+feste Wartezeit. Der Trigger bleibt deshalb bei "sofort": billig,
+gelegentlich genau richtig, und die Fälle, die er verpasst, holt der
+reguläre Takt ohnehin ein. (Peters Beobachtung kam übrigens NICHT vom
+neuen Trigger — sein laufendes Programm stammt von vor diesem Commit, im
+Log steht keine einzige `Inventar-Ereignis erkannt`-Zeile. Was er sah,
+war der gewöhnliche 16-Sekunden-Takt.)
 
 Getestet: `tests/test_zone_watcher.py` (beide Schreibweisen des
 Identifizierens, abgebrochener Handel löst nichts aus, getrennte
