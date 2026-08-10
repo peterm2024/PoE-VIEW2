@@ -85,10 +85,10 @@ nachdem v0.6.0 schon veröffentlicht war).
 Für die Auffindbarkeit entscheidend: Die
 GitHub-Topics (Repo-Seite, Zahnrad neben "About") steuern die
 GitHub-interne Suche und die Indexierung durch Suchmaschinen. Git-Tags
-tun das nicht. Gesetzt sind (Stand 2026-08-03, GitHub erlaubt bis zu 20):
+tun das nicht. Gesetzt sind (Stand 2026-08-10, GitHub erlaubt bis zu 20):
 
 ```
-path-of-exile, pathofexile, poe, poe-api, poe-tools, ggg-api, poeview,
+path-of-exile, pathofexile, poe, poe1, poe-tools, ggg-api, poeview,
 stash, game-tools, pyside6, qt, python, desktop-app, windows
 ```
 
@@ -104,6 +104,24 @@ Drei Erkenntnisse daraus, die man ohne Messung nicht hätte:
   (200).** Beide Schreibweisen mitzunehmen kostet nichts.
 - **Mehrdeutige Topics ziehen das falsche Publikum an.** `inventory`
   (3122) gehört zur Warenwirtschaft und wurde deshalb gestrichen.
+
+**Nachtrag 2026-08-10: `poe-api` gegen `poe1` getauscht.** Die
+Mehrdeutigkeits-Regel oben hat einen Fall übersehen, den man nicht
+erraten kann — "Poe" heißt auch **Quoras KI-Plattform**, und die
+beherrscht das Topic: unter den 13 Einträgen von `poe-api` stehen
+`poe-api-wrapper` (1099★), `poe-openai-proxy` (456★) und ein
+Claude-Telegram-Bot, PoE-VIEW2 lag auf dem letzten Platz. Bei `poe`
+dasselbe Bild, dort führt ein chinesischer Chatbot mit 18.908★ vor Path
+of Building. `poe` bleibt trotzdem drin (Etikett, kein Fundweg), `poe-api`
+nicht — es kostet einen Platz und liefert das falsche Publikum.
+
+`poe1` (11 Repos, alle echtes Path of Exile 1) ist der Ersatz: klein
+genug für Seite 1 und inhaltlich richtig, seit PoE 2 die Unterscheidung
+für Suchende überhaupt erst nötig macht. Ebenfalls gemessen und sauber,
+falls einmal Plätze frei sind: `stash-tabs` (3) und `exile` (33, das
+Insider-Wort — NeverSinks Lootfilter, Exilence, PAL2). Null Treffer und
+damit als Fundweg wertlos: `pathofexile-api`, `path-of-exile-api`,
+`poe-stash`, `path-of-exile-tools`, `poe-tool`.
 
 `ggg-api` und `poeview` haben null Treffer und bringen als Fundweg
 zunächst nichts. Sie bleiben trotzdem drin: `poeview` ist die bei GGG
