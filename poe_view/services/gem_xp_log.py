@@ -54,6 +54,7 @@ from __future__ import annotations
 
 import csv
 import logging
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -61,6 +62,33 @@ from poe_view import config
 from poe_view.api.models import Item, req_attribute, req_level
 
 log = logging.getLogger(__name__)
+
+# Umgebungsvariable, die die automatische Entscheidung unten überstimmt —
+# "1"/"true"/… schaltet ein, "0"/"false" aus.
+_ENABLE_ENV = "POEVIEW_GEM_XP_LOG"
+_OFF_VALUES = frozenset({"", "0", "false", "no", "off", "nein"})
+
+
+def enabled() -> bool:
+    """Läuft die Mitschrift überhaupt? Peter, 2026-08-10: "Den Gem-Log
+    lassen wir nicht in der Release drin, das ist dort unnütz." Richtig —
+    sie ist ein Messwerkzeug für uns beide, kein Feature: Sie schreibt bei
+    jedem Charakter-Abruf mehrere Dutzend Zeilen, in einer Spielstunde
+    rund 1,8 MB, die nur jemand auswertet, der die Fragen dahinter kennt.
+
+    Deshalb an der Auslieferungsform festgemacht statt an einer Einstellung
+    (``config.RUNNING_AS_EXE``): Aus dem Quellcode heraus — also bei uns —
+    läuft sie von selbst mit, in der gepackten .exe bleibt sie still.
+    Niemand muss daran denken, sie vor einem Release abzuschalten, und
+    beim Weiterentwickeln ist sie ohne Zutun da.
+
+    ``POEVIEW_GEM_XP_LOG`` überstimmt beides. Der Fall, für den das da ist:
+    eine fertig gebaute .exe vor dem Release noch einmal mit Mitschrift
+    durchspielen, ohne dafür extra aus dem Quellcode starten zu müssen."""
+    override = os.environ.get(_ENABLE_ENV)
+    if override is not None:
+        return override.strip().lower() not in _OFF_VALUES
+    return not config.RUNNING_AS_EXE
 
 FIELDNAMES = [
     "timestamp", "character", "slot", "gem_id", "gem", "support",
@@ -248,7 +276,15 @@ def append(character: str, items: list[Item]) -> None:
     (``_on_character_items``) — mehr Messpunkte für den von Peter
     gewünschten Verlauf, unabhängig davon, welcher Charakter gerade
     angezeigt wird. Ohne Sockel-Gems (z. B. ein frisch erstellter
-    Charakter) wird nichts geschrieben, auch keine leere Zeile."""
+    Charakter) wird nichts geschrieben, auch keine leere Zeile.
+
+    Tut gar nichts, wenn die Mitschrift abgeschaltet ist (§``enabled``) —
+    die Prüfung sitzt bewusst hier und nicht an der Aufrufstelle in
+    ``_on_character_items``: Wer die Mitschrift ausschalten will, soll das
+    an EINER Stelle finden, und ein künftiger zweiter Aufrufer erbt die
+    Entscheidung, ohne sie zu kennen."""
+    if not enabled():
+        return
     timestamp = datetime.now(timezone.utc).isoformat()
     floor = _attribute_floor(items)
     rows: list[dict] = []

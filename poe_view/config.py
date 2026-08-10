@@ -18,11 +18,19 @@ from poe_view import __version__
 if sys.platform == "win32":
     import winreg
 
+# Läuft das Programm als gepackte .exe (also als ausgeliefertes Release)
+# oder aus dem Quellcode (Entwicklung)? PyInstaller setzt dafür
+# ``sys.frozen``. Zwei Dinge hängen daran, die nichts miteinander zu tun
+# haben: die Pfad-Auflösung direkt darunter — und reine Diagnose-Funktionen
+# wie die Gem-XP-Mitschrift (§services/gem_xp_log), die im fertigen
+# Programm niemandem nützen und deshalb dort still bleiben.
+RUNNING_AS_EXE = bool(getattr(sys, "frozen", False))
+
 # In einer PyInstaller-.exe zeigt __file__ in den temporären Entpackungs-
 # ordner (sys._MEIPASS) — nicht dorthin, wo die eigentliche .exe liegt und
-# der Nutzer seine .env hinlegen würde. `sys.frozen` (von PyInstaller
-# gesetzt) erkennt diesen Fall; dann zählt das Verzeichnis der .exe selbst.
-if getattr(sys, "frozen", False):
+# der Nutzer seine .env hinlegen würde. Dann zählt das Verzeichnis der
+# .exe selbst.
+if RUNNING_AS_EXE:
     PROJECT_ROOT = Path(sys.executable).resolve().parent
 else:
     PROJECT_ROOT = Path(__file__).resolve().parent.parent

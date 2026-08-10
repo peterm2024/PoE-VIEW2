@@ -32,3 +32,9 @@ def _isolated_local_state(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     # ``cache_backup``, die dort sechs Fremddateien verursacht hat, siehe
     # ``services/cache_backup.py``).
     monkeypatch.setattr("poe_view.config.LOG_DIR", tmp_path / "appdata" / "logs")
+    # Die Gem-XP-Mitschrift lässt sich per Umgebungsvariable ein- und
+    # ausschalten (§gem_xp_log.enabled). Steht die auf einem Entwickler-
+    # rechner gesetzt, würde sie sonst hineinregieren und Tests je nach
+    # Umgebung anders ausgehen lassen — Tests bestimmen ihren Zustand
+    # selbst.
+    monkeypatch.delenv("POEVIEW_GEM_XP_LOG", raising=False)

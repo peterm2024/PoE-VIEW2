@@ -37,6 +37,12 @@ Ergebnis ist `dist/PoE-VIEW2.exe`, eine eigenständige Datei von rund
 60 MB. Sie enthält Python und Qt und setzt auf dem Zielrechner nichts
 weiter voraus.
 
+Die Gem-XP-Mitschrift (`services/gem_xp_log`, ein Messwerkzeug für die
+Entwicklung) schaltet sich in der .exe von selbst ab und muss dafür nicht
+angefasst werden — sie hängt an `config.RUNNING_AS_EXE`, siehe
+ARCHITEKTUR.md §4.35. Soll sie in einem Testlauf der fertigen .exe doch
+mitschreiben: `POEVIEW_GEM_XP_LOG=1` vor dem Start setzen.
+
 Das Anwendungssymbol steckt fertig als `assets/PoE-VIEW2.ico` im Repo
 und muss für einen Release nicht angefasst werden. Nur wenn sich die
 Grafik ändert, die Vorlagen in `assets/icon/` austauschen und einmal

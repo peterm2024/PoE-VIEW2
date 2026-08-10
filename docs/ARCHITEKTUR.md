@@ -3320,6 +3320,29 @@ dafür (`_WORN_SLOTS`) ist bewusst eine eigene, knappe — nicht
 in einen reinen Service, und die beiden Listen haben gegenläufige
 Ansprüche (die dort muss vollständig sein, diese hier sicher).
 
+**Läuft nur beim Entwickeln, nicht im ausgelieferten Programm.** Peter,
+2026-08-10: "Den Gem-Log lassen wir nicht in der Release drin, das ist
+dort unnütz." Trifft zu — die Mitschrift ist ein Messwerkzeug für die
+Fragen aus §4.34, kein Feature: rund 1,8 MB pro Spielstunde, die nur
+jemand auswertet, der weiß, wonach er sucht. `enabled()` macht das an
+der Auslieferungsform fest (`config.RUNNING_AS_EXE`, dieselbe
+`sys.frozen`-Erkennung, die dort schon die Pfade auflöst) statt an einer
+Einstellung: Aus dem Quellcode heraus läuft sie von selbst mit, in der
+gepackten .exe bleibt sie still. Niemand muss daran denken, sie vor
+einem Release abzuschalten, und beim Weiterentwickeln ist sie ohne Zutun
+da. `POEVIEW_GEM_XP_LOG=1` überstimmt das für den einen absehbaren Fall,
+der sonst durchs Raster fiele: eine fertig gebaute .exe vor dem Release
+noch einmal mit Mitschrift durchspielen.
+
+Die Prüfung sitzt in `append()` selbst, nicht an der Aufrufstelle in
+`_on_character_items` — wer die Mitschrift abschalten will, soll das an
+EINER Stelle finden, und ein künftiger zweiter Aufrufer erbt die
+Entscheidung, ohne sie zu kennen. Abgeschaltet heißt dabei wirklich
+nichts anfassen, auch nicht das Beiseitelegen einer älteren Datei
+(sonst benennt ein ausgeliefertes Programm ungefragt Dateien um). Und
+weil sie nie bei einem Nutzer ankommt, steht sie auch nicht im
+CHANGELOG.
+
 **Eine Zeile pro Sockel-Gem, bei jedem Charakter-Abruf** (`gem_xp_log.
 append()`, verdrahtet in `_on_character_items`) — auch im stillen
 Hintergrund-Refresh, unabhängig davon, welcher Charakter gerade angezeigt
@@ -3392,7 +3415,9 @@ das 113 statt 108 gewesen, was den Blade Vortex mit seinen geforderten
 119 aber immer noch nicht entschieden hätte. Deshalb vorerst nicht
 gebaut.
 
-Getestet: `tests/test_gem_xp_log.py` (Header nur einmal, normal
+Getestet: `tests/test_gem_xp_log.py` (still in der .exe, von selbst
+aktiv aus dem Quellcode, Umgebungsvariable in beide Richtungen,
+abgeschaltet wird keine vorhandene Datei angefasst, Header nur einmal, normal
 levelndes Gem vs. wartendes, nachweislich erfüllte Anforderung, der
 offene Fall über der Untergrenze, ein Attribut ohne jeden Beleg, nur
 getragene Teile zählen für die Untergrenze, ältere Mitschrift mit anderen Spalten wird beiseitegelegt,

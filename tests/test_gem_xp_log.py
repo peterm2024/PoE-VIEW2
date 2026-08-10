@@ -221,3 +221,68 @@ def test_the_character_column_distinguishes_multiple_characters(log_dir) -> None
         rows = list(csv.DictReader(f))
 
     assert [r["character"] for r in rows] == ["WitchOfPeter", "AnotherChar"]
+
+
+# --- Nur beim Entwickeln, nicht im ausgelieferten Programm --------------- #
+#
+# Peter, 2026-08-10: "Den Gem-Log lassen wir nicht in der Release drin, das
+# ist dort unnuetz." Die Mitschrift ist ein Messwerkzeug, kein Feature --
+# rund 1,8 MB pro Spielstunde, die nur jemand auswertet, der die Fragen
+# dahinter kennt.
+
+def test_the_log_stays_silent_in_a_packaged_release(log_dir, monkeypatch) -> None:
+    monkeypatch.setattr(gem_xp_log.config, "RUNNING_AS_EXE", True)
+
+    gem_xp_log.append("WitchOfPeter", [_helm(_LEVELING_GEM)])
+
+    assert not gem_xp_log.log_path().exists()
+
+
+def test_the_log_runs_by_itself_when_started_from_source(log_dir, monkeypatch) -> None:
+    """Die Kehrseite, und der Grund fuer die Kopplung an die
+    Auslieferungsform statt an eine Einstellung: Beim Weiterentwickeln ist
+    die Mitschrift ohne Zutun da, und niemand muss daran denken, sie vor
+    einem Release abzuschalten."""
+    monkeypatch.setattr(gem_xp_log.config, "RUNNING_AS_EXE", False)
+
+    gem_xp_log.append("WitchOfPeter", [_helm(_LEVELING_GEM)])
+
+    assert gem_xp_log.log_path().exists()
+
+
+def test_the_environment_variable_switches_the_log_on_in_a_release(
+        log_dir, monkeypatch) -> None:
+    """Wofuer der Schalter da ist: eine fertig gebaute .exe vor dem Release
+    noch einmal mit Mitschrift durchspielen, ohne dafuer aus dem Quellcode
+    starten zu muessen."""
+    monkeypatch.setattr(gem_xp_log.config, "RUNNING_AS_EXE", True)
+    monkeypatch.setenv("POEVIEW_GEM_XP_LOG", "1")
+
+    gem_xp_log.append("WitchOfPeter", [_helm(_LEVELING_GEM)])
+
+    assert gem_xp_log.log_path().exists()
+
+
+def test_the_environment_variable_also_switches_it_off(log_dir, monkeypatch) -> None:
+    """Gegenprobe in die andere Richtung — sonst waere der Schalter nur ein
+    Ein-Schalter und man muesste zum Abschalten den Quellcode verlassen."""
+    monkeypatch.setattr(gem_xp_log.config, "RUNNING_AS_EXE", False)
+    monkeypatch.setenv("POEVIEW_GEM_XP_LOG", "0")
+
+    gem_xp_log.append("WitchOfPeter", [_helm(_LEVELING_GEM)])
+
+    assert not gem_xp_log.log_path().exists()
+
+
+def test_a_disabled_log_does_not_touch_an_existing_file(log_dir, monkeypatch) -> None:
+    """Abgeschaltet heisst wirklich nichts anfassen: Auch das Beiseitelegen
+    einer aelteren Mitschrift mit anderen Spalten darf dann nicht laufen,
+    sonst benennt ein ausgeliefertes Programm ungefragt Dateien um."""
+    monkeypatch.setattr(gem_xp_log.config, "RUNNING_AS_EXE", True)
+    vorhanden = gem_xp_log.log_path()
+    vorhanden.write_text("timestamp,character,capped_by_requirement\n", encoding="utf-8")
+
+    gem_xp_log.append("WitchOfPeter", [_helm(_LEVELING_GEM)])
+
+    assert vorhanden.read_text(encoding="utf-8").startswith("timestamp,character,capped")
+    assert list(log_dir.iterdir()) == [vorhanden]
