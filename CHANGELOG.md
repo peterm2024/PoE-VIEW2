@@ -20,9 +20,11 @@ nach [SemVer](https://semver.org/lang/de/).
   größeren, noch offenen Idee (Gem-XP/h, ein echter Graph).
 - Für dieselbe Idee: eine CSV-Mitschrift der Erfahrung jedes
   Sockel-Gems über die Zeit (`%LOCALAPPDATA%\PoE-VIEW2\logs\
-  gem-xp-log.csv`), inklusive einer Markierung für Gems, die gerade
-  nicht weiterleveln können, weil eine Voraussetzung (meist ein
-  Attribut) fehlt.
+  gem-xp-log.csv`). Sie hält fest, ob ein Gem gerade auf einen
+  Level-Up wartet, und gleicht dessen Anforderung gegen die Attribute
+  ab, die der Charakter durch seine getragene Ausrüstung nachweislich
+  erfüllt — so ist ein Gem, das wirklich festhängt, von einem
+  unterscheidbar, das absichtlich nicht weitergelevelt wird.
 - Der Live-Refresh reagiert jetzt nicht mehr nur auf Zonenwechsel,
   sondern auch auf Händler-Verkäufe und das Identifizieren von Items —
   beides steht in PoEs eigener `Client.txt`, die für den Zonenwechsel

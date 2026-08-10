@@ -10,48 +10,82 @@ nach einem einzelnen Gem filtern lässt — für eine Handvoll Spielstunden
 tut es eine CSV, die man in jede Tabellenkalkulation ziehen kann, genauso
 gut und ist in einer Zeile erklärt).
 
-**Zwei Fälle, die Peter ausdrücklich unterschieden haben wollte, bevor
-gemessen wird — beide real in Peters eigenem Cache gefunden, keine
-Vermutung:**
+**Was die Messung ergeben hat (eine Spielstunde, 231 Messpunkte,
+2026-08-10 — die Spalten unten sind danach benannt, nicht vorher
+geraten):**
 
-- Ein Gem OHNE `nextLevelRequirements`-Feld levelt normal weiter, sobald
-  genug Erfahrung da ist.
-- Ein Gem MIT `nextLevelRequirements` und `progress == 1.0`
-  (Erfahrung für die aktuelle Stufe bereits voll) hängt fest, weil eine
-  Voraussetzung für die nächste Stufe fehlt — meist ein Attribut (z. B.
-  Peters "Blood Rage": braucht 50 Dex für die nächste Stufe, hat nur 41)
-  oder ein zu niedriges Charakterlevel. `capped_by_requirement` markiert
-  genau das.
+Ein Gem kennt drei Zustände, alle drei sind hier ablesbar:
 
-Ob PoE zusätzlich einen eigenen Schalter "EP-Zuwachs deaktivieren" kennt
-(Peters zweite Vermutung), ließ sich weder in Peters echtem Cache noch in
-der öffentlichen Doku bestätigen — deshalb hier NICHT geraten, sondern
-einfach ALLE Rohfelder mitgeschrieben. Bleibt die Erfahrung eines Gems
-über die Spielrunde hinweg flach, ohne dass `capped_by_requirement`
-gesetzt ist, ist das der Kandidat dafür; die CSV reicht, um das im
-Nachhinein zu unterscheiden, ohne dass vorher schon geraten werden musste,
-wonach zu suchen ist.
+- **levelt normal** — kein `nextLevelRequirements`-Feld, der
+  Erfahrungsbalken läuft.
+- **wartet auf Level-Up** — `nextLevelRequirements` vorhanden UND
+  `progress == 1.0`. Gems steigen in PoE nicht von selbst auf; solange
+  nicht geklickt wird, ist die Erfahrung eingefroren. Genau so hält Peter
+  Gems absichtlich auf Stufe 1 (Blood Rage, Frostblink, Lifetap: voller
+  Balken, nie geklickt). `waiting_for_levelup` markiert das.
+- **pausiert** — das Gem ist ausgesockelt und taucht überhaupt nicht auf.
+  Es verpasst dabei jeden Erfahrungsschub, der in die Zeit fällt (in der
+  Messung an "Summon Skitterbots" nachgewiesen: zehn Minuten draußen,
+  danach fehlten ihm exakt die 1.066.352 XP des einen Schubs in diesem
+  Fenster).
+
+Peters ursprünglich vermuteter vierter Fall — ein Gem kann nicht leveln,
+weil ein Attribut fehlt — sieht in den Rohdaten IDENTISCH aus wie "wartet
+auf Level-Up": Das `nextLevelRequirements`-Feld nennt schlicht die
+Anforderungen der nächsten Stufe, unabhängig davon, ob sie erfüllt sind.
+Auseinanderhalten lässt sich beides nur, indem man diese Anforderung
+gegen die Attribute des Charakters hält — die GGGs Charakter-Endpunkt
+nicht liefert. Dafür `_attribute_floor()`: Was der Charakter TRÄGT, muss
+er auch erfüllen, das ergibt eine sichere Untergrenze (bei Peter Str≥151,
+Dex≥108, Int≥131). `requirement_unmet` sagt darum True nur, wenn eine
+Anforderung diese Untergrenze nachweislich übersteigt, False, wenn sie
+nachweislich erfüllt ist, und bleibt leer, wenn die Daten es nicht
+hergeben. In der gemessenen Stunde war es nie True — alle vier wartenden
+Gems warten freiwillig.
 """
 
 from __future__ import annotations
 
 import csv
+import logging
 from datetime import datetime, timezone
 from pathlib import Path
 
 from poe_view import config
-from poe_view.api.models import Item
+from poe_view.api.models import Item, req_attribute, req_level
+
+log = logging.getLogger(__name__)
 
 FIELDNAMES = [
     "timestamp", "character", "slot", "gem_id", "gem", "support",
     "level", "quality", "experience", "experience_max", "progress",
-    "capped_by_requirement", "next_level_requirements",
+    "waiting_for_levelup", "requirement_unmet", "next_level_requirements",
 ]
 
 # Fast voll gilt als voll — Fließkomma-Werte aus der API landen nicht
 # immer exakt auf 1.0 (real bei Peter beobachtet: 1 als int, aber die
 # Toleranz kostet nichts und schützt gegen einen künftigen 0.999-Fall).
 _FULL_PROGRESS = 0.999
+
+# Slots, deren Anforderungen der Charakter zwingend erfüllt, weil er die
+# Sachen am Körper trägt. Bewusst eine EIGENE, knapp gehaltene Liste statt
+# ``paperdoll.EQUIPPED_SLOTS``: Ein Import aus dem UI-Paket zöge Qt-Widgets
+# in einen reinen Service, und die beiden Listen haben gegenläufige
+# Ansprüche — die dort muss VOLLSTÄNDIG sein (sonst fehlt ein Feld auf der
+# Puppe), diese hier muss SICHER sein. Eine Untergrenze wird durch einen
+# fehlenden Slot nur schwächer, durch einen falschen dagegen falsch.
+# Die Wechselwaffen-Plätze ("Weapon2"/"Offhand2") bleiben deshalb außen
+# vor: ob PoE deren Anforderungen genauso hart erzwingt wie bei der
+# geführten Waffe, ist nicht nachgeprüft.
+_WORN_SLOTS = frozenset({
+    "Weapon", "Offhand", "Helm", "BodyArmour", "Gloves", "Boots",
+    "Belt", "Amulet", "Ring", "Ring2", "Flask",
+})
+
+# Anforderungen, für die sich aus der getragenen Ausrüstung eine
+# Untergrenze ableiten lässt. Alles andere (z. B. Heists "Level N in Any
+# Job") bleibt unentschieden statt geraten.
+_BOUNDED_REQUIREMENTS = ("Level", "Str", "Dex", "Int")
 
 
 def log_path() -> Path:
@@ -88,6 +122,60 @@ def _experience(gem: dict) -> tuple[int | None, int | None, float | None]:
     return None, None, None
 
 
+def _as_int(text: str | None) -> int | None:
+    try:
+        return int(str(text).strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def _attribute_floor(items: list[Item]) -> dict[str, int]:
+    """Untergrenzen für Charakterlevel und Attribute, abgeleitet aus dem,
+    was der Charakter TRÄGT: Jedes angelegte Item erzwingt seine eigenen
+    Anforderungen, also liegt der Charakter mindestens beim höchsten davon.
+    Kein zusätzlicher Request und keine Schätzung — und für die einzige
+    Frage, die hier ansteht ("ist diese Gem-Anforderung erfüllt?"), reicht
+    eine Untergrenze aus.
+
+    Nutzt ``models.req_level``/``req_attribute`` statt eigener Parserei —
+    die kennen bereits die Langformen ("Dexterity") und den Heist-Sonderfall
+    "Level 2 in Any Job", der sonst als Charakterlevel durchginge."""
+    floor: dict[str, int] = {}
+    for item in items:
+        if item.inventoryId not in _WORN_SLOTS:
+            continue
+        for name in _BOUNDED_REQUIREMENTS:
+            raw = req_level(item) if name == "Level" else req_attribute(item, name)
+            value = _as_int(raw)
+            if value is not None:
+                floor[name] = max(floor.get(name, 0), value)
+    return floor
+
+
+def _requirement_unmet(entries: list[dict] | None, floor: dict[str, int]) -> str:
+    """``"True"``, wenn eine Anforderung der nächsten Gem-Stufe die
+    Untergrenze aus ``_attribute_floor`` nachweislich übersteigt — dann
+    hängt das Gem wirklich fest. ``"False"``, wenn alle Anforderungen
+    nachweislich erfüllt sind (dann wartet es nur auf einen Klick).
+    Leerer String, wenn mindestens eine Anforderung sich nicht entscheiden
+    lässt: Eine Untergrenze kann "erfüllt" beweisen, "nicht erfüllt" aber
+    nur für die Werte, die sie überhaupt kennt — der Unterschied gehört in
+    die Daten, nicht unter den Teppich."""
+    if not entries:
+        return ""
+    undecidable = False
+    for entry in entries:
+        name = entry.get("name")
+        values = entry.get("values") or []
+        needed = _as_int(values[0][0]) if values else None
+        if needed is None or name not in floor:
+            undecidable = True
+            continue
+        if needed > floor[name]:
+            return "True"
+    return "" if undecidable else "False"
+
+
 def _format_requirements(entries: list[dict] | None) -> str:
     if not entries:
         return ""
@@ -99,7 +187,8 @@ def _format_requirements(entries: list[dict] | None) -> str:
     return "; ".join(parts)
 
 
-def _gem_rows(character: str, timestamp: str, item: Item) -> list[dict]:
+def _gem_rows(character: str, timestamp: str, item: Item,
+              floor: dict[str, int]) -> list[dict]:
     """Eine Zeile je Sockel-Gem in ``item``. ``socketedItems`` ist ein
     über ``extra=\"allow\"`` mitgeführtes Rohfeld (siehe ARCHITEKTUR.md
     §4.33) — rohe Dicts, keine eigenen Pydantic-Modelle, deshalb hier
@@ -110,7 +199,8 @@ def _gem_rows(character: str, timestamp: str, item: Item) -> list[dict]:
             continue
         experience, experience_max, progress = _experience(gem)
         next_requirements = gem.get("nextLevelRequirements")
-        capped = bool(next_requirements) and progress is not None and progress >= _FULL_PROGRESS
+        waiting = (bool(next_requirements) and progress is not None
+                   and progress >= _FULL_PROGRESS)
         rows.append({
             "timestamp": timestamp,
             "character": character,
@@ -123,7 +213,8 @@ def _gem_rows(character: str, timestamp: str, item: Item) -> list[dict]:
             "experience": experience,
             "experience_max": experience_max,
             "progress": progress,
-            "capped_by_requirement": capped,
+            "waiting_for_levelup": waiting,
+            "requirement_unmet": _requirement_unmet(next_requirements, floor) if waiting else "",
             "next_level_requirements": _format_requirements(next_requirements),
         })
     return rows
@@ -139,16 +230,44 @@ def append(character: str, items: list[Item]) -> None:
     angezeigt wird. Ohne Sockel-Gems (z. B. ein frisch erstellter
     Charakter) wird nichts geschrieben, auch keine leere Zeile."""
     timestamp = datetime.now(timezone.utc).isoformat()
+    floor = _attribute_floor(items)
     rows: list[dict] = []
     for item in items:
-        rows.extend(_gem_rows(character, timestamp, item))
+        rows.extend(_gem_rows(character, timestamp, item, floor))
     if not rows:
         return
     path = log_path()
     path.parent.mkdir(parents=True, exist_ok=True)
+    _retire_foreign_header(path)
     is_new = not path.exists()
     with path.open("a", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=FIELDNAMES)
         if is_new:
             writer.writeheader()
         writer.writerows(rows)
+
+
+def _retire_foreign_header(path: Path) -> None:
+    """Legt eine vorhandene Mitschrift mit ANDEREN Spalten beiseite, statt
+    Zeilen hineinzuschreiben, die nicht zu ihrem Kopf passen.
+
+    Konkreter Anlass: Peters erste Messstunde liegt in einer Datei mit der
+    alten Spalte ``capped_by_requirement``. Würde einfach weiter angehängt,
+    stünden ab da Werte unter falschen Überschriften — die Datei wäre
+    stillschweigend unbrauchbar, und zwar rückwirkend auch für den Teil,
+    der vorher gestimmt hat. Der alte Stand bleibt darum unter seinem
+    Zeitstempel erhalten, die neue Datei fängt mit passendem Kopf an."""
+    if not path.exists():
+        return
+    try:
+        with path.open("r", encoding="utf-8", newline="") as f:
+            header = next(csv.reader(f), None)
+    except OSError:
+        return
+    if header == FIELDNAMES:
+        return
+    retired = path.with_name(
+        f"{path.stem}-{datetime.now().strftime('%Y%m%d-%H%M%S')}{path.suffix}")
+    path.rename(retired)
+    log.info("Gem-XP-Mitschrift hatte andere Spalten und wurde beiseitegelegt: %s",
+             retired.name)

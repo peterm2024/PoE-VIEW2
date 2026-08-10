@@ -67,7 +67,7 @@ def test_append_writes_a_header_and_one_row_per_gem(log_dir) -> None:
     assert all(r["character"] == "WitchOfPeter" and r["slot"] == "Helm" for r in rows)
 
 
-def test_a_normally_leveling_gem_is_not_marked_as_capped(log_dir) -> None:
+def test_a_normally_leveling_gem_is_not_marked_as_waiting(log_dir) -> None:
     gem_xp_log.append("WitchOfPeter", [_helm(_LEVELING_GEM)])
 
     with gem_xp_log.log_path().open(encoding="utf-8") as f:
@@ -78,22 +78,112 @@ def test_a_normally_leveling_gem_is_not_marked_as_capped(log_dir) -> None:
     assert row["experience"] == "66921722"
     assert row["experience_max"] == "212046017"
     assert row["progress"] == "0.32"
-    assert row["capped_by_requirement"] == "False"
+    assert row["waiting_for_levelup"] == "False"
+    assert row["requirement_unmet"] == ""
     assert row["next_level_requirements"] == ""
 
 
-def test_a_gem_stuck_on_a_missing_requirement_is_marked_as_capped(log_dir) -> None:
-    """Peters zweiter Fall: ein Gem, das nicht weiterleveln KANN, weil
-    ein Attribut (hier Dex) nicht hoch genug ist — real in Peters eigenem
-    Cache gefunden (Blood Rage, ARCHITEKTUR.md §4.34), keine Vermutung."""
+def test_a_gem_with_a_full_bar_is_marked_as_waiting_for_a_levelup(log_dir) -> None:
+    """Gems steigen in PoE nicht von selbst auf: Voller Balken plus
+    ``nextLevelRequirements`` heisst "wartet auf den Klick". Genau so haelt
+    Peter Blood Rage, Frostblink und Lifetap absichtlich auf Stufe 1 (in
+    seiner Messstunde nachgewiesen, ARCHITEKTUR.md §4.35)."""
     gem_xp_log.append("WitchOfPeter", [_helm(_CAPPED_GEM)])
 
     with gem_xp_log.log_path().open(encoding="utf-8") as f:
         row = next(csv.DictReader(f))
 
     assert row["progress"] == "1"
-    assert row["capped_by_requirement"] == "True"
+    assert row["waiting_for_levelup"] == "True"
     assert row["next_level_requirements"] == "Level 20; Dex 50"
+
+
+def test_a_met_requirement_proves_the_gem_waits_voluntarily(log_dir) -> None:
+    """Der Abgleich, der Peters zwei Faelle trennt: Traegt der Charakter
+    Ausruestung, die 108 Dex verlangt, dann sind die 50 Dex der naechsten
+    Gem-Stufe zwingend erfuellt — das Gem wartet also freiwillig. Genau
+    dieser Fall lag bei allen vier wartenden Gems seiner Messstunde vor."""
+    boots = Item.model_validate({
+        "id": "boots-1", "typeLine": "Soldier Boots", "inventoryId": "Boots",
+        "requirements": [{"name": "Level", "values": [["69", 0]]},
+                         {"name": "Dex", "values": [["108", 0]]}]})
+
+    gem_xp_log.append("WitchOfPeter", [_helm(_CAPPED_GEM), boots])
+
+    with gem_xp_log.log_path().open(encoding="utf-8") as f:
+        row = next(r for r in csv.DictReader(f) if r["gem"] == "Blood Rage")
+
+    assert row["waiting_for_levelup"] == "True"
+    assert row["requirement_unmet"] == "False"
+
+
+def test_a_requirement_above_the_proven_floor_marks_the_gem_as_blocked(log_dir) -> None:
+    """Gegenprobe und Peters urspruenglich vermuteter Fall: Reicht die aus
+    der getragenen Ausruestung belegte Untergrenze nicht an die geforderte
+    Dex heran, haengt das Gem wirklich fest."""
+    boots = Item.model_validate({
+        "id": "boots-1", "typeLine": "Soldier Boots", "inventoryId": "Boots",
+        "requirements": [{"name": "Level", "values": [["69", 0]]},
+                         {"name": "Dex", "values": [["30", 0]]}]})
+
+    gem_xp_log.append("WitchOfPeter", [_helm(_CAPPED_GEM), boots])
+
+    with gem_xp_log.log_path().open(encoding="utf-8") as f:
+        row = next(r for r in csv.DictReader(f) if r["gem"] == "Blood Rage")
+
+    assert row["requirement_unmet"] == "True"
+
+
+def test_an_undecidable_requirement_stays_empty_rather_than_guessing(log_dir) -> None:
+    """Eine Untergrenze kann "erfuellt" beweisen, "nicht erfuellt" aber nur
+    fuer die Werte, die sie kennt. Ohne ein einziges getragenes Teil mit
+    Dex-Anforderung bleibt die Spalte leer statt auf True oder False zu
+    raten — der Unterschied gehoert in die Daten."""
+    gem_xp_log.append("WitchOfPeter", [_helm(_CAPPED_GEM)])
+
+    with gem_xp_log.log_path().open(encoding="utf-8") as f:
+        row = next(csv.DictReader(f))
+
+    assert row["waiting_for_levelup"] == "True"
+    assert row["requirement_unmet"] == ""
+
+
+def test_only_worn_items_count_towards_the_attribute_floor(log_dir) -> None:
+    """Ein Item im Rucksack beweist gar nichts — der Charakter kann es
+    aufgehoben haben, ohne seine Anforderungen zu erfuellen. Zaehlte es
+    mit, wuerde aus einem blockierten Gem faelschlich ein freiwillig
+    wartendes."""
+    in_backpack = Item.model_validate({
+        "id": "bag-1", "typeLine": "Soldier Boots", "inventoryId": "MainInventory",
+        "requirements": [{"name": "Dex", "values": [["108", 0]]}]})
+
+    gem_xp_log.append("WitchOfPeter", [_helm(_CAPPED_GEM), in_backpack])
+
+    with gem_xp_log.log_path().open(encoding="utf-8") as f:
+        row = next(csv.DictReader(f))
+
+    assert row["requirement_unmet"] == ""
+
+
+def test_an_older_log_with_different_columns_is_set_aside(log_dir) -> None:
+    """Peters erste Messstunde liegt in einer Datei mit der alten Spalte
+    ``capped_by_requirement``. Wuerde einfach weiter angehaengt, stuenden
+    ab da Werte unter falschen Ueberschriften — die Datei waere
+    stillschweigend unbrauchbar, rueckwirkend auch fuer den Teil, der
+    vorher gestimmt hat."""
+    old = gem_xp_log.log_path()
+    old.write_text("timestamp,character,capped_by_requirement\nalt,alt,True\n",
+                   encoding="utf-8")
+
+    gem_xp_log.append("WitchOfPeter", [_helm(_LEVELING_GEM)])
+
+    with gem_xp_log.log_path().open(encoding="utf-8") as f:
+        rows = list(csv.DictReader(f))
+    assert len(rows) == 1 and rows[0]["gem"] == "Fire Trap"
+
+    retired = [p for p in log_dir.iterdir() if p.name.startswith("gem-xp-log-")]
+    assert len(retired) == 1
+    assert "capped_by_requirement" in retired[0].read_text(encoding="utf-8")
 
 
 def test_second_append_does_not_repeat_the_header(log_dir) -> None:

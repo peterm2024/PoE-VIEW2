@@ -3124,17 +3124,37 @@ XP/h, dazu eine Benachrichtigung bei Stufe 20 und eine Anzeige, ob ein
 Gem gerade pausiert ist (EP-Zuwachs lässt sich in PoE gezielt
 abschalten).
 
-**Wichtige Korrektur an der Ausgangsannahme, bevor irgendetwas gebaut
-wurde:** Peters Vermutung war "die Gems bekommen ja eh alle die
-gleiche XP, einer reicht als Stellvertreter". Stimmt nicht — an seinem
-eigenen Charakter gemessen (29 sockelbare Gems, ein Snapshot) teilen
-sich mehrere DAUERHAFT AKTIVE Skills (Hauptangriff + direkt verlinkte
-Supports, Auren) exakt denselben XP-Stand, während selten ausgelöste
-Skills (ein Fluch, ein Minion-Skill) weit zurückliegen und kaum
-genutzte Gems noch auf Stufe 1 stehen. Ein Gem bekommt XP dafür, dass
-der SKILL SELBST etwas bewirkt, nicht einfach dafür, dass der Charakter
-tötet — ein einzelnes Gem taugt also nicht als Stellvertreter für
-"alle", nur als Anzeiger für sich selbst.
+**Peters Ausgangsannahme war richtig — die Zwischenkorrektur hier war
+falsch.** Peters Vermutung: "die Gems bekommen ja eh alle die gleiche
+XP, einer reicht als Stellvertreter". Aus einem einzelnen Snapshot
+seines Charakters schien das widerlegt: Mehrere Gems teilten sich exakt
+denselben XP-STAND, andere lagen weit zurück, einige standen auf Stufe
+1 — woraus hier zunächst geschlossen wurde, ein Gem bekomme XP nur für
+das, was der Skill selbst bewirkt.
+
+Die Messung über eine volle Spielstunde (§4.35, 231 Messpunkte) zeigt
+das Gegenteil: **Jedes gesockelte Gem bekam in jedem einzelnen Schritt
+exakt denselben Zuwachs** — über acht XP-Sprünge hinweg zusammen
+12.187.472 XP, bei allen 25 aktiven Gems auf die Einheit gleich. Der
+unterschiedliche STAND kommt allein aus der Vorgeschichte (wann ein Gem
+gesockelt wurde, wie oft es zwischendurch draußen war), nicht aus einer
+unterschiedlichen Zuteilung. Genau das ließ sich aus einem einzelnen
+Snapshot nicht sehen: Er zeigt Bestände, die Frage war aber eine nach
+Zuwächsen.
+
+Die beiden Abweichungen im Datensatz bestätigen die Regel, statt sie zu
+brechen:
+
+- `Summon Skitterbots` fehlt zwischen 21:04 und 21:14 komplett aus den
+  Daten (Peter hatte es kurz ausgesockelt) und verpasste dadurch genau
+  den einen Sprung von 1.066.352 XP, der in dieser Zeit lag — sein
+  Rückstand am Ende beträgt exakt diesen Betrag.
+- `Ice Nova` wurde um 21:04 frisch gesockelt und bekam beim nächsten
+  Sprung nicht die vollen 1.066.352, sondern 147.967 — genau so viel,
+  wie bis zu seiner Obergrenze noch hineinpasste.
+
+Für die Anzeige heißt das: Ein einzelnes Gem TAUGT als Stellvertreter,
+solange es durchgehend gesockelt und nicht am Anschlag ist.
 
 **Umgesetzt, ausdrücklich nur der erste, kleinste Schritt: Charakter-
 XP/h als Zahl, kein Graph, keine Gems.** Drei Gründe für diese
@@ -3203,30 +3223,64 @@ Annahme nicht weiter auswerten.
 **Zwei Fälle sollten unterscheidbar sein, die Peter ausdrücklich nannte:**
 ein Gem, das absichtlich nicht weitergelevelt wird, und eines, das gerade
 NICHT weiterleveln KANN, weil eine Voraussetzung (meist ein Attribut)
-fehlt. Nachgesehen, bevor irgendetwas gebaut wurde: In Peters echtem
-Cache tragen genau die drei Level-1-Gems aus §4.34 (`Blood Rage`,
-`Frostblink`, ein zweites `Lifetap Support`) zusätzlich ein Feld
-`nextLevelRequirements` und stehen mit `progress: 1` auf ihrer
-Experience — die Erfahrung für die aktuelle Stufe ist bereits VOLL, nur
-eine Voraussetzung für die nächste fehlt (bei `Blood Rage`: Charakterlevel
-20 und 50 Dex, Peters Charakter hat nur 41). Das ist real gefunden, kein
-Rätselraten. Für Peters ANDERE Vermutung — ein eigener Schalter "EP-Zuwachs
-deaktivieren" — ließ sich weder im Rohdatensatz noch in der öffentlichen
-Doku ein Feld dafür bestätigen. **Deshalb bewusst nicht geraten:** Statt
-eine Erkennung für ein möglicherweise gar nicht existierendes Flag zu
-bauen, schreibt das Log einfach ALLE relevanten Rohfelder mit. Bleibt die
-Erfahrung eines Gems über die Spielrunde flach, ohne dass
-`capped_by_requirement` gesetzt ist, ist GENAU DAS der Kandidat für
-Peters zweiten Fall — die Unterscheidung fällt beim Auswerten der Daten,
-nicht beim Schreiben des Codes.
+fehlt. Vor der Messung sah es so aus, als trenne das Feld
+`nextLevelRequirements` beide sauber: Genau die Level-1-Gems tragen es
+und stehen mit `progress: 1` auf ihrer Experience. Die Spalte hieß
+deshalb zunächst `capped_by_requirement`.
+
+**Die Messung hat das korrigiert** (eine Spielstunde, 231 Messpunkte).
+`nextLevelRequirements` nennt schlicht die Anforderungen der NÄCHSTEN
+Stufe — unabhängig davon, ob sie erfüllt sind. Nachgerechnet an Peters
+eigener Ausrüstung: `Blood Rage` verlangt 50 Dex, sein Charakter hat
+nachweislich mindestens 108; `Lifetap Support` verlangt 21 Str bei
+mindestens 151. (Die frühere Angabe "Peters Charakter hat nur 41 Dex"
+in einer vorigen Fassung dieses Abschnitts war falsch.) Kein einziges
+seiner Gems war blockiert.
+
+Die eigentliche Mechanik dahinter, aus dem Verlauf abgelesen und von
+Peter bestätigt: **Gems steigen in PoE nicht von selbst auf.** Solange
+nicht geklickt wird, bleibt der Balken voll und die Erfahrung
+eingefroren. `Ice Nova`, um 21:04 frisch gesockelt, ging in einem
+einzigen Erfahrungsschub von Stufe 1 auf 4 (Peter levelte es gezielt) und
+stand danach still, obwohl alle Anforderungen erfüllt waren. Genau so
+hält er auch `Blood Rage`, `Frostblink` und `Lifetap Support` absichtlich
+auf Stufe 1.
+
+Damit sind es drei Zustände statt zwei, alle drei aus der Mitschrift
+ablesbar: **levelt normal** (kein `nextLevelRequirements`), **wartet auf
+Level-Up** (`waiting_for_levelup`) und **pausiert** — Peters drittes
+Wort dafür, dass ein Gem ausgesockelt ist. Es taucht dann gar nicht auf
+und verpasst jeden Erfahrungsschub in der Zeit; an `Summon Skitterbots`
+nachgewiesen, dem nach zehn Minuten draußen exakt der eine Schub von
+1.066.352 XP fehlte, der in dieses Fenster fiel.
+
+Peters ursprünglicher zweiter Fall bleibt trotzdem darstellbar, nur
+braucht er einen Abgleich statt eines Feldes: `_attribute_floor()` leitet
+aus der GETRAGENEN Ausrüstung eine sichere Untergrenze für Level, Str,
+Dex und Int ab (was der Charakter trägt, erfüllt er zwingend) und
+`requirement_unmet` vergleicht die Gem-Anforderung dagegen — `True` nur
+bei nachweislicher Unterschreitung, `False` bei nachweislicher Erfüllung,
+leer, wenn die Daten es nicht hergeben. Eine Untergrenze kann "erfüllt"
+beweisen, "nicht erfüllt" aber nur für Werte, die sie kennt; dieser
+Unterschied gehört in die Daten statt unter den Teppich. Die Slot-Liste
+dafür (`_WORN_SLOTS`) ist bewusst eine eigene, knappe — nicht
+`paperdoll.EQUIPPED_SLOTS`: Ein Import aus dem UI-Paket zöge Qt-Widgets
+in einen reinen Service, und die beiden Listen haben gegenläufige
+Ansprüche (die dort muss vollständig sein, diese hier sicher).
 
 **Eine Zeile pro Sockel-Gem, bei jedem Charakter-Abruf** (`gem_xp_log.
 append()`, verdrahtet in `_on_character_items`) — auch im stillen
 Hintergrund-Refresh, unabhängig davon, welcher Charakter gerade angezeigt
 wird (mehr Messpunkte für den Verlauf). Spalten: Zeitstempel, Charakter,
 Slot, Gem-ID/-Name, Support-Flag, Level, Qualität, Erfahrung (aktuell/
-Maximum/Anteil), `capped_by_requirement` und die lesbare Fassung von
-`nextLevelRequirements`. Reine CSV statt eines eigenen Zeitreihen-Formats
+Maximum/Anteil), `waiting_for_levelup`, `requirement_unmet` und die
+lesbare Fassung von `nextLevelRequirements`. Ändern sich die Spalten,
+legt `_retire_foreign_header()` eine vorhandene Mitschrift unter ihrem
+Zeitstempel beiseite, statt Zeilen unter fremde Überschriften zu
+schreiben — sonst wäre die Datei stillschweigend unbrauchbar, und zwar
+rückwirkend auch für den Teil, der vorher gestimmt hat (Peters erste
+Messstunde steckt in einer Datei mit der alten Spalte).
+Reine CSV statt eines eigenen Zeitreihen-Formats
 — für eine Handvoll Spielstunden zieht man das genauso gut in jede
 Tabellenkalkulation, und es ist in einer Zeile erklärt. Ohne Sockel-Gems
 (Ringe, Amulett, Rucksack) wird nichts geschrieben, auch keine leere
@@ -3245,10 +3299,26 @@ Log-Ordner geschrieben. `tests/conftest.py`s Autouse-Fixture patcht
 `APP_DATA_DIR` — ein systemischer Fix, der jeden künftigen Code vor
 demselben Fehler schützt, nicht nur diesen einen.
 
-Getestet: `tests/test_gem_xp_log.py` (Header nur einmal, beide Fälle aus
-Peters echten Daten nachgebildet — normal levelndes Gem vs. durch eine
-Voraussetzung blockiertes —, mehrere Charaktere in einer Datei, keine
-Zeile ohne Sockel-Gems, Gegenprobe für `capped_by_requirement`),
+**Was die erste Messung ergeben hat** (2026-08-10, 21:00–22:00, 231
+Messpunkte, keine Lücke) — die Grundlage für jede weitere Arbeit an §4.34:
+
+- **Alle gesockelten Gems bekommen exakt denselben Zuwachs.** Peters
+  Ausgangsannahme war richtig, siehe die Richtigstellung in §4.34.
+- **Die Erfahrung kommt in Schüben, nicht kontinuierlich.** In 230
+  Messschritten gab es NUR ACHT mit Zuwachs; sieben davon 1–3 Sekunden
+  nach einem Zonenwechsel, der achte nach einer Händler-Interaktion
+  (§4.36). Über die Stunde ergibt das 12.187.472 XP, also rund 12,2 Mio.
+  XP/h — die Fünf-Minuten-Werte schwanken dabei zwischen 0 und 38 Mio.
+  **Für die geplante Anzeige heißt das: Alle 16 Sekunden zu messen bringt
+  nichts.** Ein Graph braucht einen Punkt je Veröffentlichung (Treppe)
+  oder eine Glättung über mindestens 10–15 Minuten; eine Momentanrate
+  zwischen zwei Abrufen wäre fast immer null.
+
+Getestet: `tests/test_gem_xp_log.py` (Header nur einmal, normal
+levelndes Gem vs. wartendes, Attribut-Abgleich in beide Richtungen plus
+der unentscheidbare Fall, nur getragene Teile zählen für die
+Untergrenze, ältere Mitschrift mit anderen Spalten wird beiseitegelegt,
+mehrere Charaktere in einer Datei, keine Zeile ohne Sockel-Gems),
 `tests/test_main_window_helpers.py` (Ende-zu-Ende-Verdrahtung über
 `_on_character_items`).
 
@@ -3324,6 +3394,34 @@ zwischen Hideout und Map hin- und herportet, löste sonst beliebig viele
 Abrufe aus. Die gemeinsamen Abbruchgründe (Pause-Modus, laufendes "Load
 All Tabs", kein Login, `pacing_blocked()`) stehen dafür jetzt in
 `_event_refresh_blocked()` statt zweimal ausgeschrieben.
+
+**Nachtrag aus der Messstunde: Wo der Zonenwechsel als Auslöser komplett
+ausfällt.** Peter, 2026-08-10: "Wenn ich aus der Mine zurück zum Händler
+dort porte, wird die Itemliste nicht aktualisiert, d. h. ich kann dort
+identifizieren und handeln, ohne dass unser Tool das mitbekommt. Erst
+wenn ich diesen Händler-Bereich wieder verlasse und in die Mine gehe,
+wird das Tool aktualisiert." Gegen seine Client.txt geprüft und
+bestätigt: Zwischen 21:21:41 und 21:49:26 steht dort **27 Minuten lang
+keine einzige `You have entered`-Zeile**, obwohl in dieser Zeit acht
+Händler-Ereignisse anfielen (zweimal identifizieren + verkaufen, dann
+noch einmal dasselbe). Die Fahrt zum Händler im Delve erzeugt keinen
+Zonenwechsel — für den Zonen-Auslöser ist dieser Bereich unsichtbar.
+
+Wichtig für die Einordnung des Triggers oben: Die App hat in diesen 27
+Minuten trotzdem rund hundertmal gefragt (der Charakter wird im
+Single-Modus alle ~16 s abgerufen, die Mitschrift aus §4.35 belegt es
+lückenlos) und dabei **ein einziges Mal** neue Daten bekommen. Das
+Problem ist also nicht, dass zu selten gefragt würde, sondern dass GGG
+dort nichts veröffentlicht. Der Händler-Trigger kann das nicht heilen —
+er hilft dort, wo GGG tatsächlich veröffentlicht und nur der Auslöser
+fehlte (in einer normalen Stadt lagen zwischen "Trade accepted" und der
+neuen Antwort gemessene 9 bis 30 Sekunden), und in den Modi, die
+seltener als das fragen (Auto: 40 s).
+
+Daraus folgt auch, dass der Trigger **zu früh feuert**: 1–3 Sekunden
+nach der Zeile, während die Daten erst 9–57 Sekunden später da sind.
+Eine Verzögerung von rund einer halben Minute wäre die naheliegende
+Verbesserung — noch nicht umgesetzt, das ist Peters Entscheidung.
 
 Getestet: `tests/test_zone_watcher.py` (beide Schreibweisen des
 Identifizierens, abgebrochener Handel löst nichts aus, getrennte
