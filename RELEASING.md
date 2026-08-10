@@ -89,7 +89,8 @@ tun das nicht. Gesetzt sind (Stand 2026-08-10, GitHub erlaubt bis zu 20):
 
 ```
 path-of-exile, pathofexile, poe, poe1, poe-tools, ggg-api, poeview,
-stash, game-tools, pyside6, qt, python, desktop-app, windows
+stash, stash-tabs, exile, game-tools, pyside6, qt, python, desktop-app,
+windows
 ```
 
 Die Auswahl beruht auf den tatsächlichen Nutzungszahlen, abgefragt über
@@ -117,11 +118,19 @@ nicht — es kostet einen Platz und liefert das falsche Publikum.
 
 `poe1` (11 Repos, alle echtes Path of Exile 1) ist der Ersatz: klein
 genug für Seite 1 und inhaltlich richtig, seit PoE 2 die Unterscheidung
-für Suchende überhaupt erst nötig macht. Ebenfalls gemessen und sauber,
-falls einmal Plätze frei sind: `stash-tabs` (3) und `exile` (33, das
-Insider-Wort — NeverSinks Lootfilter, Exilence, PAL2). Null Treffer und
-damit als Fundweg wertlos: `pathofexile-api`, `path-of-exile-api`,
-`poe-stash`, `path-of-exile-tools`, `poe-tool`.
+für Suchende überhaupt erst nötig macht. Dazu kamen `stash-tabs` (jetzt
+4 Repos — die wörtlichste Beschreibung dessen, was das Programm zeigt,
+und eine Seite, die man vollständig liest) und `exile`, das Insider-Wort
+der Spielerschaft (NeverSinks Lootfilter, Exilence, PAL2). Bei `exile`
+ohne Illusionen: Platz 30 von rund 34, also das Ende der ersten Seite.
+Es kostet nichts und das Publikum stimmt, ein Fundweg ist es vorerst
+nicht. Null Treffer und damit von vornherein wertlos:
+`pathofexile-api`, `path-of-exile-api`, `poe-stash`,
+`path-of-exile-tools`, `poe-tool`.
+
+Damit sind 16 der 20 Plätze belegt. Die verbleibenden vier bewusst frei
+gelassen: Ein Topic, das man nur nimmt, um die Liste zu füllen, ist
+genau der Fall, den die Mehrdeutigkeits-Regel oben verhindern soll.
 
 `ggg-api` und `poeview` haben null Treffer und bringen als Fundweg
 zunächst nichts. Sie bleiben trotzdem drin: `poeview` ist die bei GGG
