@@ -2988,6 +2988,58 @@ Antwort, zwei Verwerter.
 
 ---
 
+### 4.33 Diagnose: Ausrüstung "als frisch erkannt" nach einem Zonenwechsel
+
+Peter, 2026-08-10 (ToDo.md): "Beim Refresh der Itemliste nach dem
+Zonenwechsel aus einer Map ins Hideout werden auch die angelegten Items
+als frisch erkannt." Betrifft die Türkis-Hervorhebung aus §4.20 — sie
+soll geänderte/neue Items zeigen, meldet nach Peters Beobachtung aber
+auch bereits getragene Ausrüstung, mit der nichts geschehen ist.
+
+**Noch nicht gefixt, weil die Ursache noch nicht feststeht.** Gegen
+Peters echte Logs geprüft: `_log_publish_interval` (§_PublishWatch,
+2026-08-05) protokolliert für jede Inventaränderung Zu-/Abgänge in
+einer Zeile. Eine ID-Neuvergabe für Ausrüstung durch GGG bei einem
+Zonenwechsel müsste dort als GLEICHZEITIGER Zu- UND Abgang derselben
+Größenordnung auftauchen, direkt nach dem Zonenwechsel. Das Muster
+kommt in den Logs nicht vor — was dort steht (`+N/-0` während einer Map,
+ein späterer `+0/-N`-Sprung auf eine stabile Grundausstattung), erklärt
+sich vollständig durch normales Loot-Sammeln und den Truhen-Abwurf im
+Hideout, danach eine neue Map mit leerem Rucksack. Die reine
+Zähl-Statistik kann aber nicht zeigen, ob stattdessen ein FELD eines
+bereits getragenen Items zwischen zwei Abrufen kippt (Flaschenladung,
+Sockel-Gem-Erfahrung, …) und dadurch `changed_ids` in
+`_diff_character_items` (§4.20) auslöst — dafür fehlt in der Zähl-Zeile
+das Feld selbst.
+
+**Deshalb zunächst nur instrumentiert, nicht geraten gefixt** —
+dieselbe Reihenfolge wie bei der Zonenwechsel-Frage in §_PublishWatch:
+erst Sichtbarkeit schaffen, dann urteilen. `MainWindow.
+_log_equipped_item_diff()` protokolliert bei Gelegenheit eine INFO-Zeile,
+wenn ein Item auf einem Ausrüstungs-Slot (`paperdoll.EQUIPPED_SLOTS` —
+dieselbe Liste, die auch die Puppe aus §4.16 befüllt, keine zweite
+gepflegte Kopie) innerhalb von `_ZONE_EQUIP_DIFF_LOG_WINDOW_S = 5s` nach
+dem letzten bekannten Zonenwechsel als neu oder geändert auffällt:
+
+- **Neue ID** (`added_ids`): loggt nur, dass die vorherige ID unbekannt
+  war — das wäre der Beleg für eine GGG-seitige ID-Neuvergabe.
+- **Geänderte ID** (`changed_ids`): loggt die tatsächlich abweichenden
+  Feldnamen (`_differing_fields`, Vergleich über `model_dump()` inkl.
+  `extra="allow"`-Felder), NICHT deren Werte — reicht, um beim nächsten
+  Auftreten gezielt nachzusehen, ohne Mod-Text o. Ä. ins Log zu
+  schreiben.
+
+Bewusst eng auf Ausrüstung UND ein 5-Sekunden-Fenster begrenzt: Peters
+Beschwerde galt ausdrücklich "angelegten" Items, nicht dem Rucksack, und
+ohne das Zeitfenster würde jede spätere, gewöhnliche Flaschenladung
+mitten in der nächsten Map ebenfalls eine Zeile erzeugen und das Log
+fluten. Nach dem nächsten Spielabend mit dieser Zeile im Log lässt sich
+der eigentliche Fix zielgerichtet bauen statt zu raten. Getestet:
+`tests/test_main_window_helpers.py` (Mechanismus, Zeitfenster,
+Beschränkung auf Ausrüstungs-Slots, beide Auslöser).
+
+---
+
 ## 5. UI-Konzept (Oberflächenvorschlag)
 
 Ein Hauptfenster: Navigation links (Charaktere + Stash getrennt), Items

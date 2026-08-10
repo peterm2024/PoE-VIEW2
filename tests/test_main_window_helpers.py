@@ -6427,6 +6427,132 @@ def test_the_first_fetch_of_a_session_is_marked_as_such_in_the_measurement(
     win.worker.wait(5000)
 
 
+def test_differing_fields_lists_only_the_fields_that_actually_differ() -> None:
+    a = Item.model_validate({"id": "x", "typeLine": "Rat's Nest", "inventoryId": "Helm",
+                             "corrupted": False, "ilvl": 84})
+    b = Item.model_validate({"id": "x", "typeLine": "Rat's Nest", "inventoryId": "Helm",
+                             "corrupted": True, "ilvl": 84})
+    assert MainWindow._differing_fields(a, b) == ["corrupted"]
+    assert MainWindow._differing_fields(a, a) == []
+
+
+def test_equipped_item_change_shortly_after_a_zone_change_logs_the_field(
+        qapp, caplog) -> None:
+    """Peter, 2026-08-10 (ToDo.md): 'Beim Refresh der Itemliste nach dem
+    Zonenwechsel aus einer Map ins Hideout werden auch die angelegten
+    Items als frisch erkannt.' Gegen Peters echte Logs geprüft: die
+    Zähl-Statistik allein erklärt sich vollständig durch normales Loot-
+    Verhalten (siehe Kommentar an ``_ZONE_EQUIP_DIFF_LOG_WINDOW_S``) — ob
+    stattdessen ein FELD eines getragenen Items zwischen zwei Abrufen
+    kippt, lässt sich daraus nicht ablesen. Dieser Test prüft nur den
+    MECHANISMUS der neuen Diagnose-Zeile, nicht eine echte Ursache (die
+    steht noch aus, siehe ToDo.md)."""
+    import logging
+
+    win = MainWindow()
+    win._current_character_name = "WitchOfPeter"
+    win._on_character_items("WitchOfPeter", [
+        Item.model_validate({"id": "helm-1", "typeLine": "Rat's Nest",
+                             "inventoryId": "Helm", "corrupted": False})], False)
+    win._on_zone_changed("Backstreet Hideout")
+
+    with caplog.at_level(logging.INFO, logger="poe_view.ui.main_window"):
+        win._on_character_items("WitchOfPeter", [
+            Item.model_validate({"id": "helm-1", "typeLine": "Rat's Nest",
+                                 "inventoryId": "Helm", "corrupted": True})], False)
+
+    line = next(m for m in caplog.messages if "als GEÄNDERT erkannt" in m)
+    assert "Rat's Nest" in line
+    assert "Helm" in line
+    assert "corrupted" in line
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_equipped_item_change_long_after_a_zone_change_is_not_logged(
+        qapp, caplog) -> None:
+    """Ohne die Zeitgrenze würde jede spätere Änderung (z. B. eine
+    Flaschenladung mitten in der nächsten Map) mitgeloggt — das Log soll
+    aber nur die Fälle zeigen, die tatsächlich zeitlich an einen
+    Zonenwechsel anschließen."""
+    import logging
+
+    win = MainWindow()
+    win._current_character_name = "WitchOfPeter"
+    win._on_character_items("WitchOfPeter", [
+        Item.model_validate({"id": "helm-1", "typeLine": "Rat's Nest",
+                             "inventoryId": "Helm", "corrupted": False})], False)
+    win._on_zone_changed("Backstreet Hideout")
+    win._last_zone_at -= 30  # weit ausserhalb des Zeitfensters
+
+    with caplog.at_level(logging.INFO, logger="poe_view.ui.main_window"):
+        win._on_character_items("WitchOfPeter", [
+            Item.model_validate({"id": "helm-1", "typeLine": "Rat's Nest",
+                                 "inventoryId": "Helm", "corrupted": True})], False)
+
+    assert not [m for m in caplog.messages if "als GEÄNDERT erkannt" in m]
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_inventory_item_change_shortly_after_a_zone_change_is_not_logged(
+        qapp, caplog) -> None:
+    """Die Diagnose gilt ausdrücklich nur Ausrüstung (Peters Wortlaut:
+    'die ANGELEGTEN Items') — ein ganz normales Rucksack-Item, das sich
+    aendert (z. B. weil es identifiziert wurde), ist kein Fall dieses
+    Bugs und soll das Log nicht fuellen."""
+    import logging
+
+    win = MainWindow()
+    win._current_character_name = "WitchOfPeter"
+    win._on_character_items("WitchOfPeter", [
+        Item.model_validate({"id": "bag-1", "typeLine": "Chaos Orb",
+                             "inventoryId": "MainInventory", "identified": False})], False)
+    win._on_zone_changed("Backstreet Hideout")
+
+    with caplog.at_level(logging.INFO, logger="poe_view.ui.main_window"):
+        win._on_character_items("WitchOfPeter", [
+            Item.model_validate({"id": "bag-1", "typeLine": "Chaos Orb",
+                                 "inventoryId": "MainInventory", "identified": True})], False)
+
+    assert not [m for m in caplog.messages if "als GEÄNDERT erkannt" in m]
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_a_new_id_on_an_equipped_slot_shortly_after_a_zone_change_is_logged_distinctly(
+        qapp, caplog) -> None:
+    """Deckt die andere mögliche Ursache ab: nicht ein geändertes Feld
+    unter derselben ID, sondern eine ganz neue ID auf demselben Slot
+    (``added_ids`` statt ``changed_ids``) — falls GGG Ausrüstungs-Items
+    bei einem Zonenwechsel neu durchnummeriert, taucht das hier auf,
+    nicht als 'GEÄNDERT'."""
+    import logging
+
+    win = MainWindow()
+    win._current_character_name = "WitchOfPeter"
+    win._on_character_items("WitchOfPeter", [
+        Item.model_validate({"id": "helm-old", "typeLine": "Rat's Nest",
+                             "inventoryId": "Helm"})], False)
+    win._on_zone_changed("Backstreet Hideout")
+
+    with caplog.at_level(logging.INFO, logger="poe_view.ui.main_window"):
+        win._on_character_items("WitchOfPeter", [
+            Item.model_validate({"id": "helm-new", "typeLine": "Rat's Nest",
+                                 "inventoryId": "Helm"})], False)
+
+    line = next(m for m in caplog.messages if "als NEU erkannt" in m)
+    assert "Rat's Nest" in line
+    assert "Helm" in line
+    assert not [m for m in caplog.messages if "als GEÄNDERT erkannt" in m]
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
 def test_a_cached_inventory_is_not_used_as_a_history_baseline(qapp) -> None:
     """Peter, 2026-08-04: "Hab gerade gesehen, dass in meiner History noch
     Kishara's Star drin war. Ein Item, das ich schon lange nicht mehr

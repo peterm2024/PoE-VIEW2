@@ -58,7 +58,7 @@ from poe_view.ui.item_history import (BASE_COL as HISTORY_BASE_COL,
                                       VALUE_COL as HISTORY_VALUE_COL,
                                       HistoryEntry, ItemHistoryModel)
 from poe_view.ui.item_zoom import ItemZoomDialog
-from poe_view.ui.paperdoll import PaperdollDialog
+from poe_view.ui.paperdoll import EQUIPPED_SLOTS, PaperdollDialog
 from poe_view.ui.settings_dialog import SettingsDialog
 from poe_view.ui.rate_limit_dashboard import RateLimitDashboard
 from poe_view.ui.raw_data_viewer import RawDataViewer
@@ -3020,6 +3020,74 @@ class MainWindow(QMainWindow):
                          if item_id not in current_ids]
         return added_ids, changed_ids, removed_items
 
+    # Peter, 2026-08-10 (ToDo.md): "Beim Refresh der Itemliste nach dem
+    # Zonenwechsel aus einer Map ins Hideout werden auch die angelegten
+    # Items als frisch erkannt." Gegen Peters echte Logs geprüft: Die
+    # Anzahl-Statistik aus ``_log_publish_interval`` zeigt an keiner Stelle
+    # ein Muster, das zur behaupteten ID-Neuvergabe passen würde (Zu- UND
+    # Abgänge in gleicher Zahl direkt nach einem Zonenwechsel) — was dort
+    # tatsächlich passiert (Loot während einer Map sammelt sich an, der
+    # Sprung zurück auf die Grundausstattung fällt beim Betreten der
+    # NÄCHSTEN Map auf, sobald zwischendurch in der Truhe abgeladen wurde)
+    # erklärt sich vollständig durch normales Spielen. Ob stattdessen ein
+    # WERT eines bereits getragenen Items sich zwischen zwei Abrufen ändert
+    # (Ladung einer Flasche, EP eines Sockel-Gems, …) und ``changed_ids``
+    # auslöst, lässt sich aus den Zähl-Logs nicht ablesen — dafür bräuchte
+    # es das Feld selbst. Statt zu raten, protokolliert
+    # ``_log_equipped_item_diff`` deshalb bei Gelegenheit die tatsächlich
+    # abweichenden Felder, eng zeitlich um einen Zonenwechsel begrenzt,
+    # damit das Log nicht bei jedem gewöhnlichen Flaschenschluck vollläuft.
+    _ZONE_EQUIP_DIFF_LOG_WINDOW_S = 5.0
+
+    @staticmethod
+    def _differing_fields(previous: Item, current: Item) -> list[str]:
+        """Namen der Felder, in denen sich zwei sonst identisch geführte
+        Item-Zustände unterscheiden — für die Log-Zeile unten. Über
+        ``model_dump()`` statt einzelner Attribute, damit auch über
+        ``extra="allow"`` mitgeführte, in ``Item`` nicht deklarierte
+        API-Felder erfasst sind (siehe ``Item.model_config``). Nur die
+        FELDNAMEN werden geloggt, nicht ihre Werte — reicht, um beim
+        nächsten Auftreten gezielt nachzusehen, ohne Mod-Texte o. Ä. ins
+        Log zu schreiben."""
+        old_dump = previous.model_dump()
+        new_dump = current.model_dump()
+        keys = sorted(set(old_dump) | set(new_dump))
+        return [k for k in keys if old_dump.get(k) != new_dump.get(k)]
+
+    def _log_equipped_item_diff(self, name: str, previous_items: list[Item] | None,
+                                items: list[Item], added_ids: frozenset[str],
+                                changed_ids: frozenset[str]) -> None:
+        """Diagnose-Zeile für ToDo.md/Peter, 2026-08-10 (siehe Kommentar
+        oben an ``_ZONE_EQUIP_DIFF_LOG_WINDOW_S``). Beschränkt auf
+        Ausrüstungs-Slots (``paperdoll.EQUIPPED_SLOTS`` — dieselbe Liste,
+        die auch die Puppe befüllt, nicht neu erfunden) und auf ein enges
+        Zeitfenster nach dem letzten bekannten Zonenwechsel, sonst würde
+        jede normale Flaschenladung während des Mappens eine Zeile
+        erzeugen. Läuft nur, solange überhaupt schon ein Zonenwechsel
+        beobachtet wurde (``_last_zone_at``)."""
+        if self._last_zone_at is None:
+            return
+        if time.monotonic() - self._last_zone_at > self._ZONE_EQUIP_DIFF_LOG_WINDOW_S:
+            return
+        previous_by_id = {item.id: item for item in (previous_items or []) if item.id}
+        for item in items:
+            if item.inventoryId not in EQUIPPED_SLOTS:
+                continue
+            if item.id in added_ids:
+                log.info("Ausrüstung als NEU erkannt kurz nach Zonenwechsel (%s, %s in %s): "
+                        "vorherige ID unbekannt — evtl. vergibt GGG bei Zonenwechseln neue "
+                        "Item-IDs für Ausrüstung.",
+                        name, item.typeLine or item.name or "?", item.inventoryId)
+            elif item.id in changed_ids:
+                previous = previous_by_id.get(item.id)
+                if previous is None:
+                    continue
+                diff = self._differing_fields(previous, item)
+                log.info("Ausrüstung als GEÄNDERT erkannt kurz nach Zonenwechsel "
+                        "(%s, %s in %s): abweichende Felder: %s",
+                        name, item.typeLine or item.name or "?", item.inventoryId,
+                        ", ".join(diff) or "(keine? bitte Item.__eq__ prüfen)")
+
     @staticmethod
     def _stack_size_changes(previous_items: list[Item] | None,
                             items: list[Item]) -> list[tuple[Item, int]]:
@@ -3158,6 +3226,7 @@ class MainWindow(QMainWindow):
         self._current_stash_selection = None
         self.table.setColumnHidden(TAB_COL, False)
         added_ids, changed_ids, removed_items = self._diff_character_items(previous_items, items)
+        self._log_equipped_item_diff(name, previous_items, items, added_ids, changed_ids)
         display_items = items + removed_items
         sources = [item.inventoryId or "?" for item in display_items]
         removed_ids = frozenset(item.id for item in removed_items if item.id)

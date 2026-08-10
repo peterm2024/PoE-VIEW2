@@ -77,6 +77,20 @@ _DOLL_SLOTS = (
 _SWAP_SLOTS = (("Weapon2", "Weapon (swap)"), ("Offhand2", "Off Hand (swap)"))
 _TRINKET_SLOT = ("Trinket", "Trinket")
 
+# Alle ``inventoryId``-Werte, die ein Charakter tatsächlich TRÄGT statt im
+# Rucksack ("MainInventory") zu haben — die Puppe oben plus Flaschen (eigener
+# Slot "Flask", nicht Teil der Puppe, siehe ``_build_flasks``), Zweitwaffe
+# und Trinket. Öffentlich, weil ``main_window.py`` dieselbe Unterscheidung
+# für die Diagnose der ToDo-Meldung "angelegte Items werden nach einem
+# Zonenwechsel fälschlich als frisch erkannt" braucht — eine zweite,
+# eigene Liste hätte bei einer künftigen Slot-Änderung leicht auseinanderlaufen
+# können.
+EQUIPPED_SLOTS: frozenset[str] = frozenset(
+    {slot_id for _, _, slot_id, _ in _DOLL_SLOTS}
+    | {slot_id for slot_id, _ in _SWAP_SLOTS}
+    | {_TRINKET_SLOT[0], "Flask"}
+)
+
 
 # Ein Platz ist so breit, dass die üblichen Basis-Namen in zwei Zeilen
 # passen. Vorher waren es 88 px bei EINER Zeile — an Peters echten
