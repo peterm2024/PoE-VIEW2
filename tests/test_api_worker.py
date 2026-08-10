@@ -66,7 +66,7 @@ def test_leagues_dispatch_emits_bereit_after_result(qapp, monkeypatch) -> None:
 def test_character_items_dispatch_emits_name_and_items(qapp, monkeypatch) -> None:
     worker = ApiWorker()
     item = Item.model_validate({"typeLine": "Chaos Orb", "frameType": 5})
-    monkeypatch.setattr(worker.client, "get_character_items", lambda name: [item])
+    monkeypatch.setattr(worker.client, "get_character_items", lambda name: (87, 123, [item]))
 
     emitted: list[str] = []
     worker.status.connect(emitted.append)
@@ -77,6 +77,23 @@ def test_character_items_dispatch_emits_name_and_items(qapp, monkeypatch) -> Non
 
     assert emitted == ["Loading equipment: WitchOfPeter…", "Ready"]
     assert results == [("WitchOfPeter", [item])]
+    worker.client.close()
+
+
+def test_character_items_dispatch_also_emits_level_and_experience(qapp, monkeypatch) -> None:
+    """Peter, 2026-08-10: XP/h-Anzeige. Level/Erfahrung stecken in
+    derselben Antwort wie die Items — ein eigenes Signal, damit die
+    bestehenden Verwerter von ``character_items_loaded`` unangetastet
+    bleiben."""
+    worker = ApiWorker()
+    monkeypatch.setattr(worker.client, "get_character_items", lambda name: (87, 1631274653, []))
+
+    results: list[tuple[str, int, int]] = []
+    worker.character_snapshot_loaded.connect(lambda name, level, xp: results.append((name, level, xp)))
+
+    worker._dispatch(FetchCharacterItemsJob("WitchOfPeter"))
+
+    assert results == [("WitchOfPeter", 87, 1631274653)]
     worker.client.close()
 
 
@@ -184,7 +201,7 @@ def test_silent_character_items_dispatch_emits_no_status(qapp, monkeypatch) -> N
     Charakters darf den Status-Text nicht mit Ladehinweisen stören."""
     worker = ApiWorker()
     item = Item.model_validate({"typeLine": "Chaos Orb", "frameType": 5})
-    monkeypatch.setattr(worker.client, "get_character_items", lambda name: [item])
+    monkeypatch.setattr(worker.client, "get_character_items", lambda name: (0, 0, [item]))
 
     emitted: list[str] = []
     worker.status.connect(emitted.append)

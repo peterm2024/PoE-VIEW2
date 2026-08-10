@@ -185,6 +185,35 @@ class _PublishWatch:
     from_session_start: bool = True
 
 
+@dataclass
+class _XpWatch:
+    """Erfahrungs-Fortschritt EINES Charakters für die XP/h-Anzeige (Peter,
+    2026-08-10, direkt aus der §4.33-Diagnose entstanden: GGGs Antwort auf
+    ``/character/{name}`` trägt ``level``/``experience`` neben den
+    Item-Listen, bisher stillschweigend verworfen — kein zusätzlicher
+    Request nötig, die Werte kommen ohnehin bei jedem Auto-/Single-Refresh
+    mit, solange der Charakter offen ist).
+
+    Rein session-lokal wie ``_PublishWatch`` — ein aus der Datei geladener
+    Stand taugt nicht als Basis: ein Levelaufstieg während einer längeren
+    Pause vor dem heutigen Sitzungsstart würde sonst als absurd hohe Rate
+    ausgewiesen (derselbe Grund wie beim Item-Verlauf, siehe
+    ``_log_character_item_history``/``stale_baseline``).
+
+    Bewusst der SESSION-DURCHSCHNITT seit dem ersten Abruf dieser Sitzung,
+    keine gleitende Rate der letzten Minuten — die einfachste Variante für
+    den ersten Schritt (Peter: "Charakter-XP/h zuerst"), die sich mit der
+    Zeit von selbst stabilisiert. Ein Fenster über die letzten N Minuten
+    wäre die naheliegende Verfeinerung, sobald der eigentliche Graph gebaut
+    wird — dafür reicht ein Wert pro Charakter nicht, dann bräuchte es eine
+    Zeitreihe."""
+
+    since: float                # time.monotonic() des ersten Abrufs dieser Sitzung
+    since_experience: int
+    level: int = 0
+    current_experience: int = 0
+
+
 # Felder, deren Listen-Reihenfolge GGG zwischen zwei Abrufen NICHT stabil
 # hält, obwohl sich am Inhalt nichts geändert hat. Real beobachtet (Peter,
 # 2026-08-10, echtes Spiel, ARCHITEKTUR.md §4.33): Beim selben Zonenwechsel
@@ -384,6 +413,7 @@ class MainWindow(QMainWindow):
         self._last_zone_at: float | None = None
         self._last_zone_name = ""
         self._publish_watch: dict[str, _PublishWatch] = {}
+        self._xp_watch: dict[str, _XpWatch] = {}
         # Charakter-Item-Verlauf (Peter, 2026-08-02): letzte 120 Items, die
         # neu im Inventar aufgetaucht oder daraus verschwunden sind — über
         # ALLE Charaktere hinweg, unabhängig davon, welcher gerade angezeigt
@@ -1548,6 +1578,7 @@ class MainWindow(QMainWindow):
         w.stash_items_loaded.connect(self._on_stash_items)
         w.stash_children_loaded.connect(self._on_stash_children)
         w.character_items_loaded.connect(self._on_character_items)
+        w.character_snapshot_loaded.connect(self._on_character_snapshot)
         w.icon_loaded.connect(self._on_icon)
         w.rate_limit_changed.connect(self._on_rate_limit_changed)
         w.status.connect(self._on_status)
@@ -2948,6 +2979,51 @@ class MainWindow(QMainWindow):
         self._status_msg.setText(f"Loading equipment: {char.name}…")
         self.worker.submit(FetchCharacterItemsJob(char.name))
 
+    def _on_character_snapshot(self, name: str, level: int, experience: int) -> None:
+        """Läuft bei JEDEM Abruf von ``/character/{name}`` mit, egal ob
+        gerade angezeigt oder ein stiller Hintergrund-Refresh — anders als
+        die Türkis-Hervorhebung, die nur die offene Ansicht betrifft
+        (§4.20). Der erste Abruf eines Charakters in dieser Sitzung setzt
+        NUR die Basis (siehe ``_XpWatch``), erst ab dem zweiten liefert
+        ``_xp_per_hour`` eine Rate."""
+        watch = self._xp_watch.get(name)
+        if watch is None:
+            self._xp_watch[name] = _XpWatch(since=time.monotonic(), since_experience=experience,
+                                            level=level, current_experience=experience)
+            return
+        watch.level = level
+        watch.current_experience = experience
+
+    def _xp_per_hour(self, name: str) -> float | None:
+        """Session-Durchschnitt seit dem ersten Abruf, ``None`` ohne
+        mindestens zwei Messpunkte (siehe ``_XpWatch``)."""
+        watch = self._xp_watch.get(name)
+        if watch is None:
+            return None
+        elapsed_h = (time.monotonic() - watch.since) / 3600
+        if elapsed_h <= 0:
+            return None
+        return (watch.current_experience - watch.since_experience) / elapsed_h
+
+    @staticmethod
+    def _format_xp_rate(rate: float) -> str:
+        """"12.4M XP/h" — die Größenordnung, in der PoEs kumulierte
+        Erfahrung üblicherweise anfällt (zweistellige Millionen pro
+        Stunde bei einem eingespielten Charakter). Ein negativer Wert
+        käme nur zustande, wenn ``experience`` zwischen zwei Abrufen
+        SINKT — in echten Daten nie beobachtet, PoEs Erfahrung wächst
+        monoton — taucht deshalb unverändert mit Vorzeichen auf, statt
+        ihn zu verstecken."""
+        sign = "-" if rate < 0 else ""
+        magnitude = abs(rate)
+        if magnitude >= 1_000_000_000:
+            return f"{sign}{magnitude / 1_000_000_000:.2f}B XP/h"
+        if magnitude >= 1_000_000:
+            return f"{sign}{magnitude / 1_000_000:.1f}M XP/h"
+        if magnitude >= 1_000:
+            return f"{sign}{magnitude / 1_000:.0f}K XP/h"
+        return f"{sign}{magnitude:.0f} XP/h"
+
     def _on_character_items(self, name: str, items: list[Item], silent: bool) -> None:
         """``name`` kommt aus dem Signal, nicht aus der Auswahl — sonst könnte
         ein spät eintreffender Job Daten eines inzwischen abgewählten
@@ -3271,7 +3347,11 @@ class MainWindow(QMainWindow):
         self.table_model.set_items(display_items, sources, [None] * len(display_items),
                                    [None] * len(display_items),
                                    changed_ids=added_ids | changed_ids, removed_ids=removed_ids)
-        self._status_msg.setText(f"{name}: {len(items)} items (equipment + inventory)")
+        status = f"{name}: {len(items)} items (equipment + inventory)"
+        rate = self._xp_per_hour(name)
+        if rate is not None:
+            status += f" — {self._format_xp_rate(rate)}"
+        self._status_msg.setText(status)
 
     def _on_icon(self, url: str, data: bytes) -> None:
         pixmap = QPixmap()

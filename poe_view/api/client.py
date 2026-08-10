@@ -111,7 +111,7 @@ class PoeApiClient:
         data = self._get("/character")
         return [Character.model_validate(c) for c in data.get("characters", [])]
 
-    def get_character_items(self, name: str) -> list[Item]:
+    def get_character_items(self, name: str) -> tuple[int, int, list[Item]]:
         """Ausrüstung + Inventar EINES Charakters (Antwort-Key 'character',
         Singular, wie schon bei ``get_stash``). Die Item-Listen 'equipment'/
         'inventory'/'jewels'/'rucksack' entsprechen der offiziell dokumentierten
@@ -119,12 +119,21 @@ class PoeApiClient:
         an echten Rohdaten verifiziert (siehe FALLSTRICKE_UND_WORKAROUNDS.md
         #26). Fehlende Listen werden als leer behandelt statt einen Fehler zu
         werfen — einzelne Feld-Abweichungen sollen nicht den ganzen Abruf
-        scheitern lassen."""
+        scheitern lassen.
+
+        Liefert zusätzlich ``level``/``experience`` desselben Charakters
+        (Peter, 2026-08-10: XP/h-Anzeige) — dieselbe Antwort trägt beide
+        Werte neben den Item-Listen, real geprüft an Peters Cache. Bisher
+        wurden sie stillschweigend verworfen, obwohl sie bei jedem
+        Auto-/Single-Refresh (alle ~13s, solange der Charakter offen ist)
+        ohnehin schon ankommen — kein zusätzlicher Request nötig, nur ein
+        zusätzliches Auslesen derselben Antwort."""
         data = self._get(f"/character/{quote(name)}")
         char = data.get("character", {})
         items = (char.get("equipment", []) + char.get("inventory", [])
                  + char.get("jewels", []) + char.get("rucksack", []))
-        return [Item.model_validate(i) for i in items]
+        return (char.get("level", 0), char.get("experience", 0),
+                [Item.model_validate(i) for i in items])
 
     def get_stashes(self, league: str) -> list[StashTab]:
         """Stash-Tab-Liste (ohne Items). Liga-Namen können Leerzeichen enthalten!"""

@@ -47,9 +47,10 @@ def test_get_character_items_builds_path_and_combines_all_lists(monkeypatch) -> 
     }}
     monkeypatch.setattr(client, "_get",
                         lambda path, policy_hint=None: calls.append(path) or response)
-    items = client.get_character_items("WitchOfPeter")
+    level, experience, items = client.get_character_items("WitchOfPeter")
     assert calls == ["/character/WitchOfPeter"]
     assert [i.typeLine for i in items] == ["Sword", "Chaos Orb", "Crimson Jewel", "Cluster Jewel"]
+    assert (level, experience) == (0, 0)
     client.close()
 
 
@@ -68,5 +69,17 @@ def test_get_character_items_tolerates_missing_lists(monkeypatch) -> None:
     sollen leer bleiben statt einen Fehler zu werfen."""
     client = PoeApiClient(RateLimitManager())
     monkeypatch.setattr(client, "_get", lambda path, policy_hint=None: {"character": {}})
-    assert client.get_character_items("Empty") == []
+    assert client.get_character_items("Empty") == (0, 0, [])
+    client.close()
+
+
+def test_get_character_items_returns_level_and_experience(monkeypatch) -> None:
+    """Peter, 2026-08-10: Grundlage für die XP/h-Anzeige. GGGs Antwort
+    trägt ``level``/``experience`` direkt neben den Item-Listen — bisher
+    stillschweigend verworfen, obwohl kein zusätzlicher Request nötig ist."""
+    client = PoeApiClient(RateLimitManager())
+    monkeypatch.setattr(client, "_get", lambda path, policy_hint=None: {
+        "character": {"level": 87, "experience": 1631274653}})
+    level, experience, items = client.get_character_items("WitchOfPeter")
+    assert (level, experience, items) == (87, 1631274653, [])
     client.close()

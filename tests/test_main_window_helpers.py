@@ -7055,3 +7055,115 @@ def test_mixed_kinds_keep_the_neutral_word(qapp) -> None:
 
     win.worker.stop()
     win.worker.wait(5000)
+
+
+def test_first_character_snapshot_only_sets_the_baseline(qapp, monkeypatch) -> None:
+    """Peter, 2026-08-10: Grundlage für die XP/h-Anzeige. Der allererste
+    Abruf eines Charakters in dieser Sitzung darf noch keine Rate liefern
+    — es gibt noch nichts, wogegen verglichen werden könnte (derselbe
+    Grund wie bei ``_PublishWatch``/``stale_baseline``)."""
+    fake_now = [1000.0]
+    monkeypatch.setattr("poe_view.ui.main_window.time.monotonic", lambda: fake_now[0])
+
+    win = MainWindow()
+    win._on_character_snapshot("WitchOfPeter", 87, 1_631_274_653)
+
+    assert win._xp_per_hour("WitchOfPeter") is None
+    assert win._xp_per_hour("SomeoneElse") is None
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_second_character_snapshot_computes_a_session_average_rate(qapp, monkeypatch) -> None:
+    """Zweiter Abruf eine Stunde später mit 12 Millionen mehr Erfahrung
+    ergibt eine glatte Rate von 12 Mio. XP/h — der einfachste Fall, der
+    den Mechanismus prüft, bevor ein Graph darauf aufbaut."""
+    fake_now = [1000.0]
+    monkeypatch.setattr("poe_view.ui.main_window.time.monotonic", lambda: fake_now[0])
+
+    win = MainWindow()
+    win._on_character_snapshot("WitchOfPeter", 87, 1_631_274_653)
+
+    fake_now[0] += 3600.0
+    win._on_character_snapshot("WitchOfPeter", 87, 1_631_274_653 + 12_000_000)
+
+    assert win._xp_per_hour("WitchOfPeter") == pytest.approx(12_000_000)
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_xp_rate_is_a_session_average_not_a_per_sample_rate(qapp, monkeypatch) -> None:
+    """Bewusste Design-Entscheidung (siehe ``_XpWatch``): die Rate ist der
+    Durchschnitt SEIT DEM ERSTEN Abruf dieser Sitzung, keine gleitende
+    Rate der letzten Sekunden — ein Abruf ohne Fortschritt (z. B. gerade
+    im Menü) soll die Rate nicht sofort auf 0 einbrechen lassen."""
+    fake_now = [1000.0]
+    monkeypatch.setattr("poe_view.ui.main_window.time.monotonic", lambda: fake_now[0])
+
+    win = MainWindow()
+    win._on_character_snapshot("WitchOfPeter", 87, 0)
+
+    fake_now[0] += 3600.0
+    win._on_character_snapshot("WitchOfPeter", 87, 10_000_000)
+    assert win._xp_per_hour("WitchOfPeter") == pytest.approx(10_000_000)
+
+    # Eine weitere Stunde ganz ohne Fortschritt (z. B. im Menü) —
+    # der SESSION-Durchschnitt halbiert sich, statt auf 0 zu fallen.
+    fake_now[0] += 3600.0
+    win._on_character_snapshot("WitchOfPeter", 87, 10_000_000)
+    assert win._xp_per_hour("WitchOfPeter") == pytest.approx(5_000_000)
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_character_snapshot_signal_is_wired_to_the_xp_tracker(qapp) -> None:
+    """Ende-zu-Ende: das neue Worker-Signal muss tatsächlich ankommen,
+    nicht nur die Methode für sich isoliert funktionieren."""
+    win = MainWindow()
+    win.worker.character_snapshot_loaded.emit("WitchOfPeter", 87, 1_631_274_653)
+
+    assert "WitchOfPeter" in win._xp_watch
+    assert win._xp_watch["WitchOfPeter"].level == 87
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_format_xp_rate_picks_the_right_unit() -> None:
+    assert MainWindow._format_xp_rate(12_400_000) == "12.4M XP/h"
+    assert MainWindow._format_xp_rate(340_000) == "340K XP/h"
+    assert MainWindow._format_xp_rate(500) == "500 XP/h"
+    assert MainWindow._format_xp_rate(2_500_000_000) == "2.50B XP/h"
+    assert MainWindow._format_xp_rate(0) == "0 XP/h"
+    # PoEs Erfahrung waechst monoton -- ein negativer Wert wuerde nie
+    # real vorkommen, soll aber sichtbar bleiben statt verschluckt zu
+    # werden, falls doch einmal ein fehlerhafter Wert ankommt.
+    assert MainWindow._format_xp_rate(-1_000_000) == "-1.0M XP/h"
+
+
+def test_character_status_bar_shows_xp_rate_from_the_second_refresh_on(
+        qapp, monkeypatch) -> None:
+    """Peter, 2026-08-10: Charakter-XP/h in der Statuszeile, als erster
+    Schritt vor dem eigentlichen Graphen. Beim allerersten Anzeigen gibt
+    es noch keine Rate -- die Zeile darf dann keine Falschbehauptung
+    machen ("0 XP/h" waere falsch, es wurde ja nichts gemessen)."""
+    fake_now = [1000.0]
+    monkeypatch.setattr("poe_view.ui.main_window.time.monotonic", lambda: fake_now[0])
+
+    win = MainWindow()
+    win._current_character_name = "WitchOfPeter"
+
+    win._on_character_snapshot("WitchOfPeter", 87, 1_631_274_653)
+    win._show_character_items("WitchOfPeter", [])
+    assert "XP/h" not in win._status_msg.text()
+
+    fake_now[0] += 3600.0
+    win._on_character_snapshot("WitchOfPeter", 87, 1_631_274_653 + 24_000_000)
+    win._show_character_items("WitchOfPeter", [])
+    assert "24.0M XP/h" in win._status_msg.text()
+
+    win.worker.stop()
+    win.worker.wait(5000)

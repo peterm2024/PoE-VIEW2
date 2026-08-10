@@ -166,6 +166,11 @@ class ApiWorker(QThread):
     stash_items_loaded = Signal(str, str, str, object, bool)  # league, stash_id, name, list[Item], silent
     stash_children_loaded = Signal(str, str, str, object, bool)  # league, stash_id, name, list[StashTab], silent
     character_items_loaded = Signal(str, object, bool)  # Charaktername, list[Item], silent
+    # Level/Erfahrung desselben Charakters, aus DERSELBEN Antwort wie oben
+    # (Peter, 2026-08-10: XP/h-Anzeige) — eigenes Signal statt das obige zu
+    # erweitern, damit die bestehenden Verwerter von ``character_items_loaded``
+    # unangetastet bleiben.
+    character_snapshot_loaded = Signal(str, int, int)  # Charaktername, level, experience
     icon_loaded = Signal(str, object)          # url, bytes
     rate_limit_changed = Signal(str, object, float)  # policy, rules, wait_s
     job_error = Signal(str)                    # Fehlertext für die Statusbar
@@ -338,7 +343,9 @@ class ApiWorker(QThread):
             case FetchCharacterItemsJob(name=name, silent=silent):
                 if not silent:
                     self.status.emit(f"Loading equipment: {name}…")
-                self.character_items_loaded.emit(name, self.client.get_character_items(name), silent)
+                level, experience, items = self.client.get_character_items(name)
+                self.character_items_loaded.emit(name, items, silent)
+                self.character_snapshot_loaded.emit(name, level, experience)
                 if not silent:
                     self.status.emit("Ready")
             case FetchIconJob(url=url):

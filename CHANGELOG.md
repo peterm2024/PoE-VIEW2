@@ -13,6 +13,11 @@ nach [SemVer](https://semver.org/lang/de/).
   mehrstufigen `.ico` eine einzelne `assets/PoE-VIEW2.png` an — weder
   GitHubs Markdown noch Qts Rich Text kommen mit einer mehrstufigen
   Icondatei zurecht.
+- Charakter-XP/h in der Statuszeile, sobald ein Charakter offen ist —
+  der Session-Durchschnitt seit dem ersten Abruf, ohne zusätzlichen
+  API-Request (Level und Erfahrung stecken bereits in der Antwort, die
+  für die Ausrüstung ohnehin geladen wird). Erster Schritt einer
+  größeren, noch offenen Idee (Gem-XP/h, ein echter Graph).
 
 ### Behoben
 

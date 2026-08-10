@@ -3060,6 +3060,89 @@ Beschränkung auf Ausrüstungs-Slots.
 
 ---
 
+### 4.34 Charakter-XP/h (erster Schritt einer größeren Idee)
+
+Peter, 2026-08-10, direkt aus der §4.33-Diagnose entstanden: Beim
+Aufräumen von `socketedItems` fiel auf, dass jedes Sockel-Gem sein
+eigenes `additionalProperties`-"Experience"-Feld mitbringt
+(`{"name": "Experience", "values": [["66921722/212046017", 0]],
+"progress": 0.32}`, real geprüft an Peters Cache) — und dass GGGs
+`/character/{name}`-Antwort denselben Gedanken auch eine Ebene höher
+trägt: `level`/`experience` DES CHARAKTERS liegen direkt neben den
+Item-Listen (`equipment`/`inventory`/`jewels`/`rucksack`), wurden von
+`PoeApiClient.get_character_items()` aber bislang komplett verworfen.
+Peters Idee daraufhin: ein kleiner Graph für Gem-XP/h und Charakter-
+XP/h, dazu eine Benachrichtigung bei Stufe 20 und eine Anzeige, ob ein
+Gem gerade pausiert ist (EP-Zuwachs lässt sich in PoE gezielt
+abschalten).
+
+**Wichtige Korrektur an der Ausgangsannahme, bevor irgendetwas gebaut
+wurde:** Peters Vermutung war "die Gems bekommen ja eh alle die
+gleiche XP, einer reicht als Stellvertreter". Stimmt nicht — an seinem
+eigenen Charakter gemessen (29 sockelbare Gems, ein Snapshot) teilen
+sich mehrere DAUERHAFT AKTIVE Skills (Hauptangriff + direkt verlinkte
+Supports, Auren) exakt denselben XP-Stand, während selten ausgelöste
+Skills (ein Fluch, ein Minion-Skill) weit zurückliegen und kaum
+genutzte Gems noch auf Stufe 1 stehen. Ein Gem bekommt XP dafür, dass
+der SKILL SELBST etwas bewirkt, nicht einfach dafür, dass der Charakter
+tötet — ein einzelnes Gem taugt also nicht als Stellvertreter für
+"alle", nur als Anzeiger für sich selbst.
+
+**Umgesetzt, ausdrücklich nur der erste, kleinste Schritt: Charakter-
+XP/h als Zahl, kein Graph, keine Gems.** Drei Gründe für diese
+Reihenfolge: (1) Charakter-`experience` ist ein einzelner Wert ohne
+Peters Fehleinschätzung, die erst noch aufgeklärt werden musste. (2)
+Ein Graph braucht eine Zeitreihe — die gibt es noch nicht, nur den
+jeweils letzten Stand (wie beim Cache generell). (3) Eine Zahl lässt
+sich in einem Zug bauen UND testen, ein neues Diagramm-Widget wäre ein
+eigener Entwurfsschritt.
+
+**Kein zusätzlicher Request.** `PoeApiClient.get_character_items()`
+liefert jetzt `tuple[level, experience, items]` statt nur `items` —
+dieselbe Antwort, nur nicht mehr teilweise verworfen. Der Worker emittiert
+dafür ein neues, EIGENES Signal `character_snapshot_loaded(name, level,
+experience)` neben dem unveränderten `character_items_loaded` — bewusst
+nicht das bestehende Signal erweitert, damit dessen etablierte
+Verwerter (u. a. `_on_character_items`, in Dutzenden Tests direkt
+aufgerufen) unangetastet bleiben.
+
+**`_XpWatch` (Dataclass) hält pro Charakter EINEN Session-Durchschnitt**
+seit dem ersten Abruf dieser Sitzung — bewusst keine gleitende Rate der
+letzten Minuten, das wäre die naheliegende Verfeinerung, sobald der
+eigentliche Graph gebaut wird (dafür reicht ein Wert pro Charakter
+nicht mehr, dann braucht es eine echte Zeitreihe). Dieselbe
+Session-lokal-Regel wie überall sonst in diesem Bereich (`_PublishWatch`,
+`stale_baseline`): ein aus der Datei geladener alter Stand taugt nicht
+als Basis, sonst würde ein Levelaufstieg während einer Pause vor dem
+heutigen Sitzungsstart als absurd hohe Rate ausgewiesen. `_on_character_
+snapshot()` läuft bei JEDEM Abruf mit, auch beim stillen Hintergrund-
+Refresh eines nicht angezeigten Charakters — mehr Messpunkte für eine
+stabilere Rate, unabhängig davon, was gerade sichtbar ist.
+
+Angezeigt (nur ab dem zweiten Abruf, vorher `None`, keine
+Falschbehauptung wie "0 XP/h"): in der Statuszeile neben der
+Item-Anzahl, sobald ein Charakter offen ist — `_format_xp_rate()` wählt
+automatisch K/M/B passend zur Größenordnung von PoEs kumulierter
+Erfahrung (typischerweise zweistellige Millionen pro Stunde).
+
+Getestet: `tests/test_client.py`, `tests/test_api_worker.py` (die neue
+Signal-Emission), `tests/test_main_window_helpers.py` (Baseline ohne
+Rate, Session-Durchschnitt über zwei Messpunkte, Gegenprobe gegen eine
+naive Rate "seit dem letzten Abruf" — die würde bei einem Abruf ohne
+Fortschritt sofort auf 0 fallen statt sich nur zu verlangsamen —,
+Formatierung, Statuszeilen-Text).
+
+**Offen für eine Fortsetzung:** Gem-XP/h pro Gem (kein Stellvertreter),
+ein echter Zeitreihen-Speicher fürs Diagramm selbst, die Stufe-20-
+Benachrichtigung, die Pausiert-Erkennung (noch nicht geprüft, wie sich
+das im Rohdatensatz zeigt), sowie die von Peter zusätzlich
+vorgeschlagene, aber vorerst zurückgestellte "reduzierte/angepasste"
+Charakter-XP/h nach Level und Zone (PoEs Erfahrungs-Straf-Formel — nicht
+zuverlässig genug bekannt, um sie ungeprüft zu implementieren, siehe
+ToDo.md).
+
+---
+
 ## 5. UI-Konzept (Oberflächenvorschlag)
 
 Ein Hauptfenster: Navigation links (Charaktere + Stash getrennt), Items
