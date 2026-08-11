@@ -278,10 +278,6 @@ value display builds on.</p>
 <p>PoE-VIEW2 is free software under the MIT licence. Source code, issue
 tracker and releases:
 <a href="https://github.com/peterm2024/PoE-VIEW2">github.com/peterm2024/PoE-VIEW2</a></p>
-<p>The application identifies itself to GGG's API as
-<code>{config.CLIENT_ID}</code> with the contact address
-<code>{config.CONTACT_EMAIL}</code>, as their developer documentation
-requires.</p>
 """),
 )
 
