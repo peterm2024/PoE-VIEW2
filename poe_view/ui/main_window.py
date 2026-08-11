@@ -214,32 +214,71 @@ class _XpWatch:
     Schwelle unterhalb von zwanzig Minuten hätte mitten im Spielen
     pausiert, jede darüber die echte Pause zu spät bemerkt.
 
-    Deshalb ohne Schwelle: Gezählt wird der Zuwachs zwischen der ERSTEN
-    und der LETZTEN beobachteten Änderung, geteilt durch genau diese
-    Spanne. Hört die Erfahrung auf zu kommen, hört auch die Spanne auf zu
-    wachsen — die Anzeige friert von selbst auf ihrem letzten Wert ein,
-    ohne dass irgendwo "pausiert" entschieden werden müsste. Und die
-    gezählte Erfahrung ist sauber eingerahmt: Was in der ersten
-    beobachteten Veröffentlichung steckt, wurde teils vor dem Start der
-    Sitzung verdient und zählt darum NICHT mit; alles danach fiel
-    nachweislich in die gemessene Spanne.
+    Deshalb ohne Schwelle: Der Zeitzähler läuft nur von Veröffentlichung zu
+    Veröffentlichung. Hört die Erfahrung auf zu kommen, hört auch die
+    gemessene Spanne auf zu wachsen — die Anzeige friert von selbst auf
+    ihrem letzten Wert ein, ohne dass irgendwo "pausiert" entschieden
+    werden müsste.
 
-    Weiterhin der Durchschnitt über die ganze Sitzung, keine gleitende
-    Rate der letzten Minuten — die wäre die naheliegende Verfeinerung,
-    sobald der eigentliche Graph gebaut wird; dafür reicht ein Wert pro
-    Charakter nicht, dann bräuchte es eine Zeitreihe."""
+    **Und zwar nur über das ZULETZT abgeschlossene Intervall** (Peter,
+    2026-08-11: "Ingame wird mir meine momentane XP/h bei 182.3M angezeigt,
+    im Tool bei 14.1M"). Die Fassung davor mittelte über die ganze Spanne
+    von der ersten bis zur letzten Änderung — das verhinderte zwar, dass
+    Zeit NACH der letzten Veröffentlichung verwässert, aber nicht die
+    Pausen DAZWISCHEN. An Peters Sitzung nachgerechnet: vier
+    Veröffentlichungen in 114 Minuten, darunter eine Lücke von 87 Minuten,
+    in der er offensichtlich nicht gespielt hat. Über die ganze Spanne
+    ergab das 2,3 Mio./h, über das letzte Intervall 23,8 Mio./h — Faktor
+    10,4, und damit genau die Größenordnung, um die seine Anzeige daneben
+    lag.
+
+    **Als Nenner zählt nicht das ganze Intervall, sondern die Zeit ab dem
+    ersten Zonenwechsel danach.** Peters Zonenprotokoll zeigt, wo die
+    Erfahrung entsteht und wo nicht:
+
+    ``18:27:09 Hideout`` (Veröffentlichung) … 85 Minuten nichts …
+    ``19:52:02 Foundry`` → ``19:53:55 Hideout`` (Veröffentlichung, +755.280)
+
+    Verdient wurden diese 755.280 in den knapp zwei Minuten in der Map,
+    nicht in den 87 Minuten seit der letzten Veröffentlichung. Über das
+    volle Intervall gerechnet kämen 0,5 Mio./h heraus, über die Zeit ab
+    dem Aufbruch 23,9 Mio./h — und damit ein Wert, der zum nächsten
+    Intervall (28,6 Mio./h) passt statt um Faktor 50 danebenzuliegen.
+
+    Dafür ist keine Unterscheidung von Städten und Maps nötig, nur eine
+    Beobachtung: Wo der Charakter beim Veröffentlichen STEHT, ist die
+    Zone, in die er gerade zurückgekehrt ist — dort verdient er nichts
+    mehr. Die Uhr startet deshalb beim ersten Zonenwechsel DANACH. Ohne
+    laufende Zonen-Beobachtung (standardmäßig aus) fällt die Rechnung
+    sauber auf das volle Intervall zurück.
+
+    Schneller als bis zum Ende einer Map geht es nicht: GGG veröffentlicht
+    die Erfahrung erst, wenn der Charakter die Map verlässt (in Peters
+    Protokoll ausnahmslos beim Betreten des Hideouts, §4.35). Vorher
+    existiert die Zahl außerhalb des Spiels nirgends.
+
+    Ein Fenster über die letzten N Minuten wäre die naheliegende
+    Verfeinerung, sobald der eigentliche Graph gebaut wird; dafür reicht
+    ein Wert pro Charakter nicht, dann bräuchte es eine Zeitreihe."""
 
     since: float                # time.monotonic() des ersten Abrufs dieser Sitzung
     since_experience: int
     level: int = 0
     current_experience: int = 0
-    # Erste und letzte beobachtete ÄNDERUNG der Erfahrung — die Grundlage
-    # der Rate. Solange nur eine (oder gar keine) vorliegt, gibt es noch
-    # keine Spanne und damit keine Rate.
-    first_change_at: float | None = None
-    first_change_experience: int = 0
+    # Die letzten ZWEI beobachteten Änderungen — mehr braucht die Rate über
+    # das zuletzt abgeschlossene Intervall nicht. Solange erst eine
+    # vorliegt, ist ``previous_change_at`` None und es gibt noch keine Rate.
+    previous_change_at: float | None = None
+    previous_change_experience: int = 0
     last_change_at: float | None = None
     last_change_experience: int = 0
+    # Erster Zonenwechsel seit der letzten Veröffentlichung — der Moment,
+    # ab dem wieder Erfahrung anfallen kann. ``None`` heißt: seither noch
+    # keiner beobachtet, dann zählt das volle Intervall.
+    active_since: float | None = None
+    # Beim Veröffentlichen festgehalten, damit die Anzeige nicht bei jedem
+    # Aufruf neu entscheiden muss, welcher Startpunkt galt.
+    interval_start_at: float | None = None
 
 
 # Listenfelder, die vor dem Vergleich nach der ``id`` ihrer Einträge
@@ -3074,26 +3113,79 @@ class MainWindow(QMainWindow):
         watch.level = level
         if experience != watch.current_experience:
             now = time.monotonic()
-            if watch.first_change_at is None:
-                watch.first_change_at = now
-                watch.first_change_experience = experience
-            else:
-                watch.last_change_at = now
-                watch.last_change_experience = experience
+            watch.previous_change_at = watch.last_change_at
+            watch.previous_change_experience = watch.last_change_experience
+            watch.last_change_at = now
+            watch.last_change_experience = experience
+            # Ab dem ersten Zonenwechsel nach der vorigen Veröffentlichung
+            # rechnen, falls einer beobachtet wurde — sonst über das volle
+            # Intervall (§_XpWatch).
+            watch.interval_start_at = watch.active_since or watch.previous_change_at
+            watch.active_since = None
+            self._log_xp_publication(name, watch)
         watch.current_experience = experience
 
+    def _note_zone_change_for_xp(self) -> None:
+        """Erster Zonenwechsel nach einer Veröffentlichung startet die Uhr
+        für die nächste Rate (§_XpWatch). Jeder weitere im selben Intervall
+        ändert nichts — maßgeblich ist der Aufbruch, nicht jede Tür danach.
+
+        Gilt für alle beobachteten Charaktere: Der Zonenwechsel kommt aus
+        PoEs Client.txt und sagt nichts darüber, welcher Charakter gerade
+        gespielt wird. Praktisch ist immer nur einer aktiv, und für die
+        anderen ist der Wert ohnehin belanglos, solange keine Erfahrung
+        eintrifft."""
+        now = time.monotonic()
+        for watch in self._xp_watch.values():
+            if watch.active_since is None:
+                watch.active_since = now
+
+    @staticmethod
+    def _log_xp_publication(name: str, watch: _XpWatch) -> None:
+        """Jede Veröffentlichung der Charakter-Erfahrung mitschreiben.
+
+        Bis hierher gab es über die Charakter-XP keine einzige Zeile im
+        Log — als Peters Anzeige um den Faktor 13 danebenlag, musste die
+        Ursache über die Gem-Mitschrift ERSCHLOSSEN werden, weil die
+        eigentlichen Zahlen nirgends standen. Das ist der Fehler, den man
+        genau einmal macht. Die Zeile fällt nur bei einer echten Änderung
+        an, also ein paar Mal pro Spielstunde."""
+        if watch.previous_change_at is None or watch.interval_start_at is None:
+            log.info("Erfahrung %s: erster beobachteter Stand %d (Stufe %d) — "
+                     "Basis, noch keine Rate.",
+                     name, watch.last_change_experience, watch.level)
+            return
+        seconds = watch.last_change_at - watch.interval_start_at
+        gesamt = watch.last_change_at - watch.previous_change_at
+        gain = watch.last_change_experience - watch.previous_change_experience
+        rate = gain / (seconds / 3600) if seconds > 0 else 0.0
+        log.info("Erfahrung %s: %+d in %.0fs aktiv (Stufe %d) — %.1f Mio. XP/h; "
+                 "das ganze Intervall dauerte %.0fs.",
+                 name, gain, seconds, watch.level, rate / 1_000_000, gesamt)
+
     def _xp_per_hour(self, name: str) -> float | None:
-        """Durchschnitt über die Spanne zwischen der ersten und der letzten
-        beobachteten Erfahrungs-Änderung — ``None``, solange es weniger als
-        zwei gibt. Der Wert friert von selbst ein, sobald keine Erfahrung
-        mehr eintrifft; die ausführliche Begründung steht an ``_XpWatch``."""
+        """Rate über das ZULETZT abgeschlossene Intervall zwischen zwei
+        Veröffentlichungen — ``None``, solange erst eine beobachtet wurde.
+        Der Wert friert zwischen zwei Veröffentlichungen von selbst ein;
+        die ausführliche Begründung steht an ``_XpWatch``."""
         watch = self._xp_watch.get(name)
-        if watch is None or watch.first_change_at is None or watch.last_change_at is None:
+        if watch is None or watch.interval_start_at is None or watch.last_change_at is None:
             return None
-        elapsed_h = (watch.last_change_at - watch.first_change_at) / 3600
+        elapsed_h = (watch.last_change_at - watch.interval_start_at) / 3600
         if elapsed_h <= 0:
             return None
-        return (watch.last_change_experience - watch.first_change_experience) / elapsed_h
+        return (watch.last_change_experience - watch.previous_change_experience) / elapsed_h
+
+    def _xp_rate_age_s(self, name: str) -> float | None:
+        """Wie alt ist die angezeigte Rate? Zwischen zwei
+        Veröffentlichungen ändert sie sich nicht — ohne diese Angabe wäre
+        eine zehn Minuten alte Zahl von einer frischen nicht zu
+        unterscheiden, und genau darum ging es Peter ("so schnell wie
+        möglich und auch so akkurat wie möglich")."""
+        watch = self._xp_watch.get(name)
+        if watch is None or watch.last_change_at is None:
+            return None
+        return time.monotonic() - watch.last_change_at
 
     @staticmethod
     def _format_xp_rate(rate: float) -> str:
@@ -3465,8 +3557,26 @@ class MainWindow(QMainWindow):
         status = f"{name}: {len(items)} items (equipment + inventory)"
         rate = self._xp_per_hour(name)
         if rate is not None:
-            status += f" — {self._format_xp_rate(rate)}"
+            # Alter dazu, weil die Rate zwischen zwei Veröffentlichungen
+            # unverändert stehen bleibt (§_XpWatch): Ohne die Angabe sähe
+            # eine zehn Minuten alte Zahl aus wie eine frische.
+            status += f" — {self._format_xp_rate(rate)}{self._xp_rate_age_note(name)}"
         self._status_msg.setText(status)
+
+    def _xp_rate_age_note(self, name: str) -> str:
+        """" (2m ago)" hinter der XP-Rate — leer, solange die Zahl frisch
+        ist. Die Grenze liegt bei einer Minute, weil GGG die Erfahrung
+        ohnehin nur alle paar Minuten veröffentlicht (§4.35): Alles
+        darunter ist so aktuell, wie es überhaupt sein kann, und ein
+        Hinweis darauf wäre nur Lärm."""
+        age = self._xp_rate_age_s(name)
+        if age is None or age < 60:
+            return ""
+        # Abgerundet, nicht gerundet: "10m ago" bei zehneinhalb Minuten ist
+        # eine Untergrenze und damit immer wahr. Gerundet hinge die Anzeige
+        # bei genau x,5 Minuten außerdem an Pythons kaufmännischer Rundung
+        # (``round(10.5) == 10``), was niemand erwartet.
+        return f" ({int(age // 60)}m ago)"
 
     def _on_icon(self, url: str, data: bytes) -> None:
         pixmap = QPixmap()
@@ -3761,6 +3871,10 @@ class MainWindow(QMainWindow):
         self._zone_changes += 1
         self._last_zone_at = time.monotonic()
         self._last_zone_name = zone_name
+        # VOR den Abbruchbedingungen, aus demselben Grund wie die Zähler
+        # darüber: Für die XP-Rechnung zählt, dass der Charakter wieder
+        # unterwegs ist — nicht, ob daraufhin ein Refresh lief.
+        self._note_zone_change_for_xp()
         if self._event_refresh_blocked() or self._trigger_budget_spent():
             return
         if self._refresh_current_view():

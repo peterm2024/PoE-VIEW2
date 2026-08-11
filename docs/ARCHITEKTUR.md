@@ -3187,6 +3187,57 @@ durch die verstrichene Uhrzeit seit dem ersten Abruf — steht der
 Charakter still, wächst dabei nur der Nenner und die Anzeige sinkt,
 obwohl gar nichts passiert ist.
 
+**Zweiter Anlauf nötig: nur das letzte Intervall, und darin nur die
+aktive Zeit.** Peter, 2026-08-11: "Ingame wird mir meine momentane XP/h
+bei 182.3M angezeigt, im Tool bei 14.1M." Die Fassung von gestern
+verhinderte zwar, dass Zeit NACH der letzten Veröffentlichung
+verwässert — nicht aber die Pausen DAZWISCHEN. An seiner Sitzung
+nachgerechnet: vier Veröffentlichungen in 114 Minuten, darunter eine
+Lücke von 87 Minuten ohne Spiel. Über die ganze Spanne 2,3 Mio./h, über
+das letzte Intervall 23,8 Mio./h — Faktor 10,4, genau die Größenordnung
+seiner Abweichung.
+
+Der Rest steckte im Nenner. Sein Zonenprotokoll zeigt, wo Erfahrung
+entsteht:
+
+| Zeit | Zone | Veröffentlichung |
+|---|---|---|
+| 18:27:09 | Backstreet Hideout | +62.620 |
+| *85 Minuten nichts* | | |
+| 19:52:02 | Foundry | — |
+| 19:53:55 | Backstreet Hideout | +755.280 |
+| 19:55:08 | Orchard | — |
+| 20:01:07 | Backstreet Hideout | +2.859.098 |
+
+Die 755.280 entstanden in den knapp zwei Minuten in der Foundry, nicht
+in den 87 Minuten seit der letzten Veröffentlichung. Deshalb startet die
+Uhr beim **ersten Zonenwechsel nach einer Veröffentlichung**
+(`_note_zone_change_for_xp`, gespeist aus dem ZoneWatcher, der ohnehin
+läuft). Dafür braucht es keine Unterscheidung von Städten und Maps, nur
+eine Beobachtung: Wo der Charakter beim Veröffentlichen steht, ist die
+Zone, in die er gerade zurückgekehrt ist — dort verdient er nichts mehr.
+Aus 0,5 Mio./h werden so 23,9 Mio./h, ein Wert, der zum nächsten
+Intervall (28,6 Mio./h) passt statt um Faktor 50 danebenzuliegen. Ist
+die Zonen-Beobachtung aus (Standard), fällt die Rechnung auf das volle
+Intervall zurück.
+
+**Schneller geht es nicht.** In Peters Protokoll fiel JEDE
+Veröffentlichung mit der Rückkehr ins Hideout zusammen; die Erfahrung
+einer Map erscheint erst, wenn er sie verlässt. Peters Wunsch "XP/h erst
+am Ende der Map ist sehr unschön" beschreibt damit GGGs Verhalten, nicht
+unseres — außerhalb des Spiels existiert die Zahl vorher nirgends, und
+im Spiel läse man sie nur über einen Speicherzugriff aus, der ein
+Bann-Risiko wäre. Was bleibt, ist die Rate ehrlich zu datieren: Die
+Statuszeile hängt ab einer Minute " (7m ago)" an, sonst sähe eine alte
+Zahl aus wie eine frische.
+
+**Jede Veröffentlichung steht jetzt im Log.** Über die Charakter-XP gab
+es bis dahin keine einzige Zeile — als Peters Anzeige um Faktor 13
+danebenlag, musste die Ursache über die Gem-Mitschrift ERSCHLOSSEN
+werden, weil die eigentlichen Zahlen nirgends standen. Das ist der
+Fehler, den man genau einmal macht (`_log_xp_publication`, ein paar
+Zeilen pro Spielstunde).
+
 Die Messung aus §4.35 zeigt, warum eine Pausenerkennung über eine
 Schwelle ("seit N Sekunden keine Änderung") der falsche Weg gewesen
 wäre: GGG veröffentlicht die Erfahrung in Schüben, in einer Spielstunde
@@ -3194,17 +3245,16 @@ nur achtmal, mit Abständen von anderthalb bis **siebzehn** Minuten. Jede
 Schwelle unter zwanzig Minuten hätte mitten im Spielen pausiert, jede
 darüber die echte Pause zu spät bemerkt.
 
-Deshalb ohne Schwelle: gezählt wird der Zuwachs zwischen der ERSTEN und
-der LETZTEN beobachteten Änderung, geteilt durch genau diese Spanne.
-Hört die Erfahrung auf zu kommen, hört auch die Spanne auf zu wachsen —
-die Anzeige friert von selbst auf ihrem letzten Wert ein, ohne dass
-irgendwo "pausiert" entschieden werden müsste. Nebeneffekt, der die
-Zahl zusätzlich ehrlicher macht: Die erste beobachtete Veröffentlichung
-enthält Erfahrung, die teils VOR dem Sitzungsstart verdient wurde; als
-Startpunkt statt als Zuwachs verwendet, fällt sie sauber heraus. Ein
-Rückgang zählt wie jede andere Änderung — ab Akt 5 kostet der Tod
-Erfahrung, und eine Stunde, in der mehr gestorben als verdient wurde,
-ist eine Aussage.
+Deshalb ohne Schwelle: Der Zeitzähler läuft nur von Veröffentlichung zu
+Veröffentlichung. Hört die Erfahrung auf zu kommen, hört auch die
+gemessene Spanne auf zu wachsen — die Anzeige friert von selbst ein,
+ohne dass irgendwo "pausiert" entschieden werden müsste. Nebeneffekt,
+der die Zahl zusätzlich ehrlicher macht: Die erste beobachtete
+Veröffentlichung enthält Erfahrung, die teils VOR dem Sitzungsstart
+verdient wurde; als Startpunkt statt als Zuwachs verwendet, fällt sie
+sauber heraus. Ein Rückgang zählt wie jede andere Änderung — ab Akt 5
+kostet der Tod Erfahrung, und ein Intervall, in dem mehr gestorben als
+verdient wurde, ist eine Aussage.
 
 Dieselbe
 Session-lokal-Regel wie überall sonst in diesem Bereich (`_PublishWatch`,
@@ -3215,13 +3265,12 @@ snapshot()` läuft bei JEDEM Abruf mit, auch beim stillen Hintergrund-
 Refresh eines nicht angezeigten Charakters — mehr Messpunkte für eine
 stabilere Rate, unabhängig davon, was gerade sichtbar ist.
 
-An Peters nächster Runde nachgerechnet, wie groß der Unterschied
-ausfällt: Im Abschnitt 22:30–23:10 kamen 3.140.232 Gem-XP in drei
-Schüben zwischen 22:45 und 23:00 an. Über die Uhrzeit gerechnet ergibt
-das 4,8 Mio. XP/h, über die Spanne der Veröffentlichungen 11,0 Mio. —
-die ersten fünfzehn Minuten hatte er in der Stadt identifiziert und
-verkauft, was die Rate nach der alten Rechnung mehr als halbiert hätte,
-obwohl sie über das Spielen selbst nichts aussagt.
+An Peters nächster Runde nachgerechnet, wie groß allein dieser erste
+Schritt ausmachte: Im Abschnitt 22:30–23:10 kamen 3.140.232 Gem-XP in
+drei Schüben zwischen 22:45 und 23:00 an. Über die Uhrzeit gerechnet
+ergibt das 4,8 Mio. XP/h, über die Spanne der Veröffentlichungen 11,0
+Mio. — die ersten fünfzehn Minuten hatte er in der Stadt identifiziert
+und verkauft.
 
 Angezeigt (erst ab der zweiten beobachteten Änderung, vorher `None`,
 keine Falschbehauptung wie "0 XP/h"): in der Statuszeile neben der
@@ -3231,11 +3280,15 @@ Erfahrung (typischerweise zweistellige Millionen pro Stunde).
 
 Getestet: `tests/test_client.py`, `tests/test_api_worker.py` (die neue
 Signal-Emission), `tests/test_main_window_helpers.py` (Baseline ohne
-Rate, eine einzelne Änderung reicht noch nicht, Spanne über zwei
-Änderungen mit unveränderten Abrufen dazwischen, Einfrieren nach drei
-Stunden Stillstand, ein Rückgang durch Tod, Formatierung,
-Statuszeilen-Text). Gegenprobe gefahren: Mit der alten Rechnung "seit
-dem ersten Abruf" schlägt der Einfrier-Test fehl.
+Rate, eine einzelne Änderung reicht noch nicht, Intervall zwischen zwei
+Veröffentlichungen mit unveränderten Abrufen dazwischen, Einfrieren nach
+drei Stunden Stillstand, Peters Zahlenbeispiel mit der 87-Minuten-Lücke,
+eine frühere Pause zieht die Rate nicht herunter, Uhrstart beim ersten
+Zonenwechsel und nur bei diesem, Rückfall aufs volle Intervall ohne
+Zonen-Beobachtung, Altersvermerk in der Statuszeile, jede
+Veröffentlichung im Log, ein Rückgang durch Tod, Formatierung).
+Gegenproben gefahren: Mit der Spannen-Rechnung schlägt Peters
+Zahlenbeispiel fehl, ohne die Zonen-Uhr das 87-Minuten-Beispiel.
 
 **Offen für eine Fortsetzung:** Gem-XP/h pro Gem (kein Stellvertreter),
 ein echter Zeitreihen-Speicher fürs Diagramm selbst, die Stufe-20-

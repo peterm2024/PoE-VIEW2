@@ -7412,7 +7412,8 @@ def test_a_single_experience_change_is_not_enough_for_a_rate(qapp, monkeypatch) 
     win.worker.wait(5000)
 
 
-def test_the_rate_spans_the_first_and_last_observed_change(qapp, monkeypatch) -> None:
+def test_the_rate_measures_the_interval_between_two_publications(
+        qapp, monkeypatch) -> None:
     """Zwei Veroeffentlichungen im Abstand einer Stunde, dazwischen 12
     Millionen Erfahrung — der einfachste Fall, der den Mechanismus prueft,
     bevor ein Graph darauf aufbaut. Die vielen Abrufe OHNE Aenderung
@@ -7461,6 +7462,194 @@ def test_the_rate_freezes_when_no_more_experience_arrives(qapp, monkeypatch) -> 
         win._on_character_snapshot("WitchOfPeter", 87, 11_000_000)
 
     assert win._xp_per_hour("WitchOfPeter") == pytest.approx(10_000_000)
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_only_the_last_interval_counts_not_the_whole_session(qapp, monkeypatch) -> None:
+    """Peters Befund, 2026-08-11: "Ingame wird mir meine momentane XP/h bei
+    182.3M angezeigt, im Tool bei 14.1M." Genau dieser Fall, mit den
+    echten Zahlen seiner Sitzung nachgestellt: vier Veroeffentlichungen in
+    114 Minuten, dazwischen eine Luecke von 87 Minuten, in der er nicht
+    gespielt hat. Ueber die ganze Spanne gemittelt kam Faktor 10 zu wenig
+    heraus; das zuletzt abgeschlossene Intervall trifft es."""
+    fake_now = [1000.0]
+    monkeypatch.setattr("poe_view.ui.main_window.time.monotonic", lambda: fake_now[0])
+
+    win = MainWindow()
+    win._on_character_snapshot("WitchOfPeter", 87, 0)
+
+    def veroeffentlichung(nach_sekunden: float, zuwachs: int) -> None:
+        fake_now[0] += nach_sekunden
+        veroeffentlichung.stand += zuwachs
+        win._on_character_snapshot("WitchOfPeter", 87, veroeffentlichung.stand)
+    veroeffentlichung.stand = 0
+
+    veroeffentlichung(462, 4_470_867)      # 18:24:34
+    veroeffentlichung(156, 62_620)         # 18:27:10, 2,6 min spaeter
+    veroeffentlichung(5_206, 755_280)      # 19:53:56, 87 min Pause
+    veroeffentlichung(432, 2_859_098)      # 20:01:08, 7,2 min
+
+    ueber_alles = (4_470_867 + 62_620 + 755_280 + 2_859_098 - 4_470_867) / ((156 + 5206 + 432) / 3600)
+    assert ueber_alles == pytest.approx(2_284_474, rel=0.01)   # die alte Rechnung
+    assert win._xp_per_hour("WitchOfPeter") == pytest.approx(2_859_098 / (432 / 3600))
+    assert win._xp_per_hour("WitchOfPeter") == pytest.approx(23_825_816, rel=0.01)
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_an_earlier_idle_gap_does_not_drag_the_current_rate_down(
+        qapp, monkeypatch) -> None:
+    """Zugespitzte Gegenprobe zum Test darueber: Eine Stunde Pause VOR dem
+    letzten Intervall darf die Anzeige nicht beruehren. Genau das war der
+    Fehler — die vorige Fassung verhinderte nur, dass Zeit NACH der letzten
+    Veroeffentlichung verwaessert."""
+    fake_now = [1000.0]
+    monkeypatch.setattr("poe_view.ui.main_window.time.monotonic", lambda: fake_now[0])
+
+    win = MainWindow()
+    win._on_character_snapshot("WitchOfPeter", 87, 0)
+    fake_now[0] += 60.0
+    win._on_character_snapshot("WitchOfPeter", 87, 1_000_000)
+    fake_now[0] += 3600.0                      # eine Stunde Pause, fast nichts dazu
+    win._on_character_snapshot("WitchOfPeter", 87, 1_100_000)
+    fake_now[0] += 360.0                       # sechs Minuten echtes Spielen
+    win._on_character_snapshot("WitchOfPeter", 87, 21_100_000)
+
+    assert win._xp_per_hour("WitchOfPeter") == pytest.approx(200_000_000)
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_the_clock_starts_at_the_first_zone_change_after_a_publication(
+        qapp, monkeypatch) -> None:
+    """Peters echtes Zonenprotokoll vom 2026-08-11, der schlimmste Fall
+    darin: 18:27:09 Hideout (Veroeffentlichung), dann 85 Minuten nichts,
+    dann 19:52:02 Foundry und 19:53:55 zurueck im Hideout mit +755.280.
+    Verdient wurden die in den knapp zwei Minuten in der Map. Ueber das
+    volle Intervall waeren es 0,5 Mio./h — eine Zahl, die nach dem
+    Wiedereinstieg wie ein Defekt aussaehe."""
+    fake_now = [1000.0]
+    monkeypatch.setattr("poe_view.ui.main_window.time.monotonic", lambda: fake_now[0])
+
+    win = MainWindow()
+    win._on_character_snapshot("WitchOfPeter", 87, 0)
+    fake_now[0] += 60.0
+    win._on_character_snapshot("WitchOfPeter", 87, 1_000_000)   # 18:27:09
+    fake_now[0] += 5_093.0                                       # 85 min im Hideout
+    win._on_zone_changed("Foundry")                              # 19:52:02, Aufbruch
+    fake_now[0] += 113.0                                         # knapp zwei Minuten Map
+    win._on_zone_changed("Backstreet Hideout")                   # 19:53:55, zurueck
+    win._on_character_snapshot("WitchOfPeter", 87, 1_755_280)    # 19:53:56
+
+    assert win._xp_per_hour("WitchOfPeter") == pytest.approx(755_280 / (113 / 3600))
+    assert win._xp_per_hour("WitchOfPeter") == pytest.approx(24_062_336, rel=0.01)
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_only_the_first_zone_change_of_an_interval_starts_the_clock(
+        qapp, monkeypatch) -> None:
+    """Massgeblich ist der Aufbruch, nicht jede Tuer danach: Wer auf dem
+    Weg noch durch zwei Zonen laeuft, hat trotzdem seit dem Verlassen des
+    Hideouts Erfahrung gesammelt."""
+    fake_now = [1000.0]
+    monkeypatch.setattr("poe_view.ui.main_window.time.monotonic", lambda: fake_now[0])
+
+    win = MainWindow()
+    win._on_character_snapshot("WitchOfPeter", 87, 0)
+    fake_now[0] += 60.0
+    win._on_character_snapshot("WitchOfPeter", 87, 1_000_000)
+    win._on_zone_changed("Foundry")            # Aufbruch, hier startet die Uhr
+    fake_now[0] += 300.0
+    win._on_zone_changed("Orchard")            # unterwegs, aendert nichts
+    fake_now[0] += 300.0
+    win._on_zone_changed("Backstreet Hideout")
+    win._on_character_snapshot("WitchOfPeter", 87, 21_000_000)
+
+    assert win._xp_per_hour("WitchOfPeter") == pytest.approx(20_000_000 / (600 / 3600))
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_without_zone_watching_the_whole_interval_counts(qapp, monkeypatch) -> None:
+    """Die Zonen-Beobachtung ist standardmaessig AUS. Ohne sie gibt es
+    keinen Startpunkt, dann faellt die Rechnung sauber auf das volle
+    Intervall zurueck statt gar keine Rate zu liefern."""
+    fake_now = [1000.0]
+    monkeypatch.setattr("poe_view.ui.main_window.time.monotonic", lambda: fake_now[0])
+
+    win = MainWindow()
+    win._on_character_snapshot("WitchOfPeter", 87, 0)
+    fake_now[0] += 60.0
+    win._on_character_snapshot("WitchOfPeter", 87, 1_000_000)
+    fake_now[0] += 3600.0
+    win._on_character_snapshot("WitchOfPeter", 87, 11_000_000)
+
+    assert win._xp_per_hour("WitchOfPeter") == pytest.approx(10_000_000)
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_the_status_bar_marks_how_old_the_rate_is(qapp, monkeypatch) -> None:
+    """Die Rate steht zwischen zwei Veroeffentlichungen still — ohne einen
+    Hinweis saehe eine zehn Minuten alte Zahl aus wie eine frische. Unter
+    einer Minute bleibt der Hinweis weg: GGG veroeffentlicht ohnehin nur
+    alle paar Minuten, so frisch wie es geht braucht keine Fussnote."""
+    fake_now = [1000.0]
+    monkeypatch.setattr("poe_view.ui.main_window.time.monotonic", lambda: fake_now[0])
+
+    win = MainWindow()
+    win._current_character_name = "WitchOfPeter"
+    win._on_character_snapshot("WitchOfPeter", 87, 0)
+    fake_now[0] += 60.0
+    win._on_character_snapshot("WitchOfPeter", 87, 1_000_000)
+    fake_now[0] += 360.0
+    win._on_character_snapshot("WitchOfPeter", 87, 21_000_000)
+
+    win._show_character_items("WitchOfPeter", [])
+    assert "200.0M XP/h" in win._status_msg.text()
+    assert "ago" not in win._status_msg.text()
+
+    fake_now[0] += 630.0                        # zehneinhalb Minuten spaeter
+    win._show_character_items("WitchOfPeter", [])
+    assert "200.0M XP/h (10m ago)" in win._status_msg.text()
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_every_experience_publication_is_logged(qapp, monkeypatch, caplog) -> None:
+    """Ueber die Charakter-Erfahrung stand bislang keine einzige Zeile im
+    Log — als Peters Anzeige um den Faktor 13 danebenlag, musste die
+    Ursache ueber die Gem-Mitschrift erschlossen werden, weil die
+    eigentlichen Zahlen nirgends standen."""
+    import logging
+
+    fake_now = [1000.0]
+    monkeypatch.setattr("poe_view.ui.main_window.time.monotonic", lambda: fake_now[0])
+
+    win = MainWindow()
+    with caplog.at_level(logging.INFO, logger="poe_view.ui.main_window"):
+        win._on_character_snapshot("WitchOfPeter", 87, 1_000_000)   # legt die Basis an
+        fake_now[0] += 60.0
+        win._on_character_snapshot("WitchOfPeter", 87, 2_000_000)   # 1. Veroeffentlichung
+        fake_now[0] += 60.0
+        win._on_character_snapshot("WitchOfPeter", 87, 2_000_000)   # nichts Neues
+        fake_now[0] += 300.0
+        win._on_character_snapshot("WitchOfPeter", 87, 12_000_000)  # 2. Veroeffentlichung
+
+    zeilen = [m for m in caplog.messages if m.startswith("Erfahrung")]
+    assert len(zeilen) == 2                      # der unveraenderte Abruf schweigt
+    assert "Basis" in zeilen[0]                  # erste Aenderung: noch keine Rate
+    assert "+10000000 in 360s" in zeilen[1]
+    assert "100.0 Mio. XP/h" in zeilen[1]
 
     win.worker.stop()
     win.worker.wait(5000)
