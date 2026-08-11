@@ -3696,14 +3696,48 @@ vergeblich gefragt, und ein Zonenwechsel war nicht in Sicht (das Log
 vermerkt "kein Zonenwechsel bekannt"). Ohne den Trigger hätte er auf den
 nächsten Zonenwechsel warten müssen, im ersten Fall neun Minuten lang.
 
-Der Unterschied zwischen den beiden Zeilenarten ist dabei deutlich und
-war nicht vorhersehbar: **Identifizieren veröffentlicht sofort, ein
-Verkauf nicht.** Kein einziges `Trade accepted` lieferte unmittelbar
-Daten (gemessen 17 s, 32 s oder erst mit dem nächsten Zonenwechsel).
-Beide Muster bleiben trotzdem drin — ein Trigger, der ins Leere läuft,
-kostet einen Request aus dem ohnehin gedeckelten Budget, während der
-Verzicht auf ihn die Fälle verschenkte, in denen GGG doch sofort
-liefert.
+Daraus schien ein Unterschied zwischen den beiden Zeilenarten zu folgen —
+"Identifizieren veröffentlicht sofort, ein Verkauf nicht". **Diese
+Aussage hat der größere Datensatz nicht gehalten**, siehe den nächsten
+Absatz. Kein einziges `Trade accepted` lieferte unmittelbar Daten
+(gemessen 17 s, 32 s oder erst mit dem nächsten Zonenwechsel); dieser
+Teil steht weiterhin.
+
+**Nachgemessen an 30 Ereignissen — der Trigger ist nicht nachweisbar
+wirksam.** Peter, 2026-08-12: "Mir ist gerade aufgefallen, dass ich beim
+Händler meine Gegenstände identifiziert habe, diese aber in der Itemliste
+noch als unidentifiziert angezeigt werden. Evtl. triggert hier nur das
+Zurückkehren in die Basis, und was wir bisher gesehen haben, war Zufall
+bzw. ein günstiger Zeitpunkt." Über beide Spielabende ausgewertet:
+
+| | |
+|---|---|
+| Identifizier-Ereignisse | 30 |
+| davon lösten sofort einen Abruf aus | 30 (0,4 s später) |
+| davon lieferten binnen 6 s neue Daten | 7 |
+| davon **ohne** Zonenwechsel in den 30 s davor | **2** |
+
+Fünf der sieben Treffer lagen 2–4 Sekunden nach einem Zonenwechsel ins
+Hideout — dort ist der Zonen-Auslöser die mindestens ebenso gute
+Erklärung, die beiden Ursachen sind in diesen Fällen nicht trennbar. Die
+zwei sauberen Treffer sind genau die beiden aus dem Absatz oben; sie
+liegen sechs Minuten auseinander am selben Abend. 2 von 30 ist keine
+Wirkung, sondern liegt in dem Bereich, den GGGs ohnehin auftretende
+Spätveröffentlichungen erzeugen (§4.19: 5 % der Änderungen kommen später
+als zehn Minuten, 20 % nach zwei bis zehn). Gegenprobe, damit die
+Fehlschläge überhaupt etwas beweisen: Alle 30 Ereignisse haben
+tatsächlich einen Abruf ausgelöst, keines wurde vom Burst-Budget
+geschluckt.
+
+**Der Trigger bleibt trotzdem drin, und zwar aus einem anderen Grund als
+bisher angenommen: Er ist gratis.** Durch die Schuldenrechnung (Punkt 1
+oben) verschiebt ein vorgezogener Abruf den nächsten regulären um genau
+dieselbe Zeit — die Anzahl der Requests bleibt gleich, nur ihre Lage
+ändert sich. Einen Abruf auf einen Moment zu legen, in dem sich im Spiel
+etwas getan hat, ist nie schlechter als ihn auf die Uhr zu legen, selbst
+wenn er meistens ins Leere greift. Was NICHT bleiben darf, ist die
+Behauptung, er wirke: Sie stand hier und in `poe-verhalten.md`, beruhte
+auf zwei Fällen und hat Peter zu Recht stutzig gemacht.
 
 Getestet: `tests/test_zone_watcher.py` (beide Schreibweisen des
 Identifizierens, abgebrochener Handel löst nichts aus, getrennte

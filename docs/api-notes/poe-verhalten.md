@@ -77,17 +77,28 @@ innerhalb der Mine schreibt sehr wohl `You have entered Azurite Mine`
 und löst damit alles Weitere aus (2026-08-11, 22:59:11 — neue Daten
 0,3 Sekunden später).
 
-### Händler: Identifizieren und Verkaufen verhalten sich unterschiedlich
+### Händler: Weder Identifizieren noch Verkaufen veröffentlicht zuverlässig
 
 | Ereignis | Neue Daten verfügbar |
 |---|---|
-| `N Items identified` | teils **sofort** (0,4 s gemessen), teils erst später |
+| `N Items identified` | in 2 von 30 Fällen binnen Sekunden, sonst nicht |
 | `Trade accepted` | nie sofort; gemessen 17 s, 32 s, 57 s oder erst beim nächsten Zonenwechsel |
 
-Zwei Volltreffer am 2026-08-10: Nach `12 Items identified` (22:54:30) und
-`4 Items identified` (23:00:04) lagen die neuen Daten jeweils 0,4
-Sekunden später vor — nachdem davor 35 bzw. 9 Abrufe vergeblich
-gewesen waren.
+Auswertung über zwei Spielabende (2026-08-10 und -11, 30 Ereignisse,
+jedes davon hat nachweislich sofort einen Abruf ausgelöst): Sieben Mal
+lagen binnen sechs Sekunden neue Daten vor — aber **fünf** dieser sieben
+fielen 2–4 Sekunden hinter einen Zonenwechsel ins Hideout, wo der
+Zonenwechsel die mindestens ebenso gute Erklärung ist. Übrig bleiben
+zwei saubere Fälle, beide am 2026-08-10 innerhalb von sechs Minuten.
+
+Das liegt in dem Bereich, den GGGs ohnehin auftretende
+Spätveröffentlichungen erzeugen (siehe die Verteilungstabelle oben).
+**Als Wirkung des Identifizierens ist es nicht nachweisbar.** Peter hatte
+den Verdacht zuerst, aus der Beobachtung heraus (2026-08-12): "Ich habe
+beim Händler identifiziert, die Gegenstände werden aber noch als
+unidentifiziert angezeigt — evtl. triggert hier nur das Zurückkehren in
+die Basis, und was wir bisher gesehen haben, war Zufall bzw. ein
+günstiger Zeitpunkt."
 
 ---
 
@@ -257,6 +268,16 @@ damit sie nicht zurückkommen.
   dem die Gems sehr unterschiedliche Stände hatten. Ein Snapshot zeigt
   aber Bestände, und die Frage war eine nach Zuwächsen — die sind
   identisch.
+- **"Identifizieren beim Händler veröffentlicht sofort."** Aus zwei
+  Volltreffern am 2026-08-10 geschlossen, bei denen 0,4 Sekunden nach
+  der `Items identified`-Zeile neue Daten vorlagen, nachdem davor 35
+  bzw. 9 Abrufe vergeblich gewesen waren. Zwei Tage später über 30
+  Ereignisse nachgerechnet: 7 Treffer, davon 5 im Windschatten eines
+  Zonenwechsels, also 2 saubere von 30. Das ist die Grundrate der
+  Spätveröffentlichungen, keine Wirkung. **Die Lehre daraus ist nicht
+  "Identifizieren tut nichts", sondern "zwei Treffer sind keine
+  Stichprobe"** — die Aussage stand vier Tage lang in der Doku, weil
+  niemand nach den Fehlschlägen gefragt hatte.
 - **"Wenn nach dem Herausrechnen der Gem-Erfahrung immer noch
   Ausrüstung türkis leuchtet, ist ein Rest des Fehlers übrig."** Am
   2026-08-11 leuchteten Waffe und Schildhand als einzige angelegte

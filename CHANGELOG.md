@@ -30,7 +30,10 @@ nach [SemVer](https://semver.org/lang/de/).
   Rate-Limit-Budget verbrennen, verschiebt jeder vorgezogene Abruf den
   nächsten regulären Takt um die eingesparte Zeit; eine Serie von
   Ereignissen ist auf vier Abrufe begrenzt, danach wird gewartet, bis
-  der Takt wieder aufgeholt hat.
+  der Takt wieder aufgeholt hat. Ob GGG zu diesen Anlässen tatsächlich
+  neue Daten bereitstellt, ist unterschiedlich — verlässlich ist nach wie
+  vor nur der Zonenwechsel. Der vorgezogene Abruf kostet aber nichts
+  extra, weil er den nächsten regulären um dieselbe Zeit verschiebt.
 - Ist in einem Item ein Sockel-Gem eine Stufe aufgestiegen, leuchtet die
   Zeile grün statt türkis. Damit ist der häufigste Grund, aus dem
   angelegte Ausrüstung überhaupt aufleuchtet, auf einen Blick von einem
