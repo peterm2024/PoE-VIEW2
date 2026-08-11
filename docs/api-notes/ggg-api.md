@@ -9,7 +9,10 @@ Doku.
 Hier steht die **Form** der API. Wie sich Spiel und Server über die Zeit
 verhalten — wann neue Daten überhaupt erscheinen, wie Erfahrung anfällt,
 was die `Client.txt` hergibt — steht daneben in
-[poe-verhalten.md](poe-verhalten.md).
+[poe-verhalten.md](poe-verhalten.md). Die ist als einzige Datei des
+Projekts auf Englisch (Peter, 2026-08-12): Sie richtet sich nicht nur an
+uns, sondern an jeden, der gegen GGGs API entwickelt, und der
+Forumsbeitrag verlinkt sie.
 
 Basis-URL: `https://api.pathofexile.com`
 

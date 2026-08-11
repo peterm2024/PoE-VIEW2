@@ -94,6 +94,7 @@ PoE-VIEW2/
 │   └── api-notes/
 │       ├── ggg-api.md          ← Form der API: Endpunkte, JSON, OAuth
 │       └── poe-verhalten.md    ← Verhalten von Spiel und Server über die Zeit
+│                                 (englisch, siehe Kopf der Datei)
 ├── poe_view/
 │   ├── __init__.py
 │   ├── config.py               # Pfade, Client-ID, User-Agent, .env-Laden

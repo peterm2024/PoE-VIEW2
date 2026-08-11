@@ -1,310 +1,344 @@
-# Beobachtetes Verhalten von Path of Exile
+# Observed behaviour of Path of Exile
 
-Diese Datei sammelt, wie sich **Spiel und Server über die Zeit** verhalten
-— nicht, wie die API aufgebaut ist (das steht in
-[ggg-api.md](ggg-api.md)), und nicht, warum PoE-VIEW2 etwas so löst wie es
-das tut (das steht in [ARCHITEKTUR.md](../ARCHITEKTUR.md)).
+This file collects how **the game and GGG's servers behave over time** —
+not how the API is shaped (that is [ggg-api.md](ggg-api.md)), and not why
+PoE-VIEW2 solves something the way it does (that is
+[ARCHITEKTUR.md](../ARCHITEKTUR.md)).
 
-**Warum getrennt?** Weil diese Klasse Wissen anders altert und anders
-belegt wird. Eine JSON-Struktur sieht man einmal und weiß sie. Ob GGG die
-Erfahrung eines Charakters sofort oder erst beim Zonenwechsel
-veröffentlicht, lässt sich nur über Stunden messen — und wer es nicht
-nachgemessen hat, rät. Beim Bau der XP/h-Anzeige sind daraus an einem
-einzigen Abend drei falsche Annahmen entstanden, jede davon plausibel
-(§ *Widerlegtes*).
+**In English, unlike the rest of the project documentation** (Peter,
+2026-08-12). The measurements here are useful to anyone writing against
+GGG's API, and the forum post links to this file; German would put a
+wall in front of exactly the people it might help.
 
-**Regeln für Einträge hier:**
+**Why keep it separate?** Because this class of knowledge ages
+differently and is proven differently. You look at a JSON structure once
+and you know it. Whether GGG publishes a character's experience
+immediately or only on a zone change can only be established by
+measuring over hours — and whoever has not measured it is guessing.
+Building the XP/h display produced three wrong assumptions in a single
+evening, every one of them plausible (§ *Disproven*).
 
-1. Nur Beobachtetes. Jeder Eintrag nennt, **woran** er gemessen wurde.
-2. Was nicht bestätigt werden konnte, steht unter *Unbestätigtes* —
-   nicht weglassen, sonst wird es beim nächsten Mal wieder vermutet.
-3. Was sich als falsch herausgestellt hat, steht unter *Widerlegtes* und
-   wird nicht gelöscht. Eine plausible falsche Annahme kommt sonst
-   zurück.
-4. Zahlen mit Datum. Ein Verhalten kann sich mit einer Liga ändern.
+**Rules for entries here:**
 
-Messwerkzeuge, mit denen das hier entstanden ist: PoEs eigene
-`Client.txt` (Zonenwechsel, Handel, Identifizieren), das Programm-Log
-(`%LOCALAPPDATA%\PoE-VIEW2\logs\poe-view2.log`, seit 2026-08-11 mit einer
-Zeile je Erfahrungs-Veröffentlichung) und die Gem-XP-Mitschrift
+1. Observations only. Every entry says **what it was measured against**.
+2. What could not be confirmed goes under *Unconfirmed* — not left out,
+   or it will be guessed at again next time.
+3. What turned out to be wrong goes under *Disproven* and is not
+   deleted. A plausible wrong assumption comes back otherwise.
+4. Numbers carry a date. Behaviour can change with a league.
+5. **Say where it comes from.** Entries marked **[wiki]** are also
+   documented publicly and carry a link; the note then says what our own
+   numbers add. Everything else we measured because we could not find it
+   written down — which is not the same as it not existing.
+
+Measuring tools behind all of this: PoE's own `Client.txt` (zone
+changes, trading, identifying), the application log
+(`%LOCALAPPDATA%\PoE-VIEW2\logs\poe-view2.log`, carrying one line per
+experience publication since 2026-08-11) and the gem XP recording
 (ARCHITEKTUR.md §4.35).
 
 ---
 
-## 1. Wann liefert die API neue Daten?
+## 1. When does the API deliver new data?
 
-**Die API zeigt neue Daten praktisch nur nach einem Zonenwechsel.**
-Häufiger zu fragen bringt nichts — in einem Fenster von 27 Minuten ohne
-Zonenwechsel hat PoE-VIEW2 rund hundert Mal gefragt und **einmal** etwas
-Neues bekommen (2026-08-10).
+**The API shows new data essentially only after a zone change.** Asking
+more often buys nothing — in a 27-minute window without a zone change
+PoE-VIEW2 asked about a hundred times and got something new **once**
+(2026-08-10).
 
-Über 91 protokollierte Inventar-Änderungen (2026-08-07 bis -10):
+Across 91 logged inventory changes (2026-08-07 to -10):
 
-| Abstand zum letzten Zonenwechsel | Anteil |
+| Distance from the last zone change | Share |
 |---|---|
 | 0–5 s | 62 % |
 | 6–30 s | 1 % |
 | 31–120 s | 12 % |
 | 2–10 min | 20 % |
-| über 10 min | 5 % |
+| more than 10 min | 5 % |
 
-Die späten Fälle sind echte Nachzügler: Der Server veröffentlicht
-irgendwann auch ohne Zonenwechsel, aber unvorhersehbar (einmal +26 Items
-nach 1803 Sekunden und 113 Abrufen).
+The late cases are genuine stragglers: the server does publish without a
+zone change eventually, but unpredictably (once +26 items after 1803
+seconds and 113 requests).
 
-**Erfahrung erscheint erst, wenn eine Zone verlassen wird.** In allen
-bisher protokollierten Fällen fiel eine Erfahrungs-Veröffentlichung 1–3
-Sekunden nach einem Zonenwechsel an. Wer wissen will, wie viel Erfahrung
-in der laufenden Map schon verdient wurde, kann das über die API nicht
-erfahren — die Zahl existiert außerhalb des Spiels erst danach.
+**Experience only appears once a zone is left.** In every case logged so
+far, an experience publication landed 1–3 seconds after a zone change.
+If you want to know how much experience the current map has produced so
+far, the API cannot tell you — outside the game that number does not
+exist yet.
 
-**Eine Zone ohne Zuwachs erzeugt gar keine Veröffentlichung.** Der
-Zonenwechsel vom Hideout in eine Map ändert die Erfahrung nicht, also
-gibt es nichts zu melden. Praktische Folge: Jede
-Erfahrungs-Veröffentlichung gehört zu genau einer Zone, in der etwas
-passiert ist — nämlich der gerade verlassenen.
+**A zone without a gain produces no publication at all.** Going from
+hideout into a map does not change the experience, so there is nothing
+to report. Practical consequence: every experience publication belongs
+to exactly one zone in which something happened — the one just left.
 
-### Der Azurite Mine (Delve) ist ein blinder Fleck
+### The Azurite Mine (Delve) is a blind spot
 
-Die Fahrt zurück zum Händler im Delve erzeugt **keinen** Eintrag in der
-`Client.txt`. Gemessen am 2026-08-10: zwischen 21:21:41 und 21:49:26
-steht dort 27 Minuten lang keine einzige `You have entered`-Zeile,
-obwohl in der Zeit acht Händler-Ereignisse anfielen. Wer den
-Zonenwechsel als einzigen Auslöser benutzt, ist dort blind.
+Travelling back to the vendor in Delve produces **no** entry in
+`Client.txt`. Measured on 2026-08-10: between 21:21:41 and 21:49:26
+there is not a single `You have entered` line for 27 minutes, while
+eight vendor events occurred in that time. Anyone using the zone change
+as their only trigger is blind there.
 
-Der blinde Fleck betrifft aber **nur den Händler-Bereich**: Ein Port
-innerhalb der Mine schreibt sehr wohl `You have entered Azurite Mine`
-und löst damit alles Weitere aus (2026-08-11, 22:59:11 — neue Daten
-0,3 Sekunden später).
+The blind spot covers **only the vendor area**, though: a portal within
+the mine does write `You have entered Azurite Mine` and triggers
+everything downstream (2026-08-11, 22:59:11 — new data 0.3 seconds
+later).
 
-### Händler: Weder Identifizieren noch Verkaufen veröffentlicht zuverlässig
+### Vendors: neither identifying nor selling publishes reliably
 
-| Ereignis | Neue Daten verfügbar |
+| Event | New data available |
 |---|---|
-| `N Items identified` | in 2 von 30 Fällen binnen Sekunden, sonst nicht |
-| `Trade accepted` | nie sofort; gemessen 17 s, 32 s, 57 s oder erst beim nächsten Zonenwechsel |
+| `N Items identified` | in 2 of 30 cases within seconds, otherwise not |
+| `Trade accepted` | never immediately; measured 17 s, 32 s, 57 s or only at the next zone change |
 
-Auswertung über zwei Spielabende (2026-08-10 und -11, 30 Ereignisse,
-jedes davon hat nachweislich sofort einen Abruf ausgelöst): Sieben Mal
-lagen binnen sechs Sekunden neue Daten vor — aber **fünf** dieser sieben
-fielen 2–4 Sekunden hinter einen Zonenwechsel ins Hideout, wo der
-Zonenwechsel die mindestens ebenso gute Erklärung ist. Übrig bleiben
-zwei saubere Fälle, beide am 2026-08-10 innerhalb von sechs Minuten.
+Evaluated across two play sessions (2026-08-10 and -11, 30 events, each
+of which demonstrably triggered an immediate request): seven times new
+data was there within six seconds — but **five** of those seven fell 2–4
+seconds behind a zone change into the hideout, where the zone change is
+at least as good an explanation. That leaves two clean cases, both on
+2026-08-10 and within six minutes of each other.
 
-Das liegt in dem Bereich, den GGGs ohnehin auftretende
-Spätveröffentlichungen erzeugen (siehe die Verteilungstabelle oben).
-**Als Wirkung des Identifizierens ist es nicht nachweisbar.** Peter hatte
-den Verdacht zuerst, aus der Beobachtung heraus (2026-08-12): "Ich habe
-beim Händler identifiziert, die Gegenstände werden aber noch als
-unidentifiziert angezeigt — evtl. triggert hier nur das Zurückkehren in
-die Basis, und was wir bisher gesehen haben, war Zufall bzw. ein
-günstiger Zeitpunkt."
+That is inside the range GGG's spontaneous late publications produce
+anyway (see the distribution table above). **As an effect of identifying
+it is not demonstrable.** Peter suspected this first, from observation
+(2026-08-12): "I identified my items at the vendor, but they still show
+as unidentified — maybe only returning to base triggers it, and what we
+have seen so far was coincidence, or a favourable moment."
 
 ---
 
-## 2. Die `Client.txt` als Ereignisquelle
+## 2. `Client.txt` as an event source
 
-Reines Lesen dieser Textdatei ist von GGG erlaubt (anders als
-Speicherzugriffe auf den laufenden Client — die wären ein Bann-Risiko und
-kommen nicht in Frage).
+Merely reading this text file is permitted by GGG (unlike reading the
+running client's memory — that would be a ban risk and is out of the
+question).
 
-Ausgezählt in einer echten Datei mit 81.639 Zeilen (2026-08-10):
+Counted in a real file with 81,639 lines (2026-08-10):
 
-| Zeile | Häufigkeit | Bedeutung |
+| Line | Count | Meaning |
 |---|---|---|
-| `: You have entered <Zone>.` | 3829 | Zonenwechsel |
-| `: Trade accepted.` | 1028 | Verkauf an NPC **und** Spielerhandel |
-| `: N Items identified` | 821 | Mehrzahl |
-| `: 1 Item identified` | 78 | eigene Schreibweise, leicht zu übersehen |
-| `: Trade cancelled.` | 60 | nichts geändert |
+| `: You have entered <zone>.` | 3829 | zone change |
+| `: Trade accepted.` | 1028 | selling to an NPC **and** player trading |
+| `: N Items identified` | 821 | plural |
+| `: 1 Item identified` | 78 | its own spelling, easy to miss |
+| `: Trade cancelled.` | 60 | nothing changed |
 | `: You have killed N.N monsters.` | 204 | |
 | `: You have received an Atlas Skill Point.` | 146 | |
-| `: <Charakter> (<Klasse>) is now level N` | mehrfach | Stufenaufstieg |
-| `: Reached level N in H:MM:SS` | 73 | mit Spielzeit |
+| `: <character> (<class>) is now level N` | several | level up |
+| `: Reached level N in H:MM:SS` | 73 | with play time |
 | `: You have received a Passive Skill Point.` | 41 | |
 | `: Your Stash Tab with the Unique Affinity does not have enough space for this item.` | 31 | |
 | `: Item on cursor destroyed.` | 27 | |
 
-Format einer Zeile:
+Format of a line:
 `2026/08/01 21:44:37 15181671 cffb0658 [INFO Client 18604] : You have entered The Coast.`
 
-Nicht in der Datei: irgendetwas über Erfahrungspunkte unterhalb eines
-Stufenaufstiegs, Beute, Währung oder den Inhalt der Truhe.
+Not in the file: anything about experience points below a level up,
+loot, currency, or the contents of the stash.
 
 ---
 
-## 3. Erfahrung des Charakters
+## 3. Character experience
 
-- `character.experience` ist die **kumulierte Gesamterfahrung**, nicht
-  der Fortschritt innerhalb der Stufe. Beobachtete Größenordnungen:
-  Stufe 87 ≈ 1,63 Mrd., Stufe 89 ≈ 1,80 Mrd.
-- Sie kommt **in Schüben**: In einer Spielstunde (231 Messpunkte,
-  2026-08-10) hatten nur **8 von 230** Messschritten überhaupt einen
-  Zuwachs, mit Abständen von anderthalb bis siebzehn Minuten.
-- Größenordnung bei einem eingespielten Charakter auf Stufe 89:
-  40–163 Mio. XP/h je nach Zone, gemessen über die Verweildauer in der
-  jeweiligen Zone (2026-08-11). Ein Trial oder ein kurzer Stadtlauf liegt
-  deutlich unter einer vollen Map.
+- `character.experience` is the **cumulative total**, not the progress
+  within the current level. Observed magnitudes: level 87 ≈ 1.63
+  billion, level 89 ≈ 1.80 billion.
+- It arrives **in bursts**: over one hour of play (231 sample points,
+  2026-08-10) only **8 of 230** steps had any gain at all, spaced from
+  one and a half to seventeen minutes apart.
+- Magnitude for an established level 89 character: 40–163 million XP/h
+  depending on the zone, measured over the time spent in that zone
+  (2026-08-11). A trial or a short town run sits well below a full map.
 
 ---
 
-## 4. Sockel-Gems
+## 4. Socketed gems
 
-**Alle gesockelten Gems bekommen exakt denselben Zuwachs.** Über eine
-Spielstunde und acht Veröffentlichungen hinweg war der Zuwachs bei jedem
-aktiven Gem auf die Einheit gleich (12.187.472 XP, 2026-08-10). Ein
-einzelnes Gem taugt damit als Stellvertreter für alle — solange es
-durchgehend gesockelt und nicht am Anschlag ist.
+**Every socketed gem gains exactly the same amount.** [wiki] Over one
+hour of play and eight publications the gain was identical to the unit
+for every active gem (12,187,472 XP, 2026-08-10). A single gem therefore
+stands in for all of them — as long as it stays socketed and is not at
+its cap. The [PoE wiki](https://www.poewiki.net/wiki/Gem) states the
+same and adds the number we could not derive ourselves: gems get **10 %
+of the character's experience, calculated before any level penalties**,
+and the number of socketed gems makes no difference.
 
-**Auch die Gems im Wechsel-Waffenset.** Gegengemessen über 21
-Veröffentlichungen (2026-08-11): Jedes durchgehend gesockelte Gem stand
-bei 33.501.737 XP Zuwachs — die in `Weapon2` und `Offhand2` genauso wie
-die im aktiven Set. Die naheliegende Gegenvermutung ("das inaktive Set
-geht leer aus") ist damit erledigt.
+**Gems in the swapped-out weapon set too.** [wiki] Cross-checked over 21
+publications (2026-08-11): every continuously socketed gem stood at
+33,501,737 XP of gain — those in `Weapon2` and `Offhand2` exactly like
+those in the active set. Also documented on the
+[wiki](https://pathofexile.fandom.com/wiki/Weapon_swap), which is worth
+knowing before "measuring" it: the obvious counter-assumption ("the
+inactive set gets nothing") is simply false.
 
-Unterschiedliche **Stände** kommen allein aus der Vorgeschichte:
+### The gem/character ratio measures the experience penalty
 
-- Ein **ausgesockeltes** Gem bekommt nichts. `Summon Skitterbots` war
-  zehn Minuten draußen und fehlten danach exakt die 1.066.352 XP des
-  einen Schubs in diesem Fenster.
-- Ein **frisch gesockeltes** Gem bekommt nur so viel, wie bis zu seiner
-  Obergrenze passt. `Ice Nova`, neu eingesetzt, nahm von einem Schub über
-  1.066.352 nur 147.967 auf.
+This one falls out of the wiki's wording. If gems get 10 % of the
+experience **before** penalties, while `character.experience` only ever
+shows the amount **after** them, then the ratio between the two says how
+hard the character is currently being penalised:
 
-**Gems steigen nicht von selbst auf.** Voller Erfahrungsbalken heißt
-"wartet auf den Klick", und bis dahin ist die Erfahrung eingefroren. So
-hält man Gems absichtlich auf Stufe 1.
+    penalty ≈ 10 % ÷ (gem gain ÷ character gain)
 
-**Felder eines Sockel-Gems** (roh, kein eigenes Pydantic-Modell):
+Measured against one real session (2026-08-11/12, one row per
+publication):
 
-- `additionalProperties` → Eintrag `Experience` mit
-  `values[0][0] = "66921722/212046017"` und `progress` (0…1).
-- `nextLevelRequirements` erscheint **nur**, wenn der Balken voll ist,
-  und nennt die Anforderungen der nächsten Stufe — **unabhängig davon,
-  ob sie erfüllt sind**. Das Feld allein sagt also nicht, ob ein Gem
-  festhängt.
-- `requirements` nennt die Anforderungen der **aktuellen** Stufe.
-- `properties` → `Level`, `Quality` (wie bei Items, `values[0][0]`).
+| Time | Zone | gem/character | implied penalty |
+|---|---|---|---|
+| 21:58–22:40 | maps | 18.5 % (constant to five digits) | 54 % |
+| 22:59–23:15 | maps | 21.1 % | 47 % |
+| 23:25–23:32 | maps | 18.5 % | 54 % |
+| 00:00–00:18 | The Fathomless Depths (per the zone log) | **1030–1840 %** | **≈ 1 %** |
 
-**Ob ein Gem wirklich blockiert ist, lässt sich nur über die Attribute
-entscheiden** — und die liefert der Charakter-Endpunkt nicht. Was hilft:
-Was der Charakter TRÄGT, erfüllt er zwingend, also ergeben die
-`requirements` der angelegten Ausrüstung eine sichere Untergrenze. Diese
-beweist "erfüllt", niemals "nicht erfüllt" — an einem echten Charakter
-lagen die Untergrenzen bei Str ≥ 151 / Int ≥ 131 / Dex ≥ 108, die
-tatsächlichen Werte bei 280 / 145 / 114 (Passivbaum und Juwelen).
+The three points in the last row carried tiny character gains (+1670,
++61, +5625), so their spread says little; what matters is the order of
+magnitude. There the gems gained **roughly ten times what the character
+gained**
+— which is exactly what the rule predicts once the penalty crushes the
+character's share to about a hundredth while the gems keep their full
+10 %. The constant comes from the wiki, the variation from our data, and
+the two fit; neither alone would have shown this. Still filed under
+*Unconfirmed* below, because a single session cannot establish the 10 %
+independently.
 
-Ein real beobachteter Blockade-Fall (2026-08-11): Ein Vaal Blade Vortex
-auf Stufe 12 verlangt für die nächste Stufe `Level 53; Dex 119` bei
-tatsächlichen 114 Dex.
+Differing **levels of progress** between gems come purely from history:
+
+- A gem that was **taken out** gets nothing. `Summon Skitterbots` was
+  out for ten minutes and afterwards was short exactly the 1,066,352 XP
+  of the one burst in that window.
+- A **freshly socketed** gem only takes what fits below its cap.
+  `Ice Nova`, newly inserted, took only 147,967 out of a burst of
+  1,066,352.
+
+**Gems do not level up by themselves.** A full experience bar means
+"waiting for the click", and until then the experience is frozen. That
+is how you deliberately keep gems at level 1.
+
+**Fields of a socketed gem** (raw, no Pydantic model of its own):
+
+- `additionalProperties` → an `Experience` entry with
+  `values[0][0] = "66921722/212046017"` and `progress` (0…1).
+- `nextLevelRequirements` appears **only** when the bar is full, and
+  lists the requirements of the next level — **regardless of whether
+  they are met**. The field alone therefore does not say whether a gem
+  is stuck.
+- `requirements` lists the requirements of the **current** level.
+- `properties` → `Level`, `Quality` (as with items, `values[0][0]`).
+
+**Whether a gem is really blocked can only be decided via the
+attributes** — and the character endpoint does not provide them. What
+does help: whatever the character is WEARING, it necessarily meets, so
+the `requirements` of the equipped items give a safe lower bound. That
+bound proves "met", never "not met" — on a real character the bounds
+were Str ≥ 151 / Int ≥ 131 / Dex ≥ 108 while the actual values were
+280 / 145 / 114 (passive tree and jewels).
+
+One real blocked case observed (2026-08-11): a Vaal Blade Vortex at
+level 12 requires `Level 53; Dex 119` for its next level, with 114 Dex
+actually available.
 
 ---
 
 ## 5. Items
 
-- **Die Erfahrung der Sockel-Gems ist Teil der Item-Daten.** Ein
-  sockelbares Ausrüstungsteil sieht deshalb beim Spielen bei fast jedem
-  Abruf "verändert" aus: Zwischen zwei nur zwölf Sekunden
-  auseinanderliegenden Abrufen hatten 25 von 29 Gems neue Werte. Wer
-  Items vergleicht, um Änderungen anzuzeigen, muss die Erfahrung vorher
-  herausrechnen.
-- **Item-IDs bleiben stabil**, auch über Zonenwechsel hinweg — eine
-  naheliegende Gegenvermutung, die sich an den Logs widerlegen ließ.
-- **Die `requirements` eines Items sind das Maximum über das Item selbst
-  und seine Sockel-Gems.** Einträge, die von den Gems stammen, tragen
-  `"suffix": "(gem)"`. Beispiel (2026-08-11): eine Wand mit
-  `Level 68 (gem) / Str 66 (gem) / Dex 87 (gem) / Int 95 (gem)` — jede
-  Zahl der Höchstwert der drei Gems darin; ein Sceptre daneben zeigt
-  `Str 95` und `Int 131` **ohne** Suffix, das ist die Waffe selbst.
-  Folge: Ein Gem-Aufstieg ändert nicht nur `socketedItems`, sondern
-  gegebenenfalls auch die `requirements` des tragenden Items.
-- **Flaschen ändern sich beim Spielen dauernd.** In `properties` steht
-  `Currently has {0} Charges`; der Wert wandert mit jeder Benutzung. Ein
-  Item-Vergleich hält Flaschen deshalb regelmäßig für "geändert"
-  (viermal an einem Abend, 2026-08-11) — dieselbe Sorte Rauschen wie die
-  Gem-Erfahrung, nur seltener.
-- **Angelegte Ausrüstung ändert sich sonst gar nicht.** Über zwanzig
-  Minuten Spielzeit wiesen Ringe, Amulett und Gürtel kein einziges
-  abweichendes Feld auf.
+- **The experience of socketed gems is part of the item data.** A
+  socketable piece of equipment therefore looks "changed" on almost
+  every request while playing: between two requests only twelve seconds
+  apart, 25 of 29 gems had new values. Anyone comparing items to display
+  changes has to strip the experience first.
+- **Item IDs stay stable**, across zone changes too — an obvious
+  counter-assumption that the logs disproved.
+- **An item's `requirements` are the maximum over the item itself and
+  its socketed gems.** Entries originating from the gems carry
+  `"suffix": "(gem)"`. Example (2026-08-11): a wand showing
+  `Level 68 (gem) / Str 66 (gem) / Dex 87 (gem) / Int 95 (gem)` — each
+  number the highest of the three gems in it; a sceptre next to it shows
+  `Str 95` and `Int 131` **without** the suffix, which is the weapon
+  itself. Consequence: a gem level-up changes not only `socketedItems`
+  but possibly the `requirements` of the item holding it.
+- **Flasks change constantly while playing.** `properties` contains
+  `Currently has {0} Charges`, and the value moves with every use. An
+  item comparison therefore regularly considers flasks "changed" (four
+  times in one evening, 2026-08-11) — the same kind of noise as gem
+  experience, just rarer.
+- **Equipped gear does not change otherwise.** Over twenty minutes of
+  play, rings, amulet and belt showed not a single differing field.
 
 ---
 
-## 6. Unbestätigtes
+## 6. Unconfirmed
 
-Hier steht, was gesucht und **nicht** gefunden wurde. Nicht als
-"existiert nicht" lesen, sondern als "mit diesen Mitteln nicht
-nachweisbar".
+What was looked for and **not** found. Do not read as "does not exist",
+read as "not demonstrable with these means".
 
-- **Ein Schalter, der den Erfahrungsgewinn eines Gems abschaltet.**
-  Weder in den Rohdaten noch in der öffentlichen Dokumentation zu
-  finden. Was danach aussieht, erklärt sich vollständig durch die beiden
-  bekannten Fälle: Gem ausgesockelt, oder Balken voll und nicht
-  geklickt.
-- **Die genaue Formel für die Erfahrungsstrafe** nach Charakterstufe und
-  Zonenstufe. Bekannt ist, dass es sie gibt; die Zahlen wurden nicht
-  nachgemessen und deshalb nirgends implementiert.
-- **Erfahrungsverlust beim Tod ab Akt 5.** Allgemein bekannt, in unseren
-  eigenen Daten aber nie beobachtet. Die Auswertung ist darauf
-  vorbereitet (ein Rückgang zählt als normale Änderung), belegt ist er
-  nicht.
-
----
-
-## 7. Widerlegtes
-
-Plausible Annahmen, die sich als falsch erwiesen haben. Sie stehen hier,
-damit sie nicht zurückkommen.
-
-- **"GGG vergibt Ausrüstung bei Zonenwechseln neue Item-IDs."** Wäre die
-  bequemste Erklärung für fälschlich als neu erkannte Items gewesen. In
-  den Logs kommt das dafür nötige Muster (gleichzeitiger Zu- und Abgang
-  derselben Größenordnung) kein einziges Mal vor.
-- **"Die Reihenfolge von `socketedItems` ist zwischen zwei Abrufen
-  instabil."** Klang zwingend, weil Pydantics Listenvergleich darauf
-  anspringt. Über 47 aufeinanderfolgende Messpunkte war die Reihenfolge
-  **ausnahmslos** stabil. Die echte Ursache war die Gem-Erfahrung.
-- **"Gems bekommen unterschiedlich viel Erfahrung, je nachdem wie oft
-  der Skill benutzt wird."** Aus einem einzelnen Snapshot geschlossen, in
-  dem die Gems sehr unterschiedliche Stände hatten. Ein Snapshot zeigt
-  aber Bestände, und die Frage war eine nach Zuwächsen — die sind
-  identisch.
-- **"Identifizieren beim Händler veröffentlicht sofort."** Aus zwei
-  Volltreffern am 2026-08-10 geschlossen, bei denen 0,4 Sekunden nach
-  der `Items identified`-Zeile neue Daten vorlagen, nachdem davor 35
-  bzw. 9 Abrufe vergeblich gewesen waren. Zwei Tage später über 30
-  Ereignisse nachgerechnet: 7 Treffer, davon 5 im Windschatten eines
-  Zonenwechsels, also 2 saubere von 30. Das ist die Grundrate der
-  Spätveröffentlichungen, keine Wirkung. **Die Lehre daraus ist nicht
-  "Identifizieren tut nichts", sondern "zwei Treffer sind keine
-  Stichprobe"** — die Aussage stand vier Tage lang in der Doku, weil
-  niemand nach den Fehlschlägen gefragt hatte.
-- **"Wenn nach dem Herausrechnen der Gem-Erfahrung immer noch
-  Ausrüstung türkis leuchtet, ist ein Rest des Fehlers übrig."** Am
-  2026-08-11 leuchteten Waffe und Schildhand als einzige angelegte
-  Teile. Der Abgleich jeder einzelnen Markierung des Abends mit der
-  Gem-Mitschrift ergab: **alle** gingen auf einen echten
-  Gem-Stufenaufstieg oder einen Sockelwechsel zurück. Frisch
-  eingesockelte Gems auf niedriger Stufe steigen im Minutentakt auf und
-  lassen ihr Item dadurch bei fast jedem Zonenwechsel aufleuchten — das
-  sieht aus wie der alte Fehler, ist aber die richtige Anzeige.
-- **"Beim Veröffentlichen steht der Charakter in der Zone, in die er
-  gerade zurückgekehrt ist."** Meist ja, aber nicht immer: Die
-  Veröffentlichung kann eintreffen, wenn er längst in der nächsten Zone
-  ist. Wer darauf eine Zeitmessung stützt, bekommt Nenner von wenigen
-  Sekunden und Raten im Milliardenbereich.
+- **A switch that turns off a gem's experience gain.** Not to be found
+  in the raw data nor in the public documentation. What looks like it is
+  fully explained by the two known cases: gem taken out, or bar full and
+  not clicked.
+- **The exact formula for the experience penalty** by character level
+  and zone level. That one exists is known. What we can now do is
+  *measure the current penalty* from the gem/character ratio (§4) — but
+  that rests on the wiki's 10 %, which our own data cannot confirm
+  independently. Deriving it would need a character low enough to have
+  no penalty at all, where the ratio should read exactly 10 %.
+- **Experience loss on death from act 5 onwards.** Common knowledge, but
+  never observed in our own data. The evaluation is prepared for it (a
+  decrease counts as a normal change); it is not evidenced.
 
 ---
 
-## 8. Was PoE-VIEW2 daraus macht
+## 7. Disproven
 
-Nur als Wegweiser — die Begründungen stehen jeweils dort:
+Plausible assumptions that turned out to be wrong. They are here so they
+do not come back.
 
-| Beobachtung | Umsetzung |
+- **"GGG hands out new item IDs on zone changes."** Would have been the
+  most convenient explanation for items wrongly detected as new. The
+  pattern that would require (a simultaneous arrival and departure of
+  the same magnitude) does not occur once in the logs.
+- **"The order of `socketedItems` is unstable between requests."**
+  Sounded compelling, because Pydantic's list comparison reacts to it.
+  Across 47 consecutive sample points the order was stable **without
+  exception**. The real cause was gem experience.
+- **"Gems gain different amounts of experience depending on how often
+  the skill is used."** Concluded from a single snapshot in which the
+  gems stood at very different levels of progress. But a snapshot shows
+  stocks, and the question was about increments — those are identical.
+- **"Identifying at a vendor publishes immediately."** Concluded from
+  two direct hits on 2026-08-10, where new data was there 0.4 seconds
+  after the `Items identified` line, having been requested 35 and 9
+  times in vain before that. Recalculated two days later across 30
+  events: 7 hits, 5 of them in the slipstream of a zone change, so 2
+  clean ones out of 30. That is the background rate of late
+  publications, not an effect. **The lesson is not "identifying does
+  nothing" but "two hits are not a sample"** — the claim stood in the
+  documentation for four days because nobody asked about the misses.
+- **"If equipment still lights up after stripping gem experience, some
+  of the bug is left."** On 2026-08-11 the weapon and the shield hand
+  were the only equipped items lighting up. Comparing every single
+  highlight of that evening against the gem recording showed: **all** of
+  them went back to a genuine gem level-up or a socket change. Freshly
+  socketed low-level gems level up every few minutes and make their item
+  light up on almost every zone change — it looks like the old bug, but
+  it is the correct display.
+- **"At publication time the character is in the zone it has just
+  returned to."** Usually yes, but not always: the publication can
+  arrive when the character is long since in the next zone. Basing a
+  time measurement on that gives denominators of a few seconds and rates
+  in the billions.
+
+---
+
+## 8. What PoE-VIEW2 makes of it
+
+Signposts only — the reasoning lives in each place:
+
+| Observation | Implementation |
 |---|---|
-| Daten kommen beim Zonenwechsel | Zonen-Beobachter, ARCHITEKTUR.md §ZoneWatcher |
-| Delve ist blind, Händler veröffentlicht | Händler-Trigger, §4.36 |
-| Gem-Erfahrung steckt in den Item-Daten | `_stable_item_dump`, §4.33 |
-| Flaschen-Ladungen schwanken dauernd | `_VOLATILE_ITEM_PROPERTIES`, §4.33 |
-| Ein Gem-Aufstieg ändert das ganze Item | grüne Hervorhebung, §4.33 |
-| Erfahrung kommt in Schüben, Zone für Zone | XP/h über die Verweildauer, §4.34 |
-| Gem-Zustände, Attribut-Untergrenze | Gem-Mitschrift, §4.35 |
+| Data arrives on a zone change | zone watcher, ARCHITEKTUR.md §ZoneWatcher |
+| Delve is blind, vendors publish | vendor trigger, §4.36 |
+| Gem experience sits inside the item data | `_stable_item_dump`, §4.33 |
+| Flask charges fluctuate constantly | `_VOLATILE_ITEM_PROPERTIES`, §4.33 |
+| A gem level-up changes the whole item | green highlight, §4.33 |
+| Experience arrives in bursts, zone by zone | XP/h over dwell time, §4.34 |
+| Gem states, attribute lower bound | gem recording, §4.35 |
