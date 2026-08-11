@@ -188,9 +188,26 @@ def _characters() -> list[Character]:
     ]
 
 
+def _socketed_gem(level: int) -> dict:
+    """Sockel-Gem im Aufbau der echten API-Daten (Rohfeld, kein eigenes
+    Modell — siehe ARCHITEKTUR.md §4.33). Steigt zwischen den beiden
+    Ständen unten um eine Stufe und erzeugt damit im dritten Bild die
+    GRÜNE Hervorhebung, die es sonst nirgends zu sehen gäbe."""
+    return {
+        # Bewusst NICHT "Molten Strike": Das steht unten im Verlauf und
+        # sähe aus, als hinge beides zusammen.
+        "id": "demo-gem-1", "typeLine": "Blade Vortex", "socket": 0, "colour": "B",
+        "properties": [{"name": "Level", "values": [[str(level), 0]], "displayMode": 0}],
+        "additionalProperties": [
+            {"name": "Experience", "values": [[f"{level * 1_000_000}/226180911", 0]],
+             "progress": 0.42, "displayMode": 2},
+        ],
+    }
+
+
 def _character_items(before: bool) -> list[Item]:
     """Zwei Stände desselben Inventars — der Unterschied erzeugt im dritten
-    Bild die Türkis-/Grau-Hervorhebung, um die es dort geht."""
+    Bild die Türkis-/Grün-/Grau-Hervorhebung, um die es dort geht."""
     worn = [
         _rare("Dread Veil", "Lion Pelt", 84, ["+96 to maximum Life"], 0, 0),
         _rare("Vaal Regalia", "Vaal Regalia", 81, ["+112 to maximum Energy Shield"], 0, 0),
@@ -198,6 +215,7 @@ def _character_items(before: bool) -> list[Item]:
     ]
     for item, slot in zip(worn, ("Helm", "BodyArmour", "Ring")):
         item.inventoryId = slot
+    worn[1].socketedItems = [_socketed_gem(19 if before else 20)]
     if before:
         bag = [_currency("Chaos Orb", 39, 0, 0), _currency("Orb of Alchemy", 88, 1, 0),
                _rare("Rift Clasp", "Onyx Amulet", 83, ["+21 to all Attributes"], 2, 0)]
