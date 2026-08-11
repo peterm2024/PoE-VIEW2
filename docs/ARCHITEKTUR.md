@@ -3197,29 +3197,59 @@ Lücke von 87 Minuten ohne Spiel. Über die ganze Spanne 2,3 Mio./h, über
 das letzte Intervall 23,8 Mio./h — Faktor 10,4, genau die Größenordnung
 seiner Abweichung.
 
-Der Rest steckte im Nenner. Sein Zonenprotokoll zeigt, wo Erfahrung
-entsteht:
+Der Rest steckte im Nenner, und dafür brauchte es zwei Anläufe.
 
-| Zeit | Zone | Veröffentlichung |
-|---|---|---|
-| 18:27:09 | Backstreet Hideout | +62.620 |
-| *85 Minuten nichts* | | |
-| 19:52:02 | Foundry | — |
-| 19:53:55 | Backstreet Hideout | +755.280 |
-| 19:55:08 | Orchard | — |
-| 20:01:07 | Backstreet Hideout | +2.859.098 |
+**Erster Anlauf, falsch:** die Uhr beim ersten Zonenwechsel NACH einer
+Veröffentlichung starten — unter der Annahme, der Charakter stehe beim
+Veröffentlichen immer in der Zone, in die er gerade zurückgekehrt ist.
+Peter entlarvte das binnen einer Runde ("Hatte gerade 1.53B XP/h"). Sein
+Protokoll zeigt, warum:
 
-Die 755.280 entstanden in den knapp zwei Minuten in der Foundry, nicht
-in den 87 Minuten seit der letzten Veröffentlichung. Deshalb startet die
-Uhr beim **ersten Zonenwechsel nach einer Veröffentlichung**
-(`_note_zone_change_for_xp`, gespeist aus dem ZoneWatcher, der ohnehin
-läuft). Dafür braucht es keine Unterscheidung von Städten und Maps, nur
-eine Beobachtung: Wo der Charakter beim Veröffentlichen steht, ist die
-Zone, in die er gerade zurückgekehrt ist — dort verdient er nichts mehr.
-Aus 0,5 Mio./h werden so 23,9 Mio./h, ein Wert, der zum nächsten
-Intervall (28,6 Mio./h) passt statt um Faktor 50 danebenzuliegen. Ist
-die Zonen-Beobachtung aus (Standard), fällt die Rechnung auf das volle
-Intervall zurück.
+| Zeit | Ereignis |
+|---|---|
+| 22:07:37 | Zonenwechsel → Trial of Lingering Pain |
+| 22:07:40 | Veröffentlichung +9.677.329 |
+| 22:10:01 | Zonenwechsel → Plaza |
+| 22:10:04 | Veröffentlichung +2.192.450 |
+
+Die Veröffentlichung um 22:07:40 kam, als er längst in der nächsten Zone
+war. Der "erste Zonenwechsel danach" war deshalb nicht der Aufbruch,
+sondern schon wieder der Ausgang — drei Sekunden vor der nächsten
+Veröffentlichung. 2.192.450 XP auf 3 Sekunden ergeben 2,99 Mrd. XP/h.
+
+**Richtig ist die Verweildauer in der zuletzt verlassenen Zone**
+(`_zone_dwell_seconds`, gespeist aus dem ZoneWatcher, der ohnehin läuft):
+Eine Veröffentlichung folgt 1–3 Sekunden auf einen Zonenwechsel und
+trägt die Erfahrung, die in der gerade verlassenen Zone verdient wurde.
+Der Nenner ist damit der Abstand der letzten beiden Zonenwechsel — für
+die 22:10:04-Zeile die 144 Sekunden im Trial statt drei, also 54,8
+Mio./h.
+
+Auch das kommt ohne eine Liste von Städten und Hideouts aus, aber aus
+einem anderen Grund als zunächst gedacht: **Eine Zone, in der nichts
+verdient wurde, erzeugt beim Verlassen gar keine Veröffentlichung** — die
+Erfahrung hat sich ja nicht geändert. Jede Veröffentlichung gehört damit
+von selbst zu einer Zone, in der etwas passiert ist. Ist die
+Zonen-Beobachtung aus (Standard) oder folgt eine Veröffentlichung
+ausnahmsweise nicht auf einen Zonenwechsel (Händler, §4.36 — dort liegen
+17 bis 57 Sekunden dazwischen, `_XP_ZONE_TRIGGER_WINDOW_S` fängt das ab),
+fällt die Rechnung auf das volle Intervall zurück.
+
+Gegen Peters echte Runde gerechnet, alte gegen neue Regel:
+
+| Veröffentlichung | Zuwachs | erster Anlauf | Verweildauer | Zone |
+|---|---|---|---|---|
+| 22:02:48 | 9.136.411 | 147,7 Mio./h | 149,5 Mio./h | Mineral Pools (220 s) |
+| 22:07:40 | 9.677.329 | 160,8 Mio./h | 162,8 Mio./h | Plaza (214 s) |
+| 22:10:04 | 2.192.450 | **2.988,6 Mio./h** | 54,8 Mio./h | Trial of Lingering Pain (144 s) |
+| 22:11:36 | 1.025.082 | **1.528,1 Mio./h** | 40,1 Mio./h | Plaza (92 s) |
+| 22:15:04 | 2.668.286 | 103,7 Mio./h | 106,9 Mio./h | Dark Forest (90 s) |
+
+Die niedrigen Werte in der Mitte sind kein Rest des Fehlers, sondern das
+Ergebnis: Ein Trial und ein kurzer Plaza-Lauf bringen tatsächlich weniger
+als eine volle Map. Peters Anzeige im Spiel stand in derselben Runde bei
+182,3 Mio./h — dieselbe Größenordnung wie die 147 bis 163 der
+Map-Zeilen.
 
 **Schneller geht es nicht.** In Peters Protokoll fiel JEDE
 Veröffentlichung mit der Rückkehr ins Hideout zusammen; die Erfahrung
@@ -3283,12 +3313,13 @@ Signal-Emission), `tests/test_main_window_helpers.py` (Baseline ohne
 Rate, eine einzelne Änderung reicht noch nicht, Intervall zwischen zwei
 Veröffentlichungen mit unveränderten Abrufen dazwischen, Einfrieren nach
 drei Stunden Stillstand, Peters Zahlenbeispiel mit der 87-Minuten-Lücke,
-eine frühere Pause zieht die Rate nicht herunter, Uhrstart beim ersten
-Zonenwechsel und nur bei diesem, Rückfall aufs volle Intervall ohne
-Zonen-Beobachtung, Altersvermerk in der Statuszeile, jede
+eine frühere Pause zieht die Rate nicht herunter, Verweildauer der
+verlassenen Zone als Nenner, eine mitten in der nächsten Zone
+eintreffende Veröffentlichung sprengt die Rate nicht, Rückfall aufs volle
+Intervall ohne nahen Zonenwechsel, Altersvermerk in der Statuszeile, jede
 Veröffentlichung im Log, ein Rückgang durch Tod, Formatierung).
 Gegenproben gefahren: Mit der Spannen-Rechnung schlägt Peters
-Zahlenbeispiel fehl, ohne die Zonen-Uhr das 87-Minuten-Beispiel.
+Zahlenbeispiel fehl, ohne die Verweildauer-Regel sein 1,53-Mrd.-Fall.
 
 **Offen für eine Fortsetzung:** Gem-XP/h pro Gem (kein Stellvertreter),
 ein echter Zeitreihen-Speicher fürs Diagramm selbst, die Stufe-20-

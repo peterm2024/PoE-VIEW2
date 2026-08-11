@@ -16,10 +16,10 @@ nach [SemVer](https://semver.org/lang/de/).
 - Charakter-XP/h in der Statuszeile, sobald ein Charakter offen ist —
   ohne zusätzlichen API-Request (Level und Erfahrung stecken bereits in
   der Antwort, die für die Ausrüstung ohnehin geladen wird). Gezeigt wird
-  die Rate der zuletzt abgeschlossenen Map, gerechnet ab dem Moment, in
-  dem der Charakter dafür aufgebrochen ist — Zeit im Hideout verwässert
-  sie also nicht, und eine Pause lässt sie nicht absacken, sondern
-  einfach stehen. Ab einer Minute steht dahinter, wie alt der Wert ist
+  die Rate der zuletzt abgeschlossenen Zone, gerechnet über die Zeit, die
+  der Charakter dort verbracht hat — Wartezeit im Hideout verwässert sie
+  also nicht, und eine Pause lässt sie nicht absacken, sondern einfach
+  stehen. Ab einer Minute steht dahinter, wie alt der Wert ist
   (`24.1M XP/h (3m ago)`), denn neue Erfahrung liefert die API von GGG
   erst, wenn eine Map verlassen wird. Erster Schritt einer größeren,
   noch offenen Idee (Gem-XP/h, ein echter Graph).

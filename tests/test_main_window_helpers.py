@@ -7524,14 +7524,15 @@ def test_an_earlier_idle_gap_does_not_drag_the_current_rate_down(
     win.worker.wait(5000)
 
 
-def test_the_clock_starts_at_the_first_zone_change_after_a_publication(
+def test_the_rate_uses_the_time_spent_in_the_zone_just_left(
         qapp, monkeypatch) -> None:
-    """Peters echtes Zonenprotokoll vom 2026-08-11, der schlimmste Fall
-    darin: 18:27:09 Hideout (Veroeffentlichung), dann 85 Minuten nichts,
-    dann 19:52:02 Foundry und 19:53:55 zurueck im Hideout mit +755.280.
-    Verdient wurden die in den knapp zwei Minuten in der Map. Ueber das
-    volle Intervall waeren es 0,5 Mio./h — eine Zahl, die nach dem
-    Wiedereinstieg wie ein Defekt aussaehe."""
+    """Peters echtes Protokoll vom 2026-08-11, der schlimmste Fall darin:
+    18:27:09 Hideout (Veroeffentlichung), dann 85 Minuten nichts, dann
+    19:52:02 Foundry und 19:53:55 zurueck im Hideout mit +755.280.
+    Verdient wurden die in den knapp zwei Minuten in der Foundry — genau
+    deren Verweildauer ist der Nenner. Ueber das volle Intervall waeren es
+    0,5 Mio./h, eine Zahl, die nach dem Wiedereinstieg wie ein Defekt
+    aussaehe."""
     fake_now = [1000.0]
     monkeypatch.setattr("poe_view.ui.main_window.time.monotonic", lambda: fake_now[0])
 
@@ -7540,9 +7541,10 @@ def test_the_clock_starts_at_the_first_zone_change_after_a_publication(
     fake_now[0] += 60.0
     win._on_character_snapshot("WitchOfPeter", 87, 1_000_000)   # 18:27:09
     fake_now[0] += 5_093.0                                       # 85 min im Hideout
-    win._on_zone_changed("Foundry")                              # 19:52:02, Aufbruch
-    fake_now[0] += 113.0                                         # knapp zwei Minuten Map
-    win._on_zone_changed("Backstreet Hideout")                   # 19:53:55, zurueck
+    win._on_zone_changed("Foundry")                              # 19:52:02
+    fake_now[0] += 113.0                                         # Verweildauer in der Map
+    win._on_zone_changed("Backstreet Hideout")                   # 19:53:55
+    fake_now[0] += 1.0
     win._on_character_snapshot("WitchOfPeter", 87, 1_755_280)    # 19:53:56
 
     assert win._xp_per_hour("WitchOfPeter") == pytest.approx(755_280 / (113 / 3600))
@@ -7552,26 +7554,58 @@ def test_the_clock_starts_at_the_first_zone_change_after_a_publication(
     win.worker.wait(5000)
 
 
-def test_only_the_first_zone_change_of_an_interval_starts_the_clock(
+def test_a_publication_arriving_inside_the_next_zone_does_not_explode(
         qapp, monkeypatch) -> None:
-    """Massgeblich ist der Aufbruch, nicht jede Tuer danach: Wer auf dem
-    Weg noch durch zwei Zonen laeuft, hat trotzdem seit dem Verlassen des
-    Hideouts Erfahrung gesammelt."""
+    """Peter, 2026-08-11: "Hatte gerade 1.53B XP/h. Das kann nicht sein."
+    Sein Protokoll, exakt nachgestellt: Die Veroeffentlichung um 22:07:40
+    kam, als er laengst in der naechsten Zone war (22:07:37 Trial of
+    Lingering Pain). Eine Uhr, die erst beim naechsten Zonenwechsel
+    startet, hatte damit nur die drei Sekunden zwischen 22:10:01 und
+    22:10:04 — und verteilte 2.192.450 XP darauf. Die Verweildauer in der
+    verlassenen Zone sind dagegen die 144 Sekunden im Trial."""
+    fake_now = [1000.0]
+    monkeypatch.setattr("poe_view.ui.main_window.time.monotonic", lambda: fake_now[0])
+
+    win = MainWindow()
+    win._on_character_snapshot("WitchOfPeter", 89, 1_802_930_455)
+    win._on_zone_changed("Plaza")                                  # 22:04:03
+    fake_now[0] += 214.0
+    win._on_zone_changed("Trial of Lingering Pain")                # 22:07:37
+    fake_now[0] += 3.0
+    win._on_character_snapshot("WitchOfPeter", 89, 1_812_607_784)  # 22:07:40
+    fake_now[0] += 141.0
+    win._on_zone_changed("Plaza")                                  # 22:10:01
+    fake_now[0] += 3.0
+    win._on_character_snapshot("WitchOfPeter", 89, 1_814_800_234)  # 22:10:04, +2.192.450
+
+    rate = win._xp_per_hour("WitchOfPeter")
+    assert rate == pytest.approx(2_192_450 / (144 / 3600))
+    assert rate == pytest.approx(54_811_250, rel=0.01)   # nicht 2,99 Mrd.
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_a_publication_without_a_recent_zone_change_uses_the_full_interval(
+        qapp, monkeypatch) -> None:
+    """Nicht jede Veroeffentlichung folgt auf einen Zonenwechsel — beim
+    Haendler kommen sie verspaetet (§4.36). Dann waere die Verweildauer
+    einer laengst verlassenen Zone der falsche Nenner; gerechnet wird ueber
+    das volle Intervall."""
     fake_now = [1000.0]
     monkeypatch.setattr("poe_view.ui.main_window.time.monotonic", lambda: fake_now[0])
 
     win = MainWindow()
     win._on_character_snapshot("WitchOfPeter", 87, 0)
-    fake_now[0] += 60.0
-    win._on_character_snapshot("WitchOfPeter", 87, 1_000_000)
-    win._on_zone_changed("Foundry")            # Aufbruch, hier startet die Uhr
-    fake_now[0] += 300.0
-    win._on_zone_changed("Orchard")            # unterwegs, aendert nichts
-    fake_now[0] += 300.0
+    win._on_zone_changed("Foundry")
+    fake_now[0] += 120.0
     win._on_zone_changed("Backstreet Hideout")
-    win._on_character_snapshot("WitchOfPeter", 87, 21_000_000)
+    fake_now[0] += 1.0
+    win._on_character_snapshot("WitchOfPeter", 87, 1_000_000)
+    fake_now[0] += 3600.0                       # weit weg von jedem Zonenwechsel
+    win._on_character_snapshot("WitchOfPeter", 87, 11_000_000)
 
-    assert win._xp_per_hour("WitchOfPeter") == pytest.approx(20_000_000 / (600 / 3600))
+    assert win._xp_per_hour("WitchOfPeter") == pytest.approx(10_000_000)
 
     win.worker.stop()
     win.worker.wait(5000)

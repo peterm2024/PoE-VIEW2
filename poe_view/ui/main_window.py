@@ -232,25 +232,36 @@ class _XpWatch:
     10,4, und damit genau die Größenordnung, um die seine Anzeige daneben
     lag.
 
-    **Als Nenner zählt nicht das ganze Intervall, sondern die Zeit ab dem
-    ersten Zonenwechsel danach.** Peters Zonenprotokoll zeigt, wo die
-    Erfahrung entsteht und wo nicht:
+    **Als Nenner zählt die Zeit in der zuletzt verlassenen Zone.** Eine
+    Veröffentlichung folgt 1–3 Sekunden auf einen Zonenwechsel und trägt
+    die Erfahrung, die in der gerade verlassenen Zone verdient wurde. Also
+    ist der Nenner genau die Verweildauer dort: vom vorletzten bis zum
+    letzten Zonenwechsel.
 
-    ``18:27:09 Hideout`` (Veröffentlichung) … 85 Minuten nichts …
-    ``19:52:02 Foundry`` → ``19:53:55 Hideout`` (Veröffentlichung, +755.280)
+    Ein Zwischenstand, der falsch war und den Peter binnen einer Runde
+    entlarvt hat ("Hatte gerade 1.53B XP/h"): Zuerst startete die Uhr beim
+    ersten Zonenwechsel NACH einer Veröffentlichung — unter der Annahme,
+    der Charakter stehe beim Veröffentlichen immer in der Zone, in die er
+    gerade zurückgekehrt ist. Peters Protokoll widerlegt das:
 
-    Verdient wurden diese 755.280 in den knapp zwei Minuten in der Map,
-    nicht in den 87 Minuten seit der letzten Veröffentlichung. Über das
-    volle Intervall gerechnet kämen 0,5 Mio./h heraus, über die Zeit ab
-    dem Aufbruch 23,9 Mio./h — und damit ein Wert, der zum nächsten
-    Intervall (28,6 Mio./h) passt statt um Faktor 50 danebenzuliegen.
+    ``22:07:37 Trial of Lingering Pain`` → ``22:07:40 Veröffentlichung``
+    → ``22:10:01 Plaza`` → ``22:10:04 Veröffentlichung (+2.192.450)``
 
-    Dafür ist keine Unterscheidung von Städten und Maps nötig, nur eine
-    Beobachtung: Wo der Charakter beim Veröffentlichen STEHT, ist die
-    Zone, in die er gerade zurückgekehrt ist — dort verdient er nichts
-    mehr. Die Uhr startet deshalb beim ersten Zonenwechsel DANACH. Ohne
-    laufende Zonen-Beobachtung (standardmäßig aus) fällt die Rechnung
-    sauber auf das volle Intervall zurück.
+    Die Veröffentlichung um 22:07:40 kam, als er längst in der nächsten
+    Zone war. Der "erste Zonenwechsel danach" war deshalb nicht der
+    Aufbruch, sondern schon wieder der Ausgang — drei Sekunden vor der
+    nächsten Veröffentlichung, was 2.192.450 XP auf 3 Sekunden verteilte
+    und 2,99 Mrd. XP/h ergab. Die Verweildauer-Regel liefert für dieselbe
+    Zeile die 144 Sekunden im Trial und damit 54,8 Mio./h.
+
+    Warum das ohne eine Liste von Städten und Hideouts auskommt: Eine
+    Zone, in der nichts verdient wurde, erzeugt beim Verlassen gar keine
+    Veröffentlichung (die Erfahrung hat sich ja nicht geändert). Jede
+    Veröffentlichung gehört damit von selbst zu einer Zone, in der etwas
+    passiert ist. Ohne laufende Zonen-Beobachtung (standardmäßig aus) oder
+    wenn eine Veröffentlichung ausnahmsweise nicht auf einen Zonenwechsel
+    folgt (Händler, §4.36), fällt die Rechnung auf das volle Intervall
+    seit der vorigen Veröffentlichung zurück.
 
     Schneller als bis zum Ende einer Map geht es nicht: GGG veröffentlicht
     die Erfahrung erst, wenn der Charakter die Map verlässt (in Peters
@@ -272,13 +283,14 @@ class _XpWatch:
     previous_change_experience: int = 0
     last_change_at: float | None = None
     last_change_experience: int = 0
-    # Erster Zonenwechsel seit der letzten Veröffentlichung — der Moment,
-    # ab dem wieder Erfahrung anfallen kann. ``None`` heißt: seither noch
-    # keiner beobachtet, dann zählt das volle Intervall.
-    active_since: float | None = None
-    # Beim Veröffentlichen festgehalten, damit die Anzeige nicht bei jedem
-    # Aufruf neu entscheiden muss, welcher Startpunkt galt.
-    interval_start_at: float | None = None
+    # Sekunden, auf die der Zuwachs zu verteilen ist — beim Veröffentlichen
+    # einmal festgehalten, damit die Anzeige nicht bei jedem Aufruf neu
+    # entscheiden muss, welche Regel gegriffen hat.
+    interval_seconds: float | None = None
+    # Kam der Nenner aus der Verweildauer in der verlassenen Zone (True)
+    # oder aus dem vollen Intervall seit der vorigen Veröffentlichung?
+    # Nur fürs Log — die Anzeige unterscheidet das nicht.
+    interval_from_zone: bool = False
 
 
 # Listenfelder, die vor dem Vergleich nach der ``id`` ihrer Einträge
@@ -512,6 +524,10 @@ class MainWindow(QMainWindow):
         # die Buchführung pro Charakter.
         self._zone_changes = 0
         self._last_zone_at: float | None = None
+        # Der vorletzte Zonenwechsel: Sein Abstand zum letzten ist die
+        # Verweildauer in der gerade verlassenen Zone — der Nenner der
+        # XP-Rate (§_XpWatch).
+        self._previous_zone_at: float | None = None
         self._last_zone_name = ""
         self._publish_watch: dict[str, _PublishWatch] = {}
         self._xp_watch: dict[str, _XpWatch] = {}
@@ -3117,28 +3133,34 @@ class MainWindow(QMainWindow):
             watch.previous_change_experience = watch.last_change_experience
             watch.last_change_at = now
             watch.last_change_experience = experience
-            # Ab dem ersten Zonenwechsel nach der vorigen Veröffentlichung
-            # rechnen, falls einer beobachtet wurde — sonst über das volle
-            # Intervall (§_XpWatch).
-            watch.interval_start_at = watch.active_since or watch.previous_change_at
-            watch.active_since = None
+            zone_seconds = self._zone_dwell_seconds(now)
+            watch.interval_from_zone = zone_seconds is not None
+            watch.interval_seconds = (
+                zone_seconds if zone_seconds is not None
+                else (now - watch.previous_change_at
+                      if watch.previous_change_at is not None else None))
             self._log_xp_publication(name, watch)
         watch.current_experience = experience
 
-    def _note_zone_change_for_xp(self) -> None:
-        """Erster Zonenwechsel nach einer Veröffentlichung startet die Uhr
-        für die nächste Rate (§_XpWatch). Jeder weitere im selben Intervall
-        ändert nichts — maßgeblich ist der Aufbruch, nicht jede Tür danach.
+    # Wie kurz nach einem Zonenwechsel muss eine Veröffentlichung
+    # eintreffen, damit sie als von ihm ausgelöst gilt? Real gemessen
+    # liegen 1–3 Sekunden dazwischen (ARCHITEKTUR.md §4.34); zehn Sekunden
+    # lassen Luft für einen langsamen Abruf, ohne dass eine Minuten später
+    # eintrudelnde Händler-Veröffentlichung (§4.36) fälschlich einer Zone
+    # zugerechnet würde.
+    _XP_ZONE_TRIGGER_WINDOW_S = 10.0
 
-        Gilt für alle beobachteten Charaktere: Der Zonenwechsel kommt aus
-        PoEs Client.txt und sagt nichts darüber, welcher Charakter gerade
-        gespielt wird. Praktisch ist immer nur einer aktiv, und für die
-        anderen ist der Wert ohnehin belanglos, solange keine Erfahrung
-        eintrifft."""
-        now = time.monotonic()
-        for watch in self._xp_watch.values():
-            if watch.active_since is None:
-                watch.active_since = now
+    def _zone_dwell_seconds(self, now: float) -> float | None:
+        """Verweildauer in der zuletzt verlassenen Zone — der Nenner der
+        XP-Rate, siehe ``_XpWatch``. ``None``, wenn diese Veröffentlichung
+        nicht zu einem Zonenwechsel gehört oder noch kein zweiter bekannt
+        ist; dann rechnet der Aufrufer über das volle Intervall."""
+        if self._last_zone_at is None or self._previous_zone_at is None:
+            return None
+        if now - self._last_zone_at > self._XP_ZONE_TRIGGER_WINDOW_S:
+            return None
+        dwell = self._last_zone_at - self._previous_zone_at
+        return dwell if dwell > 0 else None
 
     @staticmethod
     def _log_xp_publication(name: str, watch: _XpWatch) -> None:
@@ -3150,18 +3172,20 @@ class MainWindow(QMainWindow):
         eigentlichen Zahlen nirgends standen. Das ist der Fehler, den man
         genau einmal macht. Die Zeile fällt nur bei einer echten Änderung
         an, also ein paar Mal pro Spielstunde."""
-        if watch.previous_change_at is None or watch.interval_start_at is None:
+        if watch.previous_change_at is None or watch.interval_seconds is None:
             log.info("Erfahrung %s: erster beobachteter Stand %d (Stufe %d) — "
                      "Basis, noch keine Rate.",
                      name, watch.last_change_experience, watch.level)
             return
-        seconds = watch.last_change_at - watch.interval_start_at
+        seconds = watch.interval_seconds
         gesamt = watch.last_change_at - watch.previous_change_at
         gain = watch.last_change_experience - watch.previous_change_experience
         rate = gain / (seconds / 3600) if seconds > 0 else 0.0
-        log.info("Erfahrung %s: %+d in %.0fs aktiv (Stufe %d) — %.1f Mio. XP/h; "
-                 "das ganze Intervall dauerte %.0fs.",
-                 name, gain, seconds, watch.level, rate / 1_000_000, gesamt)
+        log.info("Erfahrung %s: %+d in %.0fs %s (Stufe %d) — %.1f Mio. XP/h; "
+                 "seit der vorigen Veröffentlichung sind %.0fs vergangen.",
+                 name, gain, seconds,
+                 "in der verlassenen Zone" if watch.interval_from_zone else "(volles Intervall)",
+                 watch.level, rate / 1_000_000, gesamt)
 
     def _xp_per_hour(self, name: str) -> float | None:
         """Rate über das ZULETZT abgeschlossene Intervall zwischen zwei
@@ -3169,9 +3193,9 @@ class MainWindow(QMainWindow):
         Der Wert friert zwischen zwei Veröffentlichungen von selbst ein;
         die ausführliche Begründung steht an ``_XpWatch``."""
         watch = self._xp_watch.get(name)
-        if watch is None or watch.interval_start_at is None or watch.last_change_at is None:
+        if watch is None or watch.interval_seconds is None or watch.previous_change_at is None:
             return None
-        elapsed_h = (watch.last_change_at - watch.interval_start_at) / 3600
+        elapsed_h = watch.interval_seconds / 3600
         if elapsed_h <= 0:
             return None
         return (watch.last_change_experience - watch.previous_change_experience) / elapsed_h
@@ -3869,12 +3893,15 @@ class MainWindow(QMainWindow):
         # Refresh lief (§_PublishWatch, gleiche Begründung wie beim
         # Label eine Zeile darüber).
         self._zone_changes += 1
+        # Den vorigen Zeitpunkt aufheben, BEVOR er überschrieben wird: Der
+        # Abstand der letzten beiden Zonenwechsel ist die Verweildauer in
+        # der gerade verlassenen Zone und damit der Nenner der XP-Rate
+        # (§_XpWatch). Aus demselben Grund wie die Zähler darüber vor allen
+        # Abbruchbedingungen — es zählt, dass der Wechsel stattgefunden
+        # hat, nicht ob daraufhin ein Refresh lief.
+        self._previous_zone_at = self._last_zone_at
         self._last_zone_at = time.monotonic()
         self._last_zone_name = zone_name
-        # VOR den Abbruchbedingungen, aus demselben Grund wie die Zähler
-        # darüber: Für die XP-Rechnung zählt, dass der Charakter wieder
-        # unterwegs ist — nicht, ob daraufhin ein Refresh lief.
-        self._note_zone_change_for_xp()
         if self._event_refresh_blocked() or self._trigger_budget_spent():
             return
         if self._refresh_current_view():
