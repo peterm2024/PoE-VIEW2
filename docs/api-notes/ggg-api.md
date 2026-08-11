@@ -6,6 +6,11 @@ beobachteten Antworten abweicht, gilt das hier Dokumentierte: Alle
 JSON-Strukturen unten stammen aus echten API-Antworten, nicht aus der
 Doku.
 
+Hier steht die **Form** der API. Wie sich Spiel und Server über die Zeit
+verhalten — wann neue Daten überhaupt erscheinen, wie Erfahrung anfällt,
+was die `Client.txt` hergibt — steht daneben in
+[poe-verhalten.md](poe-verhalten.md).
+
 Basis-URL: `https://api.pathofexile.com`
 
 ## OAuth2 mit PKCE

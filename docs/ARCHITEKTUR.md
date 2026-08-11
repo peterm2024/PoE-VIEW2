@@ -91,7 +91,9 @@ gespeicherten JSON-Antworten.
 PoE-VIEW2/
 ├── docs/
 │   ├── ARCHITEKTUR.md          ← dieses Dokument
-│   └── api-notes/              ← Beobachtungen zur GGG-API (Header, JSON-Beispiele)
+│   └── api-notes/
+│       ├── ggg-api.md          ← Form der API: Endpunkte, JSON, OAuth
+│       └── poe-verhalten.md    ← Verhalten von Spiel und Server über die Zeit
 ├── poe_view/
 │   ├── __init__.py
 │   ├── config.py               # Pfade, Client-ID, User-Agent, .env-Laden
