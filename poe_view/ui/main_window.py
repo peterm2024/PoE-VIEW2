@@ -318,6 +318,33 @@ _VOLATILE_LIST_ORDER_FIELDS = ("socketedItems",)
 _VOLATILE_GEM_PROPERTIES = ("Experience",)
 
 
+# Dasselbe eine Ebene höher, am Item selbst: Flaschen führen in
+# ``properties`` mit, wie voll sie gerade sind. Der Wert schwankt beim
+# Spielen dauernd, die MAXIMALE Ladungszahl steht in derselben Zeile und
+# ändert sich nie (Peter, 2026-08-11: "Flaschen-Ladungen spielen generell
+# keine Rolle, da sich die maximale Anzahl nicht ändert und beim Spielen
+# die aktuellen Ladungen ständig schwanken"). An einem einzigen Spielabend
+# haben Flaschen deshalb viermal grundlos aufgeleuchtet.
+#
+# Nur DIESE eine Eigenschaft fliegt raus, nicht ``properties`` als Ganzes:
+# Dort steht bei Stapeln auch die Stapelgröße, und die ist eine echte,
+# anzeigenswerte Änderung.
+_VOLATILE_ITEM_PROPERTIES = ("Currently has {0} Charges",)
+
+
+def _without_volatile_properties(dump: dict) -> None:
+    """Entfernt ``_VOLATILE_ITEM_PROPERTIES`` aus ``dump["properties"]``.
+    Arbeitet an Ort und Stelle, weil ``dump`` bereits die Kopie aus
+    ``model_dump()`` ist — anders als bei den Sockel-Gems, wo das Rohfeld
+    unkopiert durchgereicht wird (siehe ``_gem_without_experience``)."""
+    properties = dump.get("properties")
+    if not isinstance(properties, list):
+        return
+    dump["properties"] = [p for p in properties
+                          if not (isinstance(p, dict)
+                                  and p.get("name") in _VOLATILE_ITEM_PROPERTIES)]
+
+
 def _gem_without_experience(gem: dict) -> dict:
     """``gem`` ohne die Einträge aus ``_VOLATILE_GEM_PROPERTIES`` in
     ``additionalProperties``. Gibt bewusst eine NEUE Dict-Ebene zurück,
@@ -351,6 +378,7 @@ def _stable_item_dump(item: Item) -> dict:
     seiner Stufe bzw. seiner ``id`` — nur sein Erfahrungsstand und seine
     Position in der umgebenden Liste zählen nicht mehr mit."""
     dump = item.model_dump()
+    _without_volatile_properties(dump)
     for field in _VOLATILE_LIST_ORDER_FIELDS:
         value = dump.get(field)
         if isinstance(value, list) and value and isinstance(value[0], dict):
@@ -358,6 +386,45 @@ def _stable_item_dump(item: Item) -> dict:
                                   if isinstance(entry, dict)),
                                  key=lambda entry: entry.get("id") or "")
     return dump
+
+
+def _gem_levels(item: Item) -> dict[str, str]:
+    """Stufe je Sockel-Gem, ``id`` → Stufe als Rohtext. Grundlage der
+    Grün-Hervorhebung aus ``_gem_level_changed``. Rohtext statt ``int``,
+    weil hier nur auf Gleichheit geprüft wird: Eine Stufe, die GGG einmal
+    anders schreibt, wäre als Zahl ein stiller Ausfall, als Text ein
+    sichtbarer Unterschied — und ein Unterschied ist genau das, was die
+    Anzeige zeigen soll."""
+    levels: dict[str, str] = {}
+    for gem in getattr(item, "socketedItems", None) or []:
+        if not isinstance(gem, dict):
+            continue
+        gem_id = gem.get("id")
+        if not gem_id:
+            continue
+        for prop in gem.get("properties") or []:
+            if isinstance(prop, dict) and prop.get("name") == "Level":
+                values = prop.get("values") or []
+                if values:
+                    levels[gem_id] = str(values[0][0])
+                break
+    return levels
+
+
+def _gem_level_changed(previous: Item, current: Item) -> bool:
+    """Ist in ``current`` ein Gem aufgestiegen, das in ``previous`` schon
+    steckte? Peter, 2026-08-11: "die Markierungsfarbe für gelevelte Gems
+    auf Grün ändern, dann erkennt man sofort dass ein Gem eine Stufe
+    aufgestiegen ist."
+
+    Nur Gems, die in BEIDEN Ständen vorkommen, zählen: Ein frisch
+    eingesockeltes Gem bringt seine Stufe mit, ohne aufgestiegen zu sein —
+    das ist ein Sockelwechsel und bleibt türkis."""
+    old = _gem_levels(previous)
+    if not old:
+        return False
+    return any(gem_id in old and old[gem_id] != level
+               for gem_id, level in _gem_levels(current).items())
 
 
 class MainWindow(QMainWindow):
@@ -3362,6 +3429,12 @@ class MainWindow(QMainWindow):
     # viele Zeilen die Anzeige selbst für hervorgehoben hält: Weicht das
     # von dem ab, was auf dem Bildschirm zu sehen ist, liegt der Fehler
     # nicht im Vergleich, sondern in der Darstellung.
+    #
+    # Beides hat sich am 2026-08-11 bezahlt gemacht: Peters dritte
+    # Meldung ("auch Weapon und Offhand markiert") ließ sich allein aus
+    # diesen Zeilen plus der Gem-Mitschrift als KORREKTE Anzeige
+    # nachweisen — zwei frisch gesockelte Gems auf niedriger Stufe, die
+    # im Minutentakt aufsteigen (ARCHITEKTUR.md §4.33).
     _ZONE_EQUIP_DIFF_LOG_WINDOW_S = 5.0
 
     @staticmethod
@@ -3380,9 +3453,29 @@ class MainWindow(QMainWindow):
         keys = sorted(set(old_dump) | set(new_dump))
         return [k for k in keys if old_dump.get(k) != new_dump.get(k)]
 
+    @staticmethod
+    def _gem_leveled_ids(previous_items: list[Item] | None,
+                         items: list[Item]) -> frozenset[str]:
+        """``item.id`` aller Items, in denen seit dem letzten Refresh ein
+        Sockel-Gem aufgestiegen ist — die grün hervorgehobenen Zeilen
+        (§4.33). Bewusst NEBEN ``_diff_character_items`` statt darin: Das
+        ist eine zusätzliche Aussage ÜBER eine bereits erkannte Änderung,
+        keine weitere Art von Änderung. Die Menge ist deshalb immer eine
+        Teilmenge von deren ``changed_ids`` — eine Stufe im Gem ist auch
+        ein Unterschied im Item."""
+        if previous_items is None:
+            return frozenset()
+        previous_by_id = {item.id: item for item in previous_items if item.id}
+        return frozenset(
+            item.id for item in items
+            if item.id and item.id in previous_by_id
+            and _gem_level_changed(previous_by_id[item.id], item)
+        )
+
     def _log_character_item_diff(self, name: str, previous_items: list[Item] | None,
                                  items: list[Item], added_ids: frozenset[str],
-                                 changed_ids: frozenset[str]) -> None:
+                                 changed_ids: frozenset[str],
+                                 leveled_ids: frozenset[str] = frozenset()) -> None:
         """Diagnose für ToDo.md/Peter, 2026-08-10 (siehe Kommentar oben an
         ``_ZONE_EQUIP_DIFF_LOG_WINDOW_S``).
 
@@ -3390,9 +3483,12 @@ class MainWindow(QMainWindow):
 
         - Eine Zusammenfassung bei JEDEM Refresh, sobald überhaupt etwas
           hervorgehoben wird — sie hält fest, wie viele der angezeigten
-          Zeilen die Anzeige selbst für neu bzw. geändert hält. Genau
-          dieser Abgleich mit dem, was auf dem Bildschirm türkis ist,
-          trennt einen Fehler im Vergleich von einem in der Darstellung.
+          Zeilen die Anzeige selbst für neu bzw. geändert hält, und wie
+          viele davon auf einen Gem-Aufstieg zurückgehen (die grünen).
+          Genau dieser Abgleich mit dem, was auf dem Bildschirm farbig
+          ist, trennt einen Fehler im Vergleich von einem in der
+          Darstellung — und die Gem-Zahl beantwortet gleich mit, ob eine
+          Markierung berechtigt war.
         - Je eine Zeile pro betroffenem Item mit den abweichenden
           FELDNAMEN, begrenzt auf ein enges Zeitfenster nach dem letzten
           Zonenwechsel — sonst schriebe jede eingesammelte Währung während
@@ -3403,10 +3499,10 @@ class MainWindow(QMainWindow):
         Mod-Texte o. Ä. ins Log zu schreiben."""
         if previous_items is None or not (added_ids or changed_ids):
             return
-        log.info("Türkis-Hervorhebung %s: %d von %d angezeigten Zeilen "
-                 "(%d neu, %d geändert)",
+        log.info("Hervorhebung %s: %d von %d angezeigten Zeilen "
+                 "(%d neu, %d geändert, davon %d mit Gem-Aufstieg)",
                  name, len(added_ids | changed_ids), len(items),
-                 len(added_ids), len(changed_ids))
+                 len(added_ids), len(changed_ids), len(leveled_ids))
         if self._last_zone_at is None:
             return
         if time.monotonic() - self._last_zone_at > self._ZONE_EQUIP_DIFF_LOG_WINDOW_S:
@@ -3571,13 +3667,16 @@ class MainWindow(QMainWindow):
         self._current_stash_selection = None
         self.table.setColumnHidden(TAB_COL, False)
         added_ids, changed_ids, removed_items = self._diff_character_items(previous_items, items)
-        self._log_character_item_diff(name, previous_items, items, added_ids, changed_ids)
+        leveled_ids = self._gem_leveled_ids(previous_items, items)
+        self._log_character_item_diff(name, previous_items, items, added_ids, changed_ids,
+                                      leveled_ids)
         display_items = items + removed_items
         sources = [item.inventoryId or "?" for item in display_items]
         removed_ids = frozenset(item.id for item in removed_items if item.id)
         self.table_model.set_items(display_items, sources, [None] * len(display_items),
                                    [None] * len(display_items),
-                                   changed_ids=added_ids | changed_ids, removed_ids=removed_ids)
+                                   changed_ids=added_ids | changed_ids, removed_ids=removed_ids,
+                                   leveled_ids=leveled_ids)
         status = f"{name}: {len(items)} items (equipment + inventory)"
         rate = self._xp_per_hour(name)
         if rate is not None:

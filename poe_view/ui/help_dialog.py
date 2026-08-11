@@ -25,7 +25,8 @@ from PySide6.QtWidgets import (QDialog, QDialogButtonBox, QHBoxLayout,
                                QVBoxLayout, QWidget)
 
 from poe_view import __version__, config
-from poe_view.ui.theme import RARITY_COLORS
+from poe_view.ui.theme import (RARITY_COLORS, ROW_CHANGED_COLOR,
+                               ROW_GEM_LEVELED_COLOR)
 
 
 def _icon_src() -> str:
@@ -53,6 +54,15 @@ _TYPE_LEGEND = "<table>" + "".join(
         (5, "Currency"), (6, "Divination Card"),
         (None, "Other — quest items, relics, anything without its own category"),
     )) + "</table>"
+
+
+# Legende der Charakter-Refresh-Hervorhebung (§4.20/§4.33). Dieselben
+# Konstanten wie die Tabelle selbst — eine Farbe, die hier fest
+# hingeschrieben wäre, liefe beim nächsten Theme-Wechsel auseinander.
+_REFRESH_LEGEND = "<table>" + "".join((
+    _swatch(ROW_CHANGED_COLOR, "New or changed since the last refresh"),
+    _swatch(ROW_GEM_LEVELED_COLOR, "A socketed gem gained a level"),
+)) + "</table>"
 
 
 TOPICS: tuple[tuple[str, str], ...] = (
@@ -115,7 +125,7 @@ text search.</p>
 <p>In very large leagues the search waits until you pause typing before
 it filters, instead of rebuilding the table on every keystroke.</p>
 """),
-    ("Keeping data fresh", """
+    ("Keeping data fresh", f"""
 <h3>Keeping data fresh</h3>
 <p>The <b>Mode</b> dropdown decides what happens in the background. All
 modes share the same rate-limit budget and leave room for your clicks:</p>
@@ -137,6 +147,14 @@ switch it on under <i>Settings &gt; Zone Refresh</i>. The toolbar then
 shows the zone last detected. A burst of events in quick succession is
 capped at four refreshes, so it never eats into the request budget your
 own clicks need.</p>
+<p>After a character refresh the table marks what moved:</p>
+{_REFRESH_LEGEND}
+<p>An item that left the inventory stays visible for one more cycle,
+greyed out and <s>struck through</s>, then disappears.</p>
+<p>Equipment lights up more often than you might expect, because a
+socketed gem gaining a level counts as a change to the item holding it —
+that is what the green is for. Gem <i>experience</i>, which ticks up
+constantly while you play, is ignored, as are flask charges.</p>
 <p>The status bar tells you how that is going. <b>Updated 14:23:05</b> is
 when the table was last rebuilt; if <b>unchanged for 12m</b> appears next
 to it, data kept arriving but stayed identical — almost always the

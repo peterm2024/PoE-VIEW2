@@ -3092,14 +3092,73 @@ vollständig.
 Die daraufhin gebaute Erweiterung der Diagnose bleibt trotzdem bestehen:
 Sie deckt jetzt ALLE Slots ab statt nur `EQUIPPED_SLOTS` (die Zeile
 benennt die Ausrüstung weiterhin als solche) und schreibt bei jedem
-Refresh eine Zusammenfassung "Türkis-Hervorhebung *Charakter*: N von M
-angezeigten Zeilen (X neu, Y geändert)". Die alte Beschränkung war eine
+Refresh eine Zusammenfassung "Hervorhebung *Charakter*: N von M
+angezeigten Zeilen (X neu, Y geändert, davon Z mit Gem-Aufstieg)". Die
+alte Beschränkung war eine
 Wette darauf, WO der Fehler steckt; liegt sie daneben, kostet das einen
 ganzen Spielabend Wartezeit. Und die Zusammenfassung hätte den
 Widerspruch oben in einer Zeile aufgelöst, statt ihn über einen
 Cache-Vergleich und eine Rückfrage zu klären: Weicht ihr N von dem ab,
 was auf dem Bildschirm zu sehen ist, liegt der Fehler in der Darstellung
 statt im Vergleich.
+
+**Dritte Meldung, 2026-08-11 — diesmal war die Anzeige im Recht.** Peter:
+"komischerweise wurde auch Weapon und Offhand markiert, aber als einzige
+der angelegten Items." Genau dafür war die Diagnose gebaut, und sie hat
+den Fall in einem Durchgang geklärt: Die Zusammenfassungszeile
+(22:59:13, 7 von 23 Zeilen) und die Gem-Mitschrift zeigen für dieselbe
+Sekunde `Increased Area of Effect Support 3 → 5` in `Weapon2` und
+`Minion Life Support 5 → 8` in `Offhand`. Beide Gems hatte Peter zwölf
+Minuten vorher frisch eingesockelt (davor steckten dort Armageddon Brand
+und Elemental Army Support); auf niedriger Stufe steigen sie im
+Minutentakt auf. Der Abgleich JEDER Ausrüstungs-Markierung des Abends
+gegen die Mitschrift ließ keinen unerklärten Fall übrig — alle gingen
+auf einen Stufenaufstieg oder einen Sockelwechsel zurück, also auf
+genau die Änderungen, die die Hervorhebung zeigen SOLL. Nebenbefund
+derselben Auswertung, in `docs/api-notes/poe-verhalten.md` festgehalten:
+Die `requirements` eines Items sind das Maximum über das Item und seine
+Gems (Gem-Anteile tragen `"suffix": "(gem)"`), weshalb ein
+Gem-Aufstieg zusätzlich das Feld `requirements` kippen lässt.
+
+**Zwei Folgeentscheidungen, beide von Peter am selben Abend.**
+
+*Flaschen-Ladungen fallen aus dem Vergleich.* Sie stehen in
+`properties` als `Currently has {0} Charges` und schwanken beim Spielen
+dauernd — dieselbe Sorte Rauschen wie die Gem-Erfahrung, an einem Abend
+viermal grundlos aufgeleuchtet. Peter: "Flaschen-Ladungen spielen
+generell keine Rolle, da sich die maximale Anzahl nicht ändert und beim
+Spielen die aktuellen Ladungen ständig schwanken." Umgesetzt als
+`_VOLATILE_ITEM_PROPERTIES` in `_stable_item_dump` — bewusst nur diese
+eine Eigenschaft und nicht `properties` als Ganzes, denn dort steht auch
+die Stapelgröße von Währung, und die ist eine echte Änderung.
+
+*Ein Gem-Aufstieg wird grün statt türkis.* Peter: "die Markierungsfarbe
+für gelevelte Gems auf Grün ändern, dann erkennt man sofort dass ein Gem
+eine Stufe aufgestiegen ist." `MainWindow._gem_leveled_ids()` vergleicht
+je Item die Stufe jedes Sockel-Gems mit dem vorigen Stand und reicht die
+betroffenen `item.id` als `leveled_ids` ans Tabellenmodell weiter, das
+dort `ROW_GEM_LEVELED_COLOR` statt `ROW_CHANGED_COLOR` mischt. Nur Gems,
+die in BEIDEN Ständen stecken, zählen: Ein frisch eingesockeltes Gem
+bringt seine Stufe mit, ohne aufgestiegen zu sein — das ist ein
+Sockelwechsel und bleibt türkis.
+
+Die Berechnung sitzt bewusst NEBEN `_diff_character_items` statt darin:
+Sie ist eine zusätzliche Aussage ÜBER eine bereits erkannte Änderung,
+keine weitere Art von Änderung. `leveled_ids` ist deshalb immer eine
+Teilmenge von `changed_ids`, und im Model gewinnt die speziellere
+Aussage.
+
+Peters Alternativvorschlag — die Zeile in der Farbe des aufgestiegenen
+Gems (Rot/Grün/Blau) — wurde verworfen, mit Begründung im Theme
+hinterlegt: In einem Item können mehrere Gems verschiedener Farben
+gleichzeitig aufsteigen (am 2026-08-11 im Schild ein blaues und ein
+rotes), dann gäbe es keine richtige Antwort; außerdem kollidierten Blau
+und Rot mit der Rarity-Färbung und dem Korruptionsrot des Markups. Grün
+ist dasselbe `DASH_OK` wie überall sonst in der Anwendung.
+
+Die Zusammenfassungszeile nennt seither beide Farben ("*N* neu, *M*
+geändert, davon *K* mit Gem-Aufstieg") — sonst ließe sich der Bildschirm
+nicht mehr gegen sie prüfen, und genau dafür ist sie da.
 
 Getestet: `tests/test_main_window_helpers.py` — mitzählende Gem-Erfahrung
 zählt nicht als Änderung, Gegenprobe Stufenaufstieg zählt weiterhin, die

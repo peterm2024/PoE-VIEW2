@@ -6766,6 +6766,121 @@ def test_stripping_gem_experience_leaves_the_cached_item_untouched() -> None:
     assert names == ["Experience"]
 
 
+def _flask(charges: int, maximum: int = 45) -> Item:
+    """Flasche im Aufbau von Peters echten Daten: Die aktuelle Ladung
+    steht in ``properties`` unter ``Currently has {0} Charges``, die
+    maximale in der Verbrauchszeile darueber."""
+    return Item.model_validate({
+        "id": "flask-1", "typeLine": "Divine Life Flask", "inventoryId": "Flask",
+        "properties": [
+            {"name": "Consumes {0} of {1} Charges on use",
+             "values": [["15", 0], [str(maximum), 0]], "displayMode": 3},
+            {"name": "Currently has {0} Charges",
+             "values": [[str(charges), 0]], "displayMode": 3},
+        ],
+    })
+
+
+def test_changing_flask_charges_do_not_count_as_a_changed_item() -> None:
+    """Peter, 2026-08-11: "Flaschen-Ladungen spielen generell keine Rolle,
+    da sich die maximale Anzahl nicht aendert und beim Spielen die
+    aktuellen Ladungen staendig schwanken." An einem einzigen Spielabend
+    hatten seine Flaschen dadurch viermal grundlos aufgeleuchtet —
+    dieselbe Sorte Rauschen wie die Gem-Erfahrung, nur eine Ebene
+    hoeher."""
+    added_ids, changed_ids, removed_items = MainWindow._diff_character_items(
+        [_flask(45)], [_flask(30)])
+
+    assert added_ids == frozenset()
+    assert changed_ids == frozenset()
+    assert removed_items == []
+
+
+def test_a_flask_change_other_than_its_charges_still_counts() -> None:
+    """Gegenprobe: Nur die EINE schwankende Eigenschaft faellt raus, nicht
+    ``properties`` als Ganzes. Hier steigt die maximale Ladungszahl (in
+    echt: eine andere Flasche oder ein neuer Affix) — das soll sichtbar
+    bleiben. Derselbe Grund, aus dem die Stapelgroesse von Waehrung
+    weiterhin zaehlt: Sie steht im selben Feld."""
+    _, changed_ids, _ = MainWindow._diff_character_items(
+        [_flask(45, maximum=45)], [_flask(45, maximum=60)])
+
+    assert changed_ids == frozenset({"flask-1"})
+
+
+def test_a_gem_level_up_marks_the_item_green() -> None:
+    """Peter, 2026-08-11 (§4.33): Waffe und Schildhand leuchteten als
+    einzige Ausruestung auf, und das voellig zu Recht — in beiden war ein
+    frisch gesockeltes Gem aufgestiegen (Increased Area of Effect Support
+    3 -> 5, Minion Life Support 5 -> 8). Genau dieser Fall bekommt seit
+    seiner Rueckmeldung eine eigene Farbe, damit man ihn nicht erst im
+    Log nachschlagen muss."""
+    previous = [Item.model_validate({"id": "wand-1", "typeLine": "Heavy Somatic Wand",
+                                     "inventoryId": "Weapon2",
+                                     "socketedItems": [
+                                         _gem_with_experience("gem-a", "Increased Area of "
+                                                              "Effect Support", 697891,
+                                                              level="3")]})]
+    current = [Item.model_validate({"id": "wand-1", "typeLine": "Heavy Somatic Wand",
+                                    "inventoryId": "Weapon2",
+                                    "socketedItems": [
+                                        _gem_with_experience("gem-a", "Increased Area of "
+                                                             "Effect Support", 12,
+                                                             level="5")]})]
+
+    assert MainWindow._gem_leveled_ids(previous, current) == frozenset({"wand-1"})
+
+
+def test_a_freshly_socketed_gem_is_not_a_level_up() -> None:
+    """Ein neu eingesetztes Gem bringt seine Stufe mit, ohne aufgestiegen
+    zu sein. Peter hat am 2026-08-11 genau das getan (Armageddon Brand
+    raus, Increased Area of Effect Support rein) — die Zeile soll dabei
+    tuerkis bleiben, denn geaendert hat sich der SOCKEL, nicht die
+    Stufe."""
+    previous = [Item.model_validate({"id": "wand-1", "typeLine": "Heavy Somatic Wand",
+                                     "inventoryId": "Weapon2",
+                                     "socketedItems": [
+                                         _gem_with_experience("gem-alt", "Armageddon Brand",
+                                                              5000, level="19")]})]
+    current = [Item.model_validate({"id": "wand-1", "typeLine": "Heavy Somatic Wand",
+                                    "inventoryId": "Weapon2",
+                                    "socketedItems": [
+                                        _gem_with_experience("gem-neu", "Increased Area of "
+                                                             "Effect Support", 0, level="1")]})]
+
+    assert MainWindow._gem_leveled_ids(previous, current) == frozenset()
+
+
+def test_growing_gem_experience_alone_is_not_a_level_up() -> None:
+    """Der Normalfall waehrend des Spielens: Die Erfahrung zaehlt hoch,
+    die Stufe bleibt. Waere das schon Gruen, leuchtete die halbe
+    Ausruestung dauerhaft in der Aufstiegsfarbe — der Fehler von §4.33 in
+    neuen Kleidern."""
+    previous = [Item.model_validate({"id": "helm-1", "typeLine": "Rat's Nest",
+                                     "inventoryId": "Helm",
+                                     "socketedItems": [
+                                         _gem_with_experience("gem-a", "Fire Trap", 66921722)]})]
+    current = [Item.model_validate({"id": "helm-1", "typeLine": "Rat's Nest",
+                                    "inventoryId": "Helm",
+                                    "socketedItems": [
+                                        _gem_with_experience("gem-a", "Fire Trap", 68417244)]})]
+
+    assert MainWindow._gem_leveled_ids(previous, current) == frozenset()
+
+
+def test_the_first_refresh_reports_no_gem_level_ups() -> None:
+    """Ohne Vorzustand gibt es nichts zu vergleichen. Derselbe Grund, aus
+    dem die Tuerkis-Hervorhebung beim ersten Anzeigen schweigt: Ein
+    wochenalter oder gar kein Vergleichsstand liesse halbe Inventare
+    aufleuchten, als waere das gerade passiert."""
+    current = [Item.model_validate({"id": "helm-1", "typeLine": "Rat's Nest",
+                                    "inventoryId": "Helm",
+                                    "socketedItems": [
+                                        _gem_with_experience("gem-a", "Fire Trap", 12)]})]
+
+    assert MainWindow._gem_leveled_ids(None, current) == frozenset()
+
+
 def test_socketed_items_reordering_is_not_logged_as_an_equipment_change(
         qapp, caplog) -> None:
     """Ende-zu-Ende-Fassung des Fixes: die Diagnose-Zeile aus §4.33 soll
@@ -6882,9 +6997,45 @@ def test_the_highlight_summary_reports_how_many_rows_are_marked(qapp, caplog) ->
             Item.model_validate({"id": "bag-2", "typeLine": "Portal Scroll",
                                  "inventoryId": "MainInventory"})], False)
 
-    line = next(m for m in caplog.messages if "Türkis-Hervorhebung" in m)
+    line = next(m for m in caplog.messages if "Hervorhebung" in m)
     assert "2 von 3 angezeigten Zeilen" in line
     assert "1 neu, 1 geändert" in line
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_the_highlight_summary_counts_gem_level_ups_separately(qapp, caplog) -> None:
+    """Seit es zwei Farben gibt, muss die Zusammenfassung beide nennen —
+    sonst laesst sich der Bildschirm nicht mehr gegen sie pruefen, und
+    genau dafuer ist sie da. Die Zahl beantwortet ausserdem im Vorbeigehen
+    die Frage, die Peter am 2026-08-11 gestellt hat: War die Markierung
+    berechtigt?"""
+    import logging
+
+    win = MainWindow()
+    win._current_character_name = "WitchOfPeter"
+    win._on_character_items("WitchOfPeter", [
+        Item.model_validate({"id": "wand-1", "typeLine": "Heavy Somatic Wand",
+                             "inventoryId": "Weapon2",
+                             "socketedItems": [
+                                 _gem_with_experience("gem-a", "Fire Trap", 900, level="15")]}),
+        Item.model_validate({"id": "bag-1", "typeLine": "Chaos Orb",
+                             "inventoryId": "MainInventory", "stackSize": 1})], False)
+
+    with caplog.at_level(logging.INFO, logger="poe_view.ui.main_window"):
+        win._on_character_items("WitchOfPeter", [
+            Item.model_validate({"id": "wand-1", "typeLine": "Heavy Somatic Wand",
+                                 "inventoryId": "Weapon2",
+                                 "socketedItems": [
+                                     _gem_with_experience("gem-a", "Fire Trap", 12, level="16")]}),
+            Item.model_validate({"id": "bag-1", "typeLine": "Chaos Orb",
+                                 "inventoryId": "MainInventory", "stackSize": 2})], False)
+
+    line = next(m for m in caplog.messages if "Hervorhebung" in m)
+    assert "2 von 2 angezeigten Zeilen" in line
+    assert "0 neu, 2 geändert" in line
+    assert "davon 1 mit Gem-Aufstieg" in line
 
     win.worker.stop()
     win.worker.wait(5000)
@@ -6904,7 +7055,7 @@ def test_an_unchanged_refresh_writes_no_highlight_summary(qapp, caplog) -> None:
     with caplog.at_level(logging.INFO, logger="poe_view.ui.main_window"):
         win._on_character_items("WitchOfPeter", [Item.model_validate(item)], False)
 
-    assert not [m for m in caplog.messages if "Türkis-Hervorhebung" in m]
+    assert not [m for m in caplog.messages if "Hervorhebung" in m]
 
     win.worker.stop()
     win.worker.wait(5000)

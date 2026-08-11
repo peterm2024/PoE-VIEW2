@@ -74,7 +74,7 @@ from poe_view.api.models import (Item, gem_level, gem_quality, req_attribute,
                                  req_level)
 from poe_view.api.ninja import PriceIndex
 from poe_view.ui.theme import (OTHER_TYPE, RARITY_COLORS, ROW_CHANGED_COLOR,
-                               blend, dimmed_text)
+                               ROW_GEM_LEVELED_COLOR, blend, dimmed_text)
 
 # frameTypes mit eigener Checkbox (MainWindow.TYPE_FILTER_ENTRIES) — alles
 # andere läuft für den Typ-Filter unter OTHER_TYPE ("Sonstige").
@@ -154,6 +154,7 @@ class ItemTableModel(QAbstractTableModel):
         self._price_index: PriceIndex | None = None
         self._changed_ids: frozenset[str] = frozenset()
         self._removed_ids: frozenset[str] = frozenset()
+        self._leveled_ids: frozenset[str] = frozenset()
 
     # --- Daten setzen -------------------------------------------------- #
 
@@ -162,7 +163,8 @@ class ItemTableModel(QAbstractTableModel):
                   stash_ids: list[str | None] | None = None,
                   request_icons: bool = True,
                   changed_ids: frozenset[str] = frozenset(),
-                  removed_ids: frozenset[str] = frozenset()) -> None:
+                  removed_ids: frozenset[str] = frozenset(),
+                  leveled_ids: frozenset[str] = frozenset()) -> None:
         """``sources[i]`` ist der Tab-Name von ``items[i]``. Ohne Angabe leer.
         ``tab_indices[i]`` ist die 1-basierte Position des Herkunfts-Tabs in
         der aktuellen API-Antwort (``MainWindow._tab_positions``, bewusst
@@ -186,7 +188,12 @@ class ItemTableModel(QAbstractTableModel):
         nicht. ``removed_ids`` referenziert Items, die zwar noch in
         ``items`` stehen (damit sie sichtbar bleiben), aber im aktuellen
         Inventar nicht mehr existieren — Grau/Durchgestrichen statt Löschen,
-        damit man sieht, was gerade verschwunden ist."""
+        damit man sieht, was gerade verschwunden ist.
+
+        ``leveled_ids`` ist eine Teilmenge von ``changed_ids`` und hebt
+        den einen Fall heraus, den Peter auf einen Blick erkennen wollte
+        (2026-08-11): In dem Item ist ein Sockel-Gem aufgestiegen. Grün
+        statt Türkis, sonst identisch behandelt."""
         self.beginResetModel()
         self._items = items
         self._sources = sources if sources is not None else [""] * len(items)
@@ -194,6 +201,7 @@ class ItemTableModel(QAbstractTableModel):
         self._stash_ids = stash_ids if stash_ids is not None else [None] * len(items)
         self._changed_ids = changed_ids
         self._removed_ids = removed_ids
+        self._leveled_ids = leveled_ids
         self._rows = [self._precompute(item) for item in items]
         # Einmal pro Ladevorgang statt bei JEDEM Tastendruck neu zusammengebaut
         # (filterAcceptsRow lief vorher pro Zeile UND pro Tastendruck über
@@ -413,8 +421,13 @@ class ItemTableModel(QAbstractTableModel):
             # Seit dem letzten Refresh geändert oder neu hinzugekommen
             # (Charakter-Refresh-Diff) — Türkis-Tönung des Zeilenhintergrunds,
             # zur Basisfarbe des Themes gemischt (hell wie dunkel lesbar).
+            # Ist in dem Item ein Sockel-Gem aufgestiegen, gewinnt Grün:
+            # ``leveled_ids`` ist die speziellere Aussage über dieselbe
+            # Zeile, "geändert" stimmt daneben ohnehin auch.
+            colour = (ROW_GEM_LEVELED_COLOR if item.id in self._leveled_ids
+                      else ROW_CHANGED_COLOR)
             palette = QGuiApplication.palette()
-            return QBrush(blend(QColor(ROW_CHANGED_COLOR), palette.color(QPalette.ColorRole.Base), 0.55))
+            return QBrush(blend(QColor(colour), palette.color(QPalette.ColorRole.Base), 0.55))
         if role == Qt.ItemDataRole.TextAlignmentRole and (
                 (_NUMERIC_FROM_COL <= col < MODS_COL) or col == VALUE_COL):
             return int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)

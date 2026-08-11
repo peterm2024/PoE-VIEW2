@@ -119,7 +119,10 @@ to a single line by default.
   league, and *Pause* stops all background requests.
 - **Change highlighting** in the character view: rows that appeared or
   changed since the last refresh are highlighted, and items that
-  disappeared stay visible for one cycle in grey and struck through.
+  disappeared stay visible for one cycle in grey and struck through. An
+  item whose socketed gem just gained a level turns green instead of
+  turquoise, so a gem-up is distinguishable at a glance from a genuinely
+  new item.
 - **Item history**: a collapsible panel below the table logs the last
   120 items that entered, left, or changed quantity in any character's
   inventory — a quick way to check what you just stashed, sold, or

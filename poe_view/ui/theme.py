@@ -91,6 +91,19 @@ TYPE_FILTER_COLOR = "#e05fae"
 # haben" seit dem vorigen Refresh) — item_table.py.
 ROW_CHANGED_COLOR = "#1fa8a8"
 
+# Dieselbe Zeilen-Hervorhebung, aber für den einen Fall, den Peter auf
+# einen Blick vom Rest unterscheiden wollte (2026-08-11): In dem Item ist
+# ein Sockel-Gem eine Stufe aufgestiegen. Grün statt Türkis, und zwar
+# DASSELBE Grün wie DASH_OK — die Anwendung hat genau ein Grün, und es
+# bedeutet überall "hier ist etwas fertig geworden".
+#
+# Bewusst KEINE Färbung nach Gem-Farbe (Peters Alternativvorschlag): In
+# einem Item können mehrere Gems verschiedener Farben gleichzeitig
+# aufsteigen — am 2026-08-11 im Schild ein blaues und ein rotes —, dann
+# gäbe es keine richtige Antwort. Dazu kollidierten Blau und Rot mit der
+# Rarity-Färbung (Magic ist blau) und dem Korruptionsrot des Markups.
+ROW_GEM_LEVELED_COLOR = DASH_OK
+
 
 def dimmed_text(palette: QPalette) -> QColor:
     """Textfarbe zu 50% Richtung Hintergrund gemischt — "wahrscheinlich

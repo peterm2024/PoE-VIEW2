@@ -72,6 +72,11 @@ steht dort 27 Minuten lang keine einzige `You have entered`-Zeile,
 obwohl in der Zeit acht Händler-Ereignisse anfielen. Wer den
 Zonenwechsel als einzigen Auslöser benutzt, ist dort blind.
 
+Der blinde Fleck betrifft aber **nur den Händler-Bereich**: Ein Port
+innerhalb der Mine schreibt sehr wohl `You have entered Azurite Mine`
+und löst damit alles Weitere aus (2026-08-11, 22:59:11 — neue Daten
+0,3 Sekunden später).
+
 ### Händler: Identifizieren und Verkaufen verhalten sich unterschiedlich
 
 | Ereignis | Neue Daten verfügbar |
@@ -140,6 +145,12 @@ aktiven Gem auf die Einheit gleich (12.187.472 XP, 2026-08-10). Ein
 einzelnes Gem taugt damit als Stellvertreter für alle — solange es
 durchgehend gesockelt und nicht am Anschlag ist.
 
+**Auch die Gems im Wechsel-Waffenset.** Gegengemessen über 21
+Veröffentlichungen (2026-08-11): Jedes durchgehend gesockelte Gem stand
+bei 33.501.737 XP Zuwachs — die in `Weapon2` und `Offhand2` genauso wie
+die im aktiven Set. Die naheliegende Gegenvermutung ("das inaktive Set
+geht leer aus") ist damit erledigt.
+
 Unterschiedliche **Stände** kommen allein aus der Vorgeschichte:
 
 - Ein **ausgesockeltes** Gem bekommt nichts. `Summon Skitterbots` war
@@ -188,9 +199,22 @@ tatsächlichen 114 Dex.
   herausrechnen.
 - **Item-IDs bleiben stabil**, auch über Zonenwechsel hinweg — eine
   naheliegende Gegenvermutung, die sich an den Logs widerlegen ließ.
+- **Die `requirements` eines Items sind das Maximum über das Item selbst
+  und seine Sockel-Gems.** Einträge, die von den Gems stammen, tragen
+  `"suffix": "(gem)"`. Beispiel (2026-08-11): eine Wand mit
+  `Level 68 (gem) / Str 66 (gem) / Dex 87 (gem) / Int 95 (gem)` — jede
+  Zahl der Höchstwert der drei Gems darin; ein Sceptre daneben zeigt
+  `Str 95` und `Int 131` **ohne** Suffix, das ist die Waffe selbst.
+  Folge: Ein Gem-Aufstieg ändert nicht nur `socketedItems`, sondern
+  gegebenenfalls auch die `requirements` des tragenden Items.
+- **Flaschen ändern sich beim Spielen dauernd.** In `properties` steht
+  `Currently has {0} Charges`; der Wert wandert mit jeder Benutzung. Ein
+  Item-Vergleich hält Flaschen deshalb regelmäßig für "geändert"
+  (viermal an einem Abend, 2026-08-11) — dieselbe Sorte Rauschen wie die
+  Gem-Erfahrung, nur seltener.
 - **Angelegte Ausrüstung ändert sich sonst gar nicht.** Über zwanzig
-  Minuten Spielzeit wiesen Ringe, Amulett, Gürtel und Flaschen kein
-  einziges abweichendes Feld auf.
+  Minuten Spielzeit wiesen Ringe, Amulett und Gürtel kein einziges
+  abweichendes Feld auf.
 
 ---
 
@@ -233,6 +257,15 @@ damit sie nicht zurückkommen.
   dem die Gems sehr unterschiedliche Stände hatten. Ein Snapshot zeigt
   aber Bestände, und die Frage war eine nach Zuwächsen — die sind
   identisch.
+- **"Wenn nach dem Herausrechnen der Gem-Erfahrung immer noch
+  Ausrüstung türkis leuchtet, ist ein Rest des Fehlers übrig."** Am
+  2026-08-11 leuchteten Waffe und Schildhand als einzige angelegte
+  Teile. Der Abgleich jeder einzelnen Markierung des Abends mit der
+  Gem-Mitschrift ergab: **alle** gingen auf einen echten
+  Gem-Stufenaufstieg oder einen Sockelwechsel zurück. Frisch
+  eingesockelte Gems auf niedriger Stufe steigen im Minutentakt auf und
+  lassen ihr Item dadurch bei fast jedem Zonenwechsel aufleuchten — das
+  sieht aus wie der alte Fehler, ist aber die richtige Anzeige.
 - **"Beim Veröffentlichen steht der Charakter in der Zone, in die er
   gerade zurückgekehrt ist."** Meist ja, aber nicht immer: Die
   Veröffentlichung kann eintreffen, wenn er längst in der nächsten Zone
@@ -250,5 +283,7 @@ Nur als Wegweiser — die Begründungen stehen jeweils dort:
 | Daten kommen beim Zonenwechsel | Zonen-Beobachter, ARCHITEKTUR.md §ZoneWatcher |
 | Delve ist blind, Händler veröffentlicht | Händler-Trigger, §4.36 |
 | Gem-Erfahrung steckt in den Item-Daten | `_stable_item_dump`, §4.33 |
+| Flaschen-Ladungen schwanken dauernd | `_VOLATILE_ITEM_PROPERTIES`, §4.33 |
+| Ein Gem-Aufstieg ändert das ganze Item | grüne Hervorhebung, §4.33 |
 | Erfahrung kommt in Schüben, Zone für Zone | XP/h über die Verweildauer, §4.34 |
 | Gem-Zustände, Attribut-Untergrenze | Gem-Mitschrift, §4.35 |

@@ -31,6 +31,11 @@ nach [SemVer](https://semver.org/lang/de/).
   nächsten regulären Takt um die eingesparte Zeit; eine Serie von
   Ereignissen ist auf vier Abrufe begrenzt, danach wird gewartet, bis
   der Takt wieder aufgeholt hat.
+- Ist in einem Item ein Sockel-Gem eine Stufe aufgestiegen, leuchtet die
+  Zeile grün statt türkis. Damit ist der häufigste Grund, aus dem
+  angelegte Ausrüstung überhaupt aufleuchtet, auf einen Blick von einem
+  echten Neuzugang zu unterscheiden. Ein frisch eingesockeltes Gem bringt
+  seine Stufe nur mit und bleibt türkis.
 
 ### Behoben
 
@@ -43,6 +48,10 @@ nach [SemVer](https://semver.org/lang/de/).
   Sekunden). Der Erfahrungsstand zählt für die Hervorhebung jetzt nicht
   mehr mit; ein Gem, das tatsächlich eine Stufe aufsteigt, wird
   weiterhin angezeigt.
+- Aus demselben Grund leuchteten Flaschen regelmäßig auf: Ihre aktuelle
+  Ladungszahl steht in den Item-Daten und schwankt beim Spielen
+  ununterbrochen. Sie zählt für die Hervorhebung nicht mehr mit — die
+  maximale Ladungszahl, die sich tatsächlich ändern kann, dagegen schon.
 
 ## [0.6.0] - 2026-08-07
 

@@ -29,6 +29,24 @@ def test_changed_row_gets_a_turquoise_background(qapp) -> None:
     assert model.data(idx, Qt.ItemDataRole.BackgroundRole) is not None
 
 
+def test_a_gem_level_up_gets_green_instead_of_turquoise(qapp) -> None:
+    """Peter, 2026-08-11: "die Markierungsfarbe für gelevelte Gems auf
+    Grün ändern, dann erkennt man sofort dass ein Gem eine Stufe
+    aufgestiegen ist." Anlass war eine Runde, in der Waffe und Schildhand
+    als einzige Ausrüstung aufleuchteten — zu Recht, aber ohne dass man
+    das der Farbe ansehen konnte."""
+    model = ItemTableModel()
+    model.set_items([_item("abc")], changed_ids=frozenset({"abc"}),
+                    leveled_ids=frozenset({"abc"}))
+    green = model.data(model.index(0, _NAME_COL), Qt.ItemDataRole.BackgroundRole)
+
+    model.set_items([_item("abc")], changed_ids=frozenset({"abc"}))
+    turquoise = model.data(model.index(0, _NAME_COL), Qt.ItemDataRole.BackgroundRole)
+
+    assert green is not None and turquoise is not None
+    assert green.color() != turquoise.color()
+
+
 def test_removed_row_is_greyed_and_struck_through(qapp) -> None:
     model = ItemTableModel()
     model.set_items([_item("abc")], removed_ids=frozenset({"abc"}))
@@ -67,7 +85,8 @@ def test_resetting_items_without_diff_args_clears_previous_highlighting(qapp) ->
     """Beim Wechsel zurück zur Stash-Ansicht (set_items ohne changed_ids/
     removed_ids) darf keine Charakter-Diff-Färbung hängen bleiben."""
     model = ItemTableModel()
-    model.set_items([_item("abc")], changed_ids=frozenset({"abc"}))
+    model.set_items([_item("abc")], changed_ids=frozenset({"abc"}),
+                    leveled_ids=frozenset({"abc"}))
     model.set_items([_item("abc")])
     idx = model.index(0, _NAME_COL)
     assert model.data(idx, Qt.ItemDataRole.BackgroundRole) is None

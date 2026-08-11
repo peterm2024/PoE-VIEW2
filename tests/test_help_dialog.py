@@ -82,6 +82,12 @@ def test_the_help_covers_what_came_after_it_was_written(qapp) -> None:
     assert "unchanged for" in text      # Statuszeile
     assert "no prices for this league" in text  # SSF-Hinweis
     assert "backup" in text             # Sicherungen beim Start
+    # Die zweite Hervorhebungsfarbe (Peter, 2026-08-11): Gruen fuer einen
+    # Gem-Aufstieg. Eine Farbe, die niemand erklaert, ist genau die Sorte
+    # Luecke, gegen die die Hilfe gebaut wurde — zumal Peter selbst
+    # gefragt hat, warum ausgerechnet Waffe und Schildhand leuchten.
+    assert "a socketed gem gained a level" in text
+    assert "flask charges" in text      # was NICHT als Aenderung zaehlt
 
 
 def test_the_help_says_where_the_backups_are_and_how_to_use_one(qapp) -> None:
