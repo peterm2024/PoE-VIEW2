@@ -42,6 +42,13 @@ nach [SemVer](https://semver.org/lang/de/).
 
 ### Behoben
 
+- Die kurzen Hänger beim Aktualisieren der Fächer sind weg. Ursache: Bei
+  jedem eintreffenden Fach wurde der komplette Datenbestand neu in die
+  Cache-Datei geschrieben — bei einer großen Truhe 1,4 Sekunden lang,
+  und zwar im Vordergrund. Das Schreiben läuft jetzt in einem eigenen
+  Thread, und mehrere Anforderungen kurz hintereinander fallen zu einer
+  zusammen. In der Oberfläche bleiben davon 0,009 Sekunden übrig; beim
+  Beenden wird auf den letzten Speichervorgang gewartet.
 - Beim Spielen leuchtete ständig die halbe Ausrüstung türkis auf, als
   wäre gerade etwas Neues passiert, obwohl nichts geschehen war.
   Ursache: Die Erfahrung der Sockel-Gems zählt permanent hoch und ist

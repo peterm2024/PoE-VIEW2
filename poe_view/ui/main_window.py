@@ -27,7 +27,8 @@ from poe_view import __version__, config
 from poe_view.api.models import (Character, Item, StashTab,
                                  dominant_category, is_ggg_suffix)
 from poe_view.api.ninja import PriceIndex
-from poe_view.services import cache_backup, data_cache, gem_xp_log, icon_cache, price_cache
+from poe_view.services import (cache_backup, cache_writer, data_cache, gem_xp_log,
+                               icon_cache, price_cache)
 from poe_view.services.instance_lock import InstanceLock
 from poe_view.services.zone_watcher import ZoneWatcher, resolve_client_log_path
 from poe_view.services.api_worker import (ApiWorker, BootstrapJob,
@@ -508,6 +509,10 @@ class MainWindow(QMainWindow):
         # siehe `_cache_scale`). Grundlage des Überschreibschutzes in
         # `_persist_cache`; 0 heißt "dort liegt nichts Nennenswertes".
         self._persisted_scale: int = 0
+        # Schreibt den Datei-Cache in einem eigenen Thread und fasst
+        # schnell aufeinanderfolgende Anforderungen zusammen
+        # (§cache_writer). Beendet wird er in `closeEvent`.
+        self._cache_writer = cache_writer.CacheWriter()
         self._stash_trees: dict[str, list[StashTab]] = {}      # Liga → Baumstruktur
         self._items: dict[str, dict[str, list[Item]]] = {}     # Liga → {stash_id: Items}
         self._last_loaded: dict[str, dict[str, str]] = {}      # Liga → {stash_id: ISO-Zeitstempel}
@@ -893,7 +898,19 @@ class MainWindow(QMainWindow):
         data.last_loaded = self._last_loaded
         data.character_items = self._character_items
         data.character_items_loaded = self._character_items_loaded
-        data_cache.save(data, data_cache.path_for(self._account_name))
+        # Nur der billige Teil läuft hier (Messung siehe
+        # data_cache.Snapshot: 0,009 s statt 1,4 s) — das Umwandeln der
+        # Stash-Items und das Schreiben übernimmt der Hintergrund-Thread.
+        # Peter, 2026-08-12: "Gibt es eine Möglichkeit, die kurzzeitigen
+        # Freezes beim Updaten der Fächer zu umgehen?"
+        self._cache_writer.request(
+            data_cache.Snapshot(data, data_cache.path_for(self._account_name)))
+        # Bewusst SOFORT gesetzt, nicht erst nach dem tatsächlichen
+        # Schreiben: Der Überschreibschutz oben soll den Umfang des
+        # zuletzt BEABSICHTIGTEN Stands kennen, sonst hielte er nach einem
+        # asynchronen Speichervorgang jeden weiteren für einen Rückgang.
+        # Verhalten wie vorher — auch die synchrone Fassung setzte den
+        # Wert unabhängig davon, ob das Schreiben geklappt hat.
         self._persisted_scale = scale
 
     # ------------------------------------------------------------------ #
@@ -4550,6 +4567,14 @@ class MainWindow(QMainWindow):
             log.warning("ApiWorker reagierte nicht innerhalb von 3s auf stop() — erzwinge Beendigung.")
             self.worker.terminate()
             self.worker.wait(1000)
+        # Erst jetzt, nach dem letzten möglichen `_persist_cache()`: Der
+        # Schreiber läuft als Daemon-Thread und stürbe sonst mit dem
+        # Prozess, mitsamt dem zuletzt angeforderten Stand. Vor der
+        # Freigabe der Konto-Sperre, denn bis dahin gehört die Datei uns.
+        if not self._cache_writer.flush():
+            log.warning("Daten-Cache: Der letzte Speicherstand war beim Beenden "
+                        "noch nicht geschrieben — die Datei enthält einen etwas "
+                        "älteren Stand.")
         # Nach dem Worker: Solange noch ein Job laufen könnte, gehört das
         # Konto dieser Instanz. Ein Prozessende gäbe die Sperre ohnehin
         # frei — ausdrücklich freigeben lässt aber ein zweites Fenster

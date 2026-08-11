@@ -56,38 +56,96 @@ class CachedData:
         self.character_items_loaded: dict[str, str] = {}         # Charaktername → ISO-Zeitstempel
 
 
-def save(data: CachedData, path: Path | None = None) -> None:
-    """Schreibt einen vollständigen Snapshot; Fehler werden nur geloggt (kein Crash).
+class Snapshot:
+    """Ein Speichervorgang in zwei Hälften — der billigen und der teuren.
 
-    ``path`` fehlt → ``_CACHE_FILE`` (siehe Modul-Docstring, Konto-Trennung)."""
-    path = path if path is not None else _CACHE_FILE
-    payload = {
-        "account_name": data.account_name,
-        "characters": [c.model_dump(mode="json") for c in data.characters],
-        "stash_trees": {
-            league: [s.model_dump(mode="json") for s in tree]
-            for league, tree in data.stash_trees.items()
-        },
-        "items_by_league": {
+    Anlass (Peter, 2026-08-12): "Gibt es eine Möglichkeit, die
+    kurzzeitigen Freezes beim Updaten der Fächer zu umgehen?" Gemessen an
+    seinem echten Cache (58.432 Stash-Items, 76 MB): Ein Speichervorgang
+    dauert 1,4 s und lief bisher vollständig im GUI-Thread — und zwar bei
+    JEDEM eintreffenden Fach (``_on_stash_items``). Genau das war das
+    Ruckeln.
+
+    Die Aufteilung folgt der Messung, nicht dem Gefühl:
+
+    | Teil | Dauer |
+    |---|---|
+    | Charaktere, Stash-Bäume, Charakter-Items umwandeln | 0,009 s |
+    | äußere Dicts flach kopieren | < 0,001 s |
+    | **58.432 Stash-Items umwandeln** | **0,981 s** |
+    | JSON erzeugen | 0,40 s |
+    | Datei schreiben | 0,08 s |
+
+    ``snapshot()`` erledigt die ersten beiden Zeilen und gibt ein Objekt
+    zurück, das vom weiteren Verlauf des Programms **entkoppelt** ist;
+    ``write()`` erledigt den Rest und darf deshalb in einem
+    Hintergrund-Thread laufen (``services/cache_writer.py``).
+
+    **Warum die Entkopplung ohne tiefe Kopie funktioniert.** Die
+    Item-Listen in ``items_by_league``/``character_items`` werden im
+    Betrieb immer als GANZES ersetzt (``self._items[league][stash_id] =
+    items``), nie an Ort und Stelle verändert — geprüft über alle
+    Schreibstellen in ``main_window.py``. Eine flache Kopie der äußeren
+    Dicts genügt damit: Was der Schreiber in der Hand hält, kann sich
+    nicht mehr ändern. Die Stash-Bäume dagegen WERDEN in place verändert
+    (``_stamp_category`` schreibt in ``tab.metadata``), deshalb werden
+    genau sie sofort umgewandelt statt später — sie kosten mit 0,004 s
+    ohnehin nichts.
+    """
+
+    __slots__ = ("path", "payload", "items_by_league")
+
+    def __init__(self, data: CachedData, path: Path) -> None:
+        self.path = path
+        self.payload = {
+            "account_name": data.account_name,
+            "characters": [c.model_dump(mode="json") for c in data.characters],
+            "stash_trees": {
+                league: [s.model_dump(mode="json") for s in tree]
+                for league, tree in data.stash_trees.items()
+            },
+            "last_loaded": {league: dict(entries)
+                            for league, entries in data.last_loaded.items()},
+            "character_items": {
+                name: [i.model_dump(mode="json") for i in items]
+                for name, items in data.character_items.items()
+            },
+            "character_items_loaded": dict(data.character_items_loaded),
+        }
+        self.items_by_league = {league: dict(stashes)
+                                for league, stashes in data.items_by_league.items()}
+
+    def write(self) -> None:
+        """Der teure Teil. Fehler werden nur geloggt (kein Crash) — ein
+        fehlgeschlagenes Speichern darf die Anwendung nicht abbrechen,
+        die bisherige Datei bleibt dabei unangetastet (``atomic_json``)."""
+        payload = dict(self.payload)
+        payload["items_by_league"] = {
             league: {sid: [i.model_dump(mode="json") for i in items]
                      for sid, items in stashes.items()}
-            for league, stashes in data.items_by_league.items()
-        },
-        "last_loaded": data.last_loaded,
-        "character_items": {
-            name: [i.model_dump(mode="json") for i in items]
-            for name, items in data.character_items.items()
-        },
-        "character_items_loaded": data.character_items_loaded,
-    }
-    try:
-        config.ensure_dirs()
-        # Nicht direkt in die Zieldatei: siehe atomic_json — bei 52 MB
-        # dauert das lange genug, dass ein Absturz oder eine zweite
-        # Instanz eine abgeschnittene Datei hinterlassen könnte.
-        atomic_json.write_json(path, payload)
-    except OSError:
-        log.exception("Daten-Cache: Schreiben fehlgeschlagen")
+            for league, stashes in self.items_by_league.items()
+        }
+        try:
+            config.ensure_dirs()
+            # Nicht direkt in die Zieldatei: siehe atomic_json — bei 76 MB
+            # dauert das lange genug, dass ein Absturz oder eine zweite
+            # Instanz eine abgeschnittene Datei hinterlassen könnte.
+            atomic_json.write_json(self.path, payload)
+        except OSError:
+            log.exception("Daten-Cache: Schreiben fehlgeschlagen")
+
+
+def save(data: CachedData, path: Path | None = None) -> None:
+    """Schreibt einen vollständigen Snapshot, synchron. Fehler werden nur
+    geloggt (kein Crash).
+
+    ``path`` fehlt → ``_CACHE_FILE`` (siehe Modul-Docstring, Konto-Trennung).
+
+    Der laufende Betrieb nimmt seit 2026-08-12 den Umweg über
+    ``Snapshot`` und ``cache_writer`` (§Snapshot); dieser Weg hier bleibt
+    für alles, was ohnehin warten muss oder keinen GUI-Thread hat —
+    Tests, Werkzeuge, das Beenden des Programms."""
+    Snapshot(data, path if path is not None else _CACHE_FILE).write()
 
 
 def load(path: Path | None = None) -> CachedData | None:

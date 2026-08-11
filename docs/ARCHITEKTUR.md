@@ -106,6 +106,7 @@ PoE-VIEW2/
 │   │   ├── api_worker.py       # QThread + Job-Queue
 │   │   ├── icon_cache.py       # Icon-Download + Datei-Cache
 │   │   ├── data_cache.py       # Charaktere/Stash/Items überleben einen Neustart
+│   │   ├── cache_writer.py     # schreibt ihn im Hintergrund (§4.37)
 │   │   ├── csv_export.py       # Item-Export als CSV
 │   │   └── token_store.py      # keyring-Wrapper
 │   └── ui/
@@ -3746,6 +3747,93 @@ Pause blockiert, vorgezogener Abruf verschiebt statt zurückzusetzen,
 regulärer Takt zählt weiterhin ab jetzt, Peters Zahlenbeispiel mit vier
 durchgelassenen und dem fünften geblockten Trigger, Erholung des Budgets,
 Zonenwechsel im selben Budget, volle Kette über den Watcher).
+
+---
+
+### 4.37 Die Freezes beim Aktualisieren der Fächer: der Cache-Schreiber
+
+Peter, 2026-08-12: "Gibt es eine Möglichkeit, die kurzzeitigen Freezes
+beim Updaten der Fächer zu umgehen? Evtl. in den Hintergrund auslagern."
+
+**Erst gemessen, dann gebaut.** Der Verdacht fiel sofort auf
+`_persist_cache()` — es lief bei JEDEM eintreffenden Fach
+(`_on_stash_items`) und schrieb dabei den KOMPLETTEN Bestand neu, nicht
+etwa nur das geänderte Fach. An Peters echtem Cache (58.432 Stash-Items,
+76 MB) nachgemessen:
+
+| Teil eines Speichervorgangs | Dauer |
+|---|---|
+| Charaktere, Stash-Bäume, Charakter-Items umwandeln | 0,009 s |
+| äußere Dicts flach kopieren | < 0,001 s |
+| **58.432 Stash-Items umwandeln (`model_dump`)** | **0,981 s** |
+| JSON erzeugen | 0,40 s |
+| Datei schreiben | 0,08 s |
+| **gesamt** | **≈ 1,4 s** |
+
+1,4 Sekunden Stillstand pro Fach. Bei "Load All Tabs" über ein paar
+hundert Abschnitte summiert sich das zu Minuten.
+
+**Die Trennlinie folgt der Messung.** `data_cache.Snapshot` teilt den
+Vorgang genau dort, wo die Tabelle es nahelegt: Alles unter 0,01 s
+passiert weiterhin sofort im GUI-Thread, der Rest wandert in
+`services/cache_writer.py`. Gemessen bleiben davon **0,009 s** im
+GUI-Thread übrig statt 1,4 s.
+
+**Warum das ohne tiefe Kopie sicher ist.** Ein Hintergrund-Thread, der
+Daten serialisiert, die der GUI-Thread weiter verändert, ist ein
+klassischer Fehler. Hier trägt es, weil die Item-Listen im Betrieb immer
+als GANZES ersetzt werden (`self._items[league][stash_id] = items`) und
+nie an Ort und Stelle wachsen — über alle Schreibstellen in
+`main_window.py` geprüft, inklusive der `extend`-Aufrufe (die bauen
+Aggregat-Listen auf, sie verändern keine zwischengespeicherten). Eine
+flache Kopie der äußeren Dicts genügt damit. Die Stash-BÄUME dagegen
+werden sehr wohl in place verändert (`_stamp_category` schreibt in
+`tab.metadata`), deshalb werden genau sie sofort umgewandelt — sie kosten
+mit 0,004 s ohnehin nichts. Ein Test hält das fest: Nach dem Snapshot
+werden Item-Liste, Liga und Kontoname geändert, und in der Datei steht
+trotzdem der Stand von vorher.
+
+**Zusammenfassen statt takten.** Der Schreiber hält genau einen
+wartenden Snapshot; trifft ein neuer ein, während noch geschrieben wird,
+ersetzt er den wartenden. Damit fällt eine Serie von Anforderungen von
+selbst auf "die gerade laufende plus die neueste" zusammen — ohne
+Verzögerungs-Timer, für den man eine Wartezeit erfinden müsste, die
+niemand begründen kann. Gegengemessen: 50 Anforderungen in Folge kosten
+den GUI-Thread 3,6 s statt 73 s.
+
+**Was die GIL davon übrig lässt.** Das Umwandeln ist reines Python und
+gibt die GIL nur alle paar Millisekunden ab. Der GUI-Thread kommt
+dadurch regelmäßig zum Zug, statt 1,4 s am Stück zu stehen — aus einem
+harten Einfrieren wird eine kurze zähere Phase. Die verbleibenden 3,6 s
+oben sind genau diese Konkurrenz. Ganz weg wäre sie nur mit einem
+eigenen Prozess, durch den dieselben 76 MB müssten; das kostete mehr als
+es spart.
+
+**Beim Beenden wird gewartet.** Der Thread ist ein Daemon und stürbe mit
+dem Prozess. `closeEvent` ruft deshalb `flush()`, bevor die Konto-Sperre
+fällt, und protokolliert eine Zeitüberschreitung, statt sie zu
+verschweigen — sonst hieße "geschlossen" stillschweigend "letzte
+Änderung verloren".
+
+**Der Überschreibschutz bleibt unverändert.** `_persisted_scale` wird
+weiterhin sofort gesetzt, nicht erst nach dem tatsächlichen Schreiben —
+genau wie in der synchronen Fassung, die den Wert auch dann setzte, wenn
+das Schreiben scheiterte. Er beschreibt den zuletzt BEABSICHTIGTEN
+Umfang; hinge er am Erfolg, hielte er nach dem ersten asynchronen
+Speichervorgang jeden weiteren für einen Rückgang.
+
+Ein Fehler im Hintergrund-Thread wird gefangen und protokolliert, statt
+den Thread mitzunehmen: Ohne ihn würde ab da still nichts mehr
+gespeichert, während die Anwendung weiterläuft. Dieser Fall kam nicht
+aus dem Kopf, sondern aus dem ersten Testlauf — er hat den Thread
+tatsächlich gekillt.
+
+Getestet: `tests/test_cache_writer.py` (Snapshot schreibt dieselbe Datei
+wie der synchrone Weg, Entkopplung von späteren Änderungen, `request()`
+blockiert nicht, Zusammenfassen auf den neuesten Stand, `flush()` meldet
+eine Zeitüberschreitung statt Erfolg, ein Fehler tötet den Schreiber
+nicht und steht im Log), `tests/test_main_window_helpers.py` (Anforderung
+statt Schreibvorgang beobachtet, Konto-Trennung, Überschreibschutz).
 
 ---
 

@@ -173,7 +173,7 @@ def test_the_cache_is_backed_up_at_startup(qapp, monkeypatch, tmp_path) -> None:
     ist danach nicht mehr zu sichern. Deshalb prueft der Test nicht nur
     DASS gesichert wird, sondern dass es VOR dem ersten Schreibvorgang
     geschieht."""
-    from poe_view.services import cache_backup, data_cache
+    from poe_view.services import cache_backup, cache_writer, data_cache
 
     # Ein Bestand aus einer frueheren Sitzung, damit der Start eine
     # Kontokennung findet — ohne die gaebe es keine Cache-Datei.
@@ -187,8 +187,13 @@ def test_the_cache_is_backed_up_at_startup(qapp, monkeypatch, tmp_path) -> None:
     ereignisse: list[str] = []
     monkeypatch.setattr(cache_backup, "run",
                         lambda path, now=None: ereignisse.append(f"backup:{path.name}"))
-    monkeypatch.setattr(data_cache, "save",
-                        lambda data, path=None: ereignisse.append("save"))
+    # Beobachtet wird die ANFORDERUNG, nicht der Schreibvorgang selbst:
+    # Der laeuft seit 2026-08-12 in einem eigenen Thread, seine Lage in
+    # dieser Liste waere also nicht mehr aussagekraeftig. Fuer die Frage
+    # des Tests ("wurde vor dem ersten Schreiben gesichert?") ist der
+    # Zeitpunkt der Anforderung ohnehin der richtige.
+    monkeypatch.setattr(cache_writer.CacheWriter, "request",
+                        lambda self, snapshot: ereignisse.append("save"))
 
     win = MainWindow()
     assert win._account_name == "Someone#1234"
@@ -2056,11 +2061,12 @@ def test_logout_submits_a_logout_job(qapp, monkeypatch) -> None:
 def test_persist_cache_is_a_noop_without_an_active_account(qapp, monkeypatch) -> None:
     """Verhindert, dass ein spät eintreffender Job kurz nach einem Logout
     eine leere Datei über einen bestehenden Kontostand schreibt."""
-    from poe_view.services import data_cache
+    from poe_view.services import cache_writer
 
     win = MainWindow()
     saved = []
-    monkeypatch.setattr(data_cache, "save", lambda data, path=None: saved.append(path))
+    monkeypatch.setattr(cache_writer.CacheWriter, "request",
+                        lambda self, snapshot: saved.append(snapshot.path))
 
     win._persist_cache()
 
@@ -2071,19 +2077,20 @@ def test_persist_cache_is_a_noop_without_an_active_account(qapp, monkeypatch) ->
 
 
 def test_persist_cache_writes_to_the_accounts_own_file(qapp, monkeypatch) -> None:
-    from poe_view.services import data_cache
+    from poe_view.services import cache_writer, data_cache
 
     win = MainWindow()
     win._on_logged_in("PeterM")
     saved = []
-    monkeypatch.setattr(data_cache, "save", lambda data, path=None: saved.append((data, path)))
+    monkeypatch.setattr(cache_writer.CacheWriter, "request",
+                        lambda self, snapshot: saved.append(snapshot))
 
     win._persist_cache()
 
     assert len(saved) == 1
-    data, path = saved[0]
-    assert data.account_name == "PeterM"
-    assert path == data_cache.path_for("PeterM")
+    snapshot = saved[0]
+    assert snapshot.payload["account_name"] == "PeterM"
+    assert snapshot.path == data_cache.path_for("PeterM")
 
     win.worker.stop()
     win.worker.wait(5000)
@@ -2294,6 +2301,7 @@ def test_persist_refuses_to_shrink_the_stored_cache_drastically(qapp, monkeypatc
     win._all_characters = []
     win._character_items = {}
     win._persist_cache()
+    win._cache_writer.flush()
 
     on_disk = data_cache.load(data_cache.path_for("TestAccount#1234"))
     assert on_disk is not None
@@ -2314,11 +2322,13 @@ def test_persist_still_writes_normal_growth_and_moderate_shrinking(qapp, monkeyp
 
     win._items = {"Standard": {f"t{i}": [] for i in range(60)}}  # gewachsen
     win._persist_cache()
+    win._cache_writer.flush()
     assert len(data_cache.load(data_cache.path_for("TestAccount#1234"))
                .items_by_league["Standard"]) == 60
 
     win._items = {"Standard": {f"t{i}": [] for i in range(30)}}  # halbiert
     win._persist_cache()
+    win._cache_writer.flush()
     assert len(data_cache.load(data_cache.path_for("TestAccount#1234"))
                .items_by_league["Standard"]) == 30
 
@@ -2338,6 +2348,7 @@ def test_persist_guard_does_not_block_a_fresh_account(qapp, monkeypatch) -> None
 
     win._all_characters = [make_char("FirstChar", "Standard")]
     win._persist_cache()
+    win._cache_writer.flush()
 
     on_disk = data_cache.load(data_cache.path_for("FreshAccount#9999"))
     assert on_disk is not None and [c.name for c in on_disk.characters] == ["FirstChar"]
@@ -2365,6 +2376,7 @@ def test_persist_after_a_logout_login_cycle_keeps_the_stored_data(qapp, monkeypa
     win._on_logout_clicked()
     win._on_logged_in("TestAccount#1234")
     win._persist_cache()
+    win._cache_writer.flush()
 
     on_disk = data_cache.load(data_cache.path_for("TestAccount#1234"))
     assert on_disk is not None
