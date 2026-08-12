@@ -3964,7 +3964,7 @@ Tool-Menü-Tests zählen ihn nicht mit).
 
 ---
 
-### 4.39 Item-Detail nach Blöcken
+### 4.39 Item-Detail nach Blöcken, Leveling-Panel daneben
 
 Peter, 2026-08-12: "Wir sollten unsere Item-Darstellung etwas
 überarbeiten... Zumindest etwas übersichtlicher, den grafischen
@@ -3997,11 +3997,61 @@ dadurch ohne Fenster prüfbar; `_blocks_to_html()` setzt sie zusammen.
   der beiden Stellen zu vergessen war der Fehler, und beide taten es
   zunächst.
 
+**Der Splitter unten.** Peter, direkt nach dem Umbau: "Kannst du das
+Item-Feld unten in der Breite begrenzen durch splitten? Sonst ziehen
+sich die horizontalen Linien über die ganze Breite. Ich hätte den
+rechten (freien) Bereich hier gerne für unsere Leveling-Infos
+(XP/h-Graph) benutzt." Ein waagerechter `QSplitter` trägt jetzt links
+`ItemDetail` und rechts `LevelingPanel`, verschiebbar, Startverhältnis
+3:1.
+
+**Beide Maße sind gemessen, nicht gegriffen** (Peter, 2026-08-13: "Die
+Trennlinienposition können wir ja anhand der Zeilenbreite berechnen.
+Können wir den XP-Bereich unten ausrichten/fixieren? Dann wackelt das
+beim Item-Wechsel nicht so rum"). Vorher standen dort 900/300 Pixel aus
+der Luft.
+
+*Breite* (`ItemDetail.preferred_width`): Über alle 201.426 Mod-Zeilen in
+Peters Bestand liegt der Median bei 34 Zeichen, 90 % passen in 58,
+**95 % in 68**. Auf 68 Zeichen ist das Panel ausgelegt; der Rest bricht
+um, abgeschnitten wird nichts. Die längste gefundene Zeile hat 381
+Zeichen (eine Jewel-Beschreibung) — dafür gibt es keine sinnvolle
+Panelbreite. Beim Vergrößern des Fensters wächst das Leveling-Feld, das
+Item-Detail behält seine Breite: Ein Text, der breiter wird, gewinnt
+nichts, die Fläche für den späteren Graphen schon.
+
+*Höhe*: fest, sonst sprang das Panel bei jedem Klick — ein Ring mit zwei
+Mods gegen ein Unique mit acht — und mit ihm das Leveling-Feld daneben
+und der untere Rand der Tabelle darüber. Da die Höhe jetzt dauerhaft
+reserviert ist, kostet jede Zeile doppelt, also auch hier gezählt: Über
+59.012 Items liegt der Median bei 7 Zeilen, 90 % kommen mit 12 aus, bei
+**14** sind es 96,5 %. Danach wird es teuer — jede weitere Zeile kauft
+unter einem Prozent und nimmt der Tabelle rund 17 Pixel. `_MAX_LINES`
+steht deshalb auf 14 (Panelhöhe 300 px), nicht auf dem Maximum von 24.
+
+`LevelingPanel` (`ui/leveling_panel.py`) zeigt Stufe, Gesamterfahrung
+und die Rate aus §4.34 — dieselben Zahlen wie die Statuszeile, nur
+größer und dauerhaft. **Der Graph ist bewusst noch nicht drin:** Er
+bräuchte einen Zeitreihen-Speicher, den es nicht gibt. `_XpWatch` merkt
+sich genau zwei Veröffentlichungen, weil die Rate nicht mehr braucht;
+ein Graph braucht den ganzen Abend. Das ist ein eigenes Vorhaben, kein
+Beiwerk dieses Umbaus.
+
+Fehlt die Rate noch, steht dort *warum* ("Rate follows after the next
+zone change") statt eines leeren Feldes — GGG veröffentlicht Erfahrung
+erst beim Verlassen einer Zone (§1 in `poe-verhalten.md`), und ein
+leeres Feld sähe nach einem Fehler aus. Beim Wechsel auf ein Truhenfach
+wird das Panel geleert: Die Anzeige gehört zu EINEM Charakter, eine
+stehengebliebene Rate neben einem Fach behauptete einen Zusammenhang,
+den es nicht gibt.
+
 Getestet: `tests/test_item_detail.py` (impliziter Mod als eigener Block,
 Blockfolge im Ganzen, Verzauberung und Flaschen-Effekt überhaupt
 sichtbar, Kürzung sagt es und schweigt sonst, HTML-Maskierung der
 Mod-Texte, Höhe bleibt über drei sehr verschiedene Items gleich, Panel
-nie kleiner als sein Icon).
+nie kleiner als sein Icon, Breite fasst eine typische Mod-Zeile),
+`tests/test_leveling_panel.py` (Anzeige der Werte, Begründung statt
+leerem Feld, Leeren beim Fach-Wechsel).
 
 ---
 

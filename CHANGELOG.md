@@ -21,6 +21,10 @@ nach [SemVer](https://semver.org/lang/de/).
   erkennen. Verzauberungen und Flaschen-Effekte werden jetzt überhaupt
   angezeigt; passt der Text nicht ins Panel, steht das dort, statt still
   abgeschnitten zu werden.
+- Neben dem Item-Detail sitzt ein Leveling-Feld mit Stufe,
+  Gesamterfahrung und XP/h des zuletzt abgeschlossenen Gebiets. Die
+  Trennlinie zwischen beiden lässt sich verschieben. Ein Verlaufsgraph
+  ist dort vorgesehen, aber noch nicht gebaut.
 
 ## [0.7.0] - 2026-08-12
 

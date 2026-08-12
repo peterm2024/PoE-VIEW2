@@ -45,6 +45,7 @@ from poe_view.ui import external_tools
 from poe_view.ui.help_dialog import HelpDialog
 from poe_view.ui.character_list import CharacterList
 from poe_view.ui.item_detail import ItemDetail
+from poe_view.ui.leveling_panel import LevelingPanel
 from poe_view.ui.item_table import (COLUMNS, CONFIGURABLE_COLUMNS, ICON_COL,
                                     MODS_COL, POSITION_COL, TAB_COL,
                                     VALUE_COL, ItemFilterProxy, ItemTableModel,
@@ -1214,7 +1215,25 @@ class MainWindow(QMainWindow):
                           + 2 * self.history_table.frameWidth())
         table_splitter.setSizes([1000, one_row_height])
         right_layout.addWidget(table_splitter, stretch=1)
-        right_layout.addWidget(self.detail)
+        # Detail links, Leveling rechts (Peter, 2026-08-12): Seit das
+        # Detail-Panel seine Blöcke durch Linien trennt (§4.39), zogen
+        # die sich über die ganze Fensterbreite. Der Splitter begrenzt
+        # sie — und die Fläche daneben bekommt eine Aufgabe, statt leer
+        # zu bleiben. Beide Hälften sind vom Nutzer verschiebbar.
+        self.leveling = LevelingPanel()
+        bottom_splitter = QSplitter(Qt.Orientation.Horizontal)
+        bottom_splitter.addWidget(self.detail)
+        bottom_splitter.addWidget(self.leveling)
+        # Die Trennlinie sitzt dort, wo eine typische Mod-Zeile endet
+        # (`ItemDetail.preferred_width`, aus 201.426 echten Mod-Zeilen
+        # bemessen) — vorher waren es geratene 900/300 Pixel. Beim
+        # Vergrößern des Fensters wächst das Leveling-Feld, das
+        # Item-Detail behält seine Breite: Ein Text, der breiter wird,
+        # gewinnt nichts, das Feld für den späteren Graphen schon.
+        bottom_splitter.setStretchFactor(0, 0)
+        bottom_splitter.setStretchFactor(1, 1)
+        bottom_splitter.setSizes([self.detail.preferred_width(), 1])
+        right_layout.addWidget(bottom_splitter)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.addWidget(left_panel)
@@ -2560,6 +2579,10 @@ class MainWindow(QMainWindow):
         self.table_model.set_items(items, [name] * len(items), [tab_index] * len(items),
                                    [stash_id] * len(items))
         self._status_msg.setText(f"{name}: {len(items)} Items")
+        # Beim Wechsel auf ein Truhenfach die Leveling-Anzeige leeren: Sie
+        # gehört zu EINEM Charakter, und eine stehengebliebene Rate neben
+        # einem Fach behauptete einen Zusammenhang, den es nicht gibt.
+        self.leveling.clear()
         self._update_raw_viewer(stash_id, name)
 
     def _show_special_parent_aggregate(self, stash: StashTab, name: str) -> None:
@@ -3703,6 +3726,20 @@ class MainWindow(QMainWindow):
             # eine zehn Minuten alte Zahl aus wie eine frische.
             status += f" — {self._format_xp_rate(rate)}{self._xp_rate_age_note(name)}"
         self._status_msg.setText(status)
+        self._show_leveling(name)
+
+    def _show_leveling(self, name: str) -> None:
+        """Dieselben Zahlen wie in der Statuszeile, nur größer und
+        dauerhaft (§4.39). Der Beobachtungsstand kommt aus ``_XpWatch``;
+        fehlt er, wurde für diesen Charakter noch nichts veröffentlicht."""
+        watch = self._xp_watch.get(name)
+        rate = self._xp_per_hour(name)
+        self.leveling.show_character(
+            name,
+            level=watch.level if watch else None,
+            experience=watch.current_experience if watch else None,
+            rate_text=self._format_xp_rate(rate) if rate is not None else None,
+            age_note=self._xp_rate_age_note(name))
 
     def _xp_rate_age_note(self, name: str) -> str:
         """" (2m ago)" hinter der XP-Rate — leer, solange die Zahl frisch
