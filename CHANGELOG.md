@@ -14,6 +14,13 @@ nach [SemVer](https://semver.org/lang/de/).
   vor allem für Truhen-Items — Charaktere holt sich PoB selbst von GGGs
   Seite, an die Truhe kommt es nicht heran. Verzauberungen und
   Flaschen-Effekte sind dabei, ebenso Sockel, Qualität und Item-Level.
+- Das Item-Detail unten ist nach Blöcken gegliedert — Eigenschaften,
+  Anforderungen, impliziter und explizite Mods durch dünne Linien
+  getrennt, wie im Spiel. Vorher lief alles als eine Liste
+  untereinander, und welcher Mod der implizite ist, war gar nicht zu
+  erkennen. Verzauberungen und Flaschen-Effekte werden jetzt überhaupt
+  angezeigt; passt der Text nicht ins Panel, steht das dort, statt still
+  abgeschnitten zu werden.
 
 ## [0.7.0] - 2026-08-12
 

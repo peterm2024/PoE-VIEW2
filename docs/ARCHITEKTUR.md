@@ -3964,6 +3964,47 @@ Tool-Menü-Tests zählen ihn nicht mit).
 
 ---
 
+### 4.39 Item-Detail nach Blöcken
+
+Peter, 2026-08-12: "Wir sollten unsere Item-Darstellung etwas
+überarbeiten... Zumindest etwas übersichtlicher, den grafischen
+Schnickschnack brauchen wir vorerst nicht."
+
+**Was daran wirklich fehlte, war nicht Schönheit.** Das Panel warf alles
+in eine flache Liste: Rarität, Anforderungen, Eigenschaften, impliziter
+und explizite Mods untereinander ohne jede Trennung. Damit war **nicht
+zu erkennen, welcher Mod der implizite ist** — im Spiel trennt ihn eine
+Linie ab, hier stand er einfach als erste Zeile zwischen den anderen.
+
+Umgesetzt mit derselben Gliederung wie im Spiel, aber ohne dessen
+Rahmen und Schriftbild: dünne `<hr>`-Linien zwischen den Blöcken
+(Peters Wahl unter drei vorgelegten Entwürfen), sonst nichts.
+`_item_blocks()` liefert die Blöcke als reine Daten ohne Qt und ist
+dadurch ohne Fenster prüfbar; `_blocks_to_html()` setzt sie zusammen.
+
+**Zwei inhaltliche Mängel kamen beim Umbau mit ans Licht:**
+
+- *Stilles Abschneiden.* Die alte Grenze von zwölf Zeilen schnitt ohne
+  Hinweis ab, und Peters "Pain Crusher" lag mit exakt zwölf Zeilen auf
+  der Kante — ein Mod mehr wäre wortlos verschwunden. Die Grenze bleibt,
+  sagt jetzt aber Bescheid und verweist auf die vergrößerte Ansicht.
+- *Fehlende Mod-Listen.* Dieselbe Lücke wie im Item-Textexport (§4.38):
+  angezeigt wurden nur `explicitMods` und `implicitMods`. Ein
+  verzauberter Helm und jede Utility-Flasche zeigten damit gerade das
+  nicht, was sie ausmacht. Die Feldliste steht seither EINMAL in
+  `models` (`ENCHANT_MOD_FIELD`, `EXTRA_MOD_FIELDS`,
+  `all_extra_mod_lines`) statt zweimal in der Oberfläche — genau eine
+  der beiden Stellen zu vergessen war der Fehler, und beide taten es
+  zunächst.
+
+Getestet: `tests/test_item_detail.py` (impliziter Mod als eigener Block,
+Blockfolge im Ganzen, Verzauberung und Flaschen-Effekt überhaupt
+sichtbar, Kürzung sagt es und schweigt sonst, HTML-Maskierung der
+Mod-Texte, Höhe bleibt über drei sehr verschiedene Items gleich, Panel
+nie kleiner als sein Icon).
+
+---
+
 ## 5. UI-Konzept (Oberflächenvorschlag)
 
 Ein Hauptfenster: Navigation links (Charaktere + Stash getrennt), Items
