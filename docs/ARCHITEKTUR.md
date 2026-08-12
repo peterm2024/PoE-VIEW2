@@ -3838,6 +3838,132 @@ statt Schreibvorgang beobachtet, Konto-Trennung, Überschreibschutz).
 
 ---
 
+### 4.38 Item-Textexport für Path of Building
+
+Peters Betatester, 2026-08-12: "Kann man eigentlich von da in den Path of
+Building rein copypasten?" Rechtsklick auf ein Item bietet seither
+"📋 Copy item text (for Path of Building)" an — PoEs eigenes
+Item-Textformat in der Zwischenablage.
+
+**Der Nutzen liegt bei TRUHEN-Items.** Charaktere holt sich PoB selbst
+von GGGs Seite; an die Truhe kommt es nicht heran. "Wäre dieser Ring ein
+Upgrade?" ist genau die Lücke, und PoE-VIEW2 hat die Ringe schon
+geladen.
+
+**Warum das trägt, obwohl derselbe Export 2026-07-31 wieder ausgebaut
+wurde** (FALLSTRICKE #50): Damals war das Ziel Craft of Exile, und CoE
+verlangt das **Strg+ALT+C**-Format ("Advanced mod descriptions") mit
+Mod-Tags, Tier und Wertspanne je Zeile. Diese Daten liefert GGGs API
+nachweislich nie — gegen einen echten 47-MB-Stash-Cache geprüft, kein
+Item trägt je ein "extended"-Feld —, weshalb der Import dort IMMER
+scheiterte und das Feature zu Recht verschwand. PoBs eigener Hilfetext
+nennt dagegen **Strg+C**, das schlichte Item-Textformat. Dessen
+Bestandteile haben wir vollständig. Der Unterschied steckt in einer
+einzigen Taste, und er entscheidet zwischen "geht gar nicht" und "geht".
+
+Gegengeprüft wurde außerdem PoBs Parser selbst (`Classes/Item.lua`,
+`Item:ParseRaw`, quelloffen) statt sich auf das Format zu verlassen, wie
+man es in Erinnerung hat: `Rarity:` schaltet den Parser in den
+Spiel-Modus, `--------` trennt die Abschnitte, `Item Class:` wird
+**gelesen und verworfen** (die Klasse leitet PoB aus dem Basistyp ab).
+
+**Aufbau** (`external_tools.item_export_text`), Abschnitte durch
+`--------` getrennt, in der Reihenfolge des Spiels: Klasse und Rarität,
+Name, Eigenschaften, Anforderungen, Sockel, Item-Level, implizite Mods,
+explizite Mods, Zustandszeilen. Drei Stellen, an denen es nicht beim
+Abschreiben der Felder bleibt:
+
+- **Die Waffenklasse fällt aus den Eigenschaften heraus.** GGG führt sie
+  als wertlose erste Property (`{"name": "Sceptre", "values": []}`) —
+  das ist der einzige Ort, an dem die API sie überhaupt nennt, weshalb
+  `item_category` sie von dort liest. Im Spieltext steht sie
+  ausschließlich in der Kopfzeile; bliebe sie stehen, bekäme PoBs Parser
+  ein nacktes "Sceptre" als Mod-Zeile vorgesetzt. `WEAPON_CLASSES` ist
+  deshalb jetzt öffentlich: dieselbe Liste, einmal zum Lesen, einmal zum
+  Überspringen.
+- **`_ITEM_CLASS_NAMES` ist eine feste Tabelle, keine
+  Pluralisierungsregel.** "One Handed Sword" heißt als Klasse "One Hand
+  Swords", "Staff" wird zu "Staves", "Helmet" zu "Helmets" — drei
+  Muster in drei Zeilen, das lässt sich nicht ableiten. Dieselbe
+  Erkenntnis hatte schon der verworfene erste Anlauf. Was fehlt, bleibt
+  WEG statt geraten: Flaschen bekommen gar keine Klassenzeile, weil PoE
+  dort vier Klassen unterscheidet (Life/Mana/Hybrid/Utility) und unsere
+  Kategorie nur "Flask" kennt. Da PoB die Zeile ohnehin überliest,
+  kostet das nichts.
+- **" (augmented)" hinter aufgewerteten Werten** — der zweite Eintrag je
+  Wert ist GGGs Formathinweis. Dass die 1 genau "aufgewertet" bedeutet,
+  ist an echten Daten abgelesen und nicht angenommen: An einem Sceptre
+  trugen Qualität und per Affix erhöhter Schaden die 1, die unveränderte
+  kritische Trefferchance die 0.
+
+**Nachtrag aus der ersten Probe in echtem PoB (2026-08-12) — es fehlten
+Mod-Listen.** Der Import lief auf Anhieb, und der Vergleich zwischen
+unserem Text und PoBs Innenansicht deckte einen Fehler auf, den kein
+Test gefunden hätte: Exportiert wurden nur `explicitMods` und
+`implicitMods`. GGG führt aber mehr Listen, und im echten Bestand sind
+sie alles andere als selten — gezählt über 59.005 Items:
+`enchantMods` 2274 (Labyrinth-Weihe, Cluster-Jewel-Notables),
+`utilityMods` 2083 (der Effekt jeder Utility-Flasche), `logbookMods` 46,
+`scourgeMods` 11, `crucibleMods` 8, `veiledMods` 6, `ultimatumMods` 5.
+Ein verzauberter Helm und jede Utility-Flasche verloren beim Export also
+genau das, was sie ausmacht.
+
+Sie kommen über `extra="allow"` roh mit, brauchen deshalb eigenes
+Entfernen des Färbungs-Markups (`_raw_mod_lines`) — die aufbereiteten
+Eigenschaften `explicit_mods`/`implicit_mods` gibt es nur für die zwei
+deklarierten Felder. Die Verzauberung bekommt einen eigenen Abschnitt
+VOR den impliziten Mods (so zeigt es das Spiel, und PoB zählt sie zu den
+Implicits); alle übrigen hängen an den expliziten, statt jeweils einen
+eigenen Abschnitt zu erfinden — wo genau das Spiel eine Utility-Flasche
+oder einen Logbuch-Mod abtrennt, ist nicht nachgeprüft, und eine
+geratene Abschnittsgrenze wäre schlechter als eine Zeile im
+benachbarten Block. Verlorengehen darf keine.
+
+Leere Abschnitte fallen weg, sonst stünden zwei Trenner hintereinander
+und PoB bekäme eine leere Mod-Zeile. Der Menüeintrag steht FEST im
+Kontextmenü und nicht in der konfigurierbaren Tool-Liste: Deren leere
+Vorbelegung begründet sich damit, niemanden ungefragt zu kontaktieren
+(§4.15) — ein Zwischenablage-Export kontaktiert niemanden.
+
+**Was ein Test hier nicht leisten kann:** ob PoB den Text am Ende
+akzeptiert. Das entscheidet nur ein echtes Einfügen; der Parser-Blick
+oben senkt das Risiko, ersetzt die Probe aber nicht — und genau die
+Probe hat dann auch die fehlenden Mod-Listen zutage gefördert, nicht
+einer der Tests.
+
+**Gegen das Original geprüft (2026-08-12).** Peter hat dasselbe Item im
+Spiel mit Strg+C kopiert und beide Texte nebeneinandergelegt. Sie
+stimmen in JEDEM Kopf-Abschnitt überein: Klasse, Rarität, beide
+Namenszeilen, Eigenschaften samt `(augmented)`, Anforderungen, Sockel,
+Item-Level. Auch die Anforderungen, die durch die gesockelten Gems
+hochgezogen sind (§4.33), stehen im Original genauso drin — die
+Entscheidung, sie unverändert zu übernehmen, war also richtig.
+
+Der einzige Unterschied liegt bei den Mods: In Peters Client ist
+**"Advanced mod descriptions"** eingeschaltet, sein Text trägt deshalb
+Affix-Namen, Tier und Wertspanne je Zeile (`35(33-38)% increased Armour
+and Energy Shield`). Das ist dieselbe Zusatzinformation, an der Craft of
+Exile gescheitert ist — sie kommt aus dem Client, nicht aus der API, und
+kein noch so sorgfältiger Nachbau kann sie herbeischaffen. Für PoB
+genügt der Wälzwert.
+
+Nebenbei geklärt: Ein erster Versuch zeigte in PoB zwei
+Eldritch-Implicits, die weder in unserem Text noch in GGGs Daten für
+dieses Item stehen (`implicitMods: []`, während drei andere Handschuhe
+desselben Kontos ihre Eldritch-Implicits sehr wohl dort tragen). Ein
+zweiter Versuch in einem frisch angelegten Charakter zeigte sie nicht —
+PoB hatte sie aus dem vorher geladenen Item behalten. Das Original aus
+dem Spiel hat ebenfalls keinen Implicit-Abschnitt.
+
+Getestet: `tests/test_external_tools.py` (Format im Ganzen, Waffenklasse
+wird nicht zur Mod-Zeile, aufgewertete Werte, keine leeren Abschnitte,
+eine Namenszeile bei Magic statt zweier, Zustandszeilen zuletzt, keine
+geratene Klasse bei Flaschen), `tests/test_main_window_helpers.py`
+(Menüeintrag schreibt in die Zwischenablage, die vorhandenen
+Tool-Menü-Tests zählen ihn nicht mit).
+
+---
+
 ## 5. UI-Konzept (Oberflächenvorschlag)
 
 Ein Hauptfenster: Navigation links (Charaktere + Stash getrennt), Items

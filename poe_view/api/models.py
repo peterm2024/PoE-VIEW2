@@ -374,9 +374,54 @@ def req_attribute(item: Item, short: str) -> str | None:
     return None
 
 
+# Mod-Listen, die GGG neben ``explicitMods``/``implicitMods`` führt und
+# die das Modell NICHT als eigenes Feld deklariert — sie kommen über
+# ``extra="allow"`` roh mit. Wer sie übersieht, verliert echte Daten:
+# gezählt in einem Bestand von 59.005 Items trägt jedes zwanzigste
+# mindestens eine (``enchantMods`` 2274, ``utilityMods`` 2083,
+# ``logbookMods`` 46, ``scourgeMods`` 11, ``crucibleMods`` 8,
+# ``veiledMods`` 6, ``ultimatumMods`` 5). ``craftedMods`` steht in GGGs
+# Doku, kam in diesem Bestand aber nicht vor.
+#
+# Hier und nicht in der Oberfläche, weil zwei Stellen dieselbe Frage
+# stellen: das Detail-Panel zeigt sie an, der Item-Textexport schreibt
+# sie mit. Genau EINE davon zu vergessen ist der Fehler, den es zu
+# verhindern gilt — beide taten es zunächst.
+ENCHANT_MOD_FIELD = "enchantMods"
+EXTRA_MOD_FIELDS = ("utilityMods", "craftedMods", "fracturedMods",
+                    "veiledMods", "scourgeMods", "crucibleMods",
+                    "logbookMods", "ultimatumMods")
+
+
+def extra_mod_lines(item: "Item", field: str) -> list[str]:
+    """Eine der Listen aus ``ENCHANT_MOD_FIELD``/``EXTRA_MOD_FIELDS`` als
+    Klartext. Das Färbungs-Markup muss hier eigens weg — die aufbereiteten
+    Eigenschaften ``explicit_mods``/``implicit_mods`` gibt es nur für die
+    beiden deklarierten Felder, alles Übrige kommt roh durch."""
+    value = getattr(item, field, None)
+    if not isinstance(value, list):
+        return []
+    return [strip_display_markup(str(entry)) for entry in value if entry]
+
+
+def all_extra_mod_lines(item: "Item") -> list[str]:
+    """Alle Zusatz-Mods AUSSER der Verzauberung, in der Reihenfolge von
+    ``EXTRA_MOD_FIELDS``. Die Verzauberung bleibt bewusst außen vor: Sie
+    gehört im Spiel über die impliziten Mods, die übrigen zu den
+    expliziten."""
+    return [line for field in EXTRA_MOD_FIELDS
+            for line in extra_mod_lines(item, field)]
+
+
 # Waffen tragen ihre Item-Klasse als ERSTE Property (ohne Werte) — das ist
 # der einzige Ort, an dem die API die Klasse direkt nennt.
-_WEAPON_CLASSES = frozenset({
+#
+# Öffentlich, weil zwei Stellen dieselbe Frage stellen: ``item_category``
+# LIEST die Klasse hier heraus, der Item-Textexport
+# (``external_tools.item_export_text``) muss dieselbe Zeile dagegen
+# ÜBERSPRINGEN — im Spieltext steht die Klasse in der Kopfzeile und nicht
+# noch einmal zwischen den Eigenschaften.
+WEAPON_CLASSES = frozenset({
     "Bow", "Claw", "Dagger", "Rune Dagger", "One Handed Axe", "One Handed Mace",
     "One Handed Sword", "Thrusting One Handed Sword", "Sceptre", "Staff",
     "Warstaff", "Two Handed Axe", "Two Handed Mace", "Two Handed Sword",
@@ -404,7 +449,7 @@ def item_category(item: Item) -> str | None:
     nennt sie nur bei Waffen direkt (erste Property), sonst Heuristik über
     die baseType-Endung, zuletzt Rüstungs-Properties → "Body Armour"."""
     if (item.properties and not item.properties[0].values
-            and item.properties[0].name in _WEAPON_CLASSES):
+            and item.properties[0].name in WEAPON_CLASSES):
         return item.properties[0].name
     base = item.baseType or item.typeLine
     for suffix, category in _BASETYPE_CATEGORIES:

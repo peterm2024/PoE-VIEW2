@@ -173,3 +173,145 @@ def test_card_art_url_falls_back_to_the_name_without_artfilename() -> None:
                 frameType=6, artFilename="   ")
     assert (external_tools.divination_card_art_url(card)
             == "https://web.poecdn.com/image/divination-card/TheDoctor.png")
+
+
+# --- Item-Textexport fuer Path of Building (ARCHITEKTUR.md §4.38) ------ #
+
+def _sceptre() -> Item:
+    """Eine echte Waffe aus Peters Cache, auf das Noetige gekuerzt — samt
+    der wertlosen ersten Property, in der GGG die Waffenklasse fuehrt."""
+    return Item.model_validate({
+        "name": "Soul Bane", "typeLine": "Opal Sceptre", "baseType": "Opal Sceptre",
+        "frameType": 2, "ilvl": 70, "identified": True,
+        "properties": [
+            {"name": "Sceptre", "values": []},
+            {"name": "Quality", "values": [["+20%", 1]]},
+            {"name": "Critical Strike Chance", "values": [["8.00%", 0]]},
+        ],
+        "requirements": [
+            {"name": "Level", "values": [["68", 0]]},
+            {"name": "Str", "values": [["95", 0]]},
+        ],
+        "sockets": [{"group": 0, "sColour": "W"}, {"group": 1, "sColour": "W"}],
+        "implicitMods": ["40% increased Elemental Damage"],
+        "explicitMods": ["69% increased Fire Damage", "+109 to maximum Mana"],
+    })
+
+
+def test_the_item_text_follows_the_games_own_format() -> None:
+    """Genau das Format, das PoE bei Strg+C in die Zwischenablage legt —
+    denn genau das erwartet Path of Building beim Einfuegen (sein eigener
+    Hilfetext nennt Strg+C ausdruecklich)."""
+    text = external_tools.item_export_text(_sceptre())
+
+    assert text.startswith("Item Class: Sceptres\nRarity: Rare\n"
+                           "Soul Bane\nOpal Sceptre\n--------\n")
+    assert "Requirements:\nLevel: 68\nStr: 95" in text
+    assert "Sockets: W W" in text
+    assert "Item Level: 70" in text
+    # Implizite und explizite Mods in GETRENNTEN Abschnitten — daran
+    # unterscheidet PoBs Parser die beiden Sorten.
+    assert ("40% increased Elemental Damage\n--------\n"
+            "69% increased Fire Damage") in text
+
+
+def test_the_weapon_class_property_does_not_become_a_mod_line() -> None:
+    """GGG fuehrt die Waffenklasse als wertlose erste Property. Im
+    Spieltext steht sie ausschliesslich in der Kopfzeile — bliebe sie
+    stehen, bekaeme PoBs Parser ein nacktes "Sceptre" zwischen den
+    Eigenschaften vorgesetzt."""
+    text = external_tools.item_export_text(_sceptre())
+
+    assert "Item Class: Sceptres" in text
+    assert "\nSceptre\n" not in text
+
+
+def test_augmented_values_are_marked_like_in_game() -> None:
+    """Der zweite Eintrag je Wert ist GGGs Formathinweis; die 1 bedeutet
+    "aufgewertet" (an Peters echtem Cache abgelesen: Qualitaet und
+    per Affix erhoehter Schaden tragen sie, die unveraenderte kritische
+    Trefferchance nicht)."""
+    text = external_tools.item_export_text(_sceptre())
+
+    assert "Quality: +20% (augmented)" in text
+    assert "Critical Strike Chance: 8.00%\n" in text
+
+
+def test_an_item_without_sockets_or_mods_has_no_empty_sections() -> None:
+    """Ein leerer Abschnitt wuerde als doppelter Trenner erscheinen und
+    PoB eine Mod-Zeile ohne Inhalt vorsetzen."""
+    text = external_tools.item_export_text(
+        Item.model_validate({"typeLine": "Chaos Orb", "frameType": 5}))
+
+    assert "--------\n--------" not in text
+    assert "Sockets:" not in text
+    assert text.startswith("Rarity: Currency\nChaos Orb")
+
+
+def test_magic_and_normal_items_get_a_single_name_line() -> None:
+    """Nur Rare und Unique tragen einen Eigennamen ueber der Basis. Bei
+    Magic steckt der Affix-Text bereits in typeLine, genau wie im Spiel —
+    eine zweite Zeile waere dort eine Dopplung."""
+    text = external_tools.item_export_text(Item.model_validate({
+        "typeLine": "Sanctified Ruby Ring of the Flatworm",
+        "baseType": "Ruby Ring", "frameType": 1}))
+
+    # Ohne Eigenschaften, Sockel und Mods bleibt es beim Kopf allein —
+    # kein Trenner ohne einen Abschnitt dahinter.
+    assert text == ("Item Class: Rings\nRarity: Magic\n"
+                    "Sanctified Ruby Ring of the Flatworm\n")
+
+
+def test_state_lines_come_last() -> None:
+    """"Unidentified" und "Corrupted" stehen im Spieltext ganz unten."""
+    text = external_tools.item_export_text(Item.model_validate({
+        "name": "Dread Veil", "baseType": "Lion Pelt", "frameType": 2,
+        "identified": False, "corrupted": True}))
+
+    assert text.endswith("--------\nUnidentified\nCorrupted\n")
+
+
+def test_a_flask_gets_no_guessed_item_class() -> None:
+    """PoE unterscheidet vier Flaschen-Klassen (Life/Mana/Hybrid/Utility),
+    unsere Kategorie kennt nur "Flask". Lieber keine Kopfzeile als eine
+    falsche — PoB leitet die Klasse ohnehin aus dem Basistyp ab."""
+    text = external_tools.item_export_text(Item.model_validate({
+        "typeLine": "Divine Life Flask", "baseType": "Divine Life Flask",
+        "frameType": 0}))
+
+    assert "Item Class:" not in text
+    assert text.startswith("Rarity: Normal\nDivine Life Flask")
+
+
+def test_enchantments_and_utility_mods_are_not_lost() -> None:
+    """Beim ersten Anlauf exportiert wurden nur explicitMods und
+    implicitMods — aufgefallen erst beim Vergleich mit PoB. In Peters
+    echtem Bestand tragen 2274 Items eine ``enchantMods``-Zeile und 2083
+    eine ``utilityMods``; beides wertet PoB aus. Die Verzauberung bekommt
+    einen eigenen Abschnitt VOR den impliziten Mods (so zeigt es das
+    Spiel, und PoB zaehlt sie zu den Implicits)."""
+    text = external_tools.item_export_text(Item.model_validate({
+        "typeLine": "Granite Flask", "baseType": "Granite Flask", "frameType": 1,
+        "enchantMods": ["Adds 4 Passive Skills"],
+        "implicitMods": ["10% increased Frenzy Charge Duration"],
+        "explicitMods": ["34% reduced Duration"],
+        "utilityMods": ["+1500 to Armour"],
+    }))
+
+    assert ("Adds 4 Passive Skills\n--------\n"
+            "10% increased Frenzy Charge Duration\n--------\n"
+            "34% reduced Duration\n+1500 to Armour") in text
+
+
+def test_mod_markup_is_stripped_from_the_extra_lists() -> None:
+    """Die Zusatzlisten kommen ueber ``extra="allow"`` roh mit — anders
+    als explicitMods/implicitMods gibt es fuer sie keine aufbereitete
+    Eigenschaft im Modell. Ohne eigenes Entfernen stuende GGGs
+    Faerbungs-Markup im Text."""
+    text = external_tools.item_export_text(Item.model_validate({
+        "typeLine": "Chaos Orb", "frameType": 5,
+        "utilityMods": ["<enchanted>{+35% to all Elemental Resistances}"],
+    }))
+
+    assert "+35% to all Elemental Resistances" in text
+    assert "<enchanted>" not in text

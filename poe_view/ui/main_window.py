@@ -15,7 +15,8 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
 from PySide6.QtCore import QSettings, Qt, QTimer, QUrl, Signal
-from PySide6.QtGui import QAction, QDesktopServices, QMouseEvent, QPixmap
+from PySide6.QtGui import (QAction, QDesktopServices, QGuiApplication,
+                           QMouseEvent, QPixmap)
 from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QCompleter,
                                QDialog, QFileDialog, QLabel, QLineEdit,
                                QMainWindow, QMenu, QMessageBox, QProgressBar,
@@ -3844,21 +3845,39 @@ class MainWindow(QMainWindow):
         fest verdrahteten und ab Werk auch keine vorbelegten — siehe
         ``external_tools``-Modul-Docstring.
 
-        Ohne einen einzigen aktiven Eintrag (Auslieferungszustand) zeigt das
-        Menü statt eines leeren Popups einen deaktivierten Hinweis auf den
-        Settings-Dialog — ein leeres Kontextmenü sieht sonst wie ein Fehler
-        aus."""
+        Der Kopieren-Eintrag steht fest im Menü und nicht in der
+        konfigurierbaren Liste: Er öffnet keine fremde Seite, sondern legt
+        Text in die Zwischenablage — die Begründung für die leere
+        Vorbelegung (niemanden ungefragt kontaktieren) trifft ihn also
+        nicht. Ohne aktiven Tool-Eintrag steht darunter statt eines leeren
+        Popups ein deaktivierter Hinweis auf den Settings-Dialog."""
         menu = QMenu(self.table)
+        menu.addAction("📋 Copy item text (for Path of Building)",
+                       lambda checked=False, i=item: self._copy_item_text(i))
+        menu.addSeparator()
+        added = False
         for entry in self._load_tool_entries():
             if not entry.enabled:
                 continue
             url = external_tools.build_url(entry, item)
             menu.addAction(f"{entry.name} öffnen",
                            lambda checked=False, u=url: QDesktopServices.openUrl(QUrl(u)))
-        if menu.isEmpty():
+            added = True
+        if not added:
             hint = menu.addAction("No item tools configured — see Settings")
             hint.setEnabled(False)
         return menu
+
+    def _copy_item_text(self, item: Item) -> None:
+        """Item im Textformat des Spiels in die Zwischenablage — das, was
+        Path of Building beim Einfügen erwartet (§4.38). Wunsch von Peters
+        Betatester, 2026-08-12: "Kann man eigentlich von da in den Path of
+        Building rein copypasten?"
+
+        Der Nutzen liegt bei Truhen-Items: Charaktere holt sich PoB selbst
+        von GGGs Seite, an die Truhe kommt es nicht heran."""
+        QGuiApplication.clipboard().setText(external_tools.item_export_text(item))
+        self._status_msg.setText(f"Copied item text: {item.display_name}")
 
     def _on_history_row_double_clicked(self, index) -> None:
         """Doppelklick auf einen Verlaufs-Eintrag: dieselbe vergrößerte

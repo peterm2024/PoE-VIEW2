@@ -6,6 +6,15 @@ nach [SemVer](https://semver.org/lang/de/).
 
 ## [Unveröffentlicht]
 
+### Hinzugefügt
+
+- Rechtsklick auf ein Item bietet jetzt "Copy item text (for Path of
+  Building)" an: Das Item landet im Textformat des Spiels in der
+  Zwischenablage und lässt sich in Path of Building einfügen. Gedacht
+  vor allem für Truhen-Items — Charaktere holt sich PoB selbst von GGGs
+  Seite, an die Truhe kommt es nicht heran. Verzauberungen und
+  Flaschen-Effekte sind dabei, ebenso Sockel, Qualität und Item-Level.
+
 ## [0.7.0] - 2026-08-12
 
 ### Hinzugefügt

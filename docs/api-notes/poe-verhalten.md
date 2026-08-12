@@ -263,6 +263,22 @@ actually available.
   experience, just rarer.
 - **Equipped gear does not change otherwise.** Over twenty minutes of
   play, rings, amulet and belt showed not a single differing field.
+- **The item text the game copies can be reconstructed from the API —
+  except for the mod details.** Compared line by line on 2026-08-12: an
+  export built purely from API fields matched the game's own Ctrl+C
+  output exactly in every header section (item class, rarity, both name
+  lines, properties with their `(augmented)` marks, requirements,
+  sockets, item level). Two things worth knowing:
+  - The requirements in that block include the ones raised by **socketed
+    gems** — the game shows the combined value, and so does the API.
+  - The game client has an option called **Advanced mod descriptions**.
+    With it enabled, the copied text carries the affix name, tier and
+    value range per mod (`35(33-38)% increased Armour and Energy
+    Shield`). **The API never provides any of that** — checked against a
+    47 MB stash cache, not one item carries an "extended" field with
+    tags, tier or range. A text built from the API therefore cannot
+    satisfy a tool that requires the advanced format, no matter how well
+    the rest is reconstructed.
 
 ---
 

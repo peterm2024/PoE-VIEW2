@@ -5239,7 +5239,10 @@ def test_item_tools_menu_is_empty_out_of_the_box_and_points_to_settings(qapp) ->
     Hinweis auf den Settings-Dialog im Menü."""
     win = MainWindow()
     rare = Item.model_validate({"typeLine": "Vaal Regalia", "baseType": "Vaal Regalia", "frameType": 2})
-    actions = win._build_item_tools_menu(rare).actions()
+    # Der Kopieren-Eintrag steht fest im Menü und gehört nicht zu den
+    # konfigurierbaren Nachschlagewerken — er öffnet keine fremde Seite.
+    actions = [a for a in win._build_item_tools_menu(rare).actions()
+               if a.text() and "Copy item text" not in a.text()]
     assert len(actions) == 1
     assert not actions[0].isEnabled()
     assert "Settings" in actions[0].text()
@@ -5273,9 +5276,39 @@ def test_item_tools_menu_uses_a_custom_configured_entry(qapp) -> None:
         external_tools.ToolEntry("Mein Wiki", "https://example.test/{slug}", enabled=True),
     ])
     item = Item.model_validate({"typeLine": "Chaos Orb", "baseType": "Chaos Orb", "frameType": 5})
-    actions = win._build_item_tools_menu(item).actions()
+    actions = [a for a in win._build_item_tools_menu(item).actions()
+               if a.text() and "Copy item text" not in a.text()]
     assert len(actions) == 1
     assert actions[0].text() == "Mein Wiki öffnen"
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_the_context_menu_copies_the_item_text_to_the_clipboard(qapp) -> None:
+    """Wunsch von Peters Betatester, 2026-08-12: "Kann man eigentlich von
+    da in den Path of Building rein copypasten?" Der Eintrag steht fest im
+    Menü, unabhaengig von den konfigurierbaren Nachschlagewerken — er
+    oeffnet keine fremde Seite, sondern schreibt nur in die
+    Zwischenablage."""
+    from PySide6.QtGui import QGuiApplication
+
+    win = MainWindow()
+    # Mit der wertlosen ersten Property: Bei WAFFEN ist das die einzige
+    # Stelle, an der die API ihre Klasse nennt (die baseType-Endung reicht
+    # nur bei Ruestung und Schmuck).
+    item = Item.model_validate({"name": "Soul Bane", "typeLine": "Opal Sceptre",
+                                "baseType": "Opal Sceptre", "frameType": 2, "ilvl": 70,
+                                "properties": [{"name": "Sceptre", "values": []}]})
+    copy_action = next(a for a in win._build_item_tools_menu(item).actions()
+                       if "Copy item text" in a.text())
+
+    copy_action.trigger()
+
+    text = QGuiApplication.clipboard().text()
+    assert text.startswith("Item Class: Sceptres\nRarity: Rare\n"
+                           "Soul Bane\nOpal Sceptre")
+    assert "Item Level: 70" in text
 
     win.worker.stop()
     win.worker.wait(5000)
