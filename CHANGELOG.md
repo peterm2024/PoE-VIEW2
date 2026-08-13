@@ -6,6 +6,16 @@ nach [SemVer](https://semver.org/lang/de/).
 
 ## [Unveröffentlicht]
 
+### Hinzugefügt
+
+- Verlässt man eine Map zwischendurch (Items verkaufen) und kommt
+  zurück, erkennt der XP-Graph das jetzt als EINE Map: Hinter den
+  einzelnen Aufenthalten liegt eine dunkelgrüne Fläche auf Höhe der
+  Rate für die ganze Map. Die Lücke bleibt sichtbar — man sieht also,
+  was der Ausflug gekostet hat.
+- Eine gestrichelte Linie im Graphen zeigt die Gesamtrate über die
+  angezeigten drei Stunden.
+
 ### Geändert
 
 - Die Suche versteht jetzt mehrere Begriffe, so wie die Suche im Spiel:

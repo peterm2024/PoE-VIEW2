@@ -233,3 +233,72 @@ def test_zone_changes_and_inventory_events_stay_on_separate_signals(tmp_path, qa
 
     assert zones == ["The Coast"]
     assert events == ["Trade accepted"]
+
+
+# --- Instanz-Kennung (Peter, 2026-08-13) ------------------------------- #
+#
+# Echte Zeilen aus Peters Client.txt, gekuerzt. Die Kennung steht IMMER
+# vor dem zugehoerigen "You have entered".
+
+_INSTANCE_BLOCK = (
+    '2026/08/13 17:23:10 11298781 11869d8b [DEBUG Client 21356] '
+    'Client-Safe Instance ID = 2308728564\n'
+    '2026/08/13 17:23:10 11298781 1186a8a3 [DEBUG Client 21356] '
+    'Generating level 80 area "MapWorldsBrambleValley" with seed 711400918\n'
+    '2026/08/13 17:23:11 11299000 cffb065b [INFO Client 21356] '
+    ': You have entered Bramble Valley.\n')
+
+
+def test_the_instance_id_is_picked_up_with_the_zone(qapp, tmp_path) -> None:
+    """Ohne sie liesse sich "zurueck in dieselbe Map" nicht von "naechste
+    Map gleichen Namens" unterscheiden — am Zonennamen allein ist das
+    NICHT zu erkennen, und die Gruppierung im XP-Graphen haengt daran."""
+    log = tmp_path / "Client.txt"
+    _write(log, "")
+    watcher = ZoneWatcher(log)
+    zonen = []
+    watcher.zone_changed.connect(zonen.append)
+
+    _write(log, _INSTANCE_BLOCK)
+    watcher.check_now()
+
+    assert zonen == ["Bramble Valley"]
+    assert watcher.last_instance_id == "2308728564"
+
+
+def test_returning_to_the_same_map_keeps_the_same_instance_id(qapp, tmp_path) -> None:
+    """Peters echter Ablauf vom 2026-08-13: Map, kurz ins Hideout Items
+    verkaufen, zurueck in DIESELBE Map. Beide Male 2308728564."""
+    log = tmp_path / "Client.txt"
+    _write(log, "")
+    watcher = ZoneWatcher(log)
+    gesehen = []
+    watcher.zone_changed.connect(lambda zone: gesehen.append((zone, watcher.last_instance_id)))
+
+    hideout = ('2026/08/13 17:29:12 1 x [DEBUG Client 1] '
+               'Client-Safe Instance ID = 3117141110\n'
+               '2026/08/13 17:29:13 1 x [INFO Client 1] '
+               ': You have entered Backstreet Hideout.\n')
+    _write(log, _INSTANCE_BLOCK + hideout + _INSTANCE_BLOCK)
+    watcher.check_now()
+
+    assert gesehen == [("Bramble Valley", "2308728564"),
+                       ("Backstreet Hideout", "3117141110"),
+                       ("Bramble Valley", "2308728564")]
+
+
+def test_without_the_debug_line_the_id_stays_empty(qapp, tmp_path) -> None:
+    """Es ist eine DEBUG-Zeile. Fehlt sie, bleibt die Kennung leer und
+    alles verhaelt sich wie zuvor — jeder Aufenthalt zaehlt fuer sich.
+    Lieber nicht gruppieren als falsch gruppieren."""
+    log = tmp_path / "Client.txt"
+    _write(log, "")
+    watcher = ZoneWatcher(log)
+    zonen = []
+    watcher.zone_changed.connect(zonen.append)
+
+    _write(log, _ZONE_LINE)
+    watcher.check_now()
+
+    assert zonen == ["The Coast"]
+    assert watcher.last_instance_id == ""

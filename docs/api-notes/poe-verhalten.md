@@ -133,6 +133,27 @@ Counted in a real file with 81,639 lines (2026-08-10):
 Format of a line:
 `2026/08/01 21:44:37 15181671 cffb0658 [INFO Client 18604] : You have entered The Coast.`
 
+**A few lines before every zone entry sits the instance identity**, and
+it is the only way to tell "back into the same map" from "the next map
+of the same name" — the `You have entered` line reads identically for
+both. Measured 2026-08-13, one map left and re-entered after a selling
+trip:
+
+```
+17:23:10 Client-Safe Instance ID = 2308728564
+17:23:10 Generating level 80 area "MapWorldsBrambleValley" with seed 711400918
+17:23:11 : You have entered Bramble Valley.
+        ... six minutes of map, then out to the hideout and back ...
+17:30:09 Client-Safe Instance ID = 2308728564      <- the same
+17:30:09 Generating level 80 area "MapWorldsBrambleValley" with seed 711400918
+17:30:10 : You have entered Bramble Valley.
+```
+
+The hideout in between carried a different id (3117141110), and the
+area name plus seed repeat the identity. Note these are `[DEBUG]` lines,
+unlike the `[INFO]` zone line — anything relying on them needs to work
+without them too.
+
 Not in the file: anything about experience points below a level up,
 loot, currency, or the contents of the stash.
 

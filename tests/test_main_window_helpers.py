@@ -8203,3 +8203,68 @@ def test_an_expired_token_greys_the_led_instead_of_reddening_it(qapp) -> None:
 
     win.worker.stop()
     win.worker.wait(5000)
+
+
+def test_a_map_visited_twice_keeps_one_instance_id_in_the_history(
+        qapp, monkeypatch) -> None:
+    """Peters Ablauf vom 2026-08-13: Map, kurz raus Items verkaufen,
+    zurueck in DIESELBE Map, fertig gecleared. Beide Abschnitte muessen
+    dieselbe Instanz-Kennung tragen, sonst kann der Graph sie nicht als
+    eine Map erkennen (§4.40).
+
+    Die Kennung gehoert dem Gebiet, das VERLASSEN wurde — nicht dem, das
+    gerade betreten wird. Genau diese Verschiebung ist die Stelle, an der
+    man sich vertut."""
+    fake_now = [1000.0]
+    monkeypatch.setattr("poe_view.ui.main_window.time.monotonic", lambda: fake_now[0])
+
+    win = MainWindow()
+
+    class _Watcher:
+        last_instance_id = ""
+    win._zone_watcher = _Watcher()
+
+    def betreten(instanz: str, zone: str) -> None:
+        win._zone_watcher.last_instance_id = instanz
+        win._on_zone_changed(zone)
+
+    win._on_character_snapshot("WitchOfPeter", 90, 1_993_000_000)
+    fake_now[0] += 60.0
+    betreten("2308728564", "Bramble Valley")      # rein in die Map
+    fake_now[0] += 362.0
+    betreten("3117141110", "Backstreet Hideout")  # raus, verkaufen
+    fake_now[0] += 2.0
+    win._on_character_snapshot("WitchOfPeter", 90, 1_993_000_000 + 14_643_224)
+    fake_now[0] += 56.0
+    betreten("2308728564", "Bramble Valley")      # zurueck in DIESELBE Map
+    fake_now[0] += 112.0
+    betreten("3117141110", "Backstreet Hideout")
+    fake_now[0] += 2.0
+    win._on_character_snapshot("WitchOfPeter", 90, 1_993_000_000 + 14_643_224 + 686_080)
+
+    verlauf = win._xp_watch["WitchOfPeter"].history
+    assert [p.instance for p in verlauf] == ["2308728564", "2308728564"]
+    assert [round(p.rate / 1_000_000, 1) for p in verlauf] == [145.6, 22.1]
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_a_publication_outside_a_zone_carries_no_instance(qapp, monkeypatch) -> None:
+    """Faellt der Nenner auf das volle Intervall zurueck (Haendler, keine
+    Zonen-Beobachtung), gehoert der Abschnitt zu keiner Map — und darf
+    dann auch mit keiner gruppiert werden."""
+    fake_now = [1000.0]
+    monkeypatch.setattr("poe_view.ui.main_window.time.monotonic", lambda: fake_now[0])
+
+    win = MainWindow()
+    win._on_character_snapshot("WitchOfPeter", 90, 0)
+    fake_now[0] += 60.0
+    win._on_character_snapshot("WitchOfPeter", 90, 1_000_000)
+    fake_now[0] += 600.0
+    win._on_character_snapshot("WitchOfPeter", 90, 21_000_000)
+
+    assert [p.instance for p in win._xp_watch["WitchOfPeter"].history] == [""]
+
+    win.worker.stop()
+    win.worker.wait(5000)

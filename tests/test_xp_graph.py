@@ -11,7 +11,8 @@ dem Auge zu finden.
 import pytest
 
 from poe_view.ui.xp_graph import (GRAPH_SPAN_S, XpGraph, XpPoint, axis_label,
-                                  graph_layout, visible_points)
+                                  combined_rate, graph_layout,
+                                  group_by_instance, visible_points)
 
 WIDTH = 300.0
 HEIGHT = 100.0
@@ -123,3 +124,85 @@ def test_the_widget_survives_a_paint_with_and_without_data(qapp) -> None:
     graph.render(graph.grab())
 
     assert len(graph._points) == 2
+
+
+# --- Eine Map mit Unterbrechung (Peter, 2026-08-13) -------------------- #
+#
+# Sein echter Ablauf, Zahlen aus dem Log: 17:23:13 rein, 17:29:15 raus
+# (+14.643.224 in 362 s = 145,6 Mio./h), 56 s im Hideout verkauft,
+# 17:30:11 zurueck, 17:32:03 raus (+686.080 in 112 s = 22,1 Mio./h).
+# Beide Male dieselbe Instanz 2308728564.
+
+_MAP = "2308728564"
+_VERKAUFSPAUSE = [
+    XpPoint(at=-170.0, seconds=362.0, rate=145_600_000.0, instance=_MAP),
+    XpPoint(at=0.0, seconds=112.0, rate=22_100_000.0, instance=_MAP),
+]
+
+
+def test_two_visits_to_one_map_form_a_group() -> None:
+    assert [len(g) for g in group_by_instance(_VERKAUFSPAUSE)] == [2]
+
+
+def test_two_maps_of_the_same_name_are_not_grouped() -> None:
+    """Der Grund, warum es die Instanz-Kennung braucht: Zwei Maps
+    gleichen Namens hintereinander sind zwei Maps. Am Zonennamen waeren
+    sie nicht zu unterscheiden."""
+    zwei = [XpPoint(at=-600.0, seconds=300.0, rate=1.0, instance="aaa"),
+            XpPoint(at=0.0, seconds=300.0, rate=1.0, instance="bbb")]
+
+    assert [len(g) for g in group_by_instance(zwei)] == [1, 1]
+
+
+def test_without_an_instance_id_nothing_is_grouped() -> None:
+    """Ohne die DEBUG-Zeile in der Client.txt steht jeder Aufenthalt fuer
+    sich — lieber nicht gruppieren als falsch gruppieren."""
+    ohne = [XpPoint(at=-600.0, seconds=300.0, rate=1.0),
+            XpPoint(at=0.0, seconds=300.0, rate=1.0)]
+
+    assert [len(g) for g in group_by_instance(ohne)] == [1, 1]
+
+
+def test_the_combined_rate_weighs_by_time_not_by_section() -> None:
+    """Ein Mittel UEBER die beiden Raten waere (145,6 + 22,1) / 2 = 83,9
+    Mio./h — falsch, weil der erste Abschnitt dreimal so lang war. Richtig
+    ist die Summe der Erfahrung durch die Summe der GESPIELTEN Zeit."""
+    assert combined_rate(_VERKAUFSPAUSE) == pytest.approx(116_400_000, rel=0.001)
+    assert combined_rate(_VERKAUFSPAUSE) != pytest.approx(83_850_000, rel=0.01)
+
+
+def test_the_group_area_spans_the_break_and_sits_at_the_common_rate() -> None:
+    """Peter: "Zusammenfassen will ich die beiden Balken nicht, weil hier
+    sieht man wirklich schoen wann man raus und wieder rein ist und was
+    das gekostet hat." Also bleiben die Balken einzeln, und die Flaeche
+    dahinter spannt sich UEBER die Pause — genau die macht sie sichtbar."""
+    layout = graph_layout(_VERKAUFSPAUSE, 0.0, WIDTH, HEIGHT)
+    (gx, gy, gw, gh), = layout.groups
+    erster, zweiter = layout.bars
+
+    assert gx == pytest.approx(erster[0])              # beginnt am ersten Aufenthalt
+    assert gx + gw == pytest.approx(zweiter[0] + zweiter[2])   # endet am zweiten
+    assert gw > erster[2] + zweiter[2]                 # die Pause liegt dazwischen
+    # Hoehe = gemeinsame Rate, also zwischen den beiden Balken.
+    assert zweiter[3] < gh < erster[3]
+    assert len(layout.bars) == 2                       # die Balken bleiben getrennt
+
+
+def test_a_single_section_gets_no_area_behind_it() -> None:
+    """Ein Rechteck deckungsgleich hinter einem einzelnen Balken waere
+    reine Verdopplung."""
+    layout = graph_layout([_VERKAUFSPAUSE[0]], 0.0, WIDTH, HEIGHT)
+
+    assert layout.groups == []
+
+
+def test_the_dashed_line_is_the_rate_over_everything_visible() -> None:
+    """Sie steht ruhig, waehrend die einzelnen Abschnitte springen — und
+    beantwortet damit, was ein einzelner Balken nicht kann: liege ich
+    ueber oder unter meinem Schnitt?"""
+    layout = graph_layout(_VERKAUFSPAUSE, 0.0, WIDTH, HEIGHT)
+
+    assert layout.average == pytest.approx(combined_rate(_VERKAUFSPAUSE))
+    assert layout.average_y is not None
+    # Zwischen den beiden Balken, wie die Rate selbst.
+    assert layout.bars[0][1] < layout.average_y < layout.bars[1][1]

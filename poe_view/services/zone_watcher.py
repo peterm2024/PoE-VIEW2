@@ -49,6 +49,26 @@ _POLL_INTERVAL_MS = 2000
 # entered Lioneye's Watch."
 _ZONE_LINE = re.compile(r": You have entered (.+)\.\s*$")
 
+# Die Kennung der Gebiets-INSTANZ, ein paar Zeilen vor jedem "You have
+# entered". Real geprüft am 2026-08-13 an Peters Client.txt:
+#
+#   17:23:10 Client-Safe Instance ID = 2308728564
+#   17:23:10 Generating level 80 area "MapWorldsBrambleValley" with seed 711400918
+#   17:23:11 : You have entered Bramble Valley.
+#   ... 6 Minuten Map, kurz ins Hideout, zurück ...
+#   17:30:09 Client-Safe Instance ID = 2308728564   ← DIESELBE
+#   17:30:09 Generating level 80 area "MapWorldsBrambleValley" with seed 711400918
+#   17:30:10 : You have entered Bramble Valley.
+#
+# Damit ist "zurück in dieselbe Map" von "nächste Map gleichen Namens"
+# unterscheidbar — am Namen allein ist es das NICHT, und genau diese
+# Unterscheidung braucht die Gruppierung im XP-Graphen (§4.40).
+#
+# Es ist eine DEBUG-Zeile. Fehlt sie (anderer Log-Umfang), bleibt die
+# Kennung leer und alles verhält sich wie zuvor: jeder Aufenthalt zählt
+# für sich.
+_INSTANCE_LINE = re.compile(r"Client-Safe Instance ID = (\d+)")
+
 # Peter, 2026-08-10: "Die Interaktion mit einem Händler, Verkaufen,
 # Identifizieren, ... triggert auch das Senden der neuesten Items von
 # GGG-Seite. Gibt es dabei einen Clients.txt-Eintrag?" — ja, beide. In
@@ -112,6 +132,12 @@ class ZoneWatcher(QObject):
 
     def __init__(self, log_path: Path, parent: QObject | None = None) -> None:
         super().__init__(parent)
+        # Kennung der zuletzt betretenen Instanz (§_INSTANCE_LINE).
+        # Bewusst ein Attribut statt eines zweiten Signal-Arguments: Die
+        # Zeile steht IMMER vor dem "You have entered", der Wert ist beim
+        # Emittieren also schon gesetzt, und alle vorhandenen Anschlüsse
+        # an ``zone_changed`` bleiben unverändert.
+        self.last_instance_id = ""
         self._log_path = log_path
         self._position = log_path.stat().st_size
         self._watcher = QFileSystemWatcher([str(log_path)], self)
@@ -168,6 +194,10 @@ class ZoneWatcher(QObject):
             new_bytes = f.read()
             self._position = f.tell()
         for line in new_bytes.decode("utf-8", errors="replace").splitlines():
+            instance = _INSTANCE_LINE.search(line)
+            if instance:
+                self.last_instance_id = instance.group(1)
+                continue
             match = _ZONE_LINE.search(line)
             if match:
                 log.info("Zonenwechsel erkannt: %s", match.group(1))

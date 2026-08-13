@@ -249,6 +249,33 @@ configure.</p>
 <p>Prices are community data, not official, and are cached for up to six
 hours.</p>
 """),
+    ("Levelling", """
+<h3>Levelling</h3>
+<p>Open a character and the panel to the right of the item detail shows
+level, total experience and how fast you are gaining it.</p>
+<p><b>The rate is measured per area, over the time you spent in it</b> —
+not against the clock. Standing in your hideout does not drag it down,
+and a break does not make it decay: it simply stays where it was. GGG
+only publish experience when you leave an area, so the number can never
+be fresher than your last zone change; if it is more than a minute old,
+that is written next to it.</p>
+<p>The graph below covers the <b>last three hours</b>, one bar per
+finished area:</p>
+<ul>
+<li>The <b>width</b> is how long you were in there, so a long map looks
+different from a quick trial.</li>
+<li><b>Gaps are real.</b> Where nothing is drawn, no experience was
+made — town, stash, a break.</li>
+<li>A <b>red bar below the line</b> is an area that cost you experience
+on balance. Dying does that from act 5 onwards.</li>
+<li>A <b>dark green block behind several bars</b> means they are the
+same map: you left it and came back. Its height is the rate for the map
+as a whole, so you can see what the trip outside cost.</li>
+<li>The <b>dashed line</b> is your overall rate across everything
+visible — a quick check whether the last map was above or below your
+own average.</li>
+</ul>
+"""),
     ("Item history", """
 <h3>Item history</h3>
 <p>The collapsible panel below the table logs the last 120 items that

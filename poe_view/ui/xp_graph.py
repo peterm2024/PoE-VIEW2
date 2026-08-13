@@ -31,14 +31,24 @@ Fehler in einer Zeichenroutine findet man sonst nur mit dem Auge.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import NamedTuple, Sequence
 
 from PySide6.QtCore import QRectF, Qt
-from PySide6.QtGui import QColor, QPainter
+from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import QSizePolicy, QWidget
 
-from poe_view.ui.theme import DASH_BAD, DASH_OK, dimmed_text
+from poe_view.ui.theme import DASH_BAD, DASH_OK, blend, dimmed_text
+
+# Die Fläche hinter den Balken einer zusammengehörenden Map: dasselbe
+# Grün, nur dunkel (Peter, 2026-08-13: "muss nicht unbedingt schraffiert
+# sein, kann auch nur dunkelgrün sein"). Dunkel genug, dass die Balken
+# darauf lesbar bleiben, hell genug, um vom Hintergrund abzustechen.
+_GROUP_COLOR = blend(QColor(DASH_OK), QColor("#000000"), 0.55)
+
+# Die gestrichelte Gesamtrate. Bewusst nicht grün: Sie ist eine
+# Bezugslinie, kein weiterer Messwert.
+_AVERAGE_COLOR = "#c9c9c9"
 
 # Peters Vorgabe: drei Stunden. Ein Spielabend passt damit größtenteils
 # ins Bild, und ein Balken einer Fünf-Minuten-Map ist bei üblichen
@@ -62,23 +72,75 @@ class XpPoint(NamedTuple):
     Veröffentlichung (``time.monotonic()``), ``seconds`` die Dauer, auf
     die sich die Rate bezieht (in der Regel die Verweildauer in der
     verlassenen Zone, siehe ``_XpWatch``), ``rate`` die daraus errechnete
-    XP/h — genau die Zahl, die auch im Leveling-Feld steht."""
+    XP/h — genau die Zahl, die auch im Leveling-Feld steht.
+
+    ``instance`` ist die Kennung der Gebiets-Instanz aus der Client.txt.
+    Gleiche Kennung = derselbe Map-Durchgang, auch wenn man
+    zwischendurch draußen war."""
 
     at: float
     seconds: float
     rate: float
+    instance: str = ""
+
+    @property
+    def gain(self) -> float:
+        """Die Erfahrung dieses Abschnitts. Der Graph rechnet in Raten,
+        zum Zusammenfassen mehrerer Abschnitte braucht es aber die
+        Summanden — ein Mittel ÜBER Raten wäre falsch, sobald die
+        Abschnitte verschieden lang sind."""
+        return self.rate * self.seconds / 3600
 
 
 @dataclass(frozen=True)
 class Layout:
     """Fertige Geometrie für ``paintEvent``. ``bars`` sind
     ``(x, y, w, h, rate)`` in Widget-Koordinaten, ``zero_y`` die Höhe der
-    Null-Linie (bei ausschließlich positiven Raten der untere Rand)."""
+    Null-Linie (bei ausschließlich positiven Raten der untere Rand).
+
+    ``groups`` sind die Flächen hinter den Balken: je ein Rechteck über
+    alle Abschnitte EINER Map, auf Höhe ihrer gemeinsamen Rate.
+    ``average_y`` ist die Höhe der gestrichelten Linie über allem."""
 
     bars: list[tuple[float, float, float, float, float]]
     zero_y: float
     peak: float
     trough: float
+    groups: list[tuple[float, float, float, float]] = field(default_factory=list)
+    average_y: float | None = None
+    average: float = 0.0
+
+
+def combined_rate(points: Sequence[XpPoint]) -> float:
+    """Gemeinsame Rate mehrerer Abschnitte: Summe der Erfahrung geteilt
+    durch die Summe der GESPIELTEN Zeit. Die Pause dazwischen zählt
+    bewusst nicht mit — sie hat keine Erfahrung gekostet, sie hat nur
+    keine gebracht."""
+    sekunden = sum(p.seconds for p in points)
+    return sum(p.gain for p in points) / (sekunden / 3600) if sekunden > 0 else 0.0
+
+
+def group_by_instance(points: Sequence[XpPoint]) -> list[list[XpPoint]]:
+    """Aufeinanderfolgende Abschnitte derselben Gebiets-Instanz
+    zusammenfassen.
+
+    Peter, 2026-08-13, nach einer Map mit Verkaufspause: "Zusammenfassen
+    will ich die beiden Balken nicht, weil hier sieht man wirklich schön
+    wann man raus und wieder rein ist und was das gekostet hat." Die
+    Balken bleiben deshalb einzeln — gruppiert wird nur für die Fläche
+    dahinter.
+
+    Ohne Kennung (leerer String) steht jeder Abschnitt für sich: Zwei
+    Maps gleichen Namens hintereinander sind zwei Maps, und ohne die
+    Instanz-Zeile in der Client.txt lässt sich das nicht unterscheiden.
+    Lieber nicht gruppieren als falsch gruppieren."""
+    gruppen: list[list[XpPoint]] = []
+    for point in points:
+        if point.instance and gruppen and gruppen[-1][-1].instance == point.instance:
+            gruppen[-1].append(point)
+        else:
+            gruppen.append([point])
+    return gruppen
 
 
 def visible_points(points: Sequence[XpPoint], now: float,
@@ -108,15 +170,35 @@ def graph_layout(points: Sequence[XpPoint], now: float, width: float, height: fl
     spread = (peak - trough) or 1.0
     zero_y = height * peak / spread
 
+    def spanne(point: XpPoint) -> tuple[float, float]:
+        """Anfang und Ende eines Abschnitts in Widget-Koordinaten."""
+        ende = min(width, width - (now - point.at) / span_s * width)
+        anfang = min(ende - max(point.seconds, 0.0) / span_s * width, ende - _MIN_BAR_W)
+        return max(0.0, anfang), ende
+
     bars: list[tuple[float, float, float, float, float]] = []
     for point in shown:
-        end = min(width, width - (now - point.at) / span_s * width)
-        start = min(end - max(point.seconds, 0.0) / span_s * width, end - _MIN_BAR_W)
-        x = max(0.0, start)
+        x, end = spanne(point)
         w = max(end - x, _MIN_BAR_W)
         h = max(abs(point.rate) / spread * height, _MIN_BAR_H)
         bars.append((x, zero_y - h if point.rate >= 0 else zero_y, w, h, point.rate))
-    return Layout(bars, zero_y, peak, trough)
+
+    # Flächen hinter den Balken: nur, wo wirklich mehrere Abschnitte zu
+    # EINER Map gehören. Bei einem einzelnen Abschnitt läge das Rechteck
+    # deckungsgleich hinter seinem Balken und wäre reine Verdopplung.
+    groups: list[tuple[float, float, float, float]] = []
+    for gruppe in group_by_instance(shown):
+        if len(gruppe) < 2:
+            continue
+        rate = combined_rate(gruppe)
+        x, _ = spanne(gruppe[0])
+        _, end = spanne(gruppe[-1])
+        h = max(abs(rate) / spread * height, _MIN_BAR_H)
+        groups.append((x, zero_y - h if rate >= 0 else zero_y, max(end - x, _MIN_BAR_W), h))
+
+    average = combined_rate(shown)
+    return Layout(bars, zero_y, peak, trough, groups,
+                  zero_y - average / spread * height, average)
 
 
 def axis_label(rate: float) -> str:
@@ -172,12 +254,41 @@ class XpGraph(QWidget):
             painter.setPen(faint)
             painter.drawLine(0, round(layout.zero_y), width, round(layout.zero_y))
 
+            # ZUERST die Flächen, damit die Balken darauf liegen: Eine Map
+            # mit Unterbrechung bekommt ihre gemeinsame Rate als
+            # dunkelgrünen Grund, über den die einzelnen Aufenthalte
+            # hinaus- oder in den sie hineinragen. Die Lücke bleibt dabei
+            # sichtbar — Peter, 2026-08-13: "hier sieht man wirklich schön
+            # wann man raus und wieder rein ist und was das gekostet hat."
+            for x, y, w, h in layout.groups:
+                painter.fillRect(QRectF(x, y, w, h), QColor(_GROUP_COLOR))
+
             for x, y, w, h, rate in layout.bars:
                 # Grün nach oben, Rot nach unten: Ein Abschnitt, in dem
                 # unterm Strich Erfahrung verloren ging (Tod ab Akt 5),
                 # soll nicht wie ein magerer Gewinn aussehen.
                 painter.fillRect(QRectF(x, y, w, h),
                                  QColor(DASH_OK if rate >= 0 else DASH_BAD))
+
+            # Die Gesamtrate über alles Sichtbare als gestrichelte Linie.
+            # Sie steht ruhig, während die einzelnen Abschnitte springen,
+            # und beantwortet damit die Frage, die ein einzelner Balken
+            # nicht kann: liege ich über oder unter meinem Schnitt?
+            if layout.average_y is not None and layout.average > 0:
+                stift = QPen(QColor(_AVERAGE_COLOR))
+                stift.setStyle(Qt.PenStyle.DashLine)
+                painter.setPen(stift)
+                painter.drawLine(0, round(layout.average_y),
+                                 width, round(layout.average_y))
+                # Beschriftung AN der Linie, nicht in der Ecke: Dort
+                # stand sie zuerst und verschwand prompt auf einem hohen
+                # Balken, weil ein gedämpftes Grau auf Grün nichts mehr
+                # hergibt. An der Linie ist sie ohnehin besser aufgehoben
+                # — sie erklärt genau diese eine Linie.
+                painter.drawText(QRectF(2, layout.average_y - metrics.height(),
+                                        width - 4, metrics.height()),
+                                 Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+                                 f"⌀ {axis_label(layout.average)}")
 
             painter.setPen(faint)
             if layout.peak > 0:

@@ -309,6 +309,11 @@ class _XpWatch:
     # beobachtete Änderung und nur unter engen Bedingungen, siehe
     # ``MainWindow._baseline_starts_the_interval``. Ebenfalls nur fürs Log.
     interval_from_baseline: bool = False
+    # Instanz der Zone, in der dieser Abschnitt verbracht wurde — leer,
+    # wenn der Nenner nicht aus einer Verweildauer kam oder die
+    # Client.txt keine Kennung liefert. Gruppiert die Balken im Graphen
+    # (§4.40).
+    interval_instance: str = ""
     # Der Verlauf für den Graphen (§4.40): je abgeschlossenem Abschnitt
     # ein Punkt, begrenzt auf das gezeichnete Zeitfenster. Session-lokal
     # wie alles andere hier — ein aus der Datei geladener Verlauf zeigte
@@ -623,6 +628,12 @@ class MainWindow(QMainWindow):
         # Verweildauer in der gerade verlassenen Zone — der Nenner der
         # XP-Rate (§_XpWatch).
         self._previous_zone_at: float | None = None
+        # Kennung der Gebiets-INSTANZ zu diesen beiden Zeitpunkten
+        # (ZoneWatcher.last_instance_id). Sie unterscheidet "zurück in
+        # dieselbe Map" von "nächste Map gleichen Namens" — am Zonennamen
+        # allein ist das NICHT zu erkennen (§4.40).
+        self._last_zone_instance = ""
+        self._previous_zone_instance = ""
         self._last_zone_name = ""
         self._publish_watch: dict[str, _PublishWatch] = {}
         self._xp_watch: dict[str, _XpWatch] = {}
@@ -3297,6 +3308,8 @@ class MainWindow(QMainWindow):
             watch.last_change_at = now
             watch.last_change_experience = experience
             watch.interval_from_zone = zone_seconds is not None
+            watch.interval_instance = (self._previous_zone_instance
+                                       if zone_seconds is not None else "")
             watch.interval_seconds = (
                 zone_seconds if zone_seconds is not None
                 else (now - watch.previous_change_at
@@ -3348,7 +3361,7 @@ class MainWindow(QMainWindow):
         return watch.since + self._XP_ZONE_TRIGGER_WINDOW_S <= self._previous_zone_at
 
     @staticmethod
-    def _record_xp_point(watch: _XpWatch, now: float) -> None:
+    def _record_xp_point(watch: "_XpWatch", now: float) -> None:
         """Einen Punkt für den Graphen aufheben (§4.40) — dieselbe Zahl,
         die auch im Leveling-Feld steht, nur mit ihrem Abschnitt daneben.
 
@@ -3359,7 +3372,8 @@ class MainWindow(QMainWindow):
         rate = MainWindow._watch_rate(watch)
         if rate is None or watch.interval_seconds is None:
             return
-        watch.history.append(XpPoint(at=now, seconds=watch.interval_seconds, rate=rate))
+        watch.history.append(XpPoint(at=now, seconds=watch.interval_seconds, rate=rate,
+                                     instance=watch.interval_instance))
         cutoff = now - GRAPH_SPAN_S
         while watch.history and watch.history[0].at <= cutoff:
             watch.history.pop(0)
@@ -4213,6 +4227,13 @@ class MainWindow(QMainWindow):
         # Abbruchbedingungen — es zählt, dass der Wechsel stattgefunden
         # hat, nicht ob daraufhin ein Refresh lief.
         self._previous_zone_at = self._last_zone_at
+        # Dieselbe Verschiebung für die Instanz-Kennung: Der Abschnitt, der
+        # gleich veröffentlicht wird, wurde in der Zone verbracht, die wir
+        # gerade VERLASSEN — also gehört ihm die Kennung, die bis eben die
+        # aktuelle war (§4.40, Gruppierung im Graphen).
+        self._previous_zone_instance = self._last_zone_instance
+        self._last_zone_instance = (self._zone_watcher.last_instance_id
+                                    if self._zone_watcher else "")
         self._last_zone_at = time.monotonic()
         self._last_zone_name = zone_name
         if self._event_refresh_blocked() or self._trigger_budget_spent():

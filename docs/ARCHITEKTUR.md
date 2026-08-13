@@ -4259,6 +4259,40 @@ liegt. Das Zeitfenster wandert bei jedem Refresh weiter, ein eigener
 Timer wäre Aufwand für nichts: Solange ein Charakter offen ist, läuft
 ohnehin alle paar Sekunden ein Abruf.
 
+**Eine Map mit Unterbrechung (2026-08-13, am selben Abend).** Peter war
+in einer Map, ging kurz Items verkaufen und danach zurück, um sie fertig
+zu clearen. Aus dem Log: 6:02 in der Map (+14.643.224 → 145,6 Mio./h),
+56 s im Hideout, 1:52 in der Map (+686.080 → 22,1 Mio./h). Beide Werte
+sind richtig, aber die Kennzahl nannte danach 22,1 — die Rate des
+Aufräumens, nicht die der Map.
+
+Zusammenfassen liegt nahe und war ausdrücklich NICHT gewollt. Peter:
+"Zusammenfassen will ich die beiden Balken nicht, weil hier sieht man
+wirklich schön wann man raus und wieder rein ist und was das gekostet
+hat." Stattdessen eine **dunkelgrüne Fläche hinter den Balken**, über
+beide Aufenthalte hinweg, auf Höhe der gemeinsamen Rate (116,4 Mio./h) —
+die Lücke bleibt dabei sichtbar und zeigt genau, was der Ausflug gekostet
+hat. Dazu eine **gestrichelte Linie** auf der Gesamtrate über alles
+Sichtbare; sie steht ruhig, während die Abschnitte springen.
+
+Die gemeinsame Rate ist Erfahrung durch GESPIELTE Zeit, nicht das Mittel
+der beiden Raten: (145,6 + 22,1) / 2 wären 83,9 Mio./h, richtig sind
+116,4 — der erste Abschnitt war dreimal so lang.
+
+**Dass sich das überhaupt gruppieren lässt, hing an einem Fund in der
+Client.txt.** Am Zonennamen ist "zurück in dieselbe Map" nicht von
+"nächste Map gleichen Namens" zu unterscheiden, beide schreiben `You have
+entered Bramble Valley`. Ein paar Zeilen davor steht aber
+`Client-Safe Instance ID = 2308728564`, und die war bei Peters beiden
+Betreten IDENTISCH (die des Hideouts dazwischen nicht). `ZoneWatcher`
+liest sie seither mit (`last_instance_id`), `_XpWatch.interval_instance`
+trägt sie bis in den `XpPoint`.
+
+Die Kennung gehört dabei der Zone, die VERLASSEN wurde — dieselbe
+Verschiebung wie beim Zeitstempel, und die Stelle, an der man sich
+vertut. Es ist eine DEBUG-Zeile: Fehlt sie, bleibt die Kennung leer und
+nichts wird gruppiert. Lieber nicht gruppieren als falsch gruppieren.
+
 Die Geometrie steht als reine Funktion (`graph_layout`) neben dem
 Widget. Fehler in einer Zeichenroutine findet man sonst nur mit dem
 Auge, und das skaliert schlecht auf Fälle wie "Abschnitt von zwei
