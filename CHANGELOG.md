@@ -6,6 +6,8 @@ nach [SemVer](https://semver.org/lang/de/).
 
 ## [Unveröffentlicht]
 
+## [0.8.0] - 2026-08-13
+
 ### Hinzugefügt
 
 - Rechtsklick auf ein Item bietet jetzt "Copy item text (for Path of
@@ -23,8 +25,48 @@ nach [SemVer](https://semver.org/lang/de/).
   abgeschnitten zu werden.
 - Neben dem Item-Detail sitzt ein Leveling-Feld mit Stufe,
   Gesamterfahrung und XP/h des zuletzt abgeschlossenen Gebiets. Die
-  Trennlinie zwischen beiden lässt sich verschieben. Ein Verlaufsgraph
-  ist dort vorgesehen, aber noch nicht gebaut.
+  Trennlinie zwischen beiden lässt sich verschieben.
+- Eine Verbindungs-LED am rechten Ende der Statuszeile: grün, solange
+  GGG antwortet, rot während einer Wartung, grau bevor überhaupt etwas
+  abgefragt wurde. Sie geht von selbst wieder auf grün, sobald ein
+  Abruf gelingt — ohne Neustart. Die Bedeutung der drei Farben steht im
+  Hilfe-Fenster unter "Getting started".
+- Darunter zeichnet ein Graph die letzten drei Stunden: ein Balken je
+  abgeschlossenem Gebiet, so breit wie das Gebiet gedauert hat. Wo
+  nichts steht, wurde keine Erfahrung gemacht — Pausen bleiben als
+  Lücken sichtbar. Ein Gebiet, in dem unterm Strich Erfahrung verloren
+  ging, hängt rot unter der Null-Linie.
+
+### Behoben
+
+- Billige Währung wurde teils viel zu hoch bewertet — ein Stapel von 921
+  Wisdom Scrolls stand mit 4,9 Divine in der Tabelle. poe.ninja kann
+  Kurse unter einem Chaos in einer Handelsrichtung nicht ausdrücken und
+  meldet dort glatt „1 Chaos"; die Gegenrichtung wird jetzt zuverlässig
+  ausgewertet, auch seit poe.ninja sie in umgekehrter Einheit angibt.
+  Fehlt die Gegenrichtung ganz, bleibt die Wertspalte leer, statt eine
+  Obergrenze als Preis auszugeben.
+- Das Item-Detail schnitt lange Items wieder ab, ohne es zu sagen: Die
+  Trennlinien zwischen den Blöcken brauchen selbst Platz, was bei der
+  Höhe nicht mitgerechnet war. Das Feld ist 16 Pixel höher und zeigt
+  jetzt 95 % aller Items vollständig; was darüber hinausgeht, wird wie
+  vorgesehen gemeldet.
+- Während einer GGG-Wartung meldete die Anwendung im Sekundentakt
+  "League not found" und verdeckte damit ihren eigenen Offline-Hinweis.
+  Der Truhen-Endpunkt beantwortet eine laufende Wartung nicht mit einem
+  Serverfehler, sondern mit einer abgelehnten Anfrage — gemessen an
+  einer echten Wartung in 19 von 22 Fällen, während der
+  Charakter-Endpunkt gleichzeitig sauber "Server nicht verfügbar"
+  meldete. Die Liga existierte dabei durchgehend. Solche Antworten
+  zählen jetzt als Wartung: Es erscheint der normale Offline-Hinweis,
+  und die zwischengespeicherten Daten bleiben durchsuchbar.
+- Nach der ersten Karte einer Sitzung blieb die XP/h-Anzeige leer,
+  obwohl alles Nötige gemessen war: Der Weg ins Hideout ändert die
+  Erfahrung nicht, es gab also nur eine Veröffentlichung, und die
+  Rechnung verlangte zwei. Sie nimmt jetzt den Stand beim
+  Programmstart als Vergleichspunkt — allerdings nur, wenn dieser
+  nachweislich vor dem Betreten des gemessenen Gebiets liegt,
+  andernfalls wäre die Rate erfunden.
 
 ## [0.7.0] - 2026-08-12
 
@@ -707,7 +749,8 @@ Erste veröffentlichte Version.
 Die technischen Hintergründe einzelner Entscheidungen stehen in
 [FALLSTRICKE_UND_WORKAROUNDS.md](FALLSTRICKE_UND_WORKAROUNDS.md).
 
-[Unveröffentlicht]: https://github.com/peterm2024/PoE-VIEW2/compare/v0.7.0...HEAD
+[Unveröffentlicht]: https://github.com/peterm2024/PoE-VIEW2/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/peterm2024/PoE-VIEW2/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/peterm2024/PoE-VIEW2/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/peterm2024/PoE-VIEW2/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/peterm2024/PoE-VIEW2/compare/v0.5.0...v0.5.1
