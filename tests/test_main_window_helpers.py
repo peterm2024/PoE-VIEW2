@@ -8268,3 +8268,88 @@ def test_a_publication_outside_a_zone_carries_no_instance(qapp, monkeypatch) -> 
 
     win.worker.stop()
     win.worker.wait(5000)
+
+
+def test_a_section_never_reaches_back_past_the_previous_publication(
+        qapp, monkeypatch) -> None:
+    """Peters Live-Daten vom 2026-08-13, 18:38:52 — im Log gefunden, nicht
+    in einem Test:
+
+        18:29:07  Zone betreten (Burial Chambers)
+        18:36:53  +14.550.145 in 485s (volles Intervall)  <- MITTEN in der Map
+        18:38:52  +6.167.471 in 582s in der verlassenen Zone -> 38,1 Mio./h
+
+    GGG veroeffentlicht meist beim Zonenwechsel, aber rund 5 % kommen als
+    Nachzuegler mittendrin (poe-verhalten.md §1). Dann sind bei der
+    naechsten Veroeffentlichung grosse Teile der Verweildauer laengst
+    abgerechnet — hier 466 der 582 Sekunden. Die uebrigen 6,17 Mio. wurden
+    in 119 Sekunden verdient: 186,6 Mio./h, nicht 38,1.
+
+    Dieselbe Erfahrung laesst sich nicht zweimal verdienen."""
+    fake_now = [1000.0]
+    monkeypatch.setattr("poe_view.ui.main_window.time.monotonic", lambda: fake_now[0])
+
+    win = MainWindow()
+    stand = 2_000_000_000
+    win._on_character_snapshot("WitchOfPeter", 90, stand)
+    fake_now[0] += 60.0
+    win._on_zone_changed("Backstreet Hideout")
+    fake_now[0] += 22.0
+    win._on_zone_changed("Burial Chambers")          # 18:29:07
+    fake_now[0] += 466.0
+    stand += 14_550_145
+    win._on_character_snapshot("WitchOfPeter", 90, stand)   # 18:36:53, mittendrin
+    fake_now[0] += 116.0
+    win._on_zone_changed("Backstreet Hideout")       # 18:38:49
+    fake_now[0] += 3.0
+    stand += 6_167_471
+    win._on_character_snapshot("WitchOfPeter", 90, stand)   # 18:38:52
+
+    watch = win._xp_watch["WitchOfPeter"]
+    assert watch.interval_seconds == pytest.approx(119.0)   # nicht 582
+    assert win._xp_per_hour("WitchOfPeter") == pytest.approx(186_600_000, rel=0.01)
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_the_limit_leaves_the_ordinary_case_untouched(qapp, monkeypatch) -> None:
+    """Gegenprobe: Im Normalfall faellt die Veroeffentlichung beim
+    VERLASSEN der vorigen Zone an, liegt also vor dem Betreten der
+    aktuellen. Dann greift die Grenze nicht und es bleibt bei der vollen
+    Verweildauer."""
+    fake_now = [1000.0]
+    monkeypatch.setattr("poe_view.ui.main_window.time.monotonic", lambda: fake_now[0])
+
+    win = MainWindow()
+    stand = 2_000_000_000
+    win._on_character_snapshot("WitchOfPeter", 90, stand)
+    fake_now[0] += 60.0
+    win._on_zone_changed("Foundry")
+    fake_now[0] += 300.0
+    win._on_zone_changed("Backstreet Hideout")
+    fake_now[0] += 3.0
+    stand += 10_000_000
+    win._on_character_snapshot("WitchOfPeter", 90, stand)   # beim Verlassen
+    fake_now[0] += 30.0
+    win._on_zone_changed("Crimson Temple")
+    fake_now[0] += 600.0
+    win._on_zone_changed("Backstreet Hideout")
+    fake_now[0] += 3.0
+    stand += 20_000_000
+    win._on_character_snapshot("WitchOfPeter", 90, stand)
+
+    assert win._xp_watch["WitchOfPeter"].interval_seconds == pytest.approx(600.0)
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_the_limit_is_a_pure_function_over_both_candidates() -> None:
+    """Die Regel selbst, ohne Fenster: das Kleinere von beidem, und jede
+    Seite fuer sich, wenn die andere fehlt."""
+    assert MainWindow._interval_seconds(582.0, 119.0) == 119.0
+    assert MainWindow._interval_seconds(600.0, 3600.0) == 600.0
+    assert MainWindow._interval_seconds(None, 485.0) == 485.0
+    assert MainWindow._interval_seconds(144.0, None) == 144.0
+    assert MainWindow._interval_seconds(None, None) is None

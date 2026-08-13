@@ -3311,13 +3311,48 @@ class MainWindow(QMainWindow):
             watch.interval_from_zone = zone_seconds is not None
             watch.interval_instance = (self._previous_zone_instance
                                        if zone_seconds is not None else "")
-            watch.interval_seconds = (
-                zone_seconds if zone_seconds is not None
-                else (now - watch.previous_change_at
-                      if watch.previous_change_at is not None else None))
+            seit_vorher = (now - watch.previous_change_at
+                           if watch.previous_change_at is not None else None)
+            watch.interval_seconds = self._interval_seconds(zone_seconds, seit_vorher)
             self._record_xp_point(watch, now)
             self._log_xp_publication(name, watch)
         watch.current_experience = experience
+
+    @staticmethod
+    def _interval_seconds(zone_seconds: float | None,
+                          since_previous: float | None) -> float | None:
+        """Der Nenner: die Verweildauer in der verlassenen Zone, aber
+        **nie länger als seit der vorigen Veröffentlichung**.
+
+        Die Begrenzung stammt aus Peters Live-Daten vom 2026-08-13,
+        18:38:52. Sein Log:
+
+            18:29:07  Zone betreten (Burial Chambers)
+            18:36:53  +14.550.145 in 485s (volles Intervall)   ← mitten in der Map
+            18:38:52  +6.167.471 in 582s in der verlassenen Zone → 38,1 Mio./h
+
+        GGG veröffentlicht meist erst beim Zonenwechsel, aber eben nicht
+        immer (`poe-verhalten.md` §1: rund 5 % Nachzügler ohne
+        Zonenwechsel). Passiert das MITTEN in einer Zone, sind bei der
+        nächsten Veröffentlichung große Teile der Verweildauer längst
+        abgerechnet — hier 466 der 582 Sekunden. Der Rest wurde in 119
+        Sekunden verdient, die ehrliche Rate ist also 186,6 Mio./h, nicht
+        38,1.
+
+        Man kann dieselbe Erfahrung nicht zweimal verdienen: Ein
+        Abschnitt beginnt beim SPÄTEREN von Zonenbetreten und voriger
+        Veröffentlichung. Im Normalfall (Veröffentlichung beim Verlassen
+        der vorigen Zone) liegt diese vor dem Betreten, dann ändert die
+        Grenze nichts.
+
+        Nebenwirkung, die genauso wichtig ist: Ohne sie überlappen sich
+        im Graphen zwei Balken zeitlich — sie beanspruchen dieselben
+        Minuten doppelt."""
+        if zone_seconds is None:
+            return since_previous
+        if since_previous is None:
+            return zone_seconds
+        return min(zone_seconds, since_previous)
 
     def _baseline_starts_the_interval(self, watch: _XpWatch,
                                       zone_seconds: float | None) -> bool:

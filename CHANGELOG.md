@@ -8,6 +8,16 @@ nach [SemVer](https://semver.org/lang/de/).
 
 ## [0.9.0] - 2026-08-13
 
+### Behoben
+
+- Veröffentlicht GGG die Erfahrung ausnahmsweise mitten in einer Karte
+  statt beim Verlassen, war die darauf folgende XP/h-Angabe viel zu
+  niedrig — im gemessenen Fall 38 statt 187 Millionen. Sie rechnete mit
+  der ganzen Zeit in der Karte, obwohl der größere Teil davon schon
+  abgerechnet war. Ein Abschnitt reicht jetzt höchstens bis zur vorigen
+  Veröffentlichung zurück; im Graphen überlappen sich dadurch auch keine
+  Balken mehr.
+
 ### Hinzugefügt
 
 - Über dem XP-Graphen zeigt jetzt ein schmaler Balken je eingesetztem

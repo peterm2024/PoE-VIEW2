@@ -3388,6 +3388,31 @@ ausnahmsweise nicht auf einen Zonenwechsel (Händler, §4.36 — dort liegen
 17 bis 57 Sekunden dazwischen, `_XP_ZONE_TRIGGER_WINDOW_S` fängt das ab),
 fällt die Rechnung auf das volle Intervall zurück.
 
+**Nie länger als seit der vorigen Veröffentlichung** (`_interval_seconds`,
+ergänzt 2026-08-13 aus Peters Live-Daten). Sein Log jenes Abends:
+
+```
+18:29:07  Zone betreten (Burial Chambers)
+18:36:53  +14.550.145 in 485s (volles Intervall)   <- MITTEN in der Map
+18:38:52  +6.167.471 in 582s in der verlassenen Zone -> 38,1 Mio./h
+```
+
+GGG veröffentlicht meist beim Zonenwechsel, aber rund 5 % kommen als
+Nachzügler mittendrin (`poe-verhalten.md` §1). Passiert das, sind bei der
+nächsten Veröffentlichung große Teile der Verweildauer längst
+abgerechnet — hier 466 der 582 Sekunden. Die übrigen 6,17 Mio. wurden in
+119 Sekunden verdient: **186,6 Mio./h, nicht 38,1**.
+
+Dieselbe Erfahrung lässt sich nicht zweimal verdienen. Ein Abschnitt
+beginnt deshalb beim SPÄTEREN von Zonenbetreten und voriger
+Veröffentlichung. Im Normalfall liegt die Veröffentlichung vor dem
+Betreten (sie fiel beim Verlassen der vorigen Zone an), dann ändert die
+Grenze nichts — alle bisherigen Messungen bleiben unverändert.
+
+Ebenso wichtig ist die Nebenwirkung im Graphen (§4.40): Ohne diese
+Grenze überlappen sich zwei Balken zeitlich und beanspruchen dieselben
+Minuten doppelt.
+
 Gegen Peters echte Runde gerechnet, alte gegen neue Regel:
 
 | Veröffentlichung | Zuwachs | erster Anlauf | Verweildauer | Zone |
