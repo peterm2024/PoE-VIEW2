@@ -190,6 +190,39 @@ def _characters() -> list[Character]:
     ]
 
 
+def _demo_socketed(name: str, level: str, colour: str,
+                   progress: float | None) -> dict:
+    """Ein Sockel-Gem fuers Bild (§4.42). Die drei Zustaende — fertig,
+    wartet auf einen Klick, am Leveln — sollen alle vorkommen."""
+    gem: dict = {"id": f"gem-{name}", "typeLine": name, "colour": colour,
+                 "properties": [{"name": "Level", "values": [[level, 0]]}]}
+    if progress is not None:
+        gem["additionalProperties"] = [{"name": "Experience",
+                                        "values": [["1/2", 0]], "progress": progress}]
+    return gem
+
+
+# (Name, Stufe, Farbe, Fortschritt) — None heisst "kein Erfahrungsfeld",
+# also fertig. progress 1.0 heisst "wartet auf einen Klick".
+_DEMO_GEMS = [
+    ("Molten Strike", "20 (Max)", "S", None),
+    ("Ancestral Call Support", "20 (Max)", "S", None),
+    ("Multistrike Support", "19", "S", 0.82),
+    ("Determination", "20 (Max)", "S", None),
+    ("Pride", "18", "S", 0.41),
+    ("Grace", "19", "D", 1.0),
+    ("Blood Rage", "16", "D", 0.63),
+    ("Haste", "20 (Max)", "D", None),
+    ("Vaal Ancestral Warchief", "17", "S", 0.29),
+    ("Cast when Damage Taken Support", "1", "S", 1.0),
+    ("Immortal Call", "3", "S", 0.55),
+    ("Increased Duration Support", "20 (Max)", "S", None),
+    ("Flame Dash", "12", "I", 0.18),
+    ("Arcane Surge Support", "7", "I", 0.71),
+    ("Enlighten Support", "3", "I", 0.05),
+]
+
+
 def _socketed_gem(level: int) -> dict:
     """Sockel-Gem im Aufbau der echten API-Daten (Rohfeld, kein eigenes
     Modell — siehe ARCHITEKTUR.md §4.33). Steigt zwischen den beiden
@@ -218,6 +251,9 @@ def _character_items(before: bool) -> list[Item]:
     for item, slot in zip(worn, ("Helm", "BodyArmour", "Ring")):
         item.inventoryId = slot
     worn[1].socketedItems = [_socketed_gem(19 if before else 20)]
+    # Die Gem-Balken im Leveling-Feld (§4.42) speisen sich aus den
+    # Sockel-Gems des Charakters — ohne sie bliebe der Streifen leer.
+    worn[0].socketedItems = [_demo_socketed(*g) for g in _DEMO_GEMS]
     if before:
         bag = [_currency("Chaos Orb", 39, 0, 0), _currency("Orb of Alchemy", 88, 1, 0),
                _rare("Rift Clasp", "Onyx Amulet", 83, ["+21 to all Attributes"], 2, 0)]

@@ -4358,6 +4358,58 @@ statt rot).
 
 ---
 
+### 4.42 Gem-Fortschritt über dem XP-Graphen (`ui/gem_progress.py`)
+
+Peter, 2026-08-13: "Oberhalb des XP-Graphen machen wir einen Bereich in
+dem die XP als vertikale Linie je Gem zur nächsten Stufe prozentual
+angegeben sind und einen dunklen Bereich mit hellem Bereich füllen ...
+Dadurch sollte man gut erkennen können ob ein Gem fertig auf Stufe 20
+gelevelt ist."
+
+Ein schmaler Balken je Sockel-Gem (5 px breit, 60 hoch), in der Farbe des
+Attributs, das es verlangt; der helle Teil ist der Fortschritt zur
+nächsten Stufe, der dunkle der Rest. Reihenfolge wie in der Paperdoll,
+Tooltip je Balken mit Name, Stufe und Prozentwert.
+
+**Die schwierigste Frage daran beantwortet GGG selbst.** "Ist das Gem
+fertig?" wäre aus Stufe und Gem-Art herzuleiten — ein Awakened-Gem ist
+bei 5 fertig, ein normales bei 20, ein korrumpiertes kann bei 21 stehen.
+Nichts davon ist nötig: Über Peters 449 Sockel-Gems (16 Charaktere)
+steht die Stufe im Klartext als `"20 (Max)"`, `"5 (Max)"`, `"21 (Max)"`,
+und genau diesen 226 Gems fehlt zugleich das `Experience`-Feld. Zwei
+unabhängige Merkmale, beide ohne Rechnerei.
+
+Daraus drei Zustände, jeder an echten Daten abgezählt:
+
+| Zustand | Merkmal | Anzahl | Darstellung |
+|---|---|---|---|
+| Fertig | "(Max)" in der Stufe, kein Erfahrungsfeld | 226 | voller Balken |
+| **Wartet auf einen Klick** | Balken voll, aber nicht Max | **65** | voller Balken + gelbe Kappe |
+| Am Leveln | Fortschritt < 1 | 157 | Teilfüllung |
+
+**Der mittlere Zustand ist nicht kosmetisch.** Gems steigen in PoE nicht
+von selbst auf (`poe-verhalten.md` §4); ein voller Balken unterhalb der
+Höchststufe ist Charakterstärke, die auf einen Mausklick wartet — 65
+Stück allein in Peters Bestand. Ohne eigene Markierung sähe das aus wie
+"fertig", und genau das ist die Frage, die der Streifen beantworten soll.
+Die Kappe trägt die Warnfarbe des Rate-Limit-Dashboards, mit derselben
+Bedeutung: hier passiert nichts von allein.
+
+Fehlen BEIDE Merkmale (weder "(Max)" noch Erfahrung, genau ein Gem von
+449), bleibt der Balken leer statt voll: Ein voller Balken hieße
+"fertig", und das wäre eine Behauptung ohne Grundlage.
+
+**Gem-Farben sind hier richtig**, anders als bei der Zeilen-Markierung
+(§4.33): Dort ging es um EIN Item, in dem mehrere verschiedenfarbige Gems
+gleichzeitig aufsteigen können, weshalb Grün gewählt wurde. Hier hat
+jedes Gem seinen eigenen Balken.
+
+Getestet: `tests/test_gem_progress.py` (alle drei Zustände, Awakened und
+korrumpierte Höchststufen, fehlende Belege, Farbzuordnung samt "G" und
+leer, Reihenfolge, Ausblenden ohne Gems, Zeichnen aller Zustände).
+
+---
+
 ## 5. UI-Konzept (Oberflächenvorschlag)
 
 Ein Hauptfenster: Navigation links (Charaktere + Stash getrennt), Items

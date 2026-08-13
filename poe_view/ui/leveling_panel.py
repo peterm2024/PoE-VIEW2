@@ -22,6 +22,7 @@ from typing import Sequence
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QFrame, QLabel, QVBoxLayout
 
+from poe_view.ui.gem_progress import GemProgress, GemProgressBar
 from poe_view.ui.xp_graph import XpGraph, XpPoint
 
 
@@ -35,11 +36,16 @@ class LevelingPanel(QFrame):
         self._body.setWordWrap(True)
         self._body.setTextFormat(Qt.TextFormat.RichText)
         self._body.setAlignment(Qt.AlignmentFlag.AlignTop)
+        # Die Gem-Balken ÜBER dem Graphen (Peters Vorgabe): Sie zeigen
+        # einen Zustand, der Graph einen Verlauf — und der Zustand ist
+        # das, wonach man beim Hinschauen zuerst sucht.
+        self._gems = GemProgressBar()
         self._graph = XpGraph()
 
         layout = QVBoxLayout(self)
         layout.addWidget(self._title)
         layout.addWidget(self._body)
+        layout.addWidget(self._gems)
         layout.addWidget(self._graph, stretch=1)
 
     def clear(self) -> None:
@@ -51,10 +57,12 @@ class LevelingPanel(QFrame):
         self._body.setText("No character selected")
         self._graph.clear()
         self._graph.hide()
+        self._gems.clear()
 
     def show_character(self, name: str, level: int | None, experience: int | None,
                        rate_text: str | None, age_note: str,
-                       points: Sequence[XpPoint] = (), now: float = 0.0) -> None:
+                       points: Sequence[XpPoint] = (), now: float = 0.0,
+                       gems: Sequence[GemProgress] = ()) -> None:
         """``rate_text`` ist die fertig formatierte Rate ("119.2M XP/h")
         oder ``None``, solange erst eine Veröffentlichung beobachtet wurde
         — dann steht dort, WARUM noch nichts da ist. Das ist keine
@@ -77,3 +85,4 @@ class LevelingPanel(QFrame):
         self._body.setText("<br>".join(lines))
         self._graph.set_points(points, now)
         self._graph.show()
+        self._gems.set_gems(gems)

@@ -119,6 +119,18 @@ LED_UNKNOWN = "#6f6f6f"
 LED_ONLINE = DASH_OK
 LED_OFFLINE = DASH_BAD
 
+# Farben der Sockel-Gems nach dem Attribut, das sie verlangen — GGGs
+# ``colour``-Feld: S = Stärke (rot), D = Geschicklichkeit (grün),
+# I = Intelligenz (blau), alles andere (G, fehlend) weiß/grau.
+#
+# **Hier sind Gem-Farben richtig, anders als bei der Zeilen-Markierung**
+# (§ROW_GEM_LEVELED_COLOR): Dort ging es um EIN Item, in dem mehrere
+# verschiedenfarbige Gems gleichzeitig aufsteigen können — da gäbe es
+# keine richtige Antwort. Hier hat jedes Gem seinen eigenen Balken, und
+# die Farbe ist die Zuordnung zum Gem im Spiel.
+GEM_COLORS = {"S": "#c15c5c", "D": "#5cb85c", "I": "#5c8fc1"}
+GEM_COLOR_OTHER = "#b0b0b0"
+
 
 def dimmed_text(palette: QPalette) -> QColor:
     """Textfarbe zu 50% Richtung Hintergrund gemischt — "wahrscheinlich

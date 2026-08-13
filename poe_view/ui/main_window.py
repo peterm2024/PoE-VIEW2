@@ -45,6 +45,7 @@ from poe_view.ui import external_tools
 from poe_view.ui.help_dialog import HelpDialog
 from poe_view.ui.character_list import CharacterList
 from poe_view.ui.item_detail import ItemDetail
+from poe_view.ui.gem_progress import gem_progress_of
 from poe_view.ui.leveling_panel import LevelingPanel
 from poe_view.ui.xp_graph import GRAPH_SPAN_S, XpPoint
 from poe_view.ui.item_table import (COLUMNS, CONFIGURABLE_COLUMNS, ICON_COL,
@@ -3865,7 +3866,7 @@ class MainWindow(QMainWindow):
             # eine zehn Minuten alte Zahl aus wie eine frische.
             status += f" — {self._format_xp_rate(rate)}{self._xp_rate_age_note(name)}"
         self._status_msg.setText(status)
-        self._show_leveling(name)
+        self._show_leveling(name, items)
 
     def _focus_search_field(self) -> None:
         """Strg+F (§Suchfeld). Der vorhandene Text wird MARKIERT, nicht
@@ -3875,7 +3876,7 @@ class MainWindow(QMainWindow):
         self._filter_edit.setFocus()
         self._filter_edit.selectAll()
 
-    def _show_leveling(self, name: str) -> None:
+    def _show_leveling(self, name: str, items: list[Item] | None = None) -> None:
         """Dieselben Zahlen wie in der Statuszeile, nur größer und
         dauerhaft (§4.39), dazu der Verlauf als Graph (§4.40). Der
         Beobachtungsstand kommt aus ``_XpWatch``; fehlt er, wurde für
@@ -3894,7 +3895,8 @@ class MainWindow(QMainWindow):
             rate_text=self._format_xp_rate(rate) if rate is not None else None,
             age_note=self._xp_rate_age_note(name),
             points=watch.history if watch else (),
-            now=time.monotonic())
+            now=time.monotonic(),
+            gems=gem_progress_of(items or []))
 
     def _xp_rate_age_note(self, name: str) -> str:
         """" (2m ago)" hinter der XP-Rate — leer, solange die Zahl frisch

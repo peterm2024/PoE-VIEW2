@@ -8,6 +8,12 @@ nach [SemVer](https://semver.org/lang/de/).
 
 ### Hinzugefügt
 
+- Über dem XP-Graphen zeigt jetzt ein schmaler Balken je eingesetztem
+  Gem, wie weit es zur nächsten Stufe ist — in der Farbe des Attributs,
+  das es verlangt. Ein voller Balken heißt fertig; wartet das Gem nur
+  auf einen Klick, sitzt eine gelbe Kappe darauf. Damit ist auf einen
+  Blick zu sehen, welche Gems durch sind und welche noch Aufmerksamkeit
+  brauchen.
 - Verlässt man eine Map zwischendurch (Items verkaufen) und kommt
   zurück, erkennt der XP-Graph das jetzt als EINE Map: Hinter den
   einzelnen Aufenthalten liegt eine dunkelgrüne Fläche auf Höhe der

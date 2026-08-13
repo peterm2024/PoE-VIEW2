@@ -259,6 +259,12 @@ and a break does not make it decay: it simply stays where it was. GGG
 only publish experience when you leave an area, so the number can never
 be fresher than your last zone change; if it is more than a minute old,
 that is written next to it.</p>
+<p>Above the graph, <b>one narrow bar per socketed gem</b> shows how far
+it is from its next level, coloured by the attribute it needs. Hover for
+its name and level. A <b>full bar</b> means the gem is done — either at
+its maximum level, or waiting for you to click it. Those waiting carry a
+<b>yellow cap</b>: gems never level up on their own, so that is free
+character power sitting unclaimed.</p>
 <p>The graph below covers the <b>last three hours</b>, one bar per
 finished area:</p>
 <ul>
