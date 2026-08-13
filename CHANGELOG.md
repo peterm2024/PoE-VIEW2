@@ -6,6 +6,8 @@ nach [SemVer](https://semver.org/lang/de/).
 
 ## [Unveröffentlicht]
 
+## [0.9.0] - 2026-08-13
+
 ### Hinzugefügt
 
 - Über dem XP-Graphen zeigt jetzt ein schmaler Balken je eingesetztem
@@ -784,7 +786,8 @@ Erste veröffentlichte Version.
 Die technischen Hintergründe einzelner Entscheidungen stehen in
 [FALLSTRICKE_UND_WORKAROUNDS.md](FALLSTRICKE_UND_WORKAROUNDS.md).
 
-[Unveröffentlicht]: https://github.com/peterm2024/PoE-VIEW2/compare/v0.8.0...HEAD
+[Unveröffentlicht]: https://github.com/peterm2024/PoE-VIEW2/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/peterm2024/PoE-VIEW2/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/peterm2024/PoE-VIEW2/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/peterm2024/PoE-VIEW2/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/peterm2024/PoE-VIEW2/compare/v0.5.1...v0.6.0
