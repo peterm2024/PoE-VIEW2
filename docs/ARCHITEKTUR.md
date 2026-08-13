@@ -1199,13 +1199,67 @@ kreuzgeprüft:** über 6639 Items mit Sockets stimmen die Treffermengen von
 `-\w-.-`, `(-\w){4}` und `(-\w){5}` exakt mit `max_links >= 4/5/6`
 überein (405/123/82 Items, keine einzige Abweichung).
 
-`compile_search()`/`matches_search()` (item_table.py) kapseln die
-Modus-Entscheidung und werden von BEIDEN Suchpfaden genutzt — dem Proxy
-und der On-Demand-Suche für große Ligen (`_run_large_search`, §FALLSTRICKE
-#40) —, damit der Umschalter überall identisch wirkt. Ein ungültiges
-Muster (beim Tippen praktisch immer kurz der Fall, etwa nach einer
-offenen Klammer) fällt still auf die Teilstring-Suche zurück, statt die
-Liste leerlaufen zu lassen. Der Modus wird in `ui-settings.ini`
+**Mehrere Begriffe, UND-verknüpft (2026-08-13).** Peter, mit dem
+Hilfe-Fenster der Spiel-eigenen Truhensuche als Vorlage: "Bin mit der
+Suche bei uns noch nicht zu 100% zufrieden." Bis dahin war der Suchtext
+EIN Muster — `life resistance` fand nur Items, bei denen die beiden
+Wörter buchstäblich nebeneinander stehen, und das kommt in Mod-Texten
+praktisch nie vor. **38.128 der 59.042 Items in Peters Bestand (64,6 %)
+tragen zwei oder mehr Mod-Zeilen**, und genau dort will man kombinieren.
+
+Jetzt dieselbe Regel wie im Spiel: Leerzeichen trennen Begriffe, ALLE
+müssen zutreffen, Anführungszeichen fassen einen mehrwortigen Begriff
+zusammen. An Peters echten 715 Allflame-Items: `life resistance` 60
+Treffer, `chaos resistance life` grenzt auf 4 ein, `"maximum life"`
+schneidet gegenüber `maximum life` drei falsche weg.
+
+Dass am Leerzeichen getrennt werden DARF, hängt an einer Eigenschaft der
+poe.re-Muster: Sie enthalten keine Leerzeichen und bleiben deshalb ein
+einziger Begriff. Ein Muster MIT Leerzeichen gehört ab jetzt in
+Anführungszeichen — die einzige bewusste Verhaltensänderung, mit eigenem
+Test festgehalten statt verschwiegen.
+
+`compile_search()` (item_table.py) liefert die `SearchQuery` und wird von
+BEIDEN Suchpfaden genutzt — dem Proxy und der On-Demand-Suche für große
+Ligen (`_run_large_search`, §FALLSTRICKE #40) —, damit der Umschalter
+überall identisch wirkt. Ein ungültiges Muster (beim Tippen praktisch
+immer kurz der Fall, etwa nach einer offenen Klammer) fällt für SEINEN
+Begriff still auf die Teilstring-Suche zurück, statt die Liste leerlaufen
+zu lassen; dasselbe gilt für ein noch offenes Anführungszeichen, das bis
+zum Zeilenende gilt.
+
+**Sockel-Gems stehen mit im Suchindex**, wie im Spiel ("The Gems and
+Microtransactions of those items are also searched"). Betrifft nur 125
+Items in Peters Bestand — aber das sind die angelegten, und "wo steckt
+eigentlich meine Determination?" ist genau die Frage, für die man sonst
+jedes Teil einzeln anklickt.
+
+**Feld-Suchen `ilvl:84` und `tier:16`**, ebenfalls aus der Spielsuche
+("Search for item level by typing ilvl:X"). Peter: "Wir haben das zwar
+schon über die Spalten gelöst, aber wenn jemand das genauso sucht, STRG+F
+und dann ilvl:84, dann freut man sich wenn es funktioniert." **Exakt,
+nicht "mindestens"** — von Peter bestätigt statt geraten; für Bereiche
+bleiben die Spalten-Filter.
+
+Umgesetzt als Marke IM Suchindex (`_field_tokens`: das Item bringt
+"ilvl:84" als eigenes Wort mit) plus ein auf Wortgrenzen festgenageltes
+Muster für den Begriff. Dadurch funktioniert es in beiden Suchpfaden ohne
+Extralogik, und `ilvl:8` findet nicht alles von 80 bis 89. `ilvl:>=84`
+bleibt bewusst ein gewöhnlicher Begriff und findet nichts, statt
+stillschweigend etwas anderes zu tun, als dort steht.
+
+**Woher die Tier kommt, war eine Messung wert.** Die erste Fassung las
+eine Property "Map Tier" — und fand auf echten Daten nichts: Über 59.042
+Items trägt KEIN EINZIGES diese Property, 13.417 tragen die Tier im
+`typeLine` ("Map (Tier 6)", "Valdo's Map (Tier 11)"). Gegen die eigenen
+Demo-Daten, in denen die Property erfunden war, sah alles richtig aus;
+sichtbar wurde es erst bei der Gegenprobe am echten Cache. An allen
+58.607 Items: `tier:6` 786 Treffer, `tier:16` 1362, `ilvl:84` 4510.
+
+**Strg+F** (`MainWindow._focus_search_field`) springt ins Suchfeld und
+MARKIERT den vorhandenen Text: Ein zweites Strg+F überschreibt die alte
+Suche durch bloßes Tippen, lässt sie aber stehen, wenn man doch nur etwas
+anhängen will. Der Modus wird in `ui-settings.ini`
 gespeichert. **Kosten gemessen** bei 50.000 Items (die
 `LIVE_SEARCH_ITEM_LIMIT`-Schwelle): 43ms für das komplexeste
 poe.re-Muster, 10ms für eine gewöhnliche Klartextsuche (gegenüber 7,5ms

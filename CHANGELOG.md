@@ -6,6 +6,25 @@ nach [SemVer](https://semver.org/lang/de/).
 
 ## [Unveröffentlicht]
 
+### Geändert
+
+- Die Suche versteht jetzt mehrere Begriffe, so wie die Suche im Spiel:
+  Durch Leerzeichen getrennte Wörter müssen ALLE zutreffen. `life
+  resistance` findet damit Items mit beidem, auch wenn die zwei Wörter
+  im Text nie nebeneinander stehen — vorher fand diese Eingabe nichts.
+  Mehrere Wörter in Anführungszeichen bleiben ein Begriff (`"maximum
+  life"`).
+  Wer reguläre Ausdrücke benutzt: Jedes Wort ist ein eigenes Muster.
+  Socket-Muster von poe.re enthalten keine Leerzeichen und funktionieren
+  unverändert; ein Muster mit Leerzeichen gehört in Anführungszeichen.
+- Mitgesucht werden jetzt auch die Namen der eingesetzten Gems — "wo
+  steckt eigentlich meine Determination?" beantwortet die Suche selbst.
+- Zwei Kurzformen aus dem Spiel funktionieren jetzt auch hier:
+  `ilvl:84` findet Itemlevel genau 84, `tier:16` Map-Tier genau 16 —
+  beides kombinierbar mit allem anderen (`ilvl:84 ring`). Für Bereiche
+  bleibt der Spalten-Filter (`>=84`) der bessere Weg.
+- **Strg+F** springt ins Suchfeld und markiert den bisherigen Text.
+
 ## [0.8.0] - 2026-08-13
 
 ### Hinzugefügt

@@ -40,12 +40,16 @@ der Live-Filter durchsucht sie mit. Zusätzlich kann jede Spalte einen
 eigenen Filter-Ausdruck tragen (">=20", "<45", "=Text", Teilstring) —
 gesetzt über das Header-Rechtsklick-Menü, markiert mit 🔍 im Header.
 
-Das Suchfeld wertet die Eingabe standardmäßig als regulären Ausdruck aus
-(Umschalter ".*" in der Toolbar) — genau wie PoEs eigene Truhensuche,
-sodass auf poe.re zusammengeklickte Muster unverändert funktionieren.
-Dafür steht auch ``Item.socket_string`` ("R-R-G", Gruppen durch
-Leerzeichen) mit im Suchindex. Ein unfertiges Muster fällt still auf die
-Teilstring-Suche zurück, statt die Liste zu leeren.
+Das Suchfeld folgt der Spiel-eigenen Truhensuche (Peter, 2026-08-13, mit
+deren Hilfe-Fenster als Vorlage): Leerzeichen trennen mehrere Begriffe,
+die ALLE zutreffen müssen; Anführungszeichen fassen einen mehrwortigen
+Begriff zusammen. Jeder Begriff wird standardmäßig als regulärer Ausdruck
+ausgewertet (Umschalter ".*" in der Toolbar), sodass auf poe.re
+zusammengeklickte Muster unverändert funktionieren — dafür steht auch
+``Item.socket_string`` ("R-R-G", Gruppen durch Leerzeichen) mit im
+Suchindex, ebenso die Namen der Sockel-Gems. Ein unfertiges Muster fällt
+für seinen Begriff still auf die Teilstring-Suche zurück, statt die Liste
+zu leeren. Siehe ``SearchQuery``.
 
 Acht Typ-Checkboxen (MainWindow, neben dem Liga-Feld) filtern zusätzlich
 nach frameType — und-verknüpft mit allem anderen: die vier PoE-Rarities
@@ -137,6 +141,56 @@ def _first_number(text: str) -> float | None:
     """Erste Zahl im Anzeigetext ("+20%" → 20.0, "–" → None)."""
     m = _NUM_RE.search(text)
     return float(m.group().replace(",", ".")) if m else None
+
+
+# Feld-Suchen aus der Spiel-eigenen Truhensuche ("Search for item level by
+# typing ilvl:X", "Search for map tier by typing tier:X"). Peter,
+# 2026-08-13: "Wir haben das zwar schon über die Spalten gelöst, aber wenn
+# jemand das genauso sucht, STRG+F und dann ilvl:84, dann freut man sich
+# wenn es funktioniert."
+#
+# **Exakt, nicht "mindestens"** — von Peter bestätigt, nicht geraten. Die
+# Spalten-Filter (">=84") bleiben der Weg für Bereiche und können mehr;
+# das hier ist die Fingergewohnheit aus dem Spiel.
+#
+# Umgesetzt als Marke IM Suchindex statt als Sonderfall im Vergleich: Das
+# Item bringt "ilvl:84" als eigenes Wort mit, und der Suchbegriff wird
+# dazu passend auf Wortgrenzen festgenagelt. Dadurch funktioniert es in
+# BEIDEN Suchpfaden ohne eine Zeile Extralogik — und "ilvl:8" findet
+# nicht versehentlich alles von 80 bis 89.
+_SEARCH_FIELDS = ("ilvl", "tier")
+
+# Woher die Map-Tier kommt. **Gemessen, nicht angenommen:** Über alle
+# 59.042 Items in Peters Bestand trägt KEIN EINZIGES eine Property namens
+# "Map Tier" — 13.417 tragen die Tier stattdessen im ``typeLine``, als
+# "Map (Tier 6)". Die erste Fassung dieser Funktion las die Property und
+# fand deshalb auf echten Daten nichts; aufgefallen ist das nur, weil die
+# Gegenprobe am echten Cache lief. Gegen die eigenen Demo-Daten, in denen
+# ich die Property selbst erfunden hatte, sah alles richtig aus.
+_TIER_IN_NAME_RE = re.compile(r"\(tier (\d+)\)", re.IGNORECASE)
+
+
+def _field_tokens(item: Item) -> str:
+    """"ilvl:84 tier:6" — die durchsuchbaren Marken eines Items."""
+    tokens = []
+    if item.ilvl:
+        tokens.append(f"ilvl:{item.ilvl}")
+    tier = _TIER_IN_NAME_RE.search(item.typeLine or "")
+    if tier:
+        tokens.append(f"tier:{tier.group(1)}")
+    return " ".join(tokens)
+
+
+_FIELD_TERM_RE = re.compile(rf"^({'|'.join(_SEARCH_FIELDS)}):(\d+)$")
+
+
+def _field_term_pattern(term: str) -> re.Pattern | None:
+    """``ilvl:84`` → ein auf Wortgrenzen festgenageltes Muster, sonst
+    ``None``. Nur Ziffern gelten als Wert: ``ilvl:>=84`` bleibt damit ein
+    gewöhnlicher Begriff, statt stillschweigend etwas anderes zu tun, als
+    dort steht."""
+    m = _FIELD_TERM_RE.match(term)
+    return re.compile(rf"\b{m.group(1)}:{m.group(2)}\b") if m else None
 
 
 class ItemTableModel(QAbstractTableModel):
@@ -257,12 +311,22 @@ class ItemTableModel(QAbstractTableModel):
         ohne sie fände die Suche Maps mit Quantity/Rarity/Pack Size/Drop
         Chance nie ("nach Quantity gesucht, nur Chisel gefunden" — die
         Chisel-Beschreibung nennt "Item Quantity" im Mod-Text, die Maps
-        selbst tragen den Wert nur als Property)."""
+        selbst tragen den Wert nur als Property).
+
+        Die Namen der SOCKEL-GEMS zählen mit, wie im Spiel ("The Gems and
+        Microtransactions of those items are also searched"). Betrifft in
+        Peters Bestand nur 125 Items — aber das sind die angelegten, und
+        "wo steckt eigentlich meine Determination?" ist genau die Frage,
+        für die man sonst jedes Teil einzeln anklickt."""
         prop_text = " ".join(p.display_text for p in item.properties)
+        gem_names = " ".join(
+            f"{gem.get('typeLine', '')} {gem.get('baseType', '')}"
+            for gem in (getattr(item, "socketedItems", None) or [])
+            if isinstance(gem, dict))
         return (f"{item.display_name} {item.typeLine} {item.baseType} "
                f"{item.rarity} {source} {item.socket_string} "
                f"{' '.join(item.explicit_mods)} {' '.join(item.implicit_mods)} "
-               f"{prop_text}").lower()
+               f"{prop_text} {gem_names} {_field_tokens(item)}").lower()
 
     def set_price_index(self, index: PriceIndex | None) -> None:
         """Preise treffen meist ASYNCHRON nach ``set_items()`` ein (poe.ninja
@@ -434,23 +498,83 @@ class ItemTableModel(QAbstractTableModel):
         return None
 
 
-def compile_search(text: str, regex_enabled: bool) -> re.Pattern | None:
-    """Suchmuster für den Regex-Modus, ``None`` für die einfache
-    Teilstring-Suche (Modus aus, leerer Text oder ein noch unfertiges
-    Muster). Gemeinsam genutzt von ``ItemFilterProxy`` und der
-    On-Demand-Suche über große Ligen (MainWindow._run_large_search)."""
-    if not regex_enabled or not text:
-        return None
-    try:
-        return re.compile(text)
-    except re.error:
-        return None
+class SearchQuery:
+    """Eine zerlegte Suchanfrage: mehrere Begriffe, UND-verknüpft.
+
+    Peter, 2026-08-13, mit dem Hilfe-Fenster der Spiel-eigenen Suche als
+    Vorlage: "Bin mit der Suche bei uns noch nicht zu 100% zufrieden."
+    Bis dahin war der Suchtext EIN Muster — "life resistance" fand nur
+    Items, bei denen die beiden Wörter buchstäblich nebeneinander stehen.
+    Das kommt in Mod-Texten praktisch nie vor: 38.128 der 59.042 Items in
+    Peters Bestand (64,6 %) tragen zwei oder mehr Mod-Zeilen, und genau
+    dort will man zwei Begriffe kombinieren.
+
+    Deshalb dieselbe Regel wie im Spiel ("Type multiple keywords by
+    separating them with a space"): Leerzeichen trennen Begriffe, ALLE
+    müssen zutreffen, und Anführungszeichen fassen einen mehrwortigen
+    Begriff wieder zusammen ("two handed mace").
+
+    Der Regex-Umschalter wirkt je Begriff, nicht auf die ganze Zeile —
+    ``r-r-g|r-g-r`` bleibt damit ein Begriff und funktioniert
+    unverändert, weil poe.re-Muster keine Leerzeichen enthalten. Ein
+    Muster MIT Leerzeichen gehört ab jetzt in Anführungszeichen.
+    """
+
+    def __init__(self, terms: list[re.Pattern | str]) -> None:
+        self._terms = terms
+
+    def __bool__(self) -> bool:
+        return bool(self._terms)
+
+    def matches(self, haystack: str) -> bool:
+        """``haystack`` ist bereits klein geschrieben
+        (``ItemTableModel._build_haystack``)."""
+        return all(term.search(haystack) if isinstance(term, re.Pattern)
+                   else term in haystack
+                   for term in self._terms)
 
 
-def matches_search(haystack: str, text_lower: str, pattern: re.Pattern | None) -> bool:
-    """Ein Treffer-Test für beide Suchmodi — der Aufrufer entscheidet über
-    ``pattern``, ob als Regex oder als Teilstring gesucht wird."""
-    return bool(pattern.search(haystack)) if pattern else text_lower in haystack
+def split_search_terms(text: str) -> list[str]:
+    """Zerlegt den Suchtext in Begriffe. Anführungszeichen halten
+    zusammen, was zusammengehört; ein nicht geschlossenes
+    Anführungszeichen (beim Tippen der Normalfall) gilt bis zum Ende,
+    statt die Suche bis zum zweiten Zeichen unbrauchbar zu machen."""
+    terms: list[str] = []
+    # Das schliessende Anfuehrungszeichen ist OPTIONAL — beim Tippen ist
+    # es zwangslaeufig kurz offen, und dann soll der Rest der Zeile der
+    # Begriff sein statt in Einzelwoerter zu zerfallen.
+    for quoted, bare in re.findall(r'"([^"]*)"?|(\S+)', text):
+        term = quoted if quoted else bare
+        if term:
+            terms.append(term)
+    return terms
+
+
+def compile_search(text: str, regex_enabled: bool) -> SearchQuery:
+    """Suchtext in eine ``SearchQuery`` übersetzen. Gemeinsam genutzt von
+    ``ItemFilterProxy`` und der On-Demand-Suche über große Ligen
+    (MainWindow._run_large_search).
+
+    Ein unfertiges Muster (beim Tippen praktisch immer kurz der Fall,
+    etwa nach einer offenen Klammer) fällt für DIESEN Begriff still auf
+    die Teilstring-Suche zurück, statt die ganze Liste zu leeren."""
+    terms: list[re.Pattern | str] = []
+    for term in split_search_terms(text.lower()):
+        feld = _field_term_pattern(term)
+        if feld is not None:
+            # Unabhängig vom Regex-Umschalter: "ilvl:84" ist in beiden
+            # Modi dasselbe gemeint, und als Teilstring gelesen träfe es
+            # auch ilvl:840.
+            terms.append(feld)
+            continue
+        if regex_enabled:
+            try:
+                terms.append(re.compile(term))
+                continue
+            except re.error:
+                pass
+        terms.append(term)
+    return SearchQuery(terms)
 
 
 # Vergleichsoperator am Anfang eines Spalten-Filter-Ausdrucks
@@ -494,7 +618,7 @@ class ItemFilterProxy(QSortFilterProxyModel):
         self._search_text = ""
         self._search_text_lower = ""
         self._regex_enabled = True
-        self._search_regex: re.Pattern | None = None
+        self._search_query = SearchQuery([])
         self._hidden_types: set[int] = set()  # _type_key(frameType), per Checkbox abgewählt
 
     def set_regex_enabled(self, enabled: bool) -> None:
@@ -504,11 +628,9 @@ class ItemFilterProxy(QSortFilterProxyModel):
         self.endFilterChange()
 
     def _compile_search(self) -> None:
-        """Übersetzt den Suchtext in ein Muster, wenn der Regex-Modus an
-        ist. Ein unfertiges/ungültiges Muster (beim Tippen praktisch immer
-        kurz der Fall, etwa nach einer offenen Klammer) fällt still auf
-        die normale Teilstring-Suche zurück, statt die Liste zu leeren."""
-        self._search_regex = compile_search(self._search_text_lower, self._regex_enabled)
+        """Übersetzt den Suchtext in eine ``SearchQuery`` (mehrere
+        Begriffe, UND-verknüpft — siehe dort)."""
+        self._search_query = compile_search(self._search_text_lower, self._regex_enabled)
 
     def lessThan(self, left: QModelIndex, right: QModelIndex) -> bool:  # noqa: N802 (Qt-API)
         """Eigene Tie-Break-Regel für gleiche Sortierwerte.
@@ -613,5 +735,4 @@ class ItemFilterProxy(QSortFilterProxyModel):
         # Haystack ist bereits beim Laden vorgerechnet und klein geschrieben
         # (ItemTableModel._build_haystack) — hier nur noch ein billiger
         # Test, kein erneutes Zusammenbauen pro Zeile/Tastendruck.
-        return matches_search(model.search_haystack_at(row),
-                             self._search_text_lower, self._search_regex)
+        return self._search_query.matches(model.search_haystack_at(row))

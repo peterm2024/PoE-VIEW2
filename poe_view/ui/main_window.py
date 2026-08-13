@@ -16,7 +16,7 @@ from datetime import datetime, timedelta, timezone
 
 from PySide6.QtCore import QSettings, Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import (QAction, QDesktopServices, QGuiApplication,
-                           QMouseEvent, QPixmap)
+                           QKeySequence, QMouseEvent, QPixmap, QShortcut)
 from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QCompleter,
                                QDialog, QFileDialog, QLabel, QLineEdit,
                                QMainWindow, QMenu, QMessageBox, QProgressBar,
@@ -50,8 +50,7 @@ from poe_view.ui.xp_graph import GRAPH_SPAN_S, XpPoint
 from poe_view.ui.item_table import (COLUMNS, CONFIGURABLE_COLUMNS, ICON_COL,
                                     MODS_COL, POSITION_COL, TAB_COL,
                                     VALUE_COL, ItemFilterProxy, ItemTableModel,
-                                    compile_search, format_chaos_value,
-                                    matches_search)
+                                    compile_search, format_chaos_value)
 from poe_view.ui.item_history import (BASE_COL as HISTORY_BASE_COL,
                                       CHARACTER_COL as HISTORY_CHARACTER_COL,
                                       EVENT_COL as HISTORY_EVENT_COL,
@@ -1092,6 +1091,11 @@ class MainWindow(QMainWindow):
         self._filter_edit.setPlaceholderText("🔍 Search all tabs of the league — * for everything")
         self._filter_edit.setFixedWidth(260)
         self._filter_edit.setClearButtonEnabled(True)  # eingebautes "x" zum Leeren
+        # Strg+F wie im Spiel ("You can press CTRL + F as a shortcut").
+        # Markiert den vorhandenen Text mit, damit ein zweites Strg+F die
+        # alte Suche direkt überschreibt statt sie zu verlängern.
+        such_kuerzel = QShortcut(QKeySequence.StandardKey.Find, self)
+        such_kuerzel.activated.connect(self._focus_search_field)
         filter_toolbar.addWidget(self._filter_edit)
         # Regex-Umschalter, standardmäßig AN: entspricht PoEs eigener
         # Truhensuche, sodass auf poe.re zusammengeklickte Muster
@@ -3085,11 +3089,9 @@ class MainWindow(QMainWindow):
             else:
                 # Dieselbe Muster-Logik wie im Proxy (§item_table), damit
                 # der Regex-Umschalter in beiden Suchpfaden identisch wirkt.
-                text_lower = text.lower()
-                pattern = compile_search(text_lower, self._regex_search_enabled)
+                query = compile_search(text.lower(), self._regex_search_enabled)
                 matched = [i for i, (item, source) in enumerate(zip(items, sources))
-                          if matches_search(ItemTableModel._build_haystack(item, source),
-                                           text_lower, pattern)]
+                          if query.matches(ItemTableModel._build_haystack(item, source))]
             matched_items = [items[i] for i in matched]
             matched_sources = [sources[i] for i in matched]
             matched_tabs = [tab_indices[i] for i in matched]
@@ -3850,6 +3852,14 @@ class MainWindow(QMainWindow):
             status += f" — {self._format_xp_rate(rate)}{self._xp_rate_age_note(name)}"
         self._status_msg.setText(status)
         self._show_leveling(name)
+
+    def _focus_search_field(self) -> None:
+        """Strg+F (§Suchfeld). Der vorhandene Text wird MARKIERT, nicht
+        gelöscht: Ein zweites Strg+F überschreibt damit die alte Suche
+        durch bloßes Tippen, lässt sie aber stehen, wenn man doch nur
+        etwas anhängen will."""
+        self._filter_edit.setFocus()
+        self._filter_edit.selectAll()
 
     def _show_leveling(self, name: str) -> None:
         """Dieselben Zahlen wie in der Statuszeile, nur größer und

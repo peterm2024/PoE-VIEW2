@@ -144,11 +144,29 @@ shows where each hit came from. Clear the field to return to the tab you
 had selected.</p>
 <p>Type <code>*</code> to list the entire league — useful before an
 export.</p>
+<p><b>Several keywords, separated by spaces, must all match</b> — the
+same rule as the game's own stash search. <code>life resistance</code>
+finds items carrying both, even though the two words never stand next to
+each other in the text. Each further word narrows the result down.</p>
+<p>To search for a phrase that contains a space, put it in
+<b>quotation marks</b>: <code>"maximum life"</code> no longer matches an
+item that merely has maximum mana and some life regeneration.</p>
 <p><b>Regular expressions</b> are on by default (the <code>.*</code>
 toggle), matching how Path of Exile's own stash search behaves. Socket
 patterns copied from sites like poe.re therefore work unchanged, for
-example <code>r-r-g|r-g-r|g-r-r</code>. Turn the toggle off for plain
-text search.</p>
+example <code>r-r-g|r-g-r|g-r-r</code>. Each keyword is its own pattern,
+so a regex that contains a space belongs in quotation marks. Turn the
+toggle off for plain text search.</p>
+<p>Searched is everything the item says about itself: name, base, rarity,
+sockets, all its mods and properties, the tab it sits in — and the names
+of the <b>gems socketed into it</b>.</p>
+<p>Two shorthands from the game work as well: <code>ilvl:84</code> finds
+item level exactly 84, <code>tier:16</code> map tier exactly 16. Both
+combine with everything else (<code>ilvl:84 ring</code>). For ranges use
+a column filter instead — right-click a column header and type
+<code>&gt;=84</code>.</p>
+<p><b>Ctrl+F</b> jumps to the search field and selects what is in it, so
+you can start typing over it straight away.</p>
 <p>In very large leagues the search waits until you pause typing before
 it filters, instead of rebuilding the table on every keystroke.</p>
 """),
