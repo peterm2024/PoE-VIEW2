@@ -40,7 +40,8 @@ A character inventory right after a refresh: rows that are new or
 changed are highlighted, items that disappeared stay visible for one
 cycle in grey and struck through. The panel underneath logs what moved
 through the inventory of every character — pulled open here, collapsed
-to a single line by default.
+to a single line by default. On the right, the levelling panel shows gem
+progress and the last three hours of experience.
 
 ![Character inventory with refresh highlighting and the item history](docs/screenshots/charakter-verlauf.png)
 
@@ -65,11 +66,17 @@ to a single line by default.
   comparison expressions such as `>=20` for quality or `<45` for item
   level, with autocomplete over the values actually present in that
   column.
-- **Regex search** (toggle `.*` next to the search field, on by
-  default), matching how Path of Exile's own stash search works — so
-  patterns built on sites like poe.re work unchanged. Sockets are
-  indexed in the in-game notation (`R-R-G`), making link patterns such
-  as `r-r-g|r-g-r|g-r-r` work directly.
+- **Search like the in-game stash search**: several keywords separated
+  by spaces must all match, so `life resistance` finds items carrying
+  both even though the two words never stand next to each other.
+  Quotation marks hold a phrase together (`"maximum life"`), `ilvl:84`
+  and `tier:16` match exactly that item level or map tier, and `Ctrl+F`
+  jumps to the field. **Regular expressions** are on by default (toggle
+  `.*`), so patterns built on sites like poe.re work unchanged — sockets
+  are indexed in the in-game notation (`R-R-G`), making link patterns
+  such as `r-r-g|r-g-r|g-r-r` work directly. Searched is everything the
+  item says about itself, down to the names of the gems socketed into
+  it.
 - **League-wide search** across all loaded tabs and characters at once.
   `*` as the search text lists the entire holdings, useful for
   exporting a whole league.
@@ -105,10 +112,34 @@ to a single line by default.
   6-link pricing), gems (matched exactly by level, quality, and
   corruption), divination cards, scarabs, essences, and fossils. Unknown
   prices stay empty rather than showing 0.
+- **Copy for Path of Building**: right-clicking an item puts it on the
+  clipboard in the game's own item text format, ready to paste into PoB.
+  Aimed at stash items in particular — PoB imports characters by itself,
+  but cannot reach your stash.
 - **Configurable item lookups**: right-clicking an item can open it in
   reference sites you define yourself (name plus a URL template with a
   `{slug}` placeholder). Nothing is preconfigured — see
   [Data sources](#data-sources).
+
+### Levelling
+
+- **Experience per hour** while a character is open, at no extra API
+  request — level and experience already come with the response that
+  loads the equipment. It is measured per area, over the time actually
+  spent in there, so hideout time does not water it down and a break
+  does not make it collapse. Once the number is older than a minute, it
+  says so.
+- **Three-hour graph**: one bar per finished area, its width the time
+  spent there. Gaps are real — no experience was made in them. Leaving a
+  map and coming back puts both visits on one dark block showing the
+  rate for the map as a whole, so the cost of the trip outside is
+  visible. A dashed line marks the overall rate; an area that cost
+  experience on balance hangs below the line in red.
+- **Gem progress**: one narrow bar per socketed gem, coloured by the
+  attribute it needs, showing how far it is from its next level. A full
+  bar means the gem is done — and if it is full below its maximum level,
+  a yellow cap marks it: gems never level up on their own, so that is
+  character power waiting to be claimed.
 
 ### Staying up to date
 
@@ -134,7 +165,10 @@ to a single line by default.
   shows the zone most recently detected this way.
 - **Offline mode**: during GGG maintenance or a lost connection, the
   app shows the last known state from the cache, clearly marked as such
-  (📴).
+  (📴). A dot in the status bar carries the same information at a
+  glance: green while the API answers, red during an outage, grey before
+  anything has been requested. It returns to green on its own as soon as
+  a request succeeds.
 - **Separate cache per account**: every GGG account keeps its own local
   data, so switching accounts never mixes up stash trees, items, or
   characters. Nothing is deleted in the process — each account keeps its
@@ -231,16 +265,21 @@ the worker, and the UI logic. It requires no network access.
 - [docs/api-notes/ggg-api.md](docs/api-notes/ggg-api.md) — observed
   behavior of the GGG API, including deviations from the official
   documentation (in German).
+- [docs/api-notes/poe-verhalten.md](docs/api-notes/poe-verhalten.md) —
+  how the game and GGG's servers behave over time, measured rather than
+  assumed: when the API publishes new data, what `Client.txt` contains,
+  how socketed gems gain experience, and what turned out to be wrong
+  along the way (in English).
 - [FALLSTRICKE_UND_WORKAROUNDS.md](FALLSTRICKE_UND_WORKAROUNDS.md) —
   solved technical hurdles with cause and fix (in German).
 
 ## Status
 
 PoE-VIEW2 is in daily use. Login, stash and character views, search,
-filters, CSV export, refresh modes, price display, and offline mode all
-work. The project is developed by a single person and makes no claim to
-completeness compared to the official PoE website. Bug reports and
-pull requests are welcome.
+filters, CSV export, refresh modes, price display, levelling display,
+and offline mode all work. The project is developed by a single person
+and makes no claim to completeness compared to the official PoE website.
+Bug reports and pull requests are welcome.
 
 ## License
 
