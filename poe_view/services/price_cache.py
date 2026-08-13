@@ -44,7 +44,13 @@ EMPTY_TTL_SECONDS = 3600
 # Werte ausgeliefert — die Behebung wäre unsichtbar geblieben und hätte
 # wie ein fehlgeschlagener Fix ausgesehen. Die TTL allein deckt das nicht
 # ab: Sie misst das Alter der DATEN, nicht das der Rechenvorschrift.
-CACHE_VERSION = 2
+#
+# 3 (2026-08-13): Dieselbe Rechenvorschrift noch einmal korrigiert —
+# poe.ninja führt die pay-Seite inzwischen teils in der umgekehrten
+# Einheit, wodurch der Boden bei Scroll of Wisdom wieder durchschlug
+# (921 Stück = 4,9 div in Peters Tabelle). Ohne diese Nummer hätte sein
+# Cache die 1,0 c weiter ausgeliefert.
+CACHE_VERSION = 3
 
 
 def _index_to_payload(index: PriceIndex) -> dict:

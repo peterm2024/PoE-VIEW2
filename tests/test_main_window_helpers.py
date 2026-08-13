@@ -7827,6 +7827,162 @@ def test_without_zone_watching_the_whole_interval_counts(qapp, monkeypatch) -> N
     win.worker.wait(5000)
 
 
+def test_the_very_first_map_of_a_session_already_yields_a_rate(
+        qapp, monkeypatch) -> None:
+    """Peter, 2026-08-13: "Ich habe eine Anfangs-XP im Tool gehabt und bin
+    vom Hideout in eine Map gegangen. Nach der Map (ca. 10 Minuten)
+    zurueck ins Hideout und da habe ich eine End-XP bekommen, aber noch
+    keine Rate, was theoretisch jetzt moeglich waere."
+
+    Er hatte recht: Der Weg INS Hideout aendert die Erfahrung nicht (dort
+    wird nichts verdient), es gab also nur EINE beobachtete Aenderung.
+    Der Nenner — die zehn Minuten in der Map — lag laengst gemessen vor,
+    nur der Vorgaenger fehlte. Er stand im Sitzungs-Startwert."""
+    fake_now = [1000.0]
+    monkeypatch.setattr("poe_view.ui.main_window.time.monotonic", lambda: fake_now[0])
+
+    win = MainWindow()
+    win._on_character_snapshot("WitchOfPeter", 87, 1_000_000)   # Anfangs-XP im Hideout
+    fake_now[0] += 300.0
+    win._on_zone_changed("Crimson Temple")                      # rein in die Map
+    fake_now[0] += 600.0                                        # ca. 10 Minuten
+    win._on_zone_changed("Backstreet Hideout")                  # zurueck
+    fake_now[0] += 2.0
+    win._on_character_snapshot("WitchOfPeter", 87, 21_000_000)  # End-XP
+
+    assert win._xp_per_hour("WitchOfPeter") == pytest.approx(120_000_000)
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_a_baseline_taken_inside_the_measured_zone_yields_no_rate(
+        qapp, monkeypatch) -> None:
+    """Gegenprobe, damit der Startwert nicht zum Freifahrtschein wird:
+    Wurde er erst gelesen, als der Charakter schon IN der Zone stand,
+    steckt in der ersten Aenderung auch Erfahrung von davor. Die Rate
+    waere dann erfunden — genau der Fehler, den
+    ``test_a_single_experience_change_is_not_enough_for_a_rate``
+    beschreibt."""
+    fake_now = [1000.0]
+    monkeypatch.setattr("poe_view.ui.main_window.time.monotonic", lambda: fake_now[0])
+
+    win = MainWindow()
+    win._on_zone_changed("Crimson Temple")                      # Zone schon betreten
+    fake_now[0] += 60.0
+    win._on_character_snapshot("WitchOfPeter", 87, 1_000_000)   # erst jetzt Programmstart
+    fake_now[0] += 540.0
+    win._on_zone_changed("Backstreet Hideout")
+    fake_now[0] += 2.0
+    win._on_character_snapshot("WitchOfPeter", 87, 21_000_000)
+
+    assert win._xp_per_hour("WitchOfPeter") is None
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_a_baseline_read_seconds_before_the_zone_change_is_not_trusted(
+        qapp, monkeypatch) -> None:
+    """Der Sicherheitsabstand: Zwischen einem Zonenwechsel und seiner
+    Veroeffentlichung liegen 1-3 Sekunden (§4.34). Faellt der erste Abruf
+    in dieses Fenster, ist der Startwert noch der Stand VOR der letzten
+    Zone, und ein Teil des Zuwachses gehoert dorthin."""
+    fake_now = [1000.0]
+    monkeypatch.setattr("poe_view.ui.main_window.time.monotonic", lambda: fake_now[0])
+
+    win = MainWindow()
+    win._on_character_snapshot("WitchOfPeter", 87, 1_000_000)
+    fake_now[0] += 3.0                                          # zu dicht am Wechsel
+    win._on_zone_changed("Crimson Temple")
+    fake_now[0] += 600.0
+    win._on_zone_changed("Backstreet Hideout")
+    fake_now[0] += 2.0
+    win._on_character_snapshot("WitchOfPeter", 87, 21_000_000)
+
+    assert win._xp_per_hour("WitchOfPeter") is None
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_every_finished_section_becomes_a_point_in_the_graph(
+        qapp, monkeypatch) -> None:
+    """Der Zeitreihen-Speicher, an dem der Graph bisher hing (§4.40). Er
+    haelt genau das, was auch angezeigt wird — Kurve und Zahl duerfen
+    nicht auseinanderlaufen."""
+    fake_now = [1000.0]
+    monkeypatch.setattr("poe_view.ui.main_window.time.monotonic", lambda: fake_now[0])
+
+    win = MainWindow()
+    win._on_character_snapshot("WitchOfPeter", 87, 0)
+    fake_now[0] += 60.0
+    win._on_character_snapshot("WitchOfPeter", 87, 1_000_000)    # nur die erste Aenderung
+    assert win._xp_watch["WitchOfPeter"].history == []           # noch keine Rate, kein Punkt
+
+    fake_now[0] += 600.0
+    win._on_character_snapshot("WitchOfPeter", 87, 21_000_000)
+    fake_now[0] += 300.0
+    win._on_character_snapshot("WitchOfPeter", 87, 26_000_000)
+
+    verlauf = win._xp_watch["WitchOfPeter"].history
+    assert [p.seconds for p in verlauf] == [600.0, 300.0]
+    assert [p.rate for p in verlauf] == [pytest.approx(120_000_000),
+                                         pytest.approx(60_000_000)]
+    assert verlauf[-1].rate == pytest.approx(win._xp_per_hour("WitchOfPeter"))
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_the_graph_history_forgets_everything_older_than_its_window(
+        qapp, monkeypatch) -> None:
+    """Peters Vorgabe: drei Stunden. Was aelter ist, wird nicht nur nicht
+    gezeichnet, sondern gar nicht erst aufgehoben — sonst waechst ueber
+    einen langen Abend eine Liste mit, die niemand ansieht."""
+    fake_now = [1000.0]
+    monkeypatch.setattr("poe_view.ui.main_window.time.monotonic", lambda: fake_now[0])
+
+    win = MainWindow()
+    win._on_character_snapshot("WitchOfPeter", 87, 0)
+    stand = 0
+    for _ in range(5):                                  # fuenf Stunden Spielabend
+        fake_now[0] += 3600.0
+        stand += 10_000_000
+        win._on_character_snapshot("WitchOfPeter", 87, stand)
+
+    verlauf = win._xp_watch["WitchOfPeter"].history
+    assert len(verlauf) == 3                            # nur die letzten drei Stunden
+    assert all(p.at > fake_now[0] - 3 * 3600 for p in verlauf)
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_the_leveling_panel_gets_the_history_for_its_graph(qapp, monkeypatch) -> None:
+    """Ende-zu-Ende: Der Verlauf muss auch im Widget ankommen, nicht nur
+    im Beobachtungsstand liegen."""
+    fake_now = [1000.0]
+    monkeypatch.setattr("poe_view.ui.main_window.time.monotonic", lambda: fake_now[0])
+
+    win = MainWindow()
+    win._current_character_name = "WitchOfPeter"
+    win._on_character_snapshot("WitchOfPeter", 87, 0)
+    fake_now[0] += 60.0
+    win._on_character_snapshot("WitchOfPeter", 87, 1_000_000)
+    fake_now[0] += 600.0
+    win._on_character_snapshot("WitchOfPeter", 87, 21_000_000)
+    win._show_character_items("WitchOfPeter", [])
+
+    assert [p.rate for p in win.leveling._graph._points] == [pytest.approx(120_000_000)]
+
+    win._show_items("tab-1", [], "Currency")
+    assert win.leveling._graph._points == []            # Fach-Wechsel raeumt auch den Graphen
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
 def test_the_status_bar_marks_how_old_the_rate_is(qapp, monkeypatch) -> None:
     """Die Rate steht zwischen zwei Veroeffentlichungen still — ohne einen
     Hinweis saehe eine zehn Minuten alte Zahl aus wie eine frische. Unter
@@ -7982,6 +8138,68 @@ def test_character_refresh_writes_to_the_gem_xp_log(qapp, monkeypatch, tmp_path)
 
     assert gem_xp_log.log_path().exists()
     assert "Fire Trap" in gem_xp_log.log_path().read_text(encoding="utf-8")
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+# --- Verbindungs-LED in der Statuszeile (§4.41) ------------------------ #
+
+def test_the_connection_led_starts_grey_because_nothing_has_been_asked_yet(
+        qapp) -> None:
+    """Peter, 2026-08-13: "wir koennten waehrend der Wartungsdauer eine LED
+    rot leuchten lassen und wenn die Wartung vorbei ist, diese wieder auf
+    gruen setzen." Dazu gehoert ein dritter Zustand, den er nicht genannt
+    hat: Vor dem ersten Abruf gibt es keinen erfolgreichen Request, auf den
+    sich ein Gruen stuetzen koennte — und PoE-VIEW2 startet
+    ausdruecklich auch ohne Login, nur mit dem Cache."""
+    win = MainWindow()
+
+    assert win._connection_led_state == "unknown"
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_the_connection_led_follows_the_outage_and_the_recovery(qapp) -> None:
+    """Der eigentliche Wunsch: waehrend der Wartung rot, danach wieder
+    gruen. Beide Wechsel haengen am vorhandenen ``offline_changed`` — die
+    Wartung vom 2026-08-13 hat genau diese zwei Flanken erzeugt."""
+    win = MainWindow()
+
+    win._on_offline_changed(True)
+    assert win._connection_led_state == "offline"
+
+    win._on_offline_changed(False)
+    assert win._connection_led_state == "online"
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_a_successful_login_turns_the_led_green_on_its_own(qapp) -> None:
+    """Ohne diesen Anschluss bliebe die LED eine ganze stoerungsfreie
+    Sitzung lang grau: ``offline_changed`` meldet nur ZUSTANDSWECHSEL, und
+    wer nie offline war, bekommt nie ein Signal. Der Login ist selbst ein
+    geglueckter Abruf (``/profile``) und damit der Beleg."""
+    win = MainWindow()
+    win._on_logged_in("PeterM")
+
+    assert win._connection_led_state == "online"
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_an_expired_token_greys_the_led_instead_of_reddening_it(qapp) -> None:
+    """Ohne Token fragen wir gar nicht erst (§_skip_unauthenticated). Ueber
+    GGGs Erreichbarkeit sagt das nichts — Rot hiesse "GGG ist weg",
+    obwohl der Server einwandfrei laufen kann."""
+    win = MainWindow()
+    win._on_logged_in("PeterM")
+    win._on_login_required("Token expired")
+
+    assert win._connection_led_state == "unknown"
 
     win.worker.stop()
     win.worker.wait(5000)

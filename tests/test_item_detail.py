@@ -2,7 +2,8 @@
 und die Anforderungs-Zeile (iLvl/Req.Lvl/Str/Dex/Int)."""
 
 from poe_view.api.models import Item
-from poe_view.ui.item_detail import ItemDetail
+from poe_view.ui.item_detail import (_MAX_UNITS, ItemDetail, _blocks_to_html,
+                                     _item_blocks)
 
 
 def _item(**kwargs) -> Item:
@@ -182,3 +183,84 @@ def test_the_preferred_width_fits_a_typical_mod_line(qapp) -> None:
     metrics = detail._props.fontMetrics()
 
     assert detail.preferred_width() >= metrics.averageCharWidth() * 68 + 64
+
+
+# --- Hoehenbudget: Textzeilen UND Trennlinien (Peter, 2026-08-13) ------- #
+
+def _einheiten(html: str) -> int:
+    """Was das HTML an Zeilenhoehen kostet. Jedes ``<br>`` und jedes
+    ``<hr>`` beginnt eine neue Textzeile, und jedes ``<hr>`` kostet
+    zusaetzlich seine eigene (gemessene) Zeilenhoehe."""
+    zeilen = html.count("<br>") + html.count("<hr>") + 1
+    return zeilen + html.count("<hr>")
+
+
+def _foe_portent() -> Item:
+    """Peters Karte aus dem Screenshot vom 2026-08-13, bei der die letzte
+    Mod-Zeile auf dem Rahmenrand stand."""
+    return Item.model_validate({
+        "id": "map-1", "name": "Foe Portent", "typeLine": "Waterways Map",
+        "baseType": "Waterways Map", "frameType": 2, "ilvl": 69, "identified": True,
+        "properties": [
+            {"name": "Map Tier", "values": [["6", 0]]},
+            {"name": "Item Quantity", "values": [["+68%", 1]]},
+            {"name": "Item Rarity", "values": [["+78%", 1]]},
+            {"name": "Monster Pack Size", "values": [["+26%", 1]]},
+            {"name": "More Currency", "values": [["+94%", 1]]}],
+        "enchantMods": ["Area is Influenced by the Originator's Memories"],
+        "explicitMods": ["29% more Monster Life", "Monsters cannot be Stunned",
+                         "Monsters' Action Speed cannot be modified to below Base Value",
+                         "Monsters' Movement Speed cannot be modified to below Base Value",
+                         "Monsters have 50% increased Accuracy Rating"],
+    })
+
+
+def test_a_five_block_map_fits_without_being_cut(qapp) -> None:
+    """Peter, 2026-08-13: "und eine abgeschnittene Info....". Diese Karte
+    braucht 13 Textzeilen in 5 Bloecken, also 17 Zeilenhoehen — die
+    Fassung davor rechnete nur die 13 und schlug pauschal drei fuer
+    Namenszeile und Linien drauf. Sie lief damit ueber den Rahmen, ohne
+    es zu melden."""
+    html = _blocks_to_html(_item_blocks(_foe_portent()))
+
+    assert _einheiten(html) == 17
+    assert "more (double-click" not in html          # nichts fehlt
+    assert "Monsters have 50% increased Accuracy Rating" in html
+
+
+def test_the_budget_counts_separators_not_just_lines(qapp) -> None:
+    """Der Kern der Korrektur: Eine ``<hr>`` kostet gemessene 16 px, also
+    eine volle Zeilenhoehe. Ein Item mit vielen kleinen Bloecken passt
+    deshalb WENIGER Text als eines mit einem grossen — vorher wurden
+    beide gleich behandelt."""
+    viele_bloecke = _blocks_to_html([[f"Block {i}"] for i in range(6)]
+                                    + [[f"Mod {i}" for i in range(20)]])
+    ein_block = _blocks_to_html([[f"Mod {i}" for i in range(40)]])
+
+    assert _einheiten(viele_bloecke) <= _MAX_UNITS
+    assert _einheiten(ein_block) <= _MAX_UNITS
+    # Der Block-reiche Fall zeigt weniger TEXT, weil die Linien mitzahlen.
+    assert viele_bloecke.count("<br>") < ein_block.count("<br>")
+
+
+def test_the_truncation_note_is_paid_for_out_of_the_budget(qapp) -> None:
+    """Der Hinweis braucht selbst eine Zeile. Wird er nicht eingeplant,
+    schiebt ausgerechnet die Meldung ueber das Abschneiden das Panel
+    ueber seine feste Hoehe — der Fehler haette sich damit selbst
+    verlaengert."""
+    html = _blocks_to_html([[f"Mod {i}" for i in range(60)]])
+
+    assert "more (double-click" in html
+    assert _einheiten(html) <= _MAX_UNITS
+
+
+def test_the_panel_is_tall_enough_for_its_own_budget(qapp) -> None:
+    """Gegenprobe in Pixeln statt in Einheiten: Was das Budget zulaesst,
+    muss auch hineinpassen. Genau diese Zusicherung fehlte."""
+    panel = ItemDetail()
+    zeile = panel._props.fontMetrics().lineSpacing()
+    raender = (panel.layout().contentsMargins().top()
+               + panel.layout().contentsMargins().bottom()
+               + panel.layout().spacing())
+
+    assert panel._full_height() >= (_MAX_UNITS + 1) * zeile + raender

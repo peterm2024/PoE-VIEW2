@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import sys
 import tempfile
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -57,7 +58,8 @@ data_cache._CACHE_FILE = _TMP / "unused.json"
 token_store.load_token = lambda: None  # kein echtes Konto, kein echter Login
 
 from poe_view.ui.item_history import HistoryEntry  # noqa: E402
-from poe_view.ui.main_window import MainWindow  # noqa: E402
+from poe_view.ui.main_window import MainWindow, _XpWatch  # noqa: E402
+from poe_view.ui.xp_graph import XpPoint  # noqa: E402
 
 OUT = Path(__file__).resolve().parent.parent / "docs" / "screenshots"
 LEAGUE = "Demo League"
@@ -293,6 +295,11 @@ def _demo_session_state(win: MainWindow) -> None:
     win._logged_in = True
     win._login_button.setText(f"⚷ {ACCOUNT}")
     win._update_online_controls_enabled()
+    # Verbindungs-LED grün (§4.41). Sie hängt sonst an einem echten
+    # geglückten Abruf, den es hier per Definition nicht gibt — grau
+    # hieße "noch nichts abgefragt" und widerspräche allem anderen im
+    # Bild.
+    win._set_connection_led("online")
     # "unchanged for" (§4.31) im Bild zeigen, ohne minutenlang zu warten.
     # Zweimal aufrufen: Der erste Aufruf merkt sich den Inhalt und setzt
     # den Zeitpunkt dabei auf jetzt — erst danach lässt er sich
@@ -352,10 +359,46 @@ def _item_details(win: MainWindow) -> None:
     _shot(win, "item-details.png")
 
 
+def _demo_leveling(win: MainWindow) -> None:
+    """Leveling-Feld füllen: Stufe, Erfahrung und ein Abendverlauf für den
+    XP/h-Graphen (§4.40).
+
+    Erfunden wie alles hier, aber in den Größenordnungen, die ein
+    Charakter dieser Stufe wirklich liefert (`poe-verhalten.md` §3): Maps
+    zwischen vier und elf Minuten, 90–160 Mio. XP/h, eine Pause und ein
+    Tod. Ohne diesen Vorrat zeigte das Bild eine leere Achse — richtig,
+    aber nicht das, was das Feld kann."""
+    jetzt = time.monotonic()
+    # (Minuten her, Dauer in s, XP/h) — der letzte Abschnitt ist der, den
+    # die Zahl über dem Graphen nennt.
+    abschnitte = [
+        (163, 540, 96_000_000), (152, 420, 118_000_000), (144, 300, 132_000_000),
+        (131, 660, 88_000_000), (117, 480, 141_000_000),
+        # Pause: 40 Minuten ohne Erfahrung, im Bild eine Lücke.
+        (73, 360, 124_000_000), (63, 300, -22_000_000),   # Tod
+        (53, 540, 109_000_000), (42, 420, 151_000_000), (30, 300, 128_000_000),
+        (18, 600, 97_000_000), (7, 367, 161_200_000),
+    ]
+    stand = 2_006_431_775
+    watch = _XpWatch(since=jetzt - 3 * 3600, since_experience=stand - 300_000_000,
+                     level=92, current_experience=stand)
+    watch.interval_seconds = abschnitte[-1][1]
+    watch.interval_from_zone = True
+    watch.last_change_at = jetzt - abschnitte[-1][0] * 60
+    watch.last_change_experience = stand
+    watch.previous_change_at = watch.last_change_at - watch.interval_seconds
+    watch.previous_change_experience = stand - round(
+        abschnitte[-1][2] * abschnitte[-1][1] / 3600)
+    watch.history = [XpPoint(at=jetzt - minuten * 60, seconds=dauer, rate=rate)
+                     for minuten, dauer, rate in abschnitte]
+    win._xp_watch["Demo Ranger"] = watch
+
+
 def _character_history(win: MainWindow) -> None:
     """Charakter-Inventar nach einem Refresh: Hervorhebung + Verlauf."""
     win._current_stash_id = None
     win._current_character_name = "Demo Ranger"
+    _demo_leveling(win)
     before, after = _character_items(before=True), _character_items(before=False)
     # Erst die Vergleichsbasis dieser "Sitzung" setzen, dann den neuen
     # Stand — sonst unterdrückt der Schutz gegen gecachte Vergleichsbasen

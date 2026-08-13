@@ -165,7 +165,8 @@ def _merge_currency(index: PriceIndex, http: httpx.Client, league: str, item_typ
 
 
 # Kleinster Kurs, den die Handelsseite auf der "receive"-Seite ausdrücken
-# kann: ein Chaos für ein Stück. Alles Billigere fällt darauf zurück.
+# kann: ein Chaos für ein Stück. Alles Billigere fällt darauf zurück —
+# der Wert ist damit eine OBERGRENZE, keine Preisauskunft.
 _RECEIVE_FLOOR = 1.0
 
 # Halber Rundungsschritt von ``chaosEquivalent`` (zwei Nachkommastellen).
@@ -197,12 +198,38 @@ def currency_chaos_value(line: dict) -> float | None:
     Bruchwerte (0,01483 für Scroll of Wisdom) — es ist also keine
     Eigenheit einer einzelnen Abfrage.
 
-    Erkannt wird der Boden daran, dass die receive-Seite GENAU auf ihm
-    steht, während die pay-Seite mehr als ein Stück pro Chaos verlangt.
-    Dann zählt die pay-Seite. Der Test ist bewusst eng: Eine Währung, die
-    wirklich ein Chaos wert ist, hat auch ``pay.value ≈ 1`` und bekommt
-    denselben Wert wie zuvor — die Regel greift nur dort, wo die beiden
-    Seiten einander widersprechen, und korrigiert nur nach unten.
+    **Was der Boden aussagt, ist eine OBERGRENZE.** Steht die
+    receive-Seite genau auf 1,0, heißt das nicht "ein Chaos wert",
+    sondern "höchstens ein Chaos wert" — mehr kann die Eingabemaske dort
+    nicht ausdrücken. Daraus folgt die Regel, und zwar ohne Annahme
+    darüber, in welcher Einheit poe.ninja die pay-Seite gerade führt: Von
+    deren beiden Lesarten (``pay`` Stück pro Chaos oder Chaos pro Stück)
+    passt genau eine zu dieser Obergrenze, nämlich die kleinere von
+    ``pay`` und ``1/pay``.
+
+    **Warum nicht fest auf "Stück pro Chaos" gerechnet wird** (Peter,
+    2026-08-13: "wir müssen irgendwas gegen das Scroll of Wisdom-Problem
+    machen ... Die sind nix wert, zumindest keine 4.9 div"): Genau diese
+    Zeile trug am 2026-08-05 ``pay.value = 246`` und am 2026-08-13
+    ``0,00333`` — denselben Preis einmal als 246 Rollen pro Chaos und
+    einmal als 1/300 Chaos pro Rolle. Die frühere Fassung verlangte
+    ``pay > 1`` und ließ die Zeile deshalb unkorrigiert: 921 Schriftrollen
+    kamen mit 921 c ≈ 4,9 div in der Tabelle an. Die Umkehrung betraf
+    3 von 69 Währungen der Liga; die übrigen Boden-Zeilen (z. B. Orb of
+    Transmutation mit ``pay = 100``) rechnen unverändert.
+
+    Die Regel korrigiert weiterhin nur nach unten und nie über die
+    Obergrenze hinaus: Eine Währung, die wirklich ein Chaos wert ist, hat
+    ``pay ≈ 1`` und behält ihren Wert.
+
+    **Ohne pay-Seite gibt es gar keinen Preis** (``None``). Der Boden
+    allein sagt nur "höchstens ein Chaos", und diese Obergrenze als Preis
+    auszugeben ist genau der Fehler, um den es hier geht — mit einem
+    fünfstelligen Stapel multipliziert wird aus "unbekannt, aber wenig"
+    ein zweistelliger Divine-Betrag. Betroffen sind in Allflame 3 von 69
+    Währungen (Orb of Binding, Orb of Unmaking, Lesser Eldritch Ichor).
+    Eine leere Wertspalte ist dafür der ehrlichere Zustand, und die
+    Tabelle behandelt sie längst als "wahrscheinlich Schrott" (§4.11).
 
     **``chaosEquivalent`` ist auf zwei Nachkommastellen gerundet.** Real
     gemessen über die ganze Standard-Route: 0,01483 wird zu 0,01 (−33 %),
@@ -223,8 +250,8 @@ def currency_chaos_value(line: dict) -> float | None:
         return None
     receive = (line.get("receive") or {}).get("value")
     pay = (line.get("pay") or {}).get("value")
-    if receive == _RECEIVE_FLOOR and pay and pay > 1:
-        return 1.0 / pay
+    if receive == _RECEIVE_FLOOR:
+        return min(pay, 1.0 / pay) if pay else None
     if receive and abs(receive - chaos) <= _CHAOS_EQUIVALENT_STEP:
         return receive
     return chaos

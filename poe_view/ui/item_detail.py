@@ -29,22 +29,40 @@ from poe_view.api.models import (ENCHANT_MOD_FIELD, Item, all_extra_mod_lines,
                                  extra_mod_lines, req_attribute, req_level)
 from poe_view.ui.theme import RARITY_COLORS
 
-# Wie viele Textzeilen das Panel zeigt. Seit die Höhe FEST ist (damit
-# beim Item-Wechsel nichts wackelt, siehe unten), ist das zugleich die
-# Höhe, die der Tabelle darüber dauerhaft fehlt — die Zahl kostet also
-# doppelt und wurde entsprechend an echten Daten bemessen.
+# Das Höhenbudget des Panels, gezählt in ZEILENHÖHEN — und zwar für
+# Textzeilen UND Trennlinien gemeinsam. Der gemeinsame Zähler ist der
+# Kern der Sache: Eine ``<hr>`` kostet gemessene 16 px, also **exakt eine
+# volle Zeilenhöhe**, keinen Bruchteil davon.
 #
-# Über alle 59.012 Items in Peters Bestand: Median 7 Zeilen, 75 % kommen
-# mit 10 aus, 90 % mit 12. Bei **14** sind es 96,5 %, danach wird es
-# teuer — jede weitere Zeile kauft unter einem Prozent und kostet die
-# Tabelle rund 17 Pixel. Das längste Item braucht 24 Zeilen, dafür eine
-# Panelhöhe zu reservieren wäre absurd.
+# Peter, 2026-08-13, mit einem Screenshot einer Karte: "und eine
+# abgeschnittene Info...." — die letzte Mod-Zeile stand auf dem
+# Rahmenrand. Die Fassung davor zählte nur Textzeilen (14) und schlug für
+# die fünf möglichen Linien plus die Namenszeile pauschal drei Zeilen
+# drauf. Für ein Item mit sechs Blöcken fehlten damit drei Zeilenhöhen,
+# und weil die Kürzung ebenfalls nur Textzeilen zählte, MELDETE sie es
+# nicht einmal — genau das stille Abschneiden, das dieser Umbau
+# abschaffen sollte, nur durch eine andere Tür.
 #
-# Die Grenze gab es vorher schon (12 Zeilen), aber sie schnitt STILL ab:
-# Peters "Pain Crusher" lag mit exakt zwölf Zeilen auf der Kante, ein Mod
-# mehr wäre wortlos verschwunden. Jetzt sagt die letzte Zeile, dass etwas
-# fehlt, und wohin man dafür schaut (Doppelklick → §4.17).
-_MAX_LINES = 14
+# Neu gemessen über 59.043 Items aus Peters Bestand, in der Einheit, auf
+# die es ankommt (Textzeilen + Trennlinien):
+#
+#   Einheiten | Panelhöhe | abgedeckt
+#          14 |   268 px  |  84,1 %
+#          16 |   300 px  |  91,8 %   ← die bisherige Höhe
+#          17 |   316 px  |  95,5 %   ← jetzt
+#          18 |   332 px  |  97,6 %
+#          20 |   364 px  |  99,3 %
+#
+# 17 kostet die Tabelle 16 Pixel gegenüber vorher und holt die Abdeckung
+# auf den Stand, der die ganze Zeit behauptet war. Die nächsten zwei
+# Prozent kosten nochmal so viel; das längste Item braucht 29 Einheiten,
+# dafür Platz vorzuhalten wäre absurd.
+_MAX_UNITS = 17
+
+# Was eine Trennlinie kostet, in Zeilenhöhen. Gemessen (Qt rendert
+# ``<hr>`` mit eigenem Abstand), nicht geschätzt — die Schätzung war der
+# Fehler oben.
+_SEPARATOR_UNITS = 1
 
 # Breite in Zeichen, auf die das Panel ausgelegt ist. Gemessen, nicht
 # gegriffen: Über alle 201.426 Mod-Zeilen in Peters echtem Bestand liegt
@@ -58,12 +76,9 @@ _MAX_LINES = 14
 # 900/300 Pixel zu raten.
 _TYPICAL_LINE_CHARS = 68
 
-# Puffer über den reinen Textzeilen: die Namenszeile plus die dünnen
-# Trennlinien zwischen den Blöcken. Deren Pixelhöhe steht erst beim
-# Rendern fest, drei Zeilenhöhen decken die fünf möglichen Linien
-# reichlich ab — lieber ein paar Pixel zu viel als eine abgeschnittene
-# letzte Zeile.
-_EXTRA_LINES = 3
+# Die Namenszeile über dem Text. Sie steht in einem eigenen Label und
+# gehört deshalb nicht ins Budget, wohl aber in die Höhe.
+_NAME_LINE_UNITS = 1
 
 
 class ItemDetail(QFrame):
@@ -104,7 +119,7 @@ class ItemDetail(QFrame):
         line = self._props.fontMetrics().lineSpacing()
         margins = self.layout().contentsMargins()
         rand = margins.top() + margins.bottom() + self.layout().spacing()
-        text = (_MAX_LINES + _EXTRA_LINES) * line
+        text = (_MAX_UNITS + _NAME_LINE_UNITS) * line
         return max(self._icon.height(), text) + rand
 
     def preferred_width(self) -> int:
@@ -171,21 +186,32 @@ def _item_blocks(item: Item) -> list[list[str]]:
 
 
 def _blocks_to_html(blocks: list[list[str]]) -> str:
-    """Blöcke zu HTML, getrennt durch ``<hr>``. Kürzt auf ``_MAX_LINES``
+    """Blöcke zu HTML, getrennt durch ``<hr>``. Kürzt auf ``_MAX_UNITS``
     und sagt es dann auch — stilles Abschneiden war der eigentliche
-    Mangel der alten Fassung."""
+    Mangel der Fassung davor, und danach noch einmal der Grund, warum
+    Peters Karte über den Rand lief: Gezählt werden muss das, was Platz
+    KOSTET, und das sind Textzeilen und Trennlinien zusammen."""
+    gefuellt = [block for block in blocks if block]
+    noetig = (sum(len(block) for block in gefuellt)
+              + max(0, len(gefuellt) - 1) * _SEPARATOR_UNITS)
+    # Passt nicht alles, braucht der Hinweis selbst eine Zeile — sonst
+    # schiebt ausgerechnet er das Panel über seine feste Höhe. Vorher
+    # entschieden, weil es sich hinterher nicht mehr sauber nachrechnen
+    # lässt.
+    budget = _MAX_UNITS if noetig <= _MAX_UNITS else _MAX_UNITS - 1
+
     kept: list[list[str]] = []
-    budget = _MAX_LINES
     weggelassen = 0
-    for block in blocks:
-        if not block:
-            continue
-        if budget <= 0:
+    for block in gefuellt:
+        trenner = _SEPARATOR_UNITS if kept else 0
+        frei = budget - trenner
+        if frei <= 0:
             weggelassen += len(block)
             continue
-        kept.append([escape(line) for line in block[:budget]])
-        weggelassen += max(0, len(block) - budget)
-        budget -= len(kept[-1])
+        genommen = block[:frei]
+        kept.append([escape(line) for line in genommen])
+        weggelassen += len(block) - len(genommen)
+        budget -= trenner + len(genommen)
     html = "<hr>".join("<br>".join(block) for block in kept)
     if weggelassen:
         html += (f"<br><i>… {weggelassen} more "

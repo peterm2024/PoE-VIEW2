@@ -1387,7 +1387,43 @@ Offline-Banner auslöst:
 - `ApiError` mit `status_code >= 500` → Server-/Wartungsfehler (502/503).
 - `json.JSONDecodeError` → GGG liefert bei Wartung mitunter eine
   HTML-Seite mit HTTP 200 statt JSON; `resp.json()` scheitert dann.
+- **`ApiError` mit 400 und der Begründung "League not found"** → ebenfalls
+  Wartung, siehe unten. Die einzige gemessene 4xx-Ausnahme.
 - Alles andere (4xx, `AuthError`, …) bleibt ein normaler Fehler.
+
+**Die 4xx-Ausnahme, und warum sie so eng gefasst ist.** Die Regel "5xx ist
+der Server, 4xx sind wir" hielt bis zum 2026-08-13. Peters Log jener
+Nacht zeigt eine Wartung von 01:03:41 bis 01:17:41, 22 Abruf-Zyklen im
+40-Sekunden-Takt, pro Zyklus eine Charakter- und eine Truhen-Anfrage im
+Abstand von 170 ms:
+
+| Endpunkt | Antworten während der Wartung |
+|---|---|
+| `/character/<Name>` | 22 × 503 |
+| `/stash/<Liga>/<Id>` | **19 × 400**, 3 × 503 |
+
+Der 400 trägt GGGs Umschlag `{"error": {"code": 2, "message": "Invalid
+query; League not found"}}` — **und die Liga gab es die ganze Zeit**: Um
+01:18:21 lieferte dieselbe URL wieder 200. Der Truhen-Endpunkt schiebt
+die Schuld also auf die Anfrage, und zwar mit einer Begründung, die auf
+die Liga des Nutzers zeigt.
+
+Die Folge war kein Datenschaden, aber die Anwendung stellte sich vor die
+eigene Diagnose: 19 Tracebacks im Log und 19 rote Meldungen über dem
+Offline-Banner, das der 503 vom Charakter-Endpunkt korrekt gesetzt hatte.
+Ausgerechnet die stillen Hintergrund-Refreshes, für die es die
+Unterdrückung unten gibt, überschrieben es im 40-Sekunden-Takt.
+
+Festgemacht ist die Ausnahme am **Text**, nicht am Fehlercode:
+`_is_maintenance_bad_request()` prüft `status_code == 400` und
+"league not found" in `ApiError.error_message`. Code 2 heißt bei GGG
+allgemein "Invalid query" und träfe auch einen von UNS falsch gebauten
+Substash-Pfad — genau den Fall, den die 4xx-Regel schützen soll. Ändert
+GGG die Formulierung, fällt das Verhalten auf die laute Fehlermeldung
+zurück statt auf ein verschlucktes Problem. Damit das überhaupt geht,
+trägt `ApiError` seit demselben Tag `error_code`/`error_message` als
+eigene Felder statt nur als Text in der Meldung (`client._ggg_error_
+fields`, wegwerfend gegenüber Antworten ohne JSON).
 
 `ApiWorker.run()` fängt jede Job-Exception zentral ab: Konnektivitätsfehler
 setzen `self._offline` und emittieren `offline_changed(bool)` — aber NUR
@@ -4022,20 +4058,49 @@ nichts, die Fläche für den späteren Graphen schon.
 
 *Höhe*: fest, sonst sprang das Panel bei jedem Klick — ein Ring mit zwei
 Mods gegen ein Unique mit acht — und mit ihm das Leveling-Feld daneben
-und der untere Rand der Tabelle darüber. Da die Höhe jetzt dauerhaft
-reserviert ist, kostet jede Zeile doppelt, also auch hier gezählt: Über
-59.012 Items liegt der Median bei 7 Zeilen, 90 % kommen mit 12 aus, bei
-**14** sind es 96,5 %. Danach wird es teuer — jede weitere Zeile kauft
-unter einem Prozent und nimmt der Tabelle rund 17 Pixel. `_MAX_LINES`
-steht deshalb auf 14 (Panelhöhe 300 px), nicht auf dem Maximum von 24.
+und der untere Rand der Tabelle darüber. Da die Höhe dauerhaft reserviert
+ist, kostet jede Zeile doppelt, also auch hier gezählt.
+
+**Korrigiert am 2026-08-13, weil die erste Messung die falsche Einheit
+zählte.** Sie ergab "14 Zeilen decken 96,5 %" und daraus 300 px. Gezählt
+waren aber nur TEXTZEILEN; die Trennlinien zwischen den Blöcken kosten
+ebenfalls Platz, und zwar gemessene 16 px — **eine volle Zeilenhöhe je
+Linie**, nicht den Bruchteil, der pauschal eingeplant war. Real deckte
+das 300-px-Panel damit 91,8 % ab, nicht 96,5 %. Aufgefallen ist es Peter
+an einer Karte, deren letzte Mod-Zeile auf dem Rahmenrand stand.
+
+Neu gemessen über 59.043 Items, in der Einheit, auf die es ankommt
+(Textzeilen + Trennlinien):
+
+| Einheiten | Panelhöhe | abgedeckt |
+|---|---|---|
+| 14 | 268 px | 84,1 % |
+| 16 | 300 px | 91,8 % ← bisher |
+| **17** | **316 px** | **95,5 % ← jetzt** |
+| 18 | 332 px | 97,6 % |
+| 20 | 364 px | 99,3 % |
+
+`_MAX_UNITS` steht auf 17. Das kostet die Tabelle 16 Pixel und holt die
+Abdeckung auf den Stand, der die ganze Zeit behauptet war; die nächsten
+zwei Prozent kosten nochmal so viel. Das längste Item braucht 29
+Einheiten — dafür Platz vorzuhalten wäre absurd.
+
+**Die Kürzung zählt jetzt dieselbe Einheit.** Sie zählte vorher ebenfalls
+nur Textzeilen und meldete deshalb bei einem block-reichen Item gar
+nichts, obwohl es überlief — genau das stille Abschneiden, das dieser
+Umbau abschaffen sollte, nur durch eine andere Tür. Ein Item mit vielen
+kleinen Blöcken zeigt seither weniger Text als eines mit einem großen,
+was der Wirklichkeit entspricht. Und der Hinweis selbst wird aus dem
+Budget bezahlt: Wird gekürzt, sinkt das Budget vorab um eine Zeile —
+sonst schöbe ausgerechnet die Meldung über das Abschneiden das Panel über
+seine feste Höhe.
 
 `LevelingPanel` (`ui/leveling_panel.py`) zeigt Stufe, Gesamterfahrung
 und die Rate aus §4.34 — dieselben Zahlen wie die Statuszeile, nur
-größer und dauerhaft. **Der Graph ist bewusst noch nicht drin:** Er
-bräuchte einen Zeitreihen-Speicher, den es nicht gibt. `_XpWatch` merkt
-sich genau zwei Veröffentlichungen, weil die Rate nicht mehr braucht;
-ein Graph braucht den ganzen Abend. Das ist ein eigenes Vorhaben, kein
-Beiwerk dieses Umbaus.
+größer und dauerhaft. Der Graph darunter kam einen Tag später dazu
+(§4.40); beim Umbau des Detail-Panels blieb die Fläche bewusst leer,
+weil er einen Zeitreihen-Speicher braucht und damit ein eigenes
+Vorhaben ist.
 
 Fehlt die Rate noch, steht dort *warum* ("Rate follows after the next
 zone change") statt eines leeren Feldes — GGG veröffentlicht Erfahrung
@@ -4052,6 +4117,156 @@ Mod-Texte, Höhe bleibt über drei sehr verschiedene Items gleich, Panel
 nie kleiner als sein Icon, Breite fasst eine typische Mod-Zeile),
 `tests/test_leveling_panel.py` (Anzeige der Werte, Begründung statt
 leerem Feld, Leeren beim Fach-Wechsel).
+
+---
+
+### 4.40 Der XP/h-Verlauf: ein Balken je Abschnitt (`ui/xp_graph.py`)
+
+Zwei Sachen an einem Tag, beide von Peter angestoßen (2026-08-13) und
+beide am selben Punkt: Die Rate maß nur von Veröffentlichung zu
+Veröffentlichung und warf alles davor weg.
+
+**Erstens: die erste Map einer Sitzung lieferte keine Rate.** Peter:
+"Ich habe eine Anfangs-XP im Tool gehabt und bin vom Hideout in eine
+Map gegangen. Nach der Map (ca. 10 Minuten) zurück ins Hideout und da
+habe ich eine End-XP bekommen, aber noch keine Rate, was theoretisch
+jetzt möglich wäre."
+
+Er hatte recht, und der Grund ist eine Kette, die sich erst im
+Zusammenhang zeigt: Der Weg INS Hideout ändert die Erfahrung nicht (dort
+wird nichts verdient), also erzeugt er auch keine beobachtete Änderung.
+Nach der Map gab es damit genau EINE, und `_xp_per_hour` verlangte zwei.
+Der Nenner — die zehn Minuten in der Map — lag längst gemessen vor
+(§4.34), es fehlte nur der Vorgänger im Zähler.
+
+Der stand die ganze Zeit daneben: `_XpWatch.since_experience`, der
+Sitzungs-Startwert. Warum er trotzdem nicht allgemein taugt, ist seit
+dem 2026-08-10 als Test festgehalten — was in der ersten Änderung
+steckt, wurde teils schon VOR dem Programmstart verdient, und gegen die
+Zeit seit dem Start gerechnet ergäbe das eine erfundene Rate. Genau so
+kam am 2026-08-11 die 1,53-Mrd.-Anzeige zustande.
+
+`_baseline_starts_the_interval()` grenzt deshalb eng ein. Der Startwert
+zählt nur, wenn **alle drei** Bedingungen halten:
+
+1. Der Nenner kommt aus der Verweildauer in der verlassenen Zone, nicht
+   aus dem vollen Intervall. Ohne eingeschaltete Zonen-Beobachtung
+   bleibt es beim alten, vorsichtigen Verhalten.
+2. Die Zone wurde erst betreten, nachdem die Sitzung ihren Startwert
+   gelesen hatte. Alles seither Dazugekommene gehört damit in diese
+   Zone — die Zone davor hätte beim Verlassen eine eigene
+   Veröffentlichung ausgelöst, und die wäre eine beobachtete Änderung
+   gewesen.
+3. Dazu ein Sicherheitsabstand in Höhe des Auslöse-Fensters (10 s):
+   Fällt der Programmstart in die ein bis drei Sekunden zwischen einem
+   Zonenwechsel und seiner Veröffentlichung, ist der Startwert noch der
+   Stand VOR der letzten Zone.
+
+**Zweitens: der Graph.** Peter beantwortete damit auch die Frage, die
+seit dem Vortag offen war ("Was kommt auf die x-Achse?"): "Wir zeichnen
+einen Graph über die letzten 3 Stunden, das sollte eigentlich reichen.
+Die meisten Gamer schließen eine Map innerhalb von 5 Minuten ab. Die
+berechnete XP/h des letzten Abschnitts schreiben wir einfach in den
+Graph."
+
+Das löst den Einwand auf, an dem die Idee hing. Eine Kurve über
+Momentanwerte gibt es gar nicht zu zeichnen — GGG veröffentlicht die
+Erfahrung nur beim Zonenwechsel, rund achtmal pro Stunde. Was es gibt,
+ist pro Abschnitt eine fertig gemessene Rate, und die hat neben ihrem
+Wert auch eine **Dauer**. Also Balken statt Linie, gezeichnet über die
+tatsächlich gemessene Zeitspanne:
+
+- Die Breite zeigt, wie lange der Abschnitt gedauert hat. Eine
+  Zehn-Minuten-Map und ein Zwei-Minuten-Trial sehen verschieden aus,
+  obwohl beide einen Wert liefern.
+- **Die Lücken sind echt.** Wo nichts gezeichnet ist, wurde keine
+  Erfahrung gemacht — Pause, Stadt, Truhe sortieren. Eine durchgezogene
+  Linie müsste dort etwas behaupten.
+- Ein Abschnitt mit Verlust (Tod ab Akt 5) hängt rot unter der
+  Null-Linie, statt herausgefiltert zu werden — dieselbe Entscheidung
+  wie bei `_format_xp_rate`, das das Vorzeichen ebenfalls stehen lässt.
+
+Der Speicher dafür ist `_XpWatch.history`, session-lokal wie alles
+andere dort: ein aus der Datei geladener Verlauf zeigte nach einer Nacht
+Pause Balken, die mit dem heutigen Abend nichts zu tun haben. Er bleibt
+klein — bei acht Veröffentlichungen pro Stunde sind drei Stunden zwei
+Dutzend Einträge, und was aus dem Fenster fällt, wird beim Anfügen
+verworfen. Die **Anzeige** benutzt ihn ausdrücklich nicht: Sie bleibt
+bei der zuletzt gemessenen Rate, weil ein Mittelwert über drei Stunden
+etwas anderes beantwortet als "wie schnell komme ich gerade voran".
+
+`MainWindow._watch_rate()` ist seither die einzige Stelle, an der aus
+einem Beobachtungsstand eine Rate wird — Anzeige und Graph teilen sie
+sich, damit die Kurve nicht etwas anderes behaupten kann als die Zahl
+darüber. Die y-Achse skaliert auf die höchste sichtbare Rate; eine feste
+Obergrenze gäbe es nicht sinnvoll, weil die Größenordnung zwischen einem
+Charakter in Akt 2 und einem in den Maps um Zehnerpotenzen auseinander
+liegt. Das Zeitfenster wandert bei jedem Refresh weiter, ein eigener
+Timer wäre Aufwand für nichts: Solange ein Charakter offen ist, läuft
+ohnehin alle paar Sekunden ein Abruf.
+
+Die Geometrie steht als reine Funktion (`graph_layout`) neben dem
+Widget. Fehler in einer Zeichenroutine findet man sonst nur mit dem
+Auge, und das skaliert schlecht auf Fälle wie "Abschnitt von zwei
+Sekunden" (Mindestbreite, sonst unsichtbar — und ausgerechnet die
+kurzen Abschnitte tragen die höchsten Raten).
+
+Getestet: `tests/test_xp_graph.py` (rechter Rand ist das Jetzt, Breite
+folgt der Dauer, Lücken bleiben Lücken, Ausscheiden nach drei Stunden,
+Verlust unter der Null-Linie, Mindestmaße, leere Achse,
+Achsenbeschriftung gröber als die Zahl daneben),
+`tests/test_main_window_helpers.py` (Peters Ablauf Hideout → Map →
+Hideout liefert jetzt eine Rate; die drei Gegenproben zu den
+Bedingungen oben; Verlauf wächst je Abschnitt, vergisst nach drei
+Stunden und kommt im Widget an).
+
+---
+
+### 4.41 Verbindungs-LED in der Statuszeile
+
+Peter, 2026-08-13, unmittelbar nach der Wartungs-Auswertung (§4.12):
+"Wir könnten während der Wartungsdauer eine LED rot leuchten lassen und
+wenn die Wartung vorbei ist, diese wieder auf grün setzen."
+
+Ein farbiger Punkt links vom Offline-Banner, in derselben Ampel wie das
+Rate-Limit-Dashboard. **Kein neuer Zustand und keine neue Erkennung** —
+die LED hängt an `offline_changed`, das es seit §4.12 gibt und das genau
+an den beiden gewünschten Flanken feuert.
+
+**Warum drei Zustände und nicht zwei.** Das Offline-Banner kann nur
+"kaputt" sagen: Im Normalfall ist es leer, und leer heißt sowohl "alles
+in Ordnung" als auch "noch nichts versucht". Genau diese Lücke soll die
+LED schließen, also darf sie sie nicht selbst wieder aufreißen.
+
+| Farbe | Bedeutung | Ausgelöst von |
+|---|---|---|
+| Grau | Noch kein Abruf — nicht angemeldet, oder nichts gelaufen | Start, `_on_login_required` |
+| Grün | Letzter Abruf erfolgreich | `_on_logged_in`, `offline_changed(False)` |
+| Rot | GGG nicht erreichbar (Wartung/kein Netz) | `offline_changed(True)` |
+
+Zwei Anschlüsse daran sind nicht offensichtlich:
+
+- **Der Login färbt grün.** Ohne ihn bliebe die LED eine ganze
+  störungsfreie Sitzung lang grau: `offline_changed` meldet nur
+  ZUSTANDSWECHSEL, und wer nie offline war, bekommt nie ein Signal. Der
+  Login ist selbst ein geglückter Abruf (`/profile`) und damit der
+  Beleg, der für Grün fehlt.
+- **Ein abgelaufenes Token färbt GRAU, nicht rot.** Ohne Token fragen wir
+  gar nicht erst (§`_skip_unauthenticated`). Über GGGs Erreichbarkeit
+  sagt das nichts — Rot hieße "GGG ist weg", obwohl der Server
+  einwandfrei laufen kann. Der Logout läuft über denselben Weg
+  (`LogoutJob` → `login_required`) und braucht deshalb keinen eigenen
+  Anschluss.
+
+Farben in `theme.py` (`LED_UNKNOWN`/`LED_ONLINE`/`LED_OFFLINE`), Zustände
+als Tabelle `MainWindow._LED_STATES` mit Farbe UND Tooltip nebeneinander:
+Die LED allein sagt "rot", der Tooltip sagt, was das für die angezeigten
+Daten bedeutet. Dieselbe Legende steht im Hilfe-Fenster unter "Getting
+started", gebaut aus denselben Konstanten.
+
+Getestet: `tests/test_main_window_helpers.py` (Startfarbe grau, beide
+Flanken der Wartung, Login färbt ohne Störung grün, Token-Ablauf grau
+statt rot).
 
 ---
 

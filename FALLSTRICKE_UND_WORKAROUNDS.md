@@ -804,3 +804,73 @@ Drittens, aus dem Nachtrag — **wo ein Modell persistiert wird, ist jede Umform
 **Was das für den vorhandenen Cache heißt:** Die Farbangaben kommen fachweise zurück, sobald ein Fach neu abgerufen wird — im Normalbetrieb also von selbst. Wer sie sofort vollständig will, drückt einmal "Load All Tabs".
 
 **Die eigentliche Konsequenz zog Peter noch am selben Abend:** "Der Cache-Schaden ist momentan egal, wir sollten uns aber eine Backup-Strategie des Cache überlegen." Das ist der richtige Schluss aus drei gleichartigen Vorfällen — #62, #65 und dieser hier. Jeder wurde mit einem gezielten Wächter gegen genau seinen Fehler behoben, und jedes Mal kam der nächste aus einer Richtung, an die vorher niemand gedacht hatte. Eine Sicherung ist die allgemeine Antwort: Sie greift auch gegen den Fehler, den es noch nicht gibt. Umgesetzt als `services/cache_backup.py`, gepackte Sicherung bei jedem Start, 24 Stunden Aufbewahrung — siehe ARCHITEKTUR §4.7.
+
+---
+
+## 67. GGG beantwortet dieselbe Wartung mit 503 ODER mit 400 "League not found" — und der 400 kam häufiger
+
+**Symptom (Peter, 2026-08-13, 01:17 Uhr):** "GGG führt gerade Wartung durch und die Server sind down. Im Terminal war ein schöner Fehler angezeigt" — ein voller Traceback mit `ApiError: HTTP 400 for /stash/Allflame/152a892ed5: {"error":{"code":2,"message":"Invalid query; League not found"}}`.
+
+**Erste Vermutung, geprüft und verworfen:** Die Meldung könnte schlicht stimmen. Eine beendete Liga verschwindet aus GGGs Liga-Liste, und wenn während der Wartung auch `FetchLeaguesJob` scheitert, könnte die Anwendung eine Liga abfragen, die es nicht mehr gibt. Das wäre eine ganz andere Ursache gewesen als die vermutete Wartung, deshalb erst ins Log statt gleich in den Code.
+
+**Was das Log zeigt** (01:03:41 bis 01:17:41, 22 Abruf-Zyklen im 40-Sekunden-Takt, pro Zyklus eine Charakter- und eine Truhen-Anfrage im Abstand von 170 ms):
+
+| Endpunkt | Antworten |
+|---|---|
+| `/character/<Name>` | 22 × 503 Service Unavailable |
+| `/stash/Allflame/<Id>` | **19 × 400 Bad Request**, 3 × 503 |
+
+Und der entscheidende Punkt: **um 01:18:21 lieferte GENAU DIESELBE URL wieder 200** — dieselbe Liga, dasselbe Fach. Die Liga gab es die ganze Zeit. Die Vermutung war widerlegt, die Wartung bestätigt, und zwar aus 22 gepaarten Beobachtungen statt aus einer Zeile.
+
+**Was die Anwendung daraus machte.** `_is_connectivity_issue()` stand auf der Regel "5xx ist der Server, 4xx sind wir" — mit ausdrücklicher Begründung im Kommentar (ein falsch zusammengesetzter Substash-Pfad soll nicht als "offline" durchgehen). Die Regel ist gut, sie war nur nicht vollständig. Folge: Der 503 vom Charakter-Endpunkt setzte das Offline-Banner korrekt, und 170 ms später schrieb der 400 desselben Zyklus einen Traceback ins Log und eine rote Meldung über genau dieses Banner. 19-mal. Ausgerechnet die stillen Hintergrund-Refreshes, für die es die Unterdrückung im Offline-Zweig gibt, waren die Verursacher.
+
+Kein Datenschaden — ein gescheiterter Abruf schreibt nichts in den Cache. Der Schaden war die Diagnose: Die Meldung sprach Peter eine Liga ab, die es gab.
+
+**Behoben** mit einer eng gefassten Ausnahme (`_is_maintenance_bad_request`): HTTP 400 **plus** "league not found" im Begründungstext gilt als Wartung. Dafür trägt `ApiError` jetzt `error_code`/`error_message` als eigene Felder, statt GGGs Umschlag nur als Text in der Meldung mitzuschleifen.
+
+**Warum am Text und nicht am Fehlercode:** Code 2 heißt bei GGG allgemein "Invalid query" und träfe auch einen von uns falsch gebauten Substash-Pfad — also genau den Fall, den die 4xx-Regel schützen soll. Eine Ausnahme auf Code 2 hätte unsere eigenen Fehler verschluckt. Der Text ist die engere Bedingung, und wenn GGG die Formulierung ändert, fällt das Verhalten auf die laute Meldung zurück statt auf ein stilles Verschlucken. Beide Richtungen stehen als Test da.
+
+**Wie vermeiden:** Zwei Lehren. Erstens — **Statuscodes einer Fremd-API sind eine Konvention, keine Zusicherung.** Wer "Server kaputt" am Code festmacht, hat für jeden Endpunkt eine eigene Annahme getroffen, ohne es zu merken; hier widersprachen sich zwei Endpunkte desselben Servers im selben Augenblick. Zweitens — **eine Fehlermeldung der Gegenseite ist ein Zeuge, kein Urteil.** "League not found" klang präzise genug, um sie zu glauben; sie war falsch, und nur der 200er drei Zyklen später hat das gezeigt. Verwandt mit #45 (fünf Runden Verfeinerung auf einer falschen Grundannahme) und #66 (die API lieferte die Antwort mit, wir haben sie uns ausgedacht) — beide Male half dasselbe: erst messen, dann glauben.
+
+---
+
+## 68. Zweimal dieselbe Zeile falsch bepreist, zweimal aus einem anderen Grund — und ein Höhenbudget, das die falsche Einheit zählte
+
+Zwei Fehler eines Abends, beide vom selben Muster: Eine Messung war sauber durchgeführt, zählte aber nicht das, was knapp ist.
+
+### 68a. Scroll of Wisdom, 921 Stück, 4,9 div
+
+**Symptom (Peter, 2026-08-13):** "wir müssen irgendwas gegen das Scroll of Wisdom-Problem machen, notfalls die ignorieren. Die sind nix wert, zumindest keine 4.9 div." Dazu seine Rückfrage: "Das hatten wir doch schon mal, das Problem oder?"
+
+**Ja und nein — dieselbe Währung, dieselbe Liga, eine andere Ursache.** #63 hatte den 1:1-Boden der receive-Seite behoben, indem bei `receive == 1.0` die pay-Seite herangezogen wurde: `1/pay`, wenn `pay > 1`. Die Rohdaten damals und heute, dieselbe Zeile:
+
+| | 2026-08-05 | 2026-08-13 |
+|---|---|---|
+| `receive.value` | 1.0 | 1.0 |
+| `pay.value` | **246.0** | **0.00333** |
+
+Das ist derselbe Preis in umgekehrter Einheit: 246 Rollen pro Chaos gegen 1/300 Chaos pro Rolle. Die Bedingung `pay > 1` traf damit ins Leere, die Zeile fiel auf `chaosEquivalent = 1.0` zurück, und mit 921 multipliziert standen 921 c ≈ 4,9 div in der Tabelle.
+
+**Behoben, ohne die neue Einheit fest einzubauen.** Der Boden sagt nicht "ein Chaos wert", sondern **"höchstens ein Chaos wert"** — mehr kann die Eingabemaske nicht ausdrücken. Von den beiden Lesarten der pay-Seite (`pay` und `1/pay`) passt genau eine zu dieser Obergrenze: die kleinere. Damit rechnen beide Fassungen der Antwort richtig, und die Regel korrigiert weiterhin ausschließlich nach unten.
+
+Gegenprobe über alle 69 Währungen der Liga: 3 Zeilen ändern sich (Scroll of Wisdom, Greater Eldritch Ember/Ichor), keine einzige nach oben, Standard bleibt unberührt. Orb of Transmutation (`pay = 100`) rechnet unverändert.
+
+**Ohne pay-Seite gibt es jetzt gar keinen Preis** statt der Obergrenze — Peters "notfalls die ignorieren". Betrifft in Allflame 3 von 69 Währungen (Orb of Binding, Orb of Unmaking, Lesser Eldritch Ichor). Eine leere Wertspalte ist der ehrlichere Zustand, und Orb of Unmaking stapelt vierstellig; die Obergrenze mal Stapelgröße ist exakt der Fehler, um den es geht.
+
+`price_cache.CACHE_VERSION` auf 3 — dieselbe Lehre wie in #63: Die TTL misst das Alter der Daten, nicht das der Rechenvorschrift.
+
+### 68b. Das Item-Panel schnitt wieder still ab
+
+**Symptom (Peter, direkt danach):** "und eine abgeschnittene Info...." — Screenshot einer Karte, deren letzte Mod-Zeile auf dem Rahmenrand steht.
+
+Das Panel war einen Tag zuvor (§4.39) genau gegen dieses Verhalten umgebaut worden, mit einer an 59.012 Items belegten Höhe: "14 Zeilen decken 96,5 % ab". Gezählt waren **Textzeilen**. Der Umbau hatte im selben Zug Trennlinien zwischen den Blöcken eingeführt, und eine `<hr>` kostet gemessene 16 px — **eine volle Zeilenhöhe**, nicht den Bruchteil, den der Puffer von drei Zeilen unterstellte. Real deckte das Panel 91,8 % ab.
+
+Schlimmer als die Höhe war die Kürzung: Sie zählte ebenfalls nur Textzeilen und schwieg deshalb bei einem block-reichen Item, obwohl es überlief. Das stille Abschneiden, dessen Abschaffung der Anlass des Umbaus war, kam durch eine andere Tür zurück.
+
+Behoben durch ein gemeinsames Budget in Zeilenhöhen für Text UND Linien (17 Einheiten, 316 px, 95,5 %), das die Kürzung ebenso benutzt wie die Höhenrechnung — und aus dem der Kürzungshinweis seine eigene Zeile bezahlt, sonst verlängert die Meldung über das Abschneiden das Problem, das sie meldet.
+
+### Wie vermeiden
+
+**Eine Messung ist erst dann eine Messung, wenn sie das zählt, was knapp ist.** Beide Fälle waren sorgfältig belegt — 59.012 Items hier, echte Rohdaten dort — und beide zählten die falsche Größe: Textzeilen statt vertikaler Pixel, "Stück pro Chaos" als feste Einheit statt als eine von zwei möglichen Lesarten. Die Sorgfalt der Erhebung sagt nichts über die Richtigkeit der Einheit.
+
+**Und: Eine Zahl einer Fremd-API kann ihre Einheit wechseln, ohne dass jemand es ankündigt.** #63 hat den Wert richtig interpretiert und die Interpretation fest verdrahtet. Robuster ist eine Regel, die aus dem ableitet, was man unabhängig WEISS — hier: dass der Boden eine Obergrenze ist.

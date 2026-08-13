@@ -267,13 +267,59 @@ def test_a_currency_genuinely_worth_one_chaos_keeps_its_value() -> None:
     assert currency_chaos_value(line) == 1.0
 
 
-def test_without_a_pay_side_the_floor_cannot_be_detected_and_is_left_alone() -> None:
-    """Ohne Gegenprobe gibt es keinen Widerspruch, den man aufloesen
-    koennte — dann bleibt poe.ninjas Wert stehen. Lieber ein moeglicher
-    Fehler der Quelle als ein selbst erfundener Preis."""
+def test_without_a_pay_side_there_is_no_price_at_all() -> None:
+    """Geaendert am 2026-08-13. Der Boden sagt nur "hoechstens ein Chaos";
+    diese Obergrenze als Preis auszugeben ist genau der Fehler, um den es
+    geht — mit einem fuenfstelligen Stapel multipliziert wird daraus ein
+    zweistelliger Divine-Betrag. In Allflame betrifft das 3 von 69
+    Waehrungen (Orb of Binding, Orb of Unmaking, Lesser Eldritch Ichor).
+    Eine leere Wertspalte ist der ehrlichere Zustand."""
     from poe_view.api.ninja import currency_chaos_value
 
-    assert currency_chaos_value({"receive": {"value": 1.0}, "chaosEquivalent": 1.0}) == 1.0
+    assert currency_chaos_value({"receive": {"value": 1.0}, "chaosEquivalent": 1.0}) is None
+
+
+# Dieselbe Waehrung, dieselbe Liga, acht Tage spaeter — real abgerufen am
+# 2026-08-13. Die pay-Seite steht jetzt in der UMGEKEHRTEN Einheit: 246
+# Stueck pro Chaos damals, 1/300 Chaos pro Stueck heute. Derselbe Preis,
+# andere Schreibweise.
+_ALLFLAME_WISDOM_INVERTED = {
+    "currencyTypeName": "Scroll of Wisdom",
+    "pay": {"value": 0.00333, "listing_count": 3},
+    "receive": {"value": 1.0, "listing_count": 375},
+    "chaosEquivalent": 1.0,
+}
+
+
+def test_the_pay_side_is_read_in_whichever_unit_fits_below_the_floor() -> None:
+    """Peter, 2026-08-13: "wir muessen irgendwas gegen das Scroll of
+    Wisdom-Problem machen ... Die sind nix wert, zumindest keine 4.9 div."
+    Sein Screenshot zeigte 921 Schriftrollen mit 4,9 div.
+
+    Ursache war NICHT die alte von 2026-08-05, obwohl es dieselbe
+    Waehrung ist: Die Regel von damals verlangte ``pay > 1`` und traf
+    deshalb ins Leere, seit poe.ninja die Einheit umgedreht hat. Statt
+    die neue Einheit fest einzubauen, wird die Lesart genommen, die zur
+    Obergrenze des Bodens passt — die kleinere von ``pay`` und ``1/pay``.
+    Damit rechnen beide Fassungen der Antwort richtig."""
+    from poe_view.api.ninja import currency_chaos_value
+
+    assert currency_chaos_value(_ALLFLAME_WISDOM_INVERTED) == 0.00333
+    assert currency_chaos_value(_ALLFLAME_WISDOM) == 1.0 / 246.0   # unveraendert
+    # Peters Stapel: vorher 921 c (4,9 div), jetzt gut drei Chaos.
+    assert currency_chaos_value(_ALLFLAME_WISDOM_INVERTED) * 921 < 4.0
+
+
+def test_a_floor_row_that_is_really_worth_a_chaos_is_not_pushed_down() -> None:
+    """Orb of Transmutation in Allflame, real am 2026-08-13: receive auf
+    dem Boden, pay = 100 Stueck pro Chaos. Die Regel darf hier weiterhin
+    auf 0,01 korrigieren — und bei einer Waehrung, deren beide Seiten
+    uebereinstimmen, gar nicht erst greifen."""
+    from poe_view.api.ninja import currency_chaos_value
+
+    transmutation = {"pay": {"value": 100.0}, "receive": {"value": 1.0},
+                     "chaosEquivalent": 1.0}
+    assert currency_chaos_value(transmutation) == 0.01
 
 
 def test_the_rounding_of_chaos_equivalent_is_recovered_from_the_receive_side() -> None:

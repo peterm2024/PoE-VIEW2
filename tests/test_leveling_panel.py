@@ -49,3 +49,19 @@ def test_switching_to_a_stash_tab_clears_the_leveling_panel(qapp, monkeypatch) -
 
     win.worker.stop()
     win.worker.wait(5000)
+
+
+def test_without_a_character_the_graph_axis_disappears_too(qapp) -> None:
+    """Eine leere Achse neben "No character selected" behauptet, es gaebe
+    hier einen Verlauf zu sehen. Bei einem Charakter OHNE Abschnitte ist
+    die leere Achse dagegen die richtige Aussage — deshalb nur beim
+    Leeren ausblenden."""
+    panel = LevelingPanel()
+    panel.show_character("WitchOfPeter", level=90, experience=1, rate_text=None,
+                         age_note="")
+    panel.show()
+    assert not panel._graph.isHidden()
+
+    panel.clear()
+
+    assert panel._graph.isHidden()

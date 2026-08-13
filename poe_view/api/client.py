@@ -28,11 +28,38 @@ class ApiError(Exception):
 
     ``status_code`` liegt offen, damit der Worker 5xx-Antworten (GGG-Wartung,
     Serverfehler) von echten Client-Fehlern (4xx) unterscheiden kann —
-    Letztere sind kein Offline-Zustand, Erstere schon (§4.12)."""
+    Letztere sind kein Offline-Zustand, Erstere schon (§4.12).
 
-    def __init__(self, status_code: int, message: str) -> None:
+    ``error_code``/``error_message`` tragen GGGs eigenen Fehler-Umschlag
+    (``{"error": {"code": 2, "message": "Invalid query; League not
+    found"}}``) getrennt daneben. Bis zum 2026-08-13 steckte er nur als
+    Text in der Meldung; seit der Wartung an jenem Morgen ist er eine
+    Entscheidungsgrundlage: GGG beantwortet dieselbe Wartung je nach
+    Endpunkt mit 503 ODER mit einem 400, dessen Status allein in die Irre
+    führt (§4.12)."""
+
+    def __init__(self, status_code: int, message: str, *,
+                 error_code: int | None = None, error_message: str = "") -> None:
         super().__init__(message)
         self.status_code = status_code
+        self.error_code = error_code
+        self.error_message = error_message
+
+
+def _ggg_error_fields(resp: httpx.Response) -> dict:
+    """GGGs Fehler-Umschlag aus der Antwort holen, soweit vorhanden.
+
+    Bewusst wegwerfend: Bei Wartung kommt auch mal eine HTML-Seite statt
+    JSON zurück, und eine Fehlerbehandlung, die selbst scheitern kann,
+    verdeckt genau den Fehler, den sie beschreiben soll."""
+    try:
+        error = resp.json().get("error")
+    except Exception:  # noqa: BLE001 — jede Antwort ohne JSON-Objekt
+        return {}
+    if not isinstance(error, dict):
+        return {}
+    return {"error_code": error.get("code"),
+            "error_message": str(error.get("message", ""))}
 
 
 class PoeApiClient:
@@ -92,7 +119,9 @@ class PoeApiClient:
                        path, dict(resp.headers), resp.text)
             raise AuthError("Not authorized — token expired or missing.")
         if resp.status_code >= 400:
-            raise ApiError(resp.status_code, f"HTTP {resp.status_code} for {path}: {resp.text[:200]}")
+            raise ApiError(resp.status_code,
+                           f"HTTP {resp.status_code} for {path}: {resp.text[:200]}",
+                           **_ggg_error_fields(resp))
         return resp.json()
 
     # ------------------------------------------------------------------ #

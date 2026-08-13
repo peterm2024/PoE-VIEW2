@@ -1,6 +1,8 @@
 """Tests für den PoeApiClient — v. a. die URL-Bildung (Encoding, Substash-Pfad)."""
 
-from poe_view.api.client import PoeApiClient
+import pytest
+
+from poe_view.api.client import ApiError, PoeApiClient
 from poe_view.api.rate_limiter import RateLimitManager
 
 
@@ -82,4 +84,47 @@ def test_get_character_items_returns_level_and_experience(monkeypatch) -> None:
         "character": {"level": 87, "experience": 1631274653}})
     level, experience, items = client.get_character_items("WitchOfPeter")
     assert (level, experience, items) == (87, 1631274653, [])
+    client.close()
+
+
+def test_an_error_response_keeps_gggs_own_reason_separate(monkeypatch) -> None:
+    """Peters Wartungs-Log vom 2026-08-13: GGGs Umschlag ``{"error":
+    {"code": 2, "message": "Invalid query; League not found"}}`` steckte
+    bisher nur als Text in der Meldung. Er entscheidet aber darueber, ob
+    ein HTTP 400 ein Anwendungsfehler oder eine laufende Wartung ist
+    (api_worker._is_maintenance_bad_request), und muss dafuer als Feld
+    danebenliegen."""
+    import httpx
+
+    client = PoeApiClient(RateLimitManager())
+    monkeypatch.setattr(client._http, "get", lambda path: httpx.Response(
+        400, json={"error": {"code": 2, "message": "Invalid query; League not found"}},
+        request=httpx.Request("GET", "https://api.pathofexile.com/stash/Allflame/x")))
+
+    with pytest.raises(ApiError) as fehler:
+        client._get("/stash/Allflame/152a892ed5")
+
+    assert fehler.value.status_code == 400
+    assert fehler.value.error_code == 2
+    assert fehler.value.error_message == "Invalid query; League not found"
+    client.close()
+
+
+def test_an_error_page_without_json_does_not_break_the_error_itself(monkeypatch) -> None:
+    """Bei Wartung kommt auch mal HTML statt JSON. Eine Fehlerbehandlung,
+    die selbst scheitert, verdeckt genau den Fehler, den sie beschreiben
+    soll."""
+    import httpx
+
+    client = PoeApiClient(RateLimitManager())
+    monkeypatch.setattr(client._http, "get", lambda path: httpx.Response(
+        503, text="<html>maintenance</html>",
+        request=httpx.Request("GET", "https://api.pathofexile.com/profile")))
+
+    with pytest.raises(ApiError) as fehler:
+        client._get("/profile")
+
+    assert fehler.value.status_code == 503
+    assert fehler.value.error_code is None
+    assert fehler.value.error_message == ""
     client.close()

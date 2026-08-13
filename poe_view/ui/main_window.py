@@ -11,7 +11,7 @@ import json
 import logging
 import time
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 
 from PySide6.QtCore import QSettings, Qt, QTimer, QUrl, Signal
@@ -46,6 +46,7 @@ from poe_view.ui.help_dialog import HelpDialog
 from poe_view.ui.character_list import CharacterList
 from poe_view.ui.item_detail import ItemDetail
 from poe_view.ui.leveling_panel import LevelingPanel
+from poe_view.ui.xp_graph import GRAPH_SPAN_S, XpPoint
 from poe_view.ui.item_table import (COLUMNS, CONFIGURABLE_COLUMNS, ICON_COL,
                                     MODS_COL, POSITION_COL, TAB_COL,
                                     VALUE_COL, ItemFilterProxy, ItemTableModel,
@@ -66,9 +67,16 @@ from poe_view.ui.settings_dialog import SettingsDialog
 from poe_view.ui.rate_limit_dashboard import RateLimitDashboard
 from poe_view.ui.raw_data_viewer import RawDataViewer
 from poe_view.ui.stash_tree import StashTree
-from poe_view.ui.theme import OTHER_TYPE, RARITY_COLORS, TYPE_FILTER_COLOR
+from poe_view.ui.theme import (LED_OFFLINE, LED_ONLINE, LED_UNKNOWN,
+                               OTHER_TYPE, RARITY_COLORS, TYPE_FILTER_COLOR)
 
 log = logging.getLogger(__name__)
+
+# Kantenlänge der Verbindungs-LED in der Statuszeile (§4.41), Peters Maß
+# vom 2026-08-13. Steht hier und nicht im Stylesheet-Text, weil derselbe
+# Wert zweimal gebraucht wird: als Größe und als halber Eckenradius, der
+# aus dem Quadrat einen Kreis macht.
+_LED_SIZE = 14
 
 
 class _TypeFilterCheckBox(QCheckBox):
@@ -271,9 +279,12 @@ class _XpWatch:
     Protokoll ausnahmslos beim Betreten des Hideouts, §4.35). Vorher
     existiert die Zahl außerhalb des Spiels nirgends.
 
-    Ein Fenster über die letzten N Minuten wäre die naheliegende
-    Verfeinerung, sobald der eigentliche Graph gebaut wird; dafür reicht
-    ein Wert pro Charakter nicht, dann bräuchte es eine Zeitreihe."""
+    **Der Graph braucht mehr als die Anzeige**, deshalb liegt seit dem
+    2026-08-13 zusätzlich ``history`` daneben: je abgeschlossenem
+    Abschnitt ein Punkt statt nur der letzten zwei Veröffentlichungen.
+    Die ANZEIGE benutzt ihn nicht — sie bleibt bei der zuletzt
+    gemessenen Rate, weil ein Mittelwert über drei Stunden etwas anderes
+    beantwortet als "wie schnell komme ich gerade voran" (§4.40)."""
 
     since: float                # time.monotonic() des ersten Abrufs dieser Sitzung
     since_experience: int
@@ -294,6 +305,17 @@ class _XpWatch:
     # oder aus dem vollen Intervall seit der vorigen Veröffentlichung?
     # Nur fürs Log — die Anzeige unterscheidet das nicht.
     interval_from_zone: bool = False
+    # War der Vorgänger dieses Intervalls der Sitzungs-Startwert statt
+    # einer echten vorigen Veröffentlichung? Gilt nur für die allererste
+    # beobachtete Änderung und nur unter engen Bedingungen, siehe
+    # ``MainWindow._baseline_starts_the_interval``. Ebenfalls nur fürs Log.
+    interval_from_baseline: bool = False
+    # Der Verlauf für den Graphen (§4.40): je abgeschlossenem Abschnitt
+    # ein Punkt, begrenzt auf das gezeichnete Zeitfenster. Session-lokal
+    # wie alles andere hier — ein aus der Datei geladener Verlauf zeigte
+    # nach einer Nacht Pause Balken, die nichts mit dem heutigen Abend zu
+    # tun haben.
+    history: list[XpPoint] = field(default_factory=list)
 
 
 # Listenfelder, die vor dem Vergleich nach der ``id`` ihrer Einträge
@@ -1264,6 +1286,18 @@ class MainWindow(QMainWindow):
         self._busy_indicator.setTextVisible(False)
         self._busy_indicator.hide()
         self.statusBar().addWidget(self._busy_indicator)
+        # Verbindungs-LED, direkt links vom Offline-Banner (§4.41). Sie
+        # zeigt DENSELBEN Zustand, aber immer — das Banner kann nur
+        # "kaputt" sagen, denn im Normalfall ist es leer, und leer heißt
+        # sowohl "alles gut" als auch "noch nichts versucht".
+        # Feste 14×14 Pixel (Peters Maß) als gefüllter Kreis, nicht als
+        # Zeichen "●": Ein Glyph ist so groß, wie die Schrift des Systems
+        # ihn macht, und säße bei einer anderen Skalierung neben der Größe,
+        # die hier ausdrücklich gewünscht ist.
+        self._connection_led = QLabel()
+        self._connection_led.setFixedSize(_LED_SIZE, _LED_SIZE)
+        self.statusBar().addPermanentWidget(self._connection_led)
+        self._set_connection_led("unknown")
         # Permanentes Offline-Banner (GGG-Wartung am
         # Patchday/Liga-Start) — separat vom transienten _status_msg, damit
         # es nicht von der nächsten "Lade …"-Meldung überschrieben wird.
@@ -1865,6 +1899,11 @@ class MainWindow(QMainWindow):
         self._login_button.setMenu(self._account_menu)
         self._login_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         self._update_online_controls_enabled()
+        # Der Login IST ein geglückter Abruf (``/profile``, §ApiWorker.
+        # _after_auth) — damit ist die LED belegt grün. Ohne diesen Anschluss
+        # bliebe sie die ganze Sitzung grau: ``offline_changed`` meldet nur
+        # ZUSTANDSWECHSEL, und wer nie offline war, bekommt nie ein Signal.
+        self._set_connection_led("online")
         self.worker.submit(FetchLeaguesJob())
         self.worker.submit(FetchCharactersJob())
 
@@ -1889,6 +1928,11 @@ class MainWindow(QMainWindow):
         self._login_button.setPopupMode(QToolButton.ToolButtonPopupMode.DelayedPopup)
         self._status_msg.setText(reason)
         self._update_online_controls_enabled()
+        # Zurück auf Grau, nicht auf Rot: Ohne Token fragen wir gar nicht
+        # erst (§_skip_unauthenticated). Über GGGs Erreichbarkeit sagt das
+        # nichts, und Rot hieße hier "GGG ist weg", obwohl der Server
+        # einwandfrei laufen kann.
+        self._set_connection_led("unknown")
 
     def _on_logout_clicked(self) -> None:
         """Nutzer wählt "Log out" im Konto-Menü (Peter, 2026-08-02, zum
@@ -3223,8 +3267,10 @@ class MainWindow(QMainWindow):
         gerade angezeigt oder ein stiller Hintergrund-Refresh — anders als
         die Türkis-Hervorhebung, die nur die offene Ansicht betrifft
         (§4.20). Der erste Abruf eines Charakters in dieser Sitzung setzt
-        NUR die Basis (siehe ``_XpWatch``), eine Rate gibt es erst, wenn
-        sich die Erfahrung zweimal geändert hat.
+        NUR die Basis (siehe ``_XpWatch``). Eine Rate gibt es danach
+        entweder bei der zweiten beobachteten Änderung oder schon bei der
+        ersten, wenn diese Basis nachweislich vor dem Betreten der
+        gemessenen Zone lag (``_baseline_starts_the_interval``).
 
         Ein RÜCKGANG zählt als Änderung wie jeder andere: Ab Akt 5 kostet
         der Tod in PoE Erfahrung, das ist ein echtes Ereignis und gehört
@@ -3237,18 +3283,84 @@ class MainWindow(QMainWindow):
         watch.level = level
         if experience != watch.current_experience:
             now = time.monotonic()
-            watch.previous_change_at = watch.last_change_at
-            watch.previous_change_experience = watch.last_change_experience
+            zone_seconds = self._zone_dwell_seconds(now)
+            watch.interval_from_baseline = self._baseline_starts_the_interval(
+                watch, zone_seconds)
+            if watch.interval_from_baseline:
+                watch.previous_change_at = watch.since
+                watch.previous_change_experience = watch.since_experience
+            else:
+                watch.previous_change_at = watch.last_change_at
+                watch.previous_change_experience = watch.last_change_experience
             watch.last_change_at = now
             watch.last_change_experience = experience
-            zone_seconds = self._zone_dwell_seconds(now)
             watch.interval_from_zone = zone_seconds is not None
             watch.interval_seconds = (
                 zone_seconds if zone_seconds is not None
                 else (now - watch.previous_change_at
                       if watch.previous_change_at is not None else None))
+            self._record_xp_point(watch, now)
             self._log_xp_publication(name, watch)
         watch.current_experience = experience
+
+    def _baseline_starts_the_interval(self, watch: _XpWatch,
+                                      zone_seconds: float | None) -> bool:
+        """Darf der Sitzungs-Startwert als Vorgänger der ERSTEN
+        beobachteten Änderung dienen?
+
+        Peter, 2026-08-13: "Ich habe eine Anfangs-XP im Tool gehabt und
+        bin vom Hideout in eine Map gegangen. Nach der Map (ca. 10
+        Minuten) zurück ins Hideout und da habe ich eine End-XP bekommen,
+        aber noch keine Rate, was theoretisch jetzt möglich wäre." Genau
+        so war es: Der Weg ins Hideout ändert die Erfahrung nicht, es gab
+        also nur EINE beobachtete Änderung, und die Rate verlangte zwei.
+        Dass der Nenner (die zehn Minuten in der Map) längst gemessen
+        vorlag, half nichts — der Zähler fehlte.
+
+        Er lag aber ebenfalls vor: ``since_experience``. Warum der
+        trotzdem nicht allgemein taugt, steht in
+        ``test_a_single_experience_change_is_not_enough_for_a_rate`` — was
+        in der ersten Änderung steckt, wurde teils schon VOR dem Start
+        dieser Sitzung verdient, und gegen die Zeit seit Programmstart
+        gerechnet ergäbe das eine erfundene Rate.
+
+        Diese drei Bedingungen schließen genau das aus:
+
+        - Der Nenner kommt aus der Verweildauer in der verlassenen Zone,
+          nicht aus dem vollen Intervall. Ohne Zonen-Beobachtung bleibt
+          es also beim alten, vorsichtigen Verhalten.
+        - Die Zone wurde erst betreten, nachdem diese Sitzung ihren
+          Startwert gelesen hatte. Alles, was seither dazukam, gehört
+          damit in diese Zone — die Zone davor hätte beim Verlassen eine
+          eigene Veröffentlichung ausgelöst, und die wäre eine beobachtete
+          Änderung gewesen.
+        - Dazu ein Sicherheitsabstand in Höhe des Auslöse-Fensters: Fällt
+          der Programmstart in die ein bis drei Sekunden zwischen einem
+          Zonenwechsel und seiner Veröffentlichung, ist der Startwert noch
+          der Stand VOR der letzten Zone. Dann gehörte ein Teil des
+          Zuwachses dorthin."""
+        if watch.last_change_at is not None or zone_seconds is None:
+            return False
+        if self._previous_zone_at is None:
+            return False
+        return watch.since + self._XP_ZONE_TRIGGER_WINDOW_S <= self._previous_zone_at
+
+    @staticmethod
+    def _record_xp_point(watch: _XpWatch, now: float) -> None:
+        """Einen Punkt für den Graphen aufheben (§4.40) — dieselbe Zahl,
+        die auch im Leveling-Feld steht, nur mit ihrem Abschnitt daneben.
+
+        Hier entsteht der Zeitreihen-Speicher, an dem der Graph bisher
+        hing. Er bleibt trotzdem klein: Bei rund acht Veröffentlichungen
+        pro Stunde (§4.35) sind drei Stunden zwei Dutzend Einträge, und
+        was aus dem Fenster fällt, fliegt sofort raus."""
+        rate = MainWindow._watch_rate(watch)
+        if rate is None or watch.interval_seconds is None:
+            return
+        watch.history.append(XpPoint(at=now, seconds=watch.interval_seconds, rate=rate))
+        cutoff = now - GRAPH_SPAN_S
+        while watch.history and watch.history[0].at <= cutoff:
+            watch.history.pop(0)
 
     # Wie kurz nach einem Zonenwechsel muss eine Veröffentlichung
     # eintreffen, damit sie als von ihm ausgelöst gilt? Real gemessen
@@ -3290,18 +3402,29 @@ class MainWindow(QMainWindow):
         gain = watch.last_change_experience - watch.previous_change_experience
         rate = gain / (seconds / 3600) if seconds > 0 else 0.0
         log.info("Erfahrung %s: %+d in %.0fs %s (Stufe %d) — %.1f Mio. XP/h; "
-                 "seit der vorigen Veröffentlichung sind %.0fs vergangen.",
+                 "seit %s sind %.0fs vergangen.",
                  name, gain, seconds,
                  "in der verlassenen Zone" if watch.interval_from_zone else "(volles Intervall)",
-                 watch.level, rate / 1_000_000, gesamt)
+                 watch.level, rate / 1_000_000,
+                 "dem Sitzungs-Startwert" if watch.interval_from_baseline
+                 else "der vorigen Veröffentlichung", gesamt)
 
     def _xp_per_hour(self, name: str) -> float | None:
         """Rate über das ZULETZT abgeschlossene Intervall zwischen zwei
-        Veröffentlichungen — ``None``, solange erst eine beobachtet wurde.
-        Der Wert friert zwischen zwei Veröffentlichungen von selbst ein;
-        die ausführliche Begründung steht an ``_XpWatch``."""
+        Veröffentlichungen — ``None``, solange erst eine beobachtet wurde
+        und der Sitzungs-Startwert nicht als Vorgänger taugt
+        (``_baseline_starts_the_interval``). Der Wert friert zwischen zwei
+        Veröffentlichungen von selbst ein; die ausführliche Begründung
+        steht an ``_XpWatch``."""
         watch = self._xp_watch.get(name)
-        if watch is None or watch.interval_seconds is None or watch.previous_change_at is None:
+        return self._watch_rate(watch) if watch is not None else None
+
+    @staticmethod
+    def _watch_rate(watch: _XpWatch) -> float | None:
+        """Die eine Stelle, an der aus einem Beobachtungsstand eine Rate
+        wird — Anzeige und Graph teilen sie sich, damit die Kurve nicht
+        etwas anderes behaupten kann als die Zahl darüber."""
+        if watch.interval_seconds is None or watch.previous_change_at is None:
             return None
         elapsed_h = watch.interval_seconds / 3600
         if elapsed_h <= 0:
@@ -3730,8 +3853,14 @@ class MainWindow(QMainWindow):
 
     def _show_leveling(self, name: str) -> None:
         """Dieselben Zahlen wie in der Statuszeile, nur größer und
-        dauerhaft (§4.39). Der Beobachtungsstand kommt aus ``_XpWatch``;
-        fehlt er, wurde für diesen Charakter noch nichts veröffentlicht."""
+        dauerhaft (§4.39), dazu der Verlauf als Graph (§4.40). Der
+        Beobachtungsstand kommt aus ``_XpWatch``; fehlt er, wurde für
+        diesen Charakter noch nichts veröffentlicht.
+
+        Das Zeitfenster des Graphen wandert damit bei jedem Refresh
+        weiter — ein eigener Timer wäre Aufwand für nichts: Solange ein
+        Charakter offen ist, läuft ohnehin alle paar Sekunden ein
+        Abruf."""
         watch = self._xp_watch.get(name)
         rate = self._xp_per_hour(name)
         self.leveling.show_character(
@@ -3739,7 +3868,9 @@ class MainWindow(QMainWindow):
             level=watch.level if watch else None,
             experience=watch.current_experience if watch else None,
             rate_text=self._format_xp_rate(rate) if rate is not None else None,
-            age_note=self._xp_rate_age_note(name))
+            age_note=self._xp_rate_age_note(name),
+            points=watch.history if watch else (),
+            now=time.monotonic())
 
     def _xp_rate_age_note(self, name: str) -> str:
         """" (2m ago)" hinter der XP-Rate — leer, solange die Zahl frisch
@@ -4130,9 +4261,37 @@ class MainWindow(QMainWindow):
         wegwischt, und Markierung im Baum, dass Fächer aus dem Cache kommen."""
         self._offline = offline
         self._update_tree_offline_display()
+        self._set_connection_led("offline" if offline else "online")
         self._offline_label.setText(
             "📴 Offline — GGG unreachable, showing cached data"
             if offline else "")
+
+    # Die drei Zustände der Verbindungs-LED (§4.41). Als Tabelle statt als
+    # if-Kette, damit Farbe und Erklärung nebeneinanderstehen — die LED
+    # allein sagt "rot", der Tooltip sagt, was das für die angezeigten
+    # Daten bedeutet.
+    _LED_STATES = {
+        "unknown": (LED_UNKNOWN, "Not talking to GGG yet — anything shown "
+                                 "comes from the local cache."),
+        "online": (LED_ONLINE, "GGG API reachable — data is live."),
+        "offline": (LED_OFFLINE, "GGG API unreachable (maintenance or no "
+                                 "network) — showing cached data."),
+    }
+
+    def _set_connection_led(self, state: str) -> None:
+        """``unknown``/``online``/``offline`` — der Zustand wird zusätzlich
+        gemerkt, damit weder Test noch Aufrufer die Farbe aus einem
+        Stylesheet zurücklesen muss.
+
+        Der Radius ist die halbe Kantenlänge, damit aus dem Quadrat ein
+        Kreis wird; der dünne dunkle Rand hält die graue LED auch auf
+        einer hellen Statuszeile sichtbar."""
+        colour, erklaerung = self._LED_STATES[state]
+        self._connection_led_state = state
+        self._connection_led.setStyleSheet(
+            f"background-color: {colour}; border-radius: {_LED_SIZE // 2}px;"
+            f" border: 1px solid rgba(0, 0, 0, 90);")
+        self._connection_led.setToolTip(erklaerung)
 
     def _refresh(self) -> None:
         """Stash-Liste + Charaktere neu laden; Item-Daten bleiben unangetastet

@@ -25,7 +25,8 @@ from PySide6.QtWidgets import (QDialog, QDialogButtonBox, QHBoxLayout,
                                QVBoxLayout, QWidget)
 
 from poe_view import __version__, config
-from poe_view.ui.theme import (RARITY_COLORS, ROW_CHANGED_COLOR,
+from poe_view.ui.theme import (LED_OFFLINE, LED_ONLINE, LED_UNKNOWN,
+                               RARITY_COLORS, ROW_CHANGED_COLOR,
                                ROW_GEM_LEVELED_COLOR)
 
 
@@ -41,10 +42,15 @@ def _icon_src() -> str:
     return QUrl.fromLocalFile(str(config.APP_ICON_PNG)).toString()
 
 
-def _swatch(colour: str, label: str) -> str:
+def _swatch(colour: str, label: str, glyph: str = "&#9632;") -> str:
     """Farbfleck + Name — bildet die Typ-Filter-Kästchen der Toolbar nach,
-    damit die Zuordnung Farbe → Bedeutung ohne Raten möglich ist."""
-    return (f'<tr><td><span style="color:{colour};">&#9632;</span></td>'
+    damit die Zuordnung Farbe → Bedeutung ohne Raten möglich ist.
+
+    ``glyph`` gibt die Form vor: voreingestellt das Quadrat der
+    Filter-Kästchen, für die runde Verbindungs-LED (§4.41) der Punkt. Eine
+    Legende, die anders aussieht als das Erklärte, kostet den Leser einen
+    zweiten Blick."""
+    return (f'<tr><td><span style="color:{colour};">{glyph}</span></td>'
             f'<td>&nbsp;{label}</td></tr>')
 
 
@@ -65,8 +71,22 @@ _REFRESH_LEGEND = "<table>" + "".join((
 )) + "</table>"
 
 
+# Die Verbindungs-LED der Statuszeile (§4.41). Drei Zustände, und der
+# graue ist der erklärungsbedürftigste: Er heißt NICHT "kaputt".
+_LED_GLYPH = "&#9679;"
+
+_CONNECTION_LEGEND = "<table>" + "".join((
+    _swatch(LED_ONLINE, "Connected — what you see came from GGG just now",
+            _LED_GLYPH),
+    _swatch(LED_OFFLINE, "GGG unreachable: maintenance, or no network. "
+                         "The tool keeps working from its cache", _LED_GLYPH),
+    _swatch(LED_UNKNOWN, "Nothing asked yet — not logged in, or no request "
+                         "has run so far", _LED_GLYPH),
+)) + "</table>"
+
+
 TOPICS: tuple[tuple[str, str], ...] = (
-    ("Getting started", """
+    ("Getting started", f"""
 <h3>Getting started</h3>
 <p>Click <b>Log in</b> in the toolbar. Your browser opens the official
 Path of Exile sign-in page. PoE-VIEW2 never sees your password: it
@@ -78,6 +98,13 @@ all at once — that keeps the tool inside the API rate limit.</p>
 <p>Once data has been loaded it stays available offline. If the API is
 unreachable, or during GGG maintenance, you keep browsing the last known
 state; the stash tree marks this with 📴.</p>
+<p>The dot at the right-hand end of the status bar says which of those
+you are looking at:</p>
+{_CONNECTION_LEGEND}
+<p>GGG announce their maintenance windows in advance, and they are
+usually short — a quarter of an hour is typical. The dot goes back to
+green by itself, without a restart, as soon as a request succeeds
+again.</p>
 """),
     ("The item table", """
 <h3>The item table</h3>

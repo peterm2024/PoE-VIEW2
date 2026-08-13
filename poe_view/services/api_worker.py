@@ -32,17 +32,49 @@ OFFLINE_MESSAGE = ("GGG API unreachable (maintenance or no network) — "
                    "showing cached data.")
 
 
+# Die eine 4xx-Antwort, die nachweislich KEIN Anwendungsfehler ist:
+# GGGs Truhen-Endpunkt beantwortet eine laufende Wartung mit HTTP 400 und
+# der Begründung, es gebe die Liga nicht. Gemessen an Peters Log vom
+# 2026-08-13, 01:03:41 bis 01:17:41 — 22 Abruf-Zyklen im 40-Sekunden-Takt:
+#
+#   /character/<Name>  →  22 × 503
+#   /stash/<Liga>/<Id> →  19 × 400 "Invalid query; League not found",
+#                          3 × 503
+#
+# Die beiden Anfragen liegen je 170 ms auseinander, es ist dieselbe
+# Wartung. Und die Liga gab es die ganze Zeit: Um 01:18:21 lieferte
+# GENAU DIESELBE URL wieder 200. Der Statuscode allein taugt hier also
+# nicht als Unterscheidungsmerkmal (ARCHITEKTUR.md §4.12, FALLSTRICKE #67).
+#
+# Warum am Text festgemacht und nicht am Fehlercode 2: Code 2 heißt bei
+# GGG allgemein "Invalid query" und träfe auch einen von UNS falsch
+# gebauten Substash-Pfad — genau den Fall, den die 4xx-Regel schützen
+# soll. Der Text ist die engere Bedingung. Ändert GGG die Formulierung,
+# fällt das Verhalten auf das alte zurück (laute Fehlermeldung), nicht
+# auf ein verschlucktes Problem.
+_MAINTENANCE_400_MESSAGE = "league not found"
+
+
+def _is_maintenance_bad_request(exc: Exception) -> bool:
+    """Ein 400, das in Wahrheit "GGG ist gerade weg" bedeutet."""
+    return (isinstance(exc, ApiError) and exc.status_code == 400
+            and _MAINTENANCE_400_MESSAGE in exc.error_message.lower())
+
+
 def _is_connectivity_issue(exc: Exception) -> bool:
     """Unterscheidet "wir sind offline" (GGG-Wartung, kein Netz) von echten
     Anwendungsfehlern (§4.12) — nur Ersteres soll den Offline-Modus auslösen.
 
     httpx.TransportError: DNS/Verbindung/Timeout — nie ein Anwendungsfehler.
-    ApiError mit 5xx: Server-/Wartungsfehler (4xx bleiben echte Fehler, z. B.
-    ein falsch zusammengesetzter Substash-Pfad). json.JSONDecodeError: GGG
-    liefert bei Wartung mitunter eine HTML-Seite mit HTTP 200 statt JSON."""
+    ApiError mit 5xx: Server-/Wartungsfehler. 4xx bleiben echte Fehler (z. B.
+    ein falsch zusammengesetzter Substash-Pfad) — mit der einen gemessenen
+    Ausnahme oben. json.JSONDecodeError: GGG liefert bei Wartung mitunter
+    eine HTML-Seite mit HTTP 200 statt JSON."""
     if isinstance(exc, httpx.TransportError):
         return True
     if isinstance(exc, ApiError) and exc.status_code >= 500:
+        return True
+    if _is_maintenance_bad_request(exc):
         return True
     return isinstance(exc, json.JSONDecodeError)
 
@@ -235,6 +267,14 @@ class ApiWorker(QThread):
                 self.login_required.emit(str(exc))
             except Exception as exc:  # noqa: BLE001 — Worker darf nie sterben
                 if _is_connectivity_issue(exc):
+                    if _is_maintenance_bad_request(exc):
+                        # Eine Zeile statt eines Tracebacks, aber nicht
+                        # schweigen: Der Statuscode steht ohnehin in
+                        # httpx' Log, GGGs Begründung nicht — und genau
+                        # die hat den Fall aufgeklärt.
+                        log.info("GGG antwortet auf %s mit HTTP 400 (%r) — als Wartung "
+                                 "gewertet, siehe ARCHITEKTUR.md §4.12",
+                                 type(job).__name__, exc.error_message)
                     self._set_offline(True)
                     # Hintergrund-Auto-Refresh (silent) soll bei anhaltender
                     # GGG-Wartung nicht alle paar Sekunden den Status-Text

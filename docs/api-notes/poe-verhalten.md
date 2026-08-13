@@ -149,6 +149,19 @@ loot, currency, or the contents of the stash.
 - Magnitude for an established level 89 character: 40–163 million XP/h
   depending on the zone, measured over the time spent in that zone
   (2026-08-11). A trial or a short town run sits well below a full map.
+- **It can go down.** First observed on 2026-08-13 at 01:32:24: a
+  242-second zone came back at **−6,189,392** for a level 90 character,
+  i.e. −92.1 million XP/h. Dying costs experience in PoE from act 5
+  onwards; until this point that was common knowledge we had never seen
+  in our own data.
+
+  **The number is a net figure and says nothing about the penalty
+  itself.** Whatever was killed in those four minutes is already
+  subtracted from it. A death penalty of 10 % of the level's
+  requirement would be roughly 16 million at level 90, so this section
+  earned about 10 million and lost more — but that is arithmetic on one
+  observation, not a measurement. Isolating the penalty would need a
+  publication with no kills in it at all.
 
 ---
 
@@ -282,7 +295,57 @@ actually available.
 
 ---
 
-## 6. Unconfirmed
+## 6. Maintenance: one outage, two different status codes
+
+Measured on 2026-08-13 from 01:03:41 to 01:17:41 — 22 request cycles, 40
+seconds apart, each cycle asking one character endpoint and one stash
+endpoint about 170 ms apart:
+
+| Endpoint | Answers during the outage |
+|---|---|
+| `/character/<name>` | 22 × `503 Service Unavailable` |
+| `/stash/<league>/<id>` | **19 × `400 Bad Request`**, 3 × `503` |
+
+The 400 carries GGG's error envelope:
+
+```json
+{"error": {"code": 2, "message": "Invalid query; League not found"}}
+```
+
+**The league existed the whole time.** At 01:18:21 the very same URL,
+same league, same stash id, returned 200 with data. Nothing about the
+request had changed; the servers had come back.
+
+So during maintenance the stash endpoint blames the request rather than
+the server, and picks a message that points at the caller's league.
+Anyone deciding "the server is down" from the status code alone will
+read most of an outage as an application bug of their own. That is
+exactly what PoE-VIEW2 did: it wrote 19 stack traces into its log and
+pushed 19 error messages over its own offline banner, each one telling
+Peter that a league he was looking at did not exist.
+
+Two things worth carrying over if you build on this:
+
+- **Match on the message, not on the code.** Code 2 is GGG's general
+  "Invalid query" and would equally cover a request that really is
+  malformed — a wrong sub-stash path, say. Treating code 2 as "server is
+  down" would swallow your own bugs.
+- **The switch is not consistent even within one outage.** Three cycles
+  in the middle (01:07:01–01:08:21) answered 503 on the stash endpoint
+  as well, before it went back to 400.
+
+**The outage itself lasted fourteen minutes — and GGG had announced
+fifteen.** They announce maintenance ahead of time with a duration, and
+for this one the announcement was accurate to within a minute (Peter,
+2026-08-13: "GGG announce the maintenance, in this case they wrote 15
+minutes. I think it varies"). So the duration is knowable in advance,
+but only by a human reading the announcement; nothing in the API says
+"back in ten minutes". Treat the fourteen minutes as one instance of a
+per-event figure, not as a typical length.
+
+---
+
+## 7. Unconfirmed
 
 What was looked for and **not** found. Do not read as "does not exist",
 read as "not demonstrable with these means".
@@ -297,13 +360,16 @@ read as "not demonstrable with these means".
   that rests on the wiki's 10 %, which our own data cannot confirm
   independently. Deriving it would need a character low enough to have
   no penalty at all, where the ratio should read exactly 10 %.
-- **Experience loss on death from act 5 onwards.** Common knowledge, but
-  never observed in our own data. The evaluation is prepared for it (a
-  decrease counts as a normal change); it is not evidenced.
+- **The size of the death penalty.** That experience is lost on death is
+  no longer unconfirmed — see §3, first observed 2026-08-13. How *much*
+  still is: what the API publishes per zone is the net of everything
+  earned and everything lost there, and the two cannot be separated from
+  outside. The widely quoted "10 % of the current level's requirement"
+  is consistent with our one observation but not established by it.
 
 ---
 
-## 7. Disproven
+## 8. Disproven
 
 Plausible assumptions that turned out to be wrong. They are here so they
 do not come back.
@@ -342,10 +408,14 @@ do not come back.
   arrive when the character is long since in the next zone. Basing a
   time measurement on that gives denominators of a few seconds and rates
   in the billions.
+- **"A 4xx from GGG is always our own fault."** A reasonable rule, and
+  the one PoE-VIEW2 was built on: 5xx means the server, 4xx means the
+  request. The maintenance window of 2026-08-13 broke it — see §6. Most
+  of that outage arrived as HTTP 400.
 
 ---
 
-## 8. What PoE-VIEW2 makes of it
+## 9. What PoE-VIEW2 makes of it
 
 Signposts only — the reasoning lives in each place:
 
@@ -358,3 +428,4 @@ Signposts only — the reasoning lives in each place:
 | A gem level-up changes the whole item | green highlight, §4.33 |
 | Experience arrives in bursts, zone by zone | XP/h over dwell time, §4.34 |
 | Gem states, attribute lower bound | gem recording, §4.35 |
+| Maintenance answers 400 as well | offline detection, §4.12 |

@@ -245,6 +245,59 @@ def test_is_connectivity_issue_false_for_client_errors(exc) -> None:
     assert _is_connectivity_issue(exc) is False
 
 
+def test_a_maintenance_400_counts_as_offline_despite_being_a_client_error() -> None:
+    """Peters Log vom 2026-08-13, 01:03:41-01:17:41: Waehrend einer
+    GGG-Wartung antwortete /character 22x mit 503, /stash im selben
+    Augenblick (170 ms spaeter) 19x mit HTTP 400 "Invalid query; League
+    not found". Die Liga gab es die ganze Zeit — um 01:18:21 lieferte
+    dieselbe URL wieder 200.
+
+    Der Statuscode allein taugt hier also nicht. Ohne diese Ausnahme
+    schrieb die Anwendung 19 Tracebacks ins Log und 19 rote Meldungen
+    ueber ihr eigenes Offline-Banner, mit einer Begruendung, die dem
+    Nutzer faelschlich seine Liga absprach."""
+    exc = ApiError(400, "HTTP 400 for /stash/Allflame/152a892ed5: ...",
+                   error_code=2, error_message="Invalid query; League not found")
+
+    assert _is_connectivity_issue(exc) is True
+
+
+def test_a_genuinely_bad_query_stays_a_real_error() -> None:
+    """Die Gegenprobe, und der Grund, warum die Ausnahme am TEXT haengt
+    und nicht am Fehlercode: Code 2 heisst bei GGG allgemein "Invalid
+    query" und traefe auch einen von uns falsch gebauten Substash-Pfad —
+    genau den Fall, den die 4xx-Regel schuetzen soll. Der duerfte nicht
+    als "GGG ist weg" verschluckt werden."""
+    exc = ApiError(400, "HTTP 400 for /stash/Allflame/a/b/c: ...",
+                   error_code=2, error_message="Invalid query")
+
+    assert _is_connectivity_issue(exc) is False
+
+
+def test_a_maintenance_400_stays_quiet_for_a_background_refresh(qapp, monkeypatch) -> None:
+    """Der eigentliche Schaden war nicht die falsche Einordnung, sondern
+    ihre Folge: Der stille Hintergrund-Refresh laeuft alle paar Sekunden
+    weiter und ueberschrieb das Offline-Banner mit einer Fehlermeldung."""
+    worker = ApiWorker()
+    worker.client.set_token("test")
+    monkeypatch.setattr(worker.client, "get_stash",
+                        lambda league, sid, parent_id=None: (_ for _ in ()).throw(
+                            ApiError(400, "HTTP 400 for /stash/Allflame/152a892ed5: ...",
+                                     error_code=2,
+                                     error_message="Invalid query; League not found")))
+    offline_events, errors = [], []
+    worker.offline_changed.connect(offline_events.append)
+    worker.job_error.connect(errors.append)
+
+    worker.submit(FetchStashItemsJob("Allflame", "152a892ed5", "Tab", silent=True))
+    worker.stop()
+    worker.run()
+
+    assert offline_events == [True]
+    assert errors == []
+    worker.client.close()
+
+
 def test_connectivity_error_sets_offline_and_suppresses_status_for_silent_job(qapp, monkeypatch) -> None:
     """Silent (Hintergrund-Auto-Refresh) darf bei anhaltender Wartung nicht
     alle paar Sekunden das Offline-Banner mit Fehlertext überschreiben."""

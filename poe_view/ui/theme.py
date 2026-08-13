@@ -104,6 +104,21 @@ ROW_CHANGED_COLOR = "#1fa8a8"
 # Rarity-Färbung (Magic ist blau) und dem Korruptionsrot des Markups.
 ROW_GEM_LEVELED_COLOR = DASH_OK
 
+# Verbindungs-LED in der Statuszeile (Peter, 2026-08-13: "wir könnten
+# während der Wartungsdauer eine LED rot leuchten lassen und wenn die
+# Wartung vorbei ist, diese wieder auf grün setzen"). Dieselbe Ampel wie
+# das Rate-Limit-Dashboard — grün heißt in dieser Anwendung überall "in
+# Ordnung", rot überall "hier geht gerade nichts".
+#
+# Der dritte Zustand ist NICHT Zierde: Vor dem ersten Abruf wissen wir
+# nichts über die Erreichbarkeit. Eine grüne LED wäre dann eine
+# Behauptung, für die es keinen einzigen erfolgreichen Request gibt —
+# und ausgerechnet beim Offline-Start (Cache durchsuchen ohne Login) die
+# falsche.
+LED_UNKNOWN = "#6f6f6f"
+LED_ONLINE = DASH_OK
+LED_OFFLINE = DASH_BAD
+
 
 def dimmed_text(palette: QPalette) -> QColor:
     """Textfarbe zu 50% Richtung Hintergrund gemischt — "wahrscheinlich
