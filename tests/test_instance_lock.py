@@ -19,8 +19,8 @@ from poe_view.services.instance_lock import InstanceLock
 def test_the_second_claim_on_the_same_account_fails(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(data_cache.config, "APP_DATA_DIR", tmp_path)
 
-    first = InstanceLock("Gandol#4338")
-    second = InstanceLock("Gandol#4338")
+    first = InstanceLock("TestAccount#1234")
+    second = InstanceLock("TestAccount#1234")
 
     assert first.acquire() is True
     assert second.acquire() is False
@@ -34,11 +34,11 @@ def test_releasing_hands_the_account_over(tmp_path, monkeypatch) -> None:
     jemand eine liegengebliebene Datei aufraeumen muesste."""
     monkeypatch.setattr(data_cache.config, "APP_DATA_DIR", tmp_path)
 
-    first = InstanceLock("Gandol#4338")
+    first = InstanceLock("TestAccount#1234")
     first.acquire()
     first.release()
 
-    second = InstanceLock("Gandol#4338")
+    second = InstanceLock("TestAccount#1234")
     assert second.acquire() is True
     second.release()
 
@@ -48,7 +48,7 @@ def test_two_different_accounts_do_not_block_each_other(tmp_path, monkeypatch) -
     weiterhin voll funktionieren."""
     monkeypatch.setattr(data_cache.config, "APP_DATA_DIR", tmp_path)
 
-    one = InstanceLock("Gandol#4338")
+    one = InstanceLock("TestAccount#1234")
     two = InstanceLock("Zweitkonto#1")
 
     assert one.acquire() is True
@@ -60,7 +60,7 @@ def test_two_different_accounts_do_not_block_each_other(tmp_path, monkeypatch) -
 
 def test_release_is_safe_to_call_twice(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(data_cache.config, "APP_DATA_DIR", tmp_path)
-    lock = InstanceLock("Gandol#4338")
+    lock = InstanceLock("TestAccount#1234")
     lock.acquire()
     lock.release()
     lock.release()  # darf nicht knallen
@@ -102,7 +102,7 @@ def test_a_normal_worker_drops_nothing(qapp) -> None:
 
 # --- Verdrahtung im Fenster --------------------------------------------- #
 
-def _window_with_taken_account(monkeypatch, tmp_path, account="Gandol#4338"):
+def _window_with_taken_account(monkeypatch, tmp_path, account="TestAccount#1234"):
     """Ein Fenster, dessen Konto bereits von einer 'anderen Instanz'
     gehalten wird."""
     from poe_view.ui.main_window import MainWindow
@@ -174,10 +174,10 @@ def test_closing_the_window_hands_the_account_back(qapp, monkeypatch, tmp_path) 
     monkeypatch.setattr(data_cache.config, "APP_DATA_DIR", tmp_path)
     win = MainWindow()
     monkeypatch.setattr(win.worker, "submit", lambda job: None)
-    win._claim_account("Gandol#4338")
+    win._claim_account("TestAccount#1234")
     assert win._account_lock is not None
 
     win.close()
 
     assert win._account_lock is None
-    assert InstanceLock("Gandol#4338").acquire() is True
+    assert InstanceLock("TestAccount#1234").acquire() is True
