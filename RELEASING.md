@@ -17,7 +17,15 @@ Versionsstand in `CHANGELOG.md` und in `poe_view/__init__.py`
    echten Cache — von Hand aufgenommene Bilder sind dagegen genau der
    Weg, auf dem versehentlich echte Konto- oder Charakternamen in die
    README geraten. Es läuft NICHT headless, das Fenster erscheint kurz.
-5. Geänderte Dateien committen (z. B. `Release vX.Y.Z vorbereiten`).
+5. `README.md` gegen den Changelog-Abschnitt lesen: Steht jedes neue
+   nutzersichtbare Feature dort? Die README ist die einzige Beschreibung,
+   die Fremde vor dem Download sehen, und sie wird von keinem Test
+   erfasst. Zweimal hintereinander fehlte dort ein fertiges Feature (der
+   PoB-Export in v0.8.0, das Leveling-Feld in v0.9.0), beide Male fiel es
+   erst nach dem Release auf. Die Feature-Liste im Forumsbeitrag
+   (`PoE-VIEW2-Forumbeitrag.txt` außerhalb des Repos) ist derselbe Fall,
+   lässt sich aber nur von Hand im Forum nachziehen.
+6. Geänderte Dateien committen (z. B. `Release vX.Y.Z vorbereiten`).
 
 ## 2. Windows-.exe bauen
 
