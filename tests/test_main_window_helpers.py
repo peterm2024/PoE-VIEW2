@@ -8468,3 +8468,129 @@ def test_the_probe_window_survives_a_stash_click(qapp, monkeypatch) -> None:
 
     win.worker.stop()
     win.worker.wait(5000)
+
+
+# --- XP-Verlauf ueber den Programmstart hinweg (§4.44) ------------------ #
+
+def _xp_punkt(win, name: str, experience: int, zone_seconds: float = 300.0):
+    """Eine Veroeffentlichung simulieren, wie sie aus einem Abruf kommt."""
+    win._zone_dwell_seconds = lambda now: zone_seconds
+    win._on_character_snapshot(name, 90, experience)
+
+
+def test_der_xp_verlauf_ueberlebt_einen_neustart(qapp, tmp_path, monkeypatch):
+    """Peters Beobachtung 2026-08-15: "Mit jeder neuen Version die ich
+    teste beginnen die XP-Daten wieder von vorne.\""""
+    monkeypatch.setattr("poe_view.config.APP_DATA_DIR", tmp_path / "appdata")
+
+    erste = MainWindow()
+    erste._account_name = "TestAccount#1234"
+    _xp_punkt(erste, "WitchOfPeter", 1_000_000)   # setzt nur die Basis
+    _xp_punkt(erste, "WitchOfPeter", 1_500_000)   # erster Abschnitt
+    _xp_punkt(erste, "WitchOfPeter", 2_000_000)   # zweiter Abschnitt
+    gemessen = [p.rate for p in erste._xp_watch["WitchOfPeter"].history]
+    assert len(gemessen) >= 1
+    erste.worker.stop()
+    erste.worker.wait(5000)
+
+    zweite = MainWindow()
+    zweite._account_name = "TestAccount#1234"
+    _xp_punkt(zweite, "WitchOfPeter", 2_000_000)  # erster Abruf nach Neustart
+
+    assert [p.rate for p in zweite._xp_watch["WitchOfPeter"].history] == gemessen
+
+    zweite.worker.stop()
+    zweite.worker.wait(5000)
+
+
+def test_die_basis_wird_ausdruecklich_nicht_wiederhergestellt(qapp, tmp_path,
+                                                              monkeypatch):
+    """Ein aus der Datei geladener Beobachtungsstand wuerde einen
+    Levelaufstieg waehrend der Programmpause als absurde Rate ausweisen
+    (Begruendung im Docstring von ``_XpWatch``)."""
+    monkeypatch.setattr("poe_view.config.APP_DATA_DIR", tmp_path / "appdata")
+
+    erste = MainWindow()
+    erste._account_name = "TestAccount#1234"
+    _xp_punkt(erste, "WitchOfPeter", 1_000_000)
+    _xp_punkt(erste, "WitchOfPeter", 1_500_000)
+    _xp_punkt(erste, "WitchOfPeter", 2_000_000)
+    assert erste._xp_watch["WitchOfPeter"].history, "Vorbedingung: ein Abschnitt"
+    erste.worker.stop()
+    erste.worker.wait(5000)
+
+    zweite = MainWindow()
+    zweite._account_name = "TestAccount#1234"
+    _xp_punkt(zweite, "WitchOfPeter", 9_000_000)
+    watch = zweite._xp_watch["WitchOfPeter"]
+
+    # Der erste Abruf setzt die Basis, mehr nicht: keine Rate aus dem
+    # Sprung von 1,5 auf 9 Millionen ueber die Programmpause hinweg.
+    assert watch.since_experience == 9_000_000
+    assert watch.last_change_at is None
+
+    zweite.worker.stop()
+    zweite.worker.wait(5000)
+
+
+def test_ohne_kontonamen_wird_kein_verlauf_geschrieben(qapp, tmp_path, monkeypatch):
+    """Vor dem Login gibt es keinen Pfad — und es duerfen auch keine
+    Dateien mit erratenem Namen entstehen."""
+    appdata = tmp_path / "appdata"
+    monkeypatch.setattr("poe_view.config.APP_DATA_DIR", appdata)
+
+    win = MainWindow()
+    win._account_name = ""
+    _xp_punkt(win, "WitchOfPeter", 1_000_000)
+    _xp_punkt(win, "WitchOfPeter", 1_500_000)
+    _xp_punkt(win, "WitchOfPeter", 2_000_000)
+
+    assert win._xp_watch["WitchOfPeter"].history, "Vorbedingung: ein Abschnitt"
+    assert not list(appdata.glob("xp-history*.json"))
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_zwei_konten_teilen_sich_keinen_verlauf(qapp, tmp_path, monkeypatch):
+    monkeypatch.setattr("poe_view.config.APP_DATA_DIR", tmp_path / "appdata")
+
+    erste = MainWindow()
+    erste._account_name = "Konto#1"
+    _xp_punkt(erste, "WitchOfPeter", 1_000_000)
+    _xp_punkt(erste, "WitchOfPeter", 1_500_000)
+    _xp_punkt(erste, "WitchOfPeter", 2_000_000)
+    assert erste._xp_watch["WitchOfPeter"].history, "Vorbedingung: ein Abschnitt"
+    erste.worker.stop()
+    erste.worker.wait(5000)
+
+    zweite = MainWindow()
+    zweite._account_name = "Konto#2"
+    _xp_punkt(zweite, "WitchOfPeter", 1_000_000)
+
+    assert zweite._xp_watch["WitchOfPeter"].history == []
+
+    zweite.worker.stop()
+    zweite.worker.wait(5000)
+
+
+def test_ein_fehlgeschlagenes_speichern_stoert_die_messung_nicht(qapp, monkeypatch):
+    """Der Verlauf ist Komfort — eine volle Platte darf die laufende
+    Messung nicht abbrechen."""
+    win = MainWindow()
+    win._account_name = "TestAccount#1234"
+
+    def explodiere(*args, **kwargs):
+        raise OSError("kein Platz")
+
+    monkeypatch.setattr("poe_view.services.xp_history.save", explodiere)
+    # Drei Veroeffentlichungen: Basis, erste beobachtete Aenderung, dann
+    # der erste Abschnitt mit Rate (siehe ``_XpWatch``).
+    _xp_punkt(win, "WitchOfPeter", 1_000_000)
+    _xp_punkt(win, "WitchOfPeter", 1_500_000)
+    _xp_punkt(win, "WitchOfPeter", 2_000_000)
+
+    assert win._xp_watch["WitchOfPeter"].history
+
+    win.worker.stop()
+    win.worker.wait(5000)

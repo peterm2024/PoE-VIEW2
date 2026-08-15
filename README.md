@@ -134,7 +134,9 @@ progress and the last three hours of experience.
   map and coming back puts both visits on one dark block showing the
   rate for the map as a whole, so the cost of the trip outside is
   visible. A dashed line marks the overall rate; an area that cost
-  experience on balance hangs below the line in red.
+  experience on balance hangs below the line in red. The graph survives
+  a restart: measured sections are stored per account and drawn again
+  next time, so closing the program does not empty it.
 - **Gem progress**: one narrow bar per socketed gem, coloured by the
   attribute it needs, showing how far it is from its next level. A full
   bar means the gem is done — and if it is full below its maximum level,

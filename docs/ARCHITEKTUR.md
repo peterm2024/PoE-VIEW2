@@ -4539,6 +4539,68 @@ Fehlermeldung, 429-Retry behält sie) und
 `tests/test_main_window_helpers.py` (Menüeintrag, Fenster beim Klick,
 Read-only-Absage, Anzeige und Ablage, eigenes Fenster).
 
+### 4.44 XP-Verlauf über den Programmstart hinweg (`services/xp_history.py`)
+
+Peter, 2026-08-15: "Mit jeder neuen Version die ich teste beginnen die
+XP-Daten wieder von vorne. Könnten wir uns das nicht merken?"
+
+**Der Verlauf wird aufgehoben, die Basis ausdrücklich nicht.** Das ist
+die ganze Entscheidung. Die Punkte im Graphen sind abgeschlossene
+Messungen — Zeitpunkt, Dauer, Rate —, sie wieder anzuzeigen erfindet
+nichts. Der Beobachtungsstand des `_XpWatch` (seit wann, mit welchem
+Erfahrungswert) bleibt dagegen sitzungslokal, aus dem Grund, der dort
+schon vor diesem Feature im Docstring stand: Ein Levelaufstieg während
+einer Pause vor dem Sitzungsstart käme sonst als absurd hohe Rate
+heraus. Vergangenheit lässt sich speichern, eine Behauptung über die
+Gegenwart nicht.
+
+Für Peter heißt das: Der Graph ist nach dem Start sofort wieder gefüllt,
+aber die erste neue Rate kommt weiterhin erst mit der zweiten
+beobachteten Veröffentlichung (oder mit der ersten, wenn
+`_baseline_starts_the_interval` greift). Die Lücke zwischen altem und
+neuem Balken ist die Programmpause und wird als solche gezeichnet — wie
+jede andere Pause im Graphen auch (§4.40).
+
+**Die Zeitstempel müssen umgerechnet werden.** Die Punkte laufen intern
+auf `time.monotonic()`, einer Uhr ohne festen Nullpunkt: Nach einem
+Neustart bedeutet derselbe Zahlenwert einen völlig anderen Augenblick.
+Gespeichert wird deshalb Wanduhrzeit, geladen wird zurückgerechnet.
+Beide Richtungen bekommen `now_mono` und `now_wall` als Parameter statt
+selbst auf die Uhr zu sehen — nur so ist die Umrechnung ohne laufende
+Zeit prüfbar, und genau sie ist die Stelle, an der ein Fehler nicht
+auffiele: Ein falscher Nullpunkt setzt Balken an die falsche Stelle,
+ohne dass irgendetwas abstürzt.
+
+Beim Laden fällt weg, was älter ist als das Graph-Fenster (drei
+Stunden), und ebenso alles, was in der Zukunft liegt — gestellte Uhr,
+Sommerzeit, eine von einem anderen Rechner kopierte Datei. Sechzig
+Sekunden Toleranz, damit die beiden Uhrabfragen sich nicht in die Quere
+kommen.
+
+**Je Konto eine Datei** (`xp-history-<Konto>.json`), wie beim
+Daten-Cache und aus demselben Grund. Geschrieben wird nach jedem neuen
+Abschnitt statt beim Beenden: Ein Absturz ist genau der Fall, nach dem
+man den Verlauf vermisst. Das kostet nichts — bei rund acht
+Veröffentlichungen pro Stunde (§4.35) sind drei Stunden zwei Dutzend
+Zeilen, ein Bruchteil dessen, wofür sich beim Daten-Cache der
+`cache_writer` lohnt. Ein Schreibfehler wird protokolliert und sonst
+ignoriert; der Verlauf ist Komfort und darf die laufende Messung nicht
+stören. Ein unlesbarer oder versionsfremder Stand ist kein Fehlerfall,
+sondern einfach kein Verlauf.
+
+Das Modul kennt `XpPoint` nicht, sondern nur ein Protokoll mit vier
+Feldern — die Dienstschicht soll die Oberfläche nicht importieren, und
+zu speichern sind ohnehin nur Zahlen.
+
+Getestet: `tests/test_xp_history.py` (Alter übersteht den Neustart,
+Programmpause zählt mit, Kürzen auf das Fenster, Punkte aus der Zukunft,
+Uhr-Toleranz, Sortierung, Konto-Trennung, Versionswechsel, kaputte
+Nutzlast und kaputte Einzelzeilen, Datei fehlt/unlesbar) und
+`tests/test_main_window_helpers.py` (Verlauf übersteht einen echten
+zweiten `MainWindow`, Basis wird nicht wiederhergestellt, ohne
+Kontonamen keine Datei, zwei Konten getrennt, Schreibfehler stört die
+Messung nicht).
+
 ---
 
 ## 5. UI-Konzept (Oberflächenvorschlag)

@@ -232,3 +232,12 @@ def test_the_help_says_why_there_is_no_poe2_support(qapp) -> None:
     # Und den gemessenen Befund, nicht nur die gelesene Doku: Der
     # Parameter wird ueberhaupt nicht ausgewertet (2026-08-15).
     assert "byte-identical" in text
+
+
+def test_the_help_says_the_graph_survives_a_restart(qapp) -> None:
+    """Peters Beobachtung 2026-08-15. Wichtig ist der zweite Teil: Der
+    Verlauf bleibt, die Messung faengt neu an — sonst wundert man sich,
+    warum der Graph da ist, die Rate aber nicht."""
+    text = _all_text()
+    assert "does not empty the graph" in text
+    assert "two\npublications again" in text or "two publications again" in text

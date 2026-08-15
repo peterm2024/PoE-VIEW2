@@ -29,7 +29,7 @@ from poe_view.api.models import (Character, Item, StashTab,
                                  dominant_category, is_ggg_suffix)
 from poe_view.api.ninja import PriceIndex
 from poe_view.services import (cache_backup, cache_writer, data_cache, gem_xp_log,
-                               icon_cache, poe2_probe, price_cache)
+                               icon_cache, poe2_probe, price_cache, xp_history)
 from poe_view.services.instance_lock import InstanceLock
 from poe_view.services.zone_watcher import ZoneWatcher, resolve_client_log_path
 from poe_view.services.api_worker import (ApiWorker, BootstrapJob,
@@ -642,6 +642,11 @@ class MainWindow(QMainWindow):
         self._last_zone_name = ""
         self._publish_watch: dict[str, _PublishWatch] = {}
         self._xp_watch: dict[str, _XpWatch] = {}
+        # Aus der Datei geholte Verläufe (§4.44), erst beim ersten
+        # gebrauchten Charakter gelesen. ``None`` = noch nicht gelesen,
+        # damit ein fehlender Stand nicht bei jedem Charakter erneut
+        # einen Dateizugriff auslöst.
+        self._restored_xp_history: dict[str, list[XpPoint]] | None = None
         # Charakter-Item-Verlauf (Peter, 2026-08-02): letzte 120 Items, die
         # neu im Inventar aufgetaucht oder daraus verschwunden sind — über
         # ALLE Charaktere hinweg, unabhängig davon, welcher gerade angezeigt
@@ -3305,8 +3310,11 @@ class MainWindow(QMainWindow):
         in die Rechnung, nicht herausgefiltert."""
         watch = self._xp_watch.get(name)
         if watch is None:
+            # Der Verlauf kommt aus der vorigen Sitzung zurück (§4.44),
+            # die BASIS ausdrücklich nicht — siehe ``_XpWatch``.
             self._xp_watch[name] = _XpWatch(since=time.monotonic(), since_experience=experience,
-                                            level=level, current_experience=experience)
+                                            level=level, current_experience=experience,
+                                            history=self._history_from_disk(name))
             return
         watch.level = level
         if experience != watch.current_experience:
@@ -3329,6 +3337,7 @@ class MainWindow(QMainWindow):
                            if watch.previous_change_at is not None else None)
             watch.interval_seconds = self._interval_seconds(zone_seconds, seit_vorher)
             self._record_xp_point(watch, now)
+            self._persist_xp_history()
             self._log_xp_publication(name, watch)
         watch.current_experience = experience
 
@@ -3409,6 +3418,52 @@ class MainWindow(QMainWindow):
         if self._previous_zone_at is None:
             return False
         return watch.since + self._XP_ZONE_TRIGGER_WINDOW_S <= self._previous_zone_at
+
+    def _history_from_disk(self, name: str) -> list[XpPoint]:
+        """Den gespeicherten Verlauf dieses Charakters holen (§4.44).
+
+        Beim ersten Aufruf wird die Datei gelesen, danach nur noch die
+        Kopie im Speicher befragt. Ohne Kontonamen gibt es keinen Pfad
+        und damit auch keinen Verlauf — das ist der Zustand vor dem
+        Login, in dem ohnehin keine Charakterdaten eintreffen."""
+        if self._restored_xp_history is None:
+            self._restored_xp_history = self._read_xp_history()
+        return list(self._restored_xp_history.get(name, ()))
+
+    def _read_xp_history(self) -> dict[str, list[XpPoint]]:
+        if not self._account_name:
+            return {}
+        roh = xp_history.load(xp_history.path_for(self._account_name),
+                              now_mono=time.monotonic(), now_wall=time.time(),
+                              span_s=GRAPH_SPAN_S)
+        wiederhergestellt = {name: [XpPoint(**zeile) for zeile in zeilen]
+                             for name, zeilen in roh.items()}
+        if wiederhergestellt:
+            log.info("XP-Verlauf geladen: %d Charaktere, %d Abschnitte",
+                     len(wiederhergestellt),
+                     sum(len(p) for p in wiederhergestellt.values()))
+        return wiederhergestellt
+
+    def _persist_xp_history(self) -> None:
+        """Nach jedem neuen Abschnitt ablegen.
+
+        Bewusst sofort und nicht erst beim Beenden: Ein Absturz oder ein
+        abgewürgter Prozess ist genau der Fall, nach dem man den Verlauf
+        vermisst. Die Datei ist ein paar Kilobyte groß, das
+        Zusammenfassen wie beim Daten-Cache (``cache_writer``) lohnt
+        hier nicht."""
+        if not self._account_name:
+            return
+        try:
+            xp_history.save({name: watch.history
+                             for name, watch in self._xp_watch.items()},
+                            xp_history.path_for(self._account_name),
+                            now_mono=time.monotonic(), now_wall=time.time())
+        except OSError:
+            # Der Verlauf ist Komfort. Ein fehlgeschlagenes Speichern
+            # darf die laufende Messung nicht stören.
+            log.warning("XP-Verlauf konnte nicht gespeichert werden.",
+                        exc_info=True)
 
     @staticmethod
     def _record_xp_point(watch: "_XpWatch", now: float) -> None:

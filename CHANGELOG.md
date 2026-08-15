@@ -8,6 +8,14 @@ nach [SemVer](https://semver.org/lang/de/).
 
 ### Hinzugefügt
 
+- Der XP-Graph ist nach einem Programmstart nicht mehr leer: Die
+  gemessenen Abschnitte der letzten drei Stunden werden je Konto
+  gespeichert und beim nächsten Start wieder eingezeichnet. Die
+  Beobachtungsbasis wird bewusst nicht mitgenommen — sonst würde ein
+  Levelaufstieg während der Programmpause als absurd hohe Rate
+  erscheinen. Die erste neue Rate kommt also weiterhin mit der zweiten
+  Veröffentlichung, aber der Verlauf davor bleibt sichtbar.
+
 - Das Konto-Menü hat einen Eintrag "PoE2 raw data", der GGGs API nach
   dem PoE2-Realm fragt und die Antwort als Rohtext zeigt. Er stellt
   dieselbe Frage dreimal — ohne Realm, mit `poe2` und mit einem

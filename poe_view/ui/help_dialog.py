@@ -281,6 +281,12 @@ as a whole, so you can see what the trip outside cost.</li>
 visible — a quick check whether the last map was above or below your
 own average.</li>
 </ul>
+<p><b>Closing the program does not empty the graph.</b> Finished sections
+are stored per account and drawn again next time, as long as they still
+fall inside the three-hour window. What does start over is the
+measurement itself: the first rate after a restart needs two
+publications again, because a baseline carried across a break would turn
+whatever you levelled meanwhile into one absurd number.</p>
 """),
     ("Item history", """
 <h3>Item history</h3>
@@ -315,8 +321,9 @@ during a long "Load All Tabs" run.</p>
 <h3>Your data</h3>
 <p>Everything PoE-VIEW2 stores stays on your computer, under
 <code>%LOCALAPPDATA%\\PoE-VIEW2</code>: the loaded stash and character
-data, the icon cache, prices, your settings and the log file. Nothing is
-sent anywhere except to the servers listed in the README.</p>
+data, the icon cache, prices, the experience graph's history, your
+settings and the log file. Nothing is sent anywhere except to the
+servers listed in the README.</p>
 <p><b>Each account keeps its own data file</b>, so switching accounts
 never mixes them up, and switching back brings your previous state with
 it.</p>
