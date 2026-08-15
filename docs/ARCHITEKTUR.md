@@ -4444,10 +4444,10 @@ Ein Eintrag im Konto-Menü fragt die PoE2-Endpunkte ab und zeigt das
 Ergebnis als Text. Kein Betriebsmittel: nichts davon geht in Tabelle,
 Cache oder Preisrechnung, und das Programm liest weiterhin PoE1.
 
-**Was GGG anbietet.** Die Spiele werden über einen `realm`-Query-Parameter
-unterschieden, nicht über eigene Pfade und nicht über einen eigenen
-OAuth-Scope — das bestehende Token deckt die Abfrage also mit ab. Aus
-GGGs Referenz gelesen am 2026-08-15:
+**Was GGGs Referenz sagt.** Die Spiele werden über einen
+`realm`-Query-Parameter unterschieden, nicht über eigene Pfade und nicht
+über einen eigenen OAuth-Scope — das bestehende Token deckt die Abfrage
+also mit ab. Gelesen am 2026-08-15:
 
 | Endpunkt | erlaubte `realm`-Werte |
 |---|---|
@@ -4458,11 +4458,37 @@ GGGs Referenz gelesen am 2026-08-15:
 Dazu GGGs eigener Hinweis auf derselben Seite: "There are currently
 limited APIs that return PoE2 game information."
 
-**Die fehlende Zeile ist die wichtigste.** Ohne Truhen-Endpunkt für PoE2
-gibt es dort keine Fächer, keine liga-weite Suche und keine
-Gesamtsumme — also genau die Funktion, für die es dieses Programm gibt.
-Ein PoE2-Modus wäre heute eine halbe Anwendung. Deshalb der Abzug statt
-eines Features: erst sehen, was ankommt.
+**Was gemessen dabei herauskommt: nichts.** Der erste Abzug lief am
+2026-08-15 gegen Peters Konto, und Peter sah sofort, was mir entgangen
+war — "das sind anscheinend alles Daten von PoE1". Die Nachmessung
+bestätigt es und geht weiter: Vier Varianten desselben Aufrufs (ohne
+Realm, `poe2`, `xbox`, ein frei erfundener Wert) liefern **bytegleiche
+Antworten** — dieselbe Prüfsumme, 50 PoE1-Charaktere, Feld `realm`
+überall `pc`. Auf dem Liga-Endpunkt dasselbe Bild.
+
+Der erfundene Realm ist der entscheidende Abruf. Käme dort ein Fehler,
+wäre `poe2` ein anerkannter Wert ohne Daten. Da auch er dieselben Bytes
+liefert, wertet GGG den Parameter schlicht nicht aus. Die Frage "hat
+dieses Konto PoE2-Charaktere?" ist über diesen Endpunkt gar nicht
+stellbar.
+
+**Die fehlende Truhen-Zeile bleibt trotzdem die wichtigste.** Selbst
+wenn der Parameter wirkte: Ohne Truhen-Endpunkt gibt es für PoE2 keine
+Fächer, keine liga-weite Suche und keine Gesamtsumme — also genau die
+Funktion, für die es dieses Programm gibt. Ein PoE2-Modus wäre eine
+halbe Anwendung. Deshalb der Abzug statt eines Features.
+
+**Kontrollabrufe sind der Inhalt, nicht die Zugabe.** Die erste Fassung
+fragte nur nach `poe2` und zeigte dann PoE1-Daten unter einer
+PoE2-Überschrift — ein Abzug, der die eigene Frage nicht beantworten
+kann und den Leser aktiv in die Irre führt. Jetzt läuft derselbe Aufruf
+dreimal (ohne Realm, mit `poe2`, mit dem erfundenen Wert), und der
+Vergleich der Prüfsummen steht als Urteil in Klartext über den
+Rohdaten. Das Charakter-Detail wird nur geholt, wenn der Realm die
+Antwort tatsächlich verändert hat; sonst wäre es ein PoE1-Charakter im
+PoE2-Abzug. Bytegleiche Antworten werden nur einmal ausgeschrieben —
+dreimal dieselbe 50-Charakter-Liste verdeckt das Wenige, worauf es
+ankommt.
 
 **Rohabrufe neben den typisierten Endpunkten** (`get_leagues_raw`,
 `get_characters_raw`, `get_character_raw`). Die pydantic-Modelle sind an
@@ -4502,13 +4528,16 @@ nicht abgefragten Truhen-Endpunkte samt Grund — sonst liest sich ein
 Abzug ohne Fächer wie ein Fehler des Programms statt wie eine Grenze der
 API.
 
-Getestet: `tests/test_poe2_probe.py` (Namensauslese samt kaputter
-Einträge, Berichtstext, Ablagepfad gegen den Testschutz, Abruf mit
-Realm, nur ein Charakter, Fehlschläge im Ergebnis, `AuthError`
-weitergereicht, Token- und Read-only-Sperre), dazu `tests/test_client.py`
-(Realm als Query, Encoding, Query in der Fehlermeldung, 429-Retry behält
-sie) und `tests/test_main_window_helpers.py` (Menüeintrag, Fenster beim
-Klick, Read-only-Absage, Anzeige und Ablage, eigenes Fenster).
+Getestet: `tests/test_poe2_probe.py` (Prüfsumme unabhängig von der
+Schlüsselreihenfolge, Wirkungserkennung samt Fehlschlägen, Urteilstext
+in allen drei Ausgängen, Namensauslese nur aus der PoE2-Antwort,
+Deduplizierung gleicher Antworten, Spaltenausrichtung, Ablagepfad gegen
+den Testschutz, Abrufreihenfolge mit Kontrollen, Detail nur bei
+Wirkung, `AuthError` weitergereicht, Token- und Read-only-Sperre), dazu
+`tests/test_client.py` (Realm als Query, Encoding, Query in der
+Fehlermeldung, 429-Retry behält sie) und
+`tests/test_main_window_helpers.py` (Menüeintrag, Fenster beim Klick,
+Read-only-Absage, Anzeige und Ablage, eigenes Fenster).
 
 ---
 

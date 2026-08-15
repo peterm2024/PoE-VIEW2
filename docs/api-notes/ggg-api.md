@@ -98,10 +98,37 @@ Als PoE2 markierte Item-/Charakterfelder in der Referenz: `gemSockets`
 ("string is always `W`"), `runeMods`, `doubleCorrupted`, `sanctified`.
 Unter "File Formats" steht ein "Build Planner (PoE2 only)".
 
-Was davon tatsächlich ankommt, ist ungeprüft — dafür gibt es den
-Rohdaten-Abzug im Konto-Menü (ARCHITEKTUR.md §4.43). Bis dahin ist diese
-Tabelle gelesene Doku, keine Messung, und die Doku lag bei diesem
-Projekt schon mehrfach daneben.
+**Gemessen am 2026-08-15: Der Parameter wird nicht ausgewertet.**
+
+Vier Varianten von `GET /character` mit Peters Token — ohne `realm`, mit
+`poe2`, mit `xbox` und mit dem frei erfundenen `quatschrealm` — lieferten
+**bytegleiche Antworten**:
+
+```
+realm=None            ->  50 Charaktere, realm-Feld=['pc'], sha256=6770989cfab50f31
+realm='poe2'          ->  50 Charaktere, realm-Feld=['pc'], sha256=6770989cfab50f31
+realm='xbox'          ->  50 Charaktere, realm-Feld=['pc'], sha256=6770989cfab50f31
+realm='quatschrealm'  ->  50 Charaktere, realm-Feld=['pc'], sha256=6770989cfab50f31
+```
+
+Auf `/account/leagues` dasselbe Bild (16 Ligen, alle `realm: pc`, eine
+Prüfsumme für alle vier Varianten). Alle Antworten kamen mit HTTP 200,
+und im Log steht die vollständige URL samt `?realm=poe2` — gesendet
+wurde er also.
+
+Der erfundene Wert ist der entscheidende Abruf: Käme dort ein Fehler,
+wäre `poe2` ein anerkannter Wert ohne Daten für dieses Konto. Da auch er
+dieselben Bytes liefert, ignoriert GGG den Parameter. Ob das an der
+OAuth-Anbindung liegt (Konto-Scopes sind an den PC-Realm gebunden), an
+einer noch nicht ausgelieferten Funktion oder an etwas anderem, ist von
+außen nicht zu entscheiden.
+
+Praktische Folge: Über diesen Weg ist nicht feststellbar, ob ein Konto
+PoE2-Charaktere hat. Die Tabelle oben bleibt als Referenzstand stehen,
+gilt aber als **widerlegt, nicht als offen**. Nachprüfen lässt sich das
+jederzeit über den Rohdaten-Abzug im Konto-Menü (ARCHITEKTUR.md §4.43),
+der die Kontrollabrufe automatisch mitmacht und sein Urteil oben in den
+Text schreibt.
 
 ## Spezial-Tabs: MapStash und UniqueStash
 

@@ -227,5 +227,8 @@ def test_the_help_says_why_there_is_no_poe2_support(qapp) -> None:
     sie beantworten, samt dem Grund (kein Truhen-Endpunkt fuer PoE2)."""
     text = _all_text()
     assert "path of exile 2" in text
-    assert "stash endpoints do not" in text
+    assert "not on the stash endpoints" in text
     assert "poe2 raw data" in text
+    # Und den gemessenen Befund, nicht nur die gelesene Doku: Der
+    # Parameter wird ueberhaupt nicht ausgewertet (2026-08-15).
+    assert "byte-identical" in text

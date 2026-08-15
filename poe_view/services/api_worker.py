@@ -462,13 +462,20 @@ class ApiWorker(QThread):
 
     def _poe2_probe(self) -> poe2_probe.Probe:
         """Fragt die Endpunkte ab, die laut GGGs Referenz ``realm=poe2``
-        annehmen, und sammelt auch die Fehlschläge ein (§4.43).
+        annehmen — jeweils mit Kontrollabruf (§4.43).
 
-        Nur der ERSTE gefundene Charakter wird im Detail geholt. Die
-        Frage dieses Abzugs ist strukturell — wo PoE2 seine Skill-Gems
-        ablegt, wie ``runeMods`` aussieht, welche Felder es überhaupt
-        gibt —, und die beantwortet ein Charakter genauso wie zehn. Jeder
-        weitere kostete nur Rate-Limit-Kontingent.
+        Die Kontrollen sind der eigentliche Inhalt. Peter hat den ersten
+        Abzug angesehen und sofort gesehen, was mir entgangen war: "Das
+        sind anscheinend alles Daten von PoE1." Ein Abzug, der nur nach
+        ``poe2`` fragt, kann das nicht auseinanderhalten — er zeigt
+        PoE1-Daten unter einer PoE2-Überschrift. Deshalb dieselbe Frage
+        dreimal: ohne Realm, mit ``poe2``, mit einem erfundenen Wert.
+        Sind alle drei bytegleich, wertet GGG den Parameter nicht aus,
+        und das ist die Antwort.
+
+        Den Charakter im Detail gibt es nur, wenn der Realm etwas
+        verändert hat. Sonst wäre es ein PoE1-Charakter im PoE2-Abzug —
+        ein Rate-Limit-Abruf für eine Antwort, die in die Irre führt.
 
         Fehlschläge landen im Ergebnis statt im Offline-Zustand: Ein 403
         oder 400 ist hier eine Messung. Nur ``AuthError`` fliegt weiter,
@@ -476,28 +483,42 @@ class ApiWorker(QThread):
         anstößt statt still im Abzug zu verschwinden."""
         probe = poe2_probe.Probe(fetched_at=time.time())
         realm = poe2_probe.REALM
+        ungueltig = poe2_probe.INVALID_REALM
         probe.calls.append(self._probe_call(
-            f"GET /account/leagues?realm={realm}",
-            lambda: self.client.get_leagues_raw(realm)))
+            "GET /character  (control, no realm)", poe2_probe.PLAIN,
+            lambda: self.client.get_characters_raw()))
         probe.calls.append(self._probe_call(
-            f"GET /character?realm={realm}",
+            f"GET /character?realm={realm}", poe2_probe.POE2,
             lambda: self.client.get_characters_raw(realm)))
-        for name in poe2_probe.character_names(probe.calls)[:1]:
-            probe.calls.append(self._probe_call(
-                f"GET /character/{name}?realm={realm}",
-                lambda n=name: self.client.get_character_raw(n, realm)))
+        probe.calls.append(self._probe_call(
+            f"GET /character?realm={ungueltig}  (control, invented realm)",
+            poe2_probe.INVALID,
+            lambda: self.client.get_characters_raw(ungueltig)))
+        probe.calls.append(self._probe_call(
+            f"GET /account/leagues?realm={realm}", poe2_probe.LEAGUES,
+            lambda: self.client.get_leagues_raw(realm)))
+        if poe2_probe.realm_had_effect(probe.calls):
+            for name in poe2_probe.character_names(probe.calls)[:1]:
+                probe.calls.append(self._probe_call(
+                    f"GET /character/{name}?realm={realm}", poe2_probe.DETAIL,
+                    lambda n=name: self.client.get_character_raw(n, realm)))
+        else:
+            log.info("PoE2-Abzug: realm ohne Wirkung, Charakter-Detail "
+                     "uebersprungen (§4.43)")
         return probe
 
     @staticmethod
-    def _probe_call(label: str, call) -> poe2_probe.ProbeCall:
+    def _probe_call(label: str, role: str, call) -> poe2_probe.ProbeCall:
         try:
-            return poe2_probe.ProbeCall(label, True, call())
+            data = call()
         except AuthError:
             raise
         except Exception as exc:  # noqa: BLE001 — der Fehler IST das Ergebnis
             log.info("PoE2-Abzug: %s → %s: %s", label, type(exc).__name__, exc)
-            return poe2_probe.ProbeCall(label, False,
+            return poe2_probe.ProbeCall(label, False, role=role,
                                         error=f"{type(exc).__name__}: {exc}")
+        return poe2_probe.ProbeCall(label, True, data, role=role,
+                                    digest=poe2_probe.digest_of(data))
 
     def _emit_stash_result(self, league: str, stash_id: str, name: str,
                            stash: StashTab, silent: bool) -> None:

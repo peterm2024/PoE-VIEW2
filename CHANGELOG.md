@@ -9,12 +9,17 @@ nach [SemVer](https://semver.org/lang/de/).
 ### Hinzugefügt
 
 - Das Konto-Menü hat einen Eintrag "PoE2 raw data", der GGGs API nach
-  dem PoE2-Realm fragt und die Antwort als Rohtext zeigt — Ligen,
-  Charakterliste und der erste Charakter im Detail. Das Programm liest
-  weiterhin nur Path of Exile 1; der Abzug soll zeigen, was für PoE2
-  überhaupt herausgegeben wird. Truhenfächer gehören nicht dazu: GGGs
-  Referenz lässt am Stash-Endpunkt nur die Konsolen-Realms zu. Der
-  Abzug landet zusätzlich als `poe2-probe.txt` im Profilordner.
+  dem PoE2-Realm fragt und die Antwort als Rohtext zeigt. Er stellt
+  dieselbe Frage dreimal — ohne Realm, mit `poe2` und mit einem
+  erfundenen Wert — und schreibt das Ergebnis des Vergleichs in
+  Klartext über die Rohdaten. Das Programm liest weiterhin nur Path of
+  Exile 1. Der Abzug landet zusätzlich als `poe2-probe.txt` im
+  Profilordner.
+- Erste Messung damit: GGG wertet den `realm`-Parameter nicht aus. Alle
+  drei Varianten liefern bytegleich dieselben PoE1-Daten, auch die mit
+  dem erfundenen Realm. Ob ein Konto PoE2-Charaktere hat, ist über
+  diesen Weg also nicht feststellbar — unabhängig davon, dass die
+  Truhen-Endpunkte für PoE2 ohnehin nicht vorgesehen sind.
 
 ### Geändert
 

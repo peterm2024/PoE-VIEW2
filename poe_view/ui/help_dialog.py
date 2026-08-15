@@ -348,16 +348,20 @@ requests to gather — in Explorer you see exactly what you are doing.</p>
 <h3>Path of Exile 2</h3>
 <p>PoE-VIEW2 reads Path of Exile 1. There is no PoE2 support, and this
 is not a temporary gap in the tool.</p>
-<p>GGG's API selects the game with a <code>realm</code> parameter, and
-it does not accept <code>poe2</code> everywhere. Characters and leagues
-do; the stash endpoints do not. Stash tabs are the heart of this
-program, so a PoE2 mode would be missing its main half.</p>
-<p>To see for yourself what the API hands out, open the account menu
-next to your name and pick <b>PoE2 raw data</b>. It asks for the PoE2
-leagues, your PoE2 character list and the first of those characters in
-full, then shows the raw JSON — including whatever fails, because that
-is the interesting part. Nothing from it enters the table, the cache or
-the value column.</p>
+<p>GGG's API selects the game with a <code>realm</code> parameter. Its
+documentation allows <code>poe2</code> on the character and league
+endpoints but not on the stash endpoints, and stash tabs are the heart
+of this program — so a PoE2 mode would be missing its main half.</p>
+<p>Measured on 15 August 2026, it is emptier than that. Asking for
+<code>realm=poe2</code>, asking for nothing, and asking for a realm that
+does not exist all return byte-identical Path of Exile 1 data. The
+parameter is not being evaluated at all, so the API cannot even tell you
+whether your account has PoE2 characters.</p>
+<p>You can check this yourself at any time: open the account menu next
+to your name and pick <b>PoE2 raw data</b>. It runs the same request
+three ways, compares the checksums and writes its verdict in plain words
+above the raw JSON. Nothing from it enters the table, the cache or the
+value column.</p>
 <p>The dump is also written to <code>poe2-probe.txt</code> next to the
 other local files, since a full character is too long to read in one
 screen. It contains your account and character names, so look before
