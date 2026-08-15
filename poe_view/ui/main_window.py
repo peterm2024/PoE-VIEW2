@@ -13,6 +13,7 @@ import time
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
+from typing import Iterator
 
 from PySide6.QtCore import QSettings, Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import (QAction, QDesktopServices, QGuiApplication,
@@ -45,6 +46,7 @@ from poe_view.ui import external_tools
 from poe_view.ui.help_dialog import HelpDialog
 from poe_view.ui.character_list import CharacterList
 from poe_view.ui.item_detail import ItemDetail
+from poe_view.ui.favourites import favourite_rows
 from poe_view.ui.gem_progress import gem_progress_of
 from poe_view.ui.leveling_panel import LevelingPanel
 from poe_view.ui.xp_graph import GRAPH_SPAN_S, XpPoint
@@ -1277,6 +1279,11 @@ class MainWindow(QMainWindow):
         # sie — und die Fläche daneben bekommt eine Aufgabe, statt leer
         # zu bleiben. Beide Hälften sind vom Nutzer verschiebbar.
         self.leveling = LevelingPanel()
+        # Entlassen auch aus der Favoriten-Tabelle heraus (§4.45): Ein
+        # Item, von dem gerade nichts da ist, steht in keiner
+        # Item-Tabelle mehr — über den Rechtsklick dort wäre es nie
+        # wieder loszuwerden.
+        self.leveling.favourites.remove_requested.connect(self._toggle_favourite)
         bottom_splitter = QSplitter(Qt.Orientation.Horizontal)
         bottom_splitter.addWidget(self.detail)
         bottom_splitter.addWidget(self.leveling)
@@ -1713,6 +1720,94 @@ class MainWindow(QMainWindow):
         """INI-Datei statt Registry, konsistent zum Datei-Cache-Ansatz."""
         return QSettings(str(config.APP_DATA_DIR / "ui-settings.ini"),
                          QSettings.Format.IniFormat)
+
+    # --- Beobachtete Stapelgrößen (§4.45) ------------------------------ #
+
+    _FAVOURITES_SETTING_KEY = "favourites/names"
+    # Mehr Zeilen als der Streifen über dem Graphen trägt, ohne ihn zu
+    # verdrängen. Wer darüber hinaus will, beobachtet nicht mehr, sondern
+    # führt Inventar — dafür ist die Haupttabelle da.
+    _MAX_FAVOURITES = 12
+
+    def _favourite_names(self) -> list[str]:
+        """Die beobachteten Namen in der gespeicherten Reihenfolge.
+
+        Als JSON-Liste und nicht als QSettings-Stringliste: Letztere
+        zerlegt einen einzelnen Eintrag beim Zurücklesen je nach
+        Plattform wieder in Zeichen."""
+        stored = self._settings().value(self._FAVOURITES_SETTING_KEY)
+        if not stored:
+            return []
+        try:
+            roh = json.loads(str(stored))
+        except ValueError:
+            return []
+        if not isinstance(roh, list):
+            return []
+        namen: list[str] = []
+        for eintrag in roh:
+            if isinstance(eintrag, str) and eintrag and eintrag not in namen:
+                namen.append(eintrag)
+        return namen[:self._MAX_FAVOURITES]
+
+    def _save_favourite_names(self, names: list[str]) -> None:
+        self._settings().setValue(self._FAVOURITES_SETTING_KEY,
+                                  json.dumps(names[:self._MAX_FAVOURITES]))
+
+    def _toggle_favourite(self, name: str) -> None:
+        """Aufnehmen oder entlassen. Neue kommen ans Ende, damit die
+        gewohnten Zeilen ihre Position behalten."""
+        namen = self._favourite_names()
+        if name in namen:
+            namen.remove(name)
+        elif len(namen) >= self._MAX_FAVOURITES:
+            self._status_msg.setText(
+                f"Watch list is full ({self._MAX_FAVOURITES}) — "
+                "remove one first.")
+            return
+        else:
+            namen.append(name)
+        self._save_favourite_names(namen)
+        self._update_favourites()
+
+    def _update_favourites(self) -> None:
+        """Die Mengen neu zählen und ins Leveling-Panel geben.
+
+        Läuft nach jedem Item-Eingang. Das klingt teuer, ist es aber
+        nicht: gezählt wird über dieselbe Liste, die die liga-weite Suche
+        ohnehin aufbaut, und nur für eine Handvoll Namen."""
+        namen = self._favourite_names()
+        if not namen:
+            self.leveling.set_favourites([])
+            return
+        self.leveling.set_favourites(
+            favourite_rows(self._items_of_current_league(), namen,
+                           complete=self._league_fully_loaded()))
+
+    def _items_of_current_league(self) -> Iterator[Item]:
+        """Alle geladenen Items dieser Liga, ohne Herkunftsangaben.
+
+        Bewusst nicht ``_league_wide_items``: Das baut zusätzlich drei
+        parallele Listen mit Fachname, Position und Fach-ID auf — bei
+        Peters Bestand knapp 59.000 Einträge je Liste, die hier niemand
+        braucht. Ein Generator zählt durch, ohne etwas aufzubauen."""
+        for items in self._items.get(self._current_league, {}).values():
+            yield from items
+        for char in self._all_characters:
+            if char.league == self._current_league:
+                yield from self._character_items.get(char.name, ())
+
+    def _league_fully_loaded(self) -> bool:
+        """Ist jedes Fach dieser Liga schon einmal abgerufen worden?
+
+        Nur dann ist die Summe vollständig; sonst trägt die Zeile ein
+        ``≥``. Ohne diese Unterscheidung sähe eine frisch gestartete
+        Sitzung mit halbem Cache wie ein Bestandsverlust aus."""
+        geladen = self._items.get(self._current_league, {})
+        blaetter = self._leaf_stashes
+        if not blaetter:
+            return False
+        return all(stash.id in geladen for stash in blaetter)
 
     def _default_column_config(self) -> list[tuple[str, bool]]:
         return [(name, name not in self.DEFAULT_HIDDEN_COLUMNS) for name in CONFIGURABLE_COLUMNS]
@@ -2192,6 +2287,10 @@ class MainWindow(QMainWindow):
         self.tree.set_stashes(stashes, last_loaded=last_loaded, item_counts=item_counts,
                               positions=self._tab_positions())
         self._update_refresh_status()
+        # Der eine Ort, an dem die abgeflachte Fachliste entsteht — für
+        # Live- wie Cache-Daten. Damit sind Programmstart, Liga-Wechsel
+        # und ein neuer Fach-Abruf mit einem Aufruf abgedeckt (§4.45).
+        self._update_favourites()
 
     def _item_counts_for_current_league(self) -> dict[str, int]:
         """stash_id → tatsächlich geladene Item-Anzahl — überschreibt im Baum
@@ -2477,6 +2576,7 @@ class MainWindow(QMainWindow):
         self.tree.mark_loaded(stash_id, self._last_loaded[league][stash_id], count=len(items))
         if relabelled is not None:
             self.tree.update_label(stash_id, relabelled)
+        self._update_favourites()
         if silent:
             self._update_refresh_status()
         # Bei einem STILLEN Refresh die sichtbare Tabelle nur dann live
@@ -3604,6 +3704,9 @@ class MainWindow(QMainWindow):
         gem_xp_log.append(name, items)
         self._log_character_item_history(name, previous_items, items, stale_baseline)
         self._persist_cache()
+        # Auch Charakter-Inventare zählen in die beobachteten Mengen
+        # (§4.45) — Währung liegt oft im Rucksack, nicht nur im Fach.
+        self._update_favourites()
         if silent:
             # Policy-Name jetzt festhalten, siehe Kommentar in
             # _count_silent_refresh.
@@ -4091,9 +4194,24 @@ class MainWindow(QMainWindow):
         if item is None:
             return
         menu = self._build_item_tools_menu(item)
+        self._add_favourite_action(menu, item)
         self._add_pin_action(menu, index.column(), source_idx.row())
         self._add_export_actions(menu)
         menu.exec(self.table.viewport().mapToGlobal(pos))
+
+    def _add_favourite_action(self, menu: QMenu, item: Item) -> None:
+        """Ein Item zur Stapel-Beobachtung aufnehmen oder wieder entlassen
+        (§4.45). Derselbe Eintrag in beide Richtungen — beobachtet wird der
+        angezeigte Name, nicht dieses eine Exemplar."""
+        name = item.display_name
+        if not name or name == "?":
+            return
+        beobachtet = name in self._favourite_names()
+        text = (f"★ Stop watching \"{name}\"" if beobachtet
+                else f"⭐ Watch stack size of \"{name}\"")
+        action = menu.addAction(text)
+        action.triggered.connect(
+            lambda _=False, n=name: self._toggle_favourite(n))
 
     def _add_pin_action(self, menu: QMenu, col: int, source_row: int) -> None:
         """"Pin" für die angeklickte ZELLE: setzt den Spaltenfilter auf

@@ -20,8 +20,9 @@ from __future__ import annotations
 from typing import Sequence
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QFrame, QLabel, QVBoxLayout
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout
 
+from poe_view.ui.favourites import FavouriteRow, FavouritesTable
 from poe_view.ui.gem_progress import GemProgress, GemProgressBar
 from poe_view.ui.xp_graph import XpGraph, XpPoint
 
@@ -40,12 +41,23 @@ class LevelingPanel(QFrame):
         # einen Zustand, der Graph einen Verlauf — und der Zustand ist
         # das, wonach man beim Hinschauen zuerst sucht.
         self._gems = GemProgressBar()
+        # Die Favoriten neben den Gem-Balken, nicht darunter (Peters
+        # Vorgabe): Beide zeigen einen Zustand und teilen sich denselben
+        # Streifen über dem Verlauf. Die Tabelle hängt bewusst NICHT am
+        # gewählten Charakter — Stapelgrößen will man auch beim Stöbern
+        # in den Fächern sehen, und ``clear()`` lässt sie deshalb stehen.
+        self.favourites = FavouritesTable()
         self._graph = XpGraph()
+
+        streifen = QHBoxLayout()
+        streifen.setContentsMargins(0, 0, 0, 0)
+        streifen.addWidget(self._gems)
+        streifen.addWidget(self.favourites, stretch=1)
 
         layout = QVBoxLayout(self)
         layout.addWidget(self._title)
         layout.addWidget(self._body)
-        layout.addWidget(self._gems)
+        layout.addLayout(streifen)
         layout.addWidget(self._graph, stretch=1)
 
     def clear(self) -> None:
@@ -58,6 +70,11 @@ class LevelingPanel(QFrame):
         self._graph.clear()
         self._graph.hide()
         self._gems.clear()
+
+    def set_favourites(self, rows: Sequence[FavouriteRow]) -> None:
+        """Beobachtete Stapelgrößen (§4.45). Eigener Weg herein, weil sie
+        von der Liga abhängen und nicht vom gewählten Charakter."""
+        self.favourites.set_rows(rows)
 
     def show_character(self, name: str, level: int | None, experience: int | None,
                        rate_text: str | None, age_note: str,

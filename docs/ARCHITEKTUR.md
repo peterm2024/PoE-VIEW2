@@ -4601,6 +4601,74 @@ zweiten `MainWindow`, Basis wird nicht wiederhergestellt, ohne
 Kontonamen keine Datei, zwei Konten getrennt, Schreibfehler stört die
 Messung nicht).
 
+### 4.45 Beobachtete Stapelgrößen (`ui/favourites.py`)
+
+Peter, 2026-08-15: "Oft gibt es Items, deren Stapelgröße ich gerne
+beobachten würde, z.B. Lifeforce. ... So weiß ich auf einen Blick,
+wieviel ich von z.B. 'Wild Crystallised Lifeforce' besitze."
+
+Eine schmale zweispaltige Tabelle rechts neben den Gem-Balken, im selben
+Streifen über dem XP-Graphen: Name links, Menge rechts. Gezählt wird
+über alle geladenen Fächer **und** Charaktere der aktuellen Liga —
+Währung liegt oft im Rucksack.
+
+**Aufgenommen wird per Rechtsklick** in der Item-Tabelle (Peters
+Entscheidung gegen eine Eingabeliste im Settings-Dialog). Derselbe
+Eintrag entlässt wieder. Beobachtet wird der Anzeigename, nicht das
+angeklickte Exemplar. Der Vorteil gegenüber dem Abtippen ist nicht die
+Bequemlichkeit, sondern dass ein Tippfehler unmöglich wird: Eine Zeile,
+die wegen eines falschen Buchstabens ewig 0 zeigt, sieht aus wie ein
+leeres Fach.
+
+**Die Tabelle hängt nicht am gewählten Charakter.** `clear()` im
+Leveling-Panel lässt sie ausdrücklich stehen — Stapelgrößen will man
+auch beim Stöbern in den Fächern sehen, und das Panel ist ohnehin immer
+sichtbar.
+
+**Ein `≥` vor der Zahl, solange nicht jedes Fach der Liga geladen ist.**
+Ohne dieses Zeichen sähe eine frisch gestartete Sitzung mit halbem Cache
+wie ein Bestandsverlust aus. Ein beobachtetes Item ohne Bestand zeigt
+`0` statt zu verschwinden: Null ist eine Aussage.
+
+**Ein Durchlauf für alle Namen.** An Peters echtem Bestand gemessen
+(58.621 Items): zwölf Namen einzeln zu zählen kostete 81 ms, in einem
+Durchlauf 11 ms — und gezählt wird nach jedem eintreffenden Fach, bei
+"Load All Tabs" also über tausendmal hintereinander. Dieselbe Falle wie
+beim Modellaufbau der Großsuche: Was einzeln billig aussieht, wird durch
+die Wiederholung teuer. Aus demselben Grund liefert
+`_items_of_current_league` einen Generator, statt `_league_wide_items`
+zu benutzen — Letzteres baut zusätzlich drei parallele Listen mit
+Fachname, Position und Fach-ID auf, die hier niemand braucht.
+
+Der Testbeweis dafür zählt **Zugriffe, nicht Millisekunden**: Ein
+Item-Doppelgänger merkt sich, wie oft nach seinem Anzeigenamen gefragt
+wurde. Eine Zeitmessung wäre auf einem langsameren Rechner unzuverlässig,
+die Zahl der Durchläufe ist es nie. Der erste Anlauf prüfte stattdessen,
+ob ein Generator durchläuft — das fiel bei einer Sabotage mit
+vorgeschaltetem `list(items)` nicht auf und bewies damit nichts über die
+Laufzeit.
+
+Höchstens zwölf Beobachtungen (`_MAX_FAVOURITES`), vier davon ohne
+Scrollen sichtbar. Wer mehr will, führt Inventar — dafür ist die
+Haupttabelle da. Gespeichert wird als JSON-Liste in `ui-settings.ini`,
+bewusst nicht als QSettings-Stringliste: Die zerlegt einen einzelnen
+Eintrag beim Zurücklesen je nach Plattform wieder in Zeichen.
+
+Gegen Peters echten Cache geprüft, bevor irgendetwas gebaut wurde: Die
+vier Lifeforce-Sorten heißen dort genau so, wie er sie genannt hat
+(81.352 Wild, 79.773 Primal, 69.751 Vivid, 2 Sacred). 94 % aller Items
+tragen gar kein `stackSize` — die zählen als eines, damit sich auch
+Karten und Uniques beobachten lassen.
+
+Getestet: `tests/test_favourites.py` (Addition, fehlender Bestand,
+Items ohne Stapelgröße, Anzeigename statt Basistyp, Reihenfolge,
+Zahlenformat samt `≥`, Tooltips, Verschwinden ohne Zeilen, Höhengrenze,
+Mindestbreite, ein Durchlauf, Generator als Eingabe) und
+`tests/test_main_window_helpers.py` (Aufnehmen und Entlassen über das
+Kontextmenü, Überleben eines Neustarts, Summe aus Fächern und
+Charakteren, `≥` bei halb geladener Liga, Obergrenze, Item ohne
+brauchbaren Namen).
+
 ---
 
 ## 5. UI-Konzept (Oberflächenvorschlag)

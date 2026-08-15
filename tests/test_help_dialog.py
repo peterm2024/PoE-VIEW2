@@ -241,3 +241,12 @@ def test_the_help_says_the_graph_survives_a_restart(qapp) -> None:
     text = _all_text()
     assert "does not empty the graph" in text
     assert "two\npublications again" in text or "two publications again" in text
+
+
+def test_the_help_explains_the_watch_list(qapp) -> None:
+    """Rechtsklick ist der einzige Weg hinein — wer ihn nicht kennt,
+    findet die Funktion nie. Und das ``≥`` erklaert sich nicht selbst."""
+    text = _all_text()
+    assert "watch stack size" in text
+    assert "right-click" in text
+    assert "≥" in text

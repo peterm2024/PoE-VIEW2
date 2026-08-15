@@ -8594,3 +8594,167 @@ def test_ein_fehlgeschlagenes_speichern_stoert_die_messung_nicht(qapp, monkeypat
 
     win.worker.stop()
     win.worker.wait(5000)
+
+
+# --- Beobachtete Stapelgroessen (§4.45) -------------------------------- #
+
+def _mit_items(win, league="Allflame", stash_items=None, char_items=None):
+    """Einen Liga-Bestand einhaengen, wie ihn die Abrufe hinterlassen."""
+    win._current_league = league
+    win._items[league] = stash_items or {}
+    win._character_items = char_items or {}
+
+
+def test_das_kontextmenue_nimmt_ein_item_in_die_beobachtung(qapp, tmp_path,
+                                                            monkeypatch):
+    """Peters Wahl 2026-08-15: Rechtsklick beim Item selbst, kein
+    Abtippen."""
+    monkeypatch.setattr("poe_view.config.APP_DATA_DIR", tmp_path / "appdata")
+    win = MainWindow()
+    item = Item(typeLine="Wild Crystallised Lifeforce", stackSize=1200)
+
+    menu = QMenu()
+    win._add_favourite_action(menu, item)
+    assert "Watch stack size" in menu.actions()[0].text()
+    menu.actions()[0].trigger()
+
+    assert win._favourite_names() == ["Wild Crystallised Lifeforce"]
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_derselbe_eintrag_entlaesst_wieder(qapp, tmp_path, monkeypatch):
+    monkeypatch.setattr("poe_view.config.APP_DATA_DIR", tmp_path / "appdata")
+    win = MainWindow()
+    item = Item(typeLine="Chaos Orb", stackSize=5)
+    win._toggle_favourite("Chaos Orb")
+
+    menu = QMenu()
+    win._add_favourite_action(menu, item)
+    assert "Stop watching" in menu.actions()[0].text()
+    menu.actions()[0].trigger()
+
+    assert win._favourite_names() == []
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_die_beobachtung_ueberlebt_einen_neustart(qapp, tmp_path, monkeypatch):
+    monkeypatch.setattr("poe_view.config.APP_DATA_DIR", tmp_path / "appdata")
+    erste = MainWindow()
+    erste._toggle_favourite("Wild Crystallised Lifeforce")
+    erste.worker.stop()
+    erste.worker.wait(5000)
+
+    zweite = MainWindow()
+    assert zweite._favourite_names() == ["Wild Crystallised Lifeforce"]
+
+    zweite.worker.stop()
+    zweite.worker.wait(5000)
+
+
+def test_die_mengen_kommen_aus_faechern_und_charakteren(qapp, tmp_path,
+                                                        monkeypatch):
+    """Waehrung liegt oft im Rucksack, nicht nur im Fach."""
+    monkeypatch.setattr("poe_view.config.APP_DATA_DIR", tmp_path / "appdata")
+    win = MainWindow()
+    tab = StashTab(id="t1", name="Currency", type="CurrencyStash", metadata={})
+    win._stash_trees["Allflame"] = [tab]
+    win._leaf_stashes = [tab]
+    _mit_items(win,
+               stash_items={"t1": [Item(typeLine="Chaos Orb", stackSize=1000)]},
+               char_items={"WitchOfPeter": [Item(typeLine="Chaos Orb",
+                                                 stackSize=204)]})
+    win._all_characters = [Character(name="WitchOfPeter", league="Allflame",
+                                     level=90, classId=0, ascendancyClass=0,
+                                     **{"class": "Witch"})]
+    win._toggle_favourite("Chaos Orb")
+
+    zeilen = win.leveling.favourites.rows()
+    assert [(z.name, z.total) for z in zeilen] == [("Chaos Orb", 1204)]
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_eine_halb_geladene_liga_kennzeichnet_die_summe(qapp, tmp_path,
+                                                        monkeypatch):
+    """Sonst saehe ein frisch gestarteter Cache wie ein Bestandsverlust
+    aus."""
+    monkeypatch.setattr("poe_view.config.APP_DATA_DIR", tmp_path / "appdata")
+    win = MainWindow()
+    geladen = StashTab(id="t1", name="Currency", type="CurrencyStash", metadata={})
+    offen = StashTab(id="t2", name="Noch nicht", type="PremiumStash", metadata={})
+    win._stash_trees["Allflame"] = [geladen, offen]
+    win._leaf_stashes = [geladen, offen]
+    _mit_items(win, stash_items={"t1": [Item(typeLine="Chaos Orb", stackSize=7)]})
+    win._toggle_favourite("Chaos Orb")
+
+    zeile = win.leveling.favourites.rows()[0]
+    assert zeile.complete is False
+    assert zeile.total == 7
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_eine_vollstaendig_geladene_liga_kennzeichnet_nichts(qapp, tmp_path,
+                                                             monkeypatch):
+    monkeypatch.setattr("poe_view.config.APP_DATA_DIR", tmp_path / "appdata")
+    win = MainWindow()
+    tab = StashTab(id="t1", name="Currency", type="CurrencyStash", metadata={})
+    win._stash_trees["Allflame"] = [tab]
+    win._leaf_stashes = [tab]
+    _mit_items(win, stash_items={"t1": [Item(typeLine="Chaos Orb", stackSize=7)]})
+    win._toggle_favourite("Chaos Orb")
+
+    assert win.leveling.favourites.rows()[0].complete is True
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_die_liste_hat_eine_obergrenze(qapp, tmp_path, monkeypatch):
+    """Wer mehr beobachten will, fuehrt Inventar — dafuer ist die
+    Haupttabelle da."""
+    monkeypatch.setattr("poe_view.config.APP_DATA_DIR", tmp_path / "appdata")
+    win = MainWindow()
+    for i in range(win._MAX_FAVOURITES + 5):
+        win._toggle_favourite(f"Item {i}")
+
+    assert len(win._favourite_names()) == win._MAX_FAVOURITES
+    assert "full" in win._status_msg.text()
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_ein_item_ohne_brauchbaren_namen_bekommt_keinen_eintrag(qapp):
+    """``display_name`` liefert "?" wenn alle Namensfelder leer sind —
+    darauf laesst sich nichts beobachten."""
+    win = MainWindow()
+    menu = QMenu()
+    win._add_favourite_action(menu, Item())
+
+    assert menu.actions() == []
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_das_entlassen_aus_der_tabelle_ist_verdrahtet(qapp, tmp_path, monkeypatch):
+    """Das Signal der Tabelle muss im Hauptfenster ankommen — sonst
+    passiert beim Klick auf "Stop watching" nichts."""
+    monkeypatch.setattr("poe_view.config.APP_DATA_DIR", tmp_path / "appdata")
+    win = MainWindow()
+    win._toggle_favourite("Chaos Orb")
+    assert win._favourite_names() == ["Chaos Orb"]
+
+    win.leveling.favourites.remove_requested.emit("Chaos Orb")
+
+    assert win._favourite_names() == []
+
+    win.worker.stop()
+    win.worker.wait(5000)

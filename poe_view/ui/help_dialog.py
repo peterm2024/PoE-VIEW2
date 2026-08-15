@@ -259,6 +259,13 @@ and a break does not make it decay: it simply stays where it was. GGG
 only publish experience when you leave an area, so the number can never
 be fresher than your last zone change; if it is more than a minute old,
 that is written next to it.</p>
+<p><b>Watched stack sizes</b> sit beside the gem bars. Right-click any
+item in the table and pick <i>Watch stack size</i>; its total across every
+loaded stash tab and character of this league then stays in view, whatever
+you are looking at. Right-click it again to stop. A <b>≥</b> in front of a
+number means some tabs of this league have not been loaded yet, so there
+may be more than it says. An item you own none of shows <b>0</b> rather
+than disappearing — that is the answer you were looking for.</p>
 <p>Above the graph, <b>one narrow bar per socketed gem</b> shows how far
 it is from its next level, coloured by the attribute it needs. Hover for
 its name and level. A <b>full bar</b> means the gem is done — either at

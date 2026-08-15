@@ -8,6 +8,13 @@ nach [SemVer](https://semver.org/lang/de/).
 
 ### Hinzugefügt
 
+- Rechtsklick auf ein Item, "Watch stack size", und es steht mit seiner
+  Gesamtmenge in einer kleinen Tabelle neben den Gem-Balken. Gezählt
+  wird über alle geladenen Fächer und Charaktere der Liga, sodass ein
+  Blick genügt, um zu sehen, wie viel Lifeforce oder Währung
+  zusammengekommen ist. Ein `≥` weist darauf hin, solange noch nicht
+  jedes Fach geladen ist.
+
 - Der XP-Graph ist nach einem Programmstart nicht mehr leer: Die
   gemessenen Abschnitte der letzten drei Stunden werden je Konto
   gespeichert und beim nächsten Start wieder eingezeichnet. Die

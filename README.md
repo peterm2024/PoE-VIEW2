@@ -137,6 +137,11 @@ progress and the last three hours of experience.
   experience on balance hangs below the line in red. The graph survives
   a restart: measured sections are stored per account and drawn again
   next time, so closing the program does not empty it.
+- **Watched stack sizes**: right-click any item and pick *Watch stack
+  size* to put it in a small table beside the gem bars. It adds up every
+  loaded stash tab and character of the league, so a glance tells you how
+  much Wild Crystallised Lifeforce you are sitting on. A `≥` marks a
+  total that is still missing unloaded tabs.
 - **Gem progress**: one narrow bar per socketed gem, coloured by the
   attribute it needs, showing how far it is from its next level. A full
   bar means the gem is done — and if it is full below its maximum level,
