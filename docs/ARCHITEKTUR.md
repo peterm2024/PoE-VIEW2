@@ -4433,6 +4433,83 @@ Getestet: `tests/test_gem_progress.py` (alle drei Zustände, Awakened und
 korrumpierte Höchststufen, fehlende Belege, Farbzuordnung samt "G" und
 leer, Reihenfolge, Ausblenden ohne Gems, Zeichnen aller Zustände).
 
+### 4.43 PoE2-Rohdaten-Abzug (`services/poe2_probe.py`)
+
+Peter, 2026-08-15: "Evtl. könnten wir einen Button PoE2-Info einbauen,
+der einfach mal die Rohdaten in einem extra Fenster zurückgibt, was wir
+bekommen. Evtl. können wir dann anhand dieser Informationen weiter
+sehen."
+
+Ein Eintrag im Konto-Menü fragt die PoE2-Endpunkte ab und zeigt das
+Ergebnis als Text. Kein Betriebsmittel: nichts davon geht in Tabelle,
+Cache oder Preisrechnung, und das Programm liest weiterhin PoE1.
+
+**Was GGG anbietet.** Die Spiele werden über einen `realm`-Query-Parameter
+unterschieden, nicht über eigene Pfade und nicht über einen eigenen
+OAuth-Scope — das bestehende Token deckt die Abfrage also mit ab. Aus
+GGGs Referenz gelesen am 2026-08-15:
+
+| Endpunkt | erlaubte `realm`-Werte |
+|---|---|
+| `/account/leagues` | `pc`, `xbox`, `sony`, `poe2` |
+| `/character`, `/character/<name>` | `xbox`, `sony`, `poe2` |
+| `/stash/...` | nur `xbox`, `sony` |
+
+Dazu GGGs eigener Hinweis auf derselben Seite: "There are currently
+limited APIs that return PoE2 game information."
+
+**Die fehlende Zeile ist die wichtigste.** Ohne Truhen-Endpunkt für PoE2
+gibt es dort keine Fächer, keine liga-weite Suche und keine
+Gesamtsumme — also genau die Funktion, für die es dieses Programm gibt.
+Ein PoE2-Modus wäre heute eine halbe Anwendung. Deshalb der Abzug statt
+eines Features: erst sehen, was ankommt.
+
+**Rohabrufe neben den typisierten Endpunkten** (`get_leagues_raw`,
+`get_characters_raw`, `get_character_raw`). Die pydantic-Modelle sind an
+PoE1 gemessen; ob PoE2 dieselben Felder liefert, ist gerade die offene
+Frage. Ein `model_validate` dazwischen ließe unbekannte Felder zwar dank
+`extra="allow"` durch, brächte aber bei einem fehlenden Pflichtfeld den
+Abruf zum Absturz — und verschluckte damit das Messergebnis.
+
+**Fehlschläge sind Ergebnisse, keine Abbrüche.** Jeder Abruf wird
+einzeln aufgefangen und mit seinem Fehlertext in den Abzug geschrieben;
+ein 403 auf die Charakterliste ist hier die Antwort auf die Frage. Nur
+`AuthError` fliegt weiter, damit ein wirklich totes Token wie überall
+sonst den Login anstößt. Aus demselben Grund trägt die Fehlermeldung
+seit diesem Feature die Query mit (`_target`): ohne sie stünde dort nur
+`/character`, und ein PoE2-Fehlschlag wäre von einem gewöhnlichen
+PoE1-Fehler nicht zu unterscheiden.
+
+**Nur der erste gefundene Charakter** wird im Detail geholt. Die Frage
+ist strukturell — wo PoE2 seine Skill-Gems ablegt, wie `runeMods`
+aussieht, welche Felder es überhaupt gibt —, und die beantwortet ein
+Charakter genauso wie zehn. Jeder weitere kostete nur
+Rate-Limit-Kontingent.
+
+**Anzeige im vorhandenen `RawDataViewer`**, um eine eigene Instanz
+erweitert. Ein zweites Monospace-Textfenster daneben wäre dieselbe
+Anzeige mit anderem Namen; eine gemeinsame Instanz ginge nicht, weil der
+Stash-Betrachter bei jedem Tab-Wechsel überschrieben wird und den Abzug
+beim ersten Klick im Baum mitnähme. Der Abzug landet zusätzlich als
+`poe2-probe.txt` im Profilordner: Ein vollständiges Charakter-JSON ist
+zu lang für einen Bildschirmfoto-Ausschnitt, weitergeben lässt sich nur
+die Datei. Der Pfad wird bei jedem Aufruf neu aus `config.APP_DATA_DIR`
+gebildet und ist deshalb vom Testschutz erreichbar (dieselbe Falle wie
+bei `cache_backup` und `LOG_DIR`).
+
+Der Text nennt die Konto- und Charakternamen, die er enthält, und die
+nicht abgefragten Truhen-Endpunkte samt Grund — sonst liest sich ein
+Abzug ohne Fächer wie ein Fehler des Programms statt wie eine Grenze der
+API.
+
+Getestet: `tests/test_poe2_probe.py` (Namensauslese samt kaputter
+Einträge, Berichtstext, Ablagepfad gegen den Testschutz, Abruf mit
+Realm, nur ein Charakter, Fehlschläge im Ergebnis, `AuthError`
+weitergereicht, Token- und Read-only-Sperre), dazu `tests/test_client.py`
+(Realm als Query, Encoding, Query in der Fehlermeldung, 429-Retry behält
+sie) und `tests/test_main_window_helpers.py` (Menüeintrag, Fenster beim
+Klick, Read-only-Absage, Anzeige und Ablage, eigenes Fenster).
+
 ---
 
 ## 5. UI-Konzept (Oberflächenvorschlag)

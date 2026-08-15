@@ -29,7 +29,7 @@ from poe_view.api.models import (Character, Item, StashTab,
                                  dominant_category, is_ggg_suffix)
 from poe_view.api.ninja import PriceIndex
 from poe_view.services import (cache_backup, cache_writer, data_cache, gem_xp_log,
-                               icon_cache, price_cache)
+                               icon_cache, poe2_probe, price_cache)
 from poe_view.services.instance_lock import InstanceLock
 from poe_view.services.zone_watcher import ZoneWatcher, resolve_client_log_path
 from poe_view.services.api_worker import (ApiWorker, BootstrapJob,
@@ -39,7 +39,7 @@ from poe_view.services.api_worker import (ApiWorker, BootstrapJob,
                                           FetchLeaguesJob, FetchPricesJob,
                                           FetchStashItemsJob,
                                           FetchStashListJob, LoginJob,
-                                          LogoutJob)
+                                          LogoutJob, Poe2ProbeJob)
 from poe_view.services.csv_export import export_items, sanitize_filename
 from poe_view.ui import external_tools
 from poe_view.ui.help_dialog import HelpDialog
@@ -619,6 +619,10 @@ class MainWindow(QMainWindow):
         # (§_prioritise_selection_in_refresh_mode) — vordrängeln statt sofort feuern.
         self._refresh_mode_priority_id: str | None = None
         self._raw_data_viewer: RawDataViewer | None = None
+        # Eigene Instanz derselben Klasse für den PoE2-Abzug (§4.43): Der
+        # Betrachter oben wird bei jedem Tab-Wechsel überschrieben und
+        # nähme den Abzug beim ersten Klick im Baum wieder mit.
+        self._poe2_viewer: RawDataViewer | None = None
         self._zone_watcher: ZoneWatcher | None = None
         # Messung zu Peters offener Frage, wovon GGGs Veröffentlichung
         # abhängt (§_PublishWatch). Der Zonenwechsel-Zähler ist global,
@@ -987,6 +991,15 @@ class MainWindow(QMainWindow):
         toolbar.addWidget(self._login_button)
         self._account_menu = QMenu(self._login_button)
         self._account_menu.addAction("🚪 Log out").triggered.connect(self._on_logout_clicked)
+        # Diagnose, kein Betriebsmittel — deshalb hier im Konto-Menü und
+        # nicht als eigener Knopf in der Leiste (Peter, 2026-08-15). Das
+        # Programm unterstützt PoE2 nicht; der Eintrag zeigt nur, was GGGs
+        # API für den anderen Realm überhaupt herausgibt (§4.43).
+        self._poe2_action = self._account_menu.addAction("🔎 PoE2 raw data…")
+        self._poe2_action.setToolTip(
+            "Ask GGG's API what it returns for the PoE2 realm and show the "
+            "raw JSON. Diagnostic only — this tool reads PoE 1.")
+        self._poe2_action.triggered.connect(self._on_poe2_probe_clicked)
 
         self._refresh_action = QAction("⟳ Refresh", self)
         self._refresh_action.triggered.connect(self._refresh)
@@ -1851,6 +1864,7 @@ class MainWindow(QMainWindow):
         w.character_items_loaded.connect(self._on_character_items)
         w.character_snapshot_loaded.connect(self._on_character_snapshot)
         w.icon_loaded.connect(self._on_icon)
+        w.poe2_probe_loaded.connect(self._on_poe2_probe_loaded)
         w.rate_limit_changed.connect(self._on_rate_limit_changed)
         w.status.connect(self._on_status)
         w.busy_changed.connect(self._on_busy_changed)
@@ -4382,6 +4396,54 @@ class MainWindow(QMainWindow):
         # aktualisiert den jetzt sichtbaren Viewer im selben Zug.
         self._on_stash_selected(stash_id, name)
 
+    # --- PoE2-Rohdaten-Abzug (Konto-Menü, §4.43) -------------------- #
+
+    def _on_poe2_probe_clicked(self) -> None:
+        """Fenster sofort öffnen, Abruf einreihen.
+
+        Der Abzug läuft über dieselbe Job-Queue wie alles andere und kann
+        deshalb hinter einem Rate-Limit-Takt warten. Ohne das sofort
+        sichtbare Fenster sähe ein Klick nach nichts aus."""
+        viewer = self._poe2_viewer
+        if viewer is None:
+            viewer = self._poe2_viewer = RawDataViewer(self)
+            viewer.setWindowTitle("PoE2 Raw Data")
+        viewer.show()
+        viewer.raise_()
+        viewer.activateWindow()
+        if self._read_only:
+            # Der Worker verwürfe den Job (§_skip_read_only), das Fenster
+            # bliebe sonst dauerhaft bei "Querying…" stehen.
+            viewer.show_document(
+                "Not available",
+                "This account is open in another PoE-VIEW2 window.\n"
+                "Close that one first — only one window queries GGG per "
+                "account.")
+            return
+        viewer.show_document("Querying the PoE2 realm…", "")
+        self.worker.submit(Poe2ProbeJob())
+
+    def _on_poe2_probe_loaded(self, probe) -> None:
+        """Abzug anzeigen und daneben als Datei ablegen.
+
+        Die Datei, weil ein vollständiges Charakter-JSON zu lang für einen
+        Bildschirmfoto-Ausschnitt ist — weitergeben lässt sich nur die
+        Datei. Pfad steht in der Kopfzeile, damit man sie auch findet."""
+        text = poe2_probe.build_report(probe)
+        try:
+            path = poe2_probe.save_report(text)
+            title = f"PoE2 raw data  ·  saved to {path}"
+        except OSError as exc:
+            # Der Abzug ist auch ungespeichert brauchbar — ein
+            # fehlgeschlagener Schreibversuch darf ihn nicht verwerfen.
+            log.warning("PoE2-Abzug nicht gespeichert: %s", exc)
+            title = "PoE2 raw data  ·  not saved (see log)"
+        if self._poe2_viewer is None:
+            self._poe2_viewer = RawDataViewer(self)
+            self._poe2_viewer.setWindowTitle("PoE2 Raw Data")
+            self._poe2_viewer.show()
+        self._poe2_viewer.show_document(title, text)
+
     def _update_raw_viewer(self, stash_id: str, name: str) -> None:
         """Hält den (falls geöffneten) Mini-Viewer beim Tab-Wechsel synchron."""
         if self._raw_data_viewer is None or not self._raw_data_viewer.isVisible():
@@ -4845,6 +4907,8 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event) -> None:  # noqa: N802
         if self._raw_data_viewer is not None:
             self._raw_data_viewer.close()
+        if self._poe2_viewer is not None:
+            self._poe2_viewer.close()
         self.worker.stop()
         if not self.worker.wait(3000):
             log.warning("ApiWorker reagierte nicht innerhalb von 3s auf stop() — erzwinge Beendigung.")

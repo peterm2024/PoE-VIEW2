@@ -6,6 +6,22 @@ nach [SemVer](https://semver.org/lang/de/).
 
 ## [Unveröffentlicht]
 
+### Hinzugefügt
+
+- Das Konto-Menü hat einen Eintrag "PoE2 raw data", der GGGs API nach
+  dem PoE2-Realm fragt und die Antwort als Rohtext zeigt — Ligen,
+  Charakterliste und der erste Charakter im Detail. Das Programm liest
+  weiterhin nur Path of Exile 1; der Abzug soll zeigen, was für PoE2
+  überhaupt herausgegeben wird. Truhenfächer gehören nicht dazu: GGGs
+  Referenz lässt am Stash-Endpunkt nur die Konsolen-Realms zu. Der
+  Abzug landet zusätzlich als `poe2-probe.txt` im Profilordner.
+
+### Geändert
+
+- Fehlermeldungen der API nennen jetzt die Query mit, nicht nur den
+  Pfad. Ohne sie wäre ein Fehlschlag mit `?realm=poe2` nicht von einem
+  gewöhnlichen zu unterscheiden.
+
 ## [0.9.0] - 2026-08-13
 
 ### Behoben

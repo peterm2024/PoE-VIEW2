@@ -77,6 +77,32 @@ Details zur Handhabung im Projekt: ARCHITEKTUR.md §7.1.
 Liga-Namen enthalten Leerzeichen (`SSF Ruthless`), Pfadsegmente müssen
 daher URL-encodiert werden (`urllib.parse.quote`).
 
+### Realm (PoE2, Konsolen)
+
+Welches Spiel und welche Plattform gemeint ist, steuert ein
+`realm`-Query-Parameter — kein eigener Pfad und kein eigener
+OAuth-Scope. Ohne ihn gilt PoE1 auf dem PC. Aus GGGs Referenz gelesen
+am 2026-08-15:
+
+| Endpunkt | erlaubte Werte |
+|---|---|
+| `/account/leagues` | `pc`, `xbox`, `sony`, `poe2` |
+| `/character`, `/character/<name>` | `xbox`, `sony`, `poe2` |
+| `/stash/...` | `xbox`, `sony` — **kein `poe2`** |
+
+GGG dazu auf derselben Seite: "There are currently limited APIs that
+return PoE2 game information." Truhenfächer sind für PoE2 also
+überhaupt nicht abrufbar; nur Charaktere und Ligen.
+
+Als PoE2 markierte Item-/Charakterfelder in der Referenz: `gemSockets`
+("string is always `W`"), `runeMods`, `doubleCorrupted`, `sanctified`.
+Unter "File Formats" steht ein "Build Planner (PoE2 only)".
+
+Was davon tatsächlich ankommt, ist ungeprüft — dafür gibt es den
+Rohdaten-Abzug im Konto-Menü (ARCHITEKTUR.md §4.43). Bis dahin ist diese
+Tabelle gelesene Doku, keine Messung, und die Doku lag bei diesem
+Projekt schon mehrfach daneben.
+
 ## Spezial-Tabs: MapStash und UniqueStash
 
 Diese Tabs antworten am Einzel-Tab-Endpunkt mit `children` statt `items`

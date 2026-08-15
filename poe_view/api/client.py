@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 import time
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 
 import httpx
 
@@ -62,6 +62,18 @@ def _ggg_error_fields(resp: httpx.Response) -> dict:
             "error_message": str(error.get("message", ""))}
 
 
+def _target(path: str, params: dict[str, str] | None) -> str:
+    """Pfad samt Query für Log- und Fehlertexte.
+
+    Ohne die Query stünde in der Meldung nur ``/character`` — bei der
+    PoE2-Abfrage (``?realm=poe2``, §services/poe2_probe.py) ist aber
+    genau der Parameter die Aussage, und ein Fehler ohne ihn wäre nicht
+    von einem gewöhnlichen PoE1-Fehler zu unterscheiden."""
+    if not params:
+        return path
+    return f"{path}?{urlencode(params)}"
+
+
 class PoeApiClient:
     def __init__(self, rate_limiter: RateLimitManager, access_token: str | None = None) -> None:
         self.rate_limiter = rate_limiter
@@ -88,10 +100,11 @@ class PoeApiClient:
 
     # ------------------------------------------------------------------ #
 
-    def _get(self, path: str, policy_hint: str | None = None) -> dict:
+    def _get(self, path: str, policy_hint: str | None = None,
+             params: dict[str, str] | None = None) -> dict:
         """Zentraler GET mit Rate-Limit-Schleife und einmaligem 429-Retry."""
         self.rate_limiter.check_and_wait(policy_hint)
-        resp = self._http.get(path)
+        resp = self._http.get(path, params=params)
         self.rate_limiter.update_from_headers(resp.headers)
 
         if resp.status_code == 429:
@@ -100,7 +113,7 @@ class PoeApiClient:
             retry_after = float(resp.headers.get("Retry-After", "10"))
             self.rate_limiter.register_penalty(retry_after)
             time.sleep(retry_after)
-            resp = self._http.get(path)
+            resp = self._http.get(path, params=params)
             self.rate_limiter.update_from_headers(resp.headers)
 
         if resp.status_code == 401:
@@ -116,11 +129,12 @@ class PoeApiClient:
             # protokollieren, um beim nächsten Auftreten den echten Grund
             # zu sehen statt weiter zu raten.
             log.warning("401 von GGG bei %s — Antwort-Header: %s, Body: %.200s",
-                       path, dict(resp.headers), resp.text)
+                       _target(path, params), dict(resp.headers), resp.text)
             raise AuthError("Not authorized — token expired or missing.")
         if resp.status_code >= 400:
             raise ApiError(resp.status_code,
-                           f"HTTP {resp.status_code} for {path}: {resp.text[:200]}",
+                           f"HTTP {resp.status_code} for {_target(path, params)}: "
+                           f"{resp.text[:200]}",
                            **_ggg_error_fields(resp))
         return resp.json()
 
@@ -163,6 +177,31 @@ class PoeApiClient:
                  + char.get("jewels", []) + char.get("rucksack", []))
         return (char.get("level", 0), char.get("experience", 0),
                 [Item.model_validate(i) for i in items])
+
+    # --- Rohabrufe für einen anderen Realm (PoE2-Abzug, §4.43) --------- #
+    #
+    # Bewusst neben den typisierten Endpunkten und nicht als Parameter an
+    # ihnen: Die pydantic-Modelle sind an PoE1-Antworten gemessen, und ob
+    # PoE2 dieselben Felder liefert, ist gerade die Frage, die der Abzug
+    # beantworten soll. Ein ``Character.model_validate`` dazwischen würde
+    # unbekannte Felder zwar dank ``extra="allow"`` durchlassen, aber bei
+    # einem fehlenden Pflichtfeld den Abruf zum Absturz bringen — und
+    # damit genau das Messergebnis verschlucken.
+
+    def _realm_params(self, realm: str | None) -> dict[str, str] | None:
+        return {"realm": realm} if realm else None
+
+    def get_leagues_raw(self, realm: str | None = None) -> dict:
+        return self._get("/account/leagues", params=self._realm_params(realm))
+
+    def get_characters_raw(self, realm: str | None = None) -> dict:
+        return self._get("/character", params=self._realm_params(realm))
+
+    def get_character_raw(self, name: str, realm: str | None = None) -> dict:
+        return self._get(f"/character/{quote(name)}",
+                         params=self._realm_params(realm))
+
+    # ------------------------------------------------------------------ #
 
     def get_stashes(self, league: str) -> list[StashTab]:
         """Stash-Tab-Liste (ohne Items). Liga-Namen können Leerzeichen enthalten!"""

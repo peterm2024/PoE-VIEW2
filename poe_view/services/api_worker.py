@@ -24,7 +24,7 @@ from poe_view.api import ninja, oauth
 from poe_view.api.client import ApiError, AuthError, PoeApiClient
 from poe_view.api.models import StashTab
 from poe_view.api.rate_limiter import RateLimitManager
-from poe_view.services import icon_cache, token_store
+from poe_view.services import icon_cache, poe2_probe, token_store
 
 log = logging.getLogger(__name__)
 
@@ -160,6 +160,15 @@ class FetchPricesJob:
 
 
 @dataclass
+class Poe2ProbeJob:
+    """Einmaliger Rohdaten-Abzug der PoE2-Endpunkte (§4.43).
+
+    Kein Bestandteil des normalen Betriebs — wird nur durch den Eintrag
+    im Konto-Menü ausgelöst und liefert Text zum Ansehen, keine Daten für
+    Tabelle oder Cache."""
+
+
+@dataclass
 class _StopJob:
     pass
 
@@ -212,6 +221,7 @@ class ApiWorker(QThread):
     bulk_finished = Signal(int, int)           # success_count, total
     offline_changed = Signal(bool)             # True, solange GGG nicht erreichbar ist (§4.12)
     prices_loaded = Signal(str, object)        # league, PriceIndex
+    poe2_probe_loaded = Signal(object)         # poe2_probe.Probe
 
     def __init__(self) -> None:
         super().__init__()
@@ -296,7 +306,8 @@ class ApiWorker(QThread):
     # und Login stellen die Authentifizierung selbst her, Logout und der
     # Icon-Download (CDN, ohne Auth-Header) brauchen sie nicht.
     _NEEDS_AUTH = (FetchLeaguesJob, FetchCharactersJob, FetchStashListJob,
-                   FetchStashItemsJob, FetchCharacterItemsJob, FetchAllItemsJob)
+                   FetchStashItemsJob, FetchCharacterItemsJob, FetchAllItemsJob,
+                   Poe2ProbeJob)
 
     def _skip_unauthenticated(self, job) -> bool:
         """Verwirft Daten-Jobs, solange kein Token gesetzt ist.
@@ -393,6 +404,10 @@ class ApiWorker(QThread):
             case FetchAllItemsJob(league=league, stashes=stashes, positions=positions):
                 self.status.emit(f"Loading all tabs ({league})…")
                 self._fetch_all_items(league, stashes, positions)
+            case Poe2ProbeJob():
+                self.status.emit("Querying the PoE2 realm…")
+                self.poe2_probe_loaded.emit(self._poe2_probe())
+                self.status.emit("Ready")
             case FetchPricesJob(league=league):
                 # Kein Status-Text: läuft meist unauffällig im Hintergrund
                 # bei einem Liga-Wechsel, soll keine relevantere Meldung
@@ -444,6 +459,45 @@ class ApiWorker(QThread):
             data = resp.content
             icon_cache.save(url, data)
         self.icon_loaded.emit(url, data)
+
+    def _poe2_probe(self) -> poe2_probe.Probe:
+        """Fragt die Endpunkte ab, die laut GGGs Referenz ``realm=poe2``
+        annehmen, und sammelt auch die Fehlschläge ein (§4.43).
+
+        Nur der ERSTE gefundene Charakter wird im Detail geholt. Die
+        Frage dieses Abzugs ist strukturell — wo PoE2 seine Skill-Gems
+        ablegt, wie ``runeMods`` aussieht, welche Felder es überhaupt
+        gibt —, und die beantwortet ein Charakter genauso wie zehn. Jeder
+        weitere kostete nur Rate-Limit-Kontingent.
+
+        Fehlschläge landen im Ergebnis statt im Offline-Zustand: Ein 403
+        oder 400 ist hier eine Messung. Nur ``AuthError`` fliegt weiter,
+        damit ein wirklich totes Token wie überall sonst den Login
+        anstößt statt still im Abzug zu verschwinden."""
+        probe = poe2_probe.Probe(fetched_at=time.time())
+        realm = poe2_probe.REALM
+        probe.calls.append(self._probe_call(
+            f"GET /account/leagues?realm={realm}",
+            lambda: self.client.get_leagues_raw(realm)))
+        probe.calls.append(self._probe_call(
+            f"GET /character?realm={realm}",
+            lambda: self.client.get_characters_raw(realm)))
+        for name in poe2_probe.character_names(probe.calls)[:1]:
+            probe.calls.append(self._probe_call(
+                f"GET /character/{name}?realm={realm}",
+                lambda n=name: self.client.get_character_raw(n, realm)))
+        return probe
+
+    @staticmethod
+    def _probe_call(label: str, call) -> poe2_probe.ProbeCall:
+        try:
+            return poe2_probe.ProbeCall(label, True, call())
+        except AuthError:
+            raise
+        except Exception as exc:  # noqa: BLE001 — der Fehler IST das Ergebnis
+            log.info("PoE2-Abzug: %s → %s: %s", label, type(exc).__name__, exc)
+            return poe2_probe.ProbeCall(label, False,
+                                        error=f"{type(exc).__name__}: {exc}")
 
     def _emit_stash_result(self, league: str, stash_id: str, name: str,
                            stash: StashTab, silent: bool) -> None:

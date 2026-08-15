@@ -219,3 +219,13 @@ def test_the_disclaimer_is_no_longer_in_the_status_bar(qapp) -> None:
 
     win.worker.stop()
     win.worker.wait(5000)
+
+
+def test_the_help_says_why_there_is_no_poe2_support(qapp) -> None:
+    """Ein Eintrag "PoE2 raw data" im Konto-Menue eines Programms, das
+    laut README PoE1 liest, wirft genau eine Frage auf — die Hilfe muss
+    sie beantworten, samt dem Grund (kein Truhen-Endpunkt fuer PoE2)."""
+    text = _all_text()
+    assert "path of exile 2" in text
+    assert "stash endpoints do not" in text
+    assert "poe2 raw data" in text

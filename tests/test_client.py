@@ -97,7 +97,7 @@ def test_an_error_response_keeps_gggs_own_reason_separate(monkeypatch) -> None:
     import httpx
 
     client = PoeApiClient(RateLimitManager())
-    monkeypatch.setattr(client._http, "get", lambda path: httpx.Response(
+    monkeypatch.setattr(client._http, "get", lambda path, params=None: httpx.Response(
         400, json={"error": {"code": 2, "message": "Invalid query; League not found"}},
         request=httpx.Request("GET", "https://api.pathofexile.com/stash/Allflame/x")))
 
@@ -117,7 +117,7 @@ def test_an_error_page_without_json_does_not_break_the_error_itself(monkeypatch)
     import httpx
 
     client = PoeApiClient(RateLimitManager())
-    monkeypatch.setattr(client._http, "get", lambda path: httpx.Response(
+    monkeypatch.setattr(client._http, "get", lambda path, params=None: httpx.Response(
         503, text="<html>maintenance</html>",
         request=httpx.Request("GET", "https://api.pathofexile.com/profile")))
 
@@ -127,4 +127,99 @@ def test_an_error_page_without_json_does_not_break_the_error_itself(monkeypatch)
     assert fehler.value.status_code == 503
     assert fehler.value.error_code is None
     assert fehler.value.error_message == ""
+    client.close()
+
+
+# --- Realm-Parameter (PoE2-Abzug, §4.43) ------------------------------- #
+
+def _record_params(monkeypatch, client, status=200):
+    """Merkt sich Pfad und Query jedes Aufrufs statt zu senden."""
+    import httpx
+
+    gesehen: list[tuple] = []
+
+    def fake_get(path, params=None):
+        gesehen.append((path, params))
+        return httpx.Response(
+            status, json={},
+            request=httpx.Request("GET", f"https://api.pathofexile.com{path}"))
+
+    monkeypatch.setattr(client._http, "get", fake_get)
+    return gesehen
+
+
+def test_raw_endpoints_pass_the_realm_as_query(monkeypatch) -> None:
+    """``realm`` ist ein Query-Parameter, kein eigener Pfad und kein
+    eigener OAuth-Scope (GGG-Referenz, gelesen am 2026-08-15)."""
+    client = PoeApiClient(RateLimitManager())
+    gesehen = _record_params(monkeypatch, client)
+
+    client.get_leagues_raw("poe2")
+    client.get_characters_raw("poe2")
+    client.get_character_raw("WitchOfPeter", "poe2")
+
+    assert gesehen == [("/account/leagues", {"realm": "poe2"}),
+                       ("/character", {"realm": "poe2"}),
+                       ("/character/WitchOfPeter", {"realm": "poe2"})]
+    client.close()
+
+
+def test_raw_endpoints_without_realm_send_no_query(monkeypatch) -> None:
+    """Ohne Realm ist es der gewoehnliche PoE1-PC-Aufruf — dann darf auch
+    kein leerer Parameter mitgehen."""
+    client = PoeApiClient(RateLimitManager())
+    gesehen = _record_params(monkeypatch, client)
+
+    client.get_characters_raw()
+
+    assert gesehen == [("/character", None)]
+    client.close()
+
+
+def test_raw_character_endpoint_encodes_the_name(monkeypatch) -> None:
+    client = PoeApiClient(RateLimitManager())
+    gesehen = _record_params(monkeypatch, client)
+
+    client.get_character_raw("Witch Of Peter", "poe2")
+
+    assert gesehen[0][0] == "/character/Witch%20Of%20Peter"
+    client.close()
+
+
+def test_error_message_names_the_realm(monkeypatch) -> None:
+    """Ohne die Query stuende in der Meldung nur ``/character`` — und ein
+    PoE2-Fehlschlag waere nicht von einem gewoehnlichen PoE1-Fehler zu
+    unterscheiden. Genau diese Meldung landet im Abzug."""
+    client = PoeApiClient(RateLimitManager())
+    _record_params(monkeypatch, client, status=403)
+
+    with pytest.raises(ApiError) as fehler:
+        client.get_characters_raw("poe2")
+
+    assert "/character?realm=poe2" in str(fehler.value)
+    client.close()
+
+
+def test_the_429_retry_keeps_the_query(monkeypatch) -> None:
+    """Der eine Wiederholungsversuch nach 429 darf den Realm nicht
+    verlieren — sonst fragte er still den falschen Realm ab."""
+    import httpx
+
+    client = PoeApiClient(RateLimitManager())
+    gesehen: list[tuple] = []
+    antworten = [429, 200]
+
+    def fake_get(path, params=None):
+        gesehen.append((path, params))
+        return httpx.Response(
+            antworten.pop(0), json={},
+            request=httpx.Request("GET", f"https://api.pathofexile.com{path}"))
+
+    monkeypatch.setattr(client._http, "get", fake_get)
+    monkeypatch.setattr("poe_view.api.client.time.sleep", lambda s: None)
+
+    client.get_characters_raw("poe2")
+
+    assert gesehen == [("/character", {"realm": "poe2"}),
+                       ("/character", {"realm": "poe2"})]
     client.close()

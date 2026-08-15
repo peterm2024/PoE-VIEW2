@@ -16,6 +16,7 @@ from poe_view.api.models import Character, Item, StashTab
 from poe_view.api.ninja import PriceIndex
 from poe_view.services import price_cache
 from poe_view.services.api_worker import FetchPricesJob, FetchStashListJob
+from poe_view.services.poe2_probe import Probe, ProbeCall
 from poe_view.ui import external_tools
 from poe_view.ui.item_table import CONFIGURABLE_COLUMNS
 from poe_view.ui.main_window import MainWindow, _stable_item_dump
@@ -1987,7 +1988,10 @@ def test_login_button_shows_account_name_and_gains_a_logout_menu(qapp) -> None:
 
     assert win._login_button.text() == "⚷ PeterM"
     assert win._login_button.menu() is win._account_menu
-    assert [a.text() for a in win._account_menu.actions()] == ["🚪 Log out"]
+    # Auf "enthaelt" statt auf Gleichheit geprueft: Das Menue traegt seit
+    # dem PoE2-Abzug (§4.43) einen zweiten Eintrag, und dieser Test geht
+    # ueber den Login-Knopf, nicht ueber den Menueinhalt.
+    assert "🚪 Log out" in [a.text() for a in win._account_menu.actions()]
     assert win._login_button.popupMode() == QToolButton.ToolButtonPopupMode.InstantPopup
 
     win.worker.stop()
@@ -8353,3 +8357,114 @@ def test_the_limit_is_a_pure_function_over_both_candidates() -> None:
     assert MainWindow._interval_seconds(None, 485.0) == 485.0
     assert MainWindow._interval_seconds(144.0, None) == 144.0
     assert MainWindow._interval_seconds(None, None) is None
+
+
+# --- PoE2-Rohdaten-Abzug (Konto-Menue, §4.43) -------------------------- #
+
+def test_the_account_menu_offers_the_poe2_probe(qapp) -> None:
+    """Peters Entscheidung 2026-08-15: der Zugang gehoert ins Konto-Menue,
+    nicht als eigener Knopf in die Leiste — das Programm liest PoE1, der
+    Abzug ist Diagnose."""
+    win = MainWindow()
+
+    beschriftungen = [a.text() for a in win._account_menu.actions()]
+    assert any("PoE2" in text for text in beschriftungen)
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_the_probe_opens_the_window_and_queues_the_job(qapp, monkeypatch) -> None:
+    """Der Abzug laeuft durch dieselbe Job-Queue und kann hinter einem
+    Rate-Limit-Takt warten — ohne sofort sichtbares Fenster saehe der
+    Klick nach nichts aus."""
+    win = MainWindow()
+    eingereiht: list = []
+    monkeypatch.setattr(win.worker, "submit", eingereiht.append)
+
+    win._on_poe2_probe_clicked()
+
+    assert win._poe2_viewer is not None
+    assert "Querying" in win._poe2_viewer._title.text()
+    assert [type(j).__name__ for j in eingereiht] == ["Poe2ProbeJob"]
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_the_probe_is_refused_while_another_window_owns_the_account(qapp, monkeypatch) -> None:
+    """Der Worker verwuerfe den Job ohnehin (§_skip_read_only) — dann
+    bliebe das Fenster dauerhaft bei "Querying…" stehen."""
+    win = MainWindow()
+    eingereiht: list = []
+    monkeypatch.setattr(win.worker, "submit", eingereiht.append)
+    win._set_read_only(True)
+
+    win._on_poe2_probe_clicked()
+
+    assert eingereiht == []
+    assert "Not available" in win._poe2_viewer._title.text()
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_the_probe_result_is_shown_and_saved(qapp, tmp_path, monkeypatch) -> None:
+    """Ein vollstaendiges Charakter-JSON ist zu lang fuer einen
+    Bildschirmfoto-Ausschnitt; weitergeben laesst sich nur die Datei."""
+    monkeypatch.setattr("poe_view.config.APP_DATA_DIR", tmp_path / "appdata")
+    win = MainWindow()
+
+    win._on_poe2_probe_loaded(Probe(
+        calls=[ProbeCall("GET /character?realm=poe2", True, {"characters": []})],
+        fetched_at=1_755_000_000.0))
+
+    text = win._poe2_viewer._text.toPlainText()
+    assert "GET /character?realm=poe2" in text
+    abzug = tmp_path / "appdata" / "poe2-probe.txt"
+    assert abzug.read_text(encoding="utf-8") == text
+    assert str(abzug) in win._poe2_viewer._title.text()
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_a_failed_save_still_shows_the_result(qapp, monkeypatch) -> None:
+    """Der Abzug ist auch ungespeichert brauchbar."""
+    win = MainWindow()
+
+    def explodiere(text):
+        raise OSError("kein Platz")
+
+    monkeypatch.setattr("poe_view.services.poe2_probe.save_report", explodiere)
+    win._on_poe2_probe_loaded(Probe(
+        calls=[ProbeCall("GET /account/leagues?realm=poe2", True, {"leagues": []})],
+        fetched_at=1_755_000_000.0))
+
+    assert "not saved" in win._poe2_viewer._title.text()
+    assert '"leagues": []' in win._poe2_viewer._text.toPlainText()
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_the_probe_window_survives_a_stash_click(qapp, monkeypatch) -> None:
+    """Der Stash-Rohdaten-Betrachter wird bei jedem Tab-Wechsel
+    ueberschrieben. Teilten sich beide eine Instanz, waere der Abzug beim
+    ersten Klick im Baum weg."""
+    win = MainWindow()
+    monkeypatch.setattr(win.worker, "submit", lambda job: None)
+    # Ueber den Klick und nicht direkt ueber das Ergebnis: Das Fenster
+    # entsteht schon beim Klick, und nur dieser Weg deckt beide Stellen ab,
+    # an denen eine Instanz gewaehlt wird.
+    win._on_poe2_probe_clicked()
+    win._on_poe2_probe_loaded(Probe(
+        calls=[ProbeCall("GET /account/leagues?realm=poe2", True, {"leagues": []})],
+        fetched_at=1_755_000_000.0))
+    win._on_raw_data_requested("t1", "Currency")
+
+    assert win._poe2_viewer is not win._raw_data_viewer
+    assert '"leagues": []' in win._poe2_viewer._text.toPlainText()
+
+    win.worker.stop()
+    win.worker.wait(5000)

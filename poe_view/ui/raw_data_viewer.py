@@ -37,5 +37,17 @@ class RawDataViewer(QDialog):
         layout.addWidget(self._text, stretch=1)
 
     def show_payload(self, stash_id: str, name: str, payload: dict) -> None:
-        self._title.setText(f"{name}  ·  id={stash_id}")
-        self._text.setPlainText(json.dumps(payload, indent=2, ensure_ascii=False, default=str))
+        self.show_document(f"{name}  ·  id={stash_id}",
+                           json.dumps(payload, indent=2, ensure_ascii=False,
+                                      default=str))
+
+    def show_document(self, title: str, text: str) -> None:
+        """Beliebigen Text zeigen statt eines Tab-Objekts.
+
+        Damit dient dasselbe Fenster auch dem PoE2-Abzug
+        (§services/poe2_probe.py) — ein zweites Monospace-Textfenster
+        daneben wäre dieselbe Anzeige mit anderem Namen. Das Hauptfenster
+        hält dafür eine eigene Instanz, sonst überschriebe der nächste
+        Tab-Wechsel den Abzug."""
+        self._title.setText(title)
+        self._text.setPlainText(text)
