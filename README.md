@@ -189,6 +189,15 @@ progress and the last three hours of experience.
 - **Rate-limit dashboard** with rules, current usage, and active locks.
 - **Raw data viewer** per stash tab, showing the unmodified API
   response.
+- **PoE2 raw data** (account menu): asks GGG's API for the PoE2 realm
+  and shows the answer as plain text. It asks the same question three
+  times — without a realm, with `poe2`, and with a made-up value — and
+  writes the verdict above the raw data, so the tool cannot mistake a
+  PoE1 answer for a PoE2 one. Measured result so far: **GGG ignores the
+  `realm` parameter.** All three answers are byte-for-byte identical
+  PoE1 data, the invented realm included, so whether an account has PoE2
+  characters cannot be determined this way. PoE-VIEW2 reads Path of
+  Exile 1 only.
 
 ## Data sources
 

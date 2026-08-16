@@ -57,6 +57,7 @@ from poe_view.services import data_cache, token_store  # noqa: E402
 data_cache._CACHE_FILE = _TMP / "unused.json"
 token_store.load_token = lambda: None  # kein echtes Konto, kein echter Login
 
+from poe_view.ui.favourites import FavouriteRow  # noqa: E402
 from poe_view.ui.item_history import HistoryEntry  # noqa: E402
 from poe_view.ui.main_window import MainWindow, _XpWatch  # noqa: E402
 from poe_view.ui.xp_graph import XpPoint  # noqa: E402
@@ -441,6 +442,31 @@ def _demo_leveling(win: MainWindow) -> None:
     win._xp_watch["Demo Ranger"] = watch
 
 
+def _demo_favourites(win: MainWindow) -> None:
+    """Die Beobachtungsliste rechts im Leveling-Feld füllen (§4.45).
+
+    Ohne sie zeigt das Bild eine leere rechte Hälfte, und ein Feature,
+    das es seit v0.10.0 gibt, käme in der README gar nicht vor. Die
+    Zahlen sind erfunden, die Namen echte Spielgegenstände — dieselbe
+    Grenze wie beim Rest der Demo-Daten.
+
+    Gesetzt wird direkt auf der Tabelle statt über ``_toggle_favourite``:
+    Der Weg über die Einstellungen zählt anschließend über den Cache und
+    fände dort nichts, weil die Demo-Fächer diese Items nicht führen.
+
+    Der Aufruf gehört ans ENDE, unmittelbar vor die Aufnahme: Jeder
+    Item-Eingang zählt neu und setzt die Tabelle dabei zurück (§4.45).
+    Weiter oben gesetzt wäre sie im Bild wieder leer."""
+    win.leveling.set_favourites([
+        FavouriteRow("Wild Crystallised Lifeforce", 81_352),
+        FavouriteRow("Primal Crystallised Lifeforce", 79_773),
+        FavouriteRow("Vivid Crystallised Lifeforce", 69_751),
+        FavouriteRow("Sacred Crystallised Lifeforce", 2),
+        FavouriteRow("Divine Orb", 34),
+        FavouriteRow("Orb of Annulment", 11, complete=False),
+    ])
+
+
 def _character_history(win: MainWindow) -> None:
     """Charakter-Inventar nach einem Refresh: Hervorhebung + Verlauf."""
     win._current_stash_id = None
@@ -476,6 +502,7 @@ def _character_history(win: MainWindow) -> None:
     win.table.selectRow(row)
     win._on_row_selected(win.proxy.index(row, 0), None)
     win._note_view_updated()
+    _demo_favourites(win)
     _shot(win, "charakter-verlauf.png")
 
 

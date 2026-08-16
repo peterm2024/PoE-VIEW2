@@ -6,6 +6,8 @@ nach [SemVer](https://semver.org/lang/de/).
 
 ## [Unveröffentlicht]
 
+## [0.10.0] - 2026-08-17
+
 ### Behoben
 
 - Ein Abyss-Jewel im Gürtel oder Ring wurde als Gem gezählt und bekam im
@@ -50,7 +52,6 @@ nach [SemVer](https://semver.org/lang/de/).
   Blick genügt, um zu sehen, wie viel Lifeforce oder Währung
   zusammengekommen ist. Ein `≥` weist darauf hin, solange noch nicht
   jedes Fach geladen ist.
-
 - Der XP-Graph ist nach einem Programmstart nicht mehr leer: Die
   gemessenen Abschnitte der letzten drei Stunden werden je Konto
   gespeichert und beim nächsten Start wieder eingezeichnet. Die
@@ -58,7 +59,6 @@ nach [SemVer](https://semver.org/lang/de/).
   Levelaufstieg während der Programmpause als absurd hohe Rate
   erscheinen. Die erste neue Rate kommt also weiterhin mit der zweiten
   Veröffentlichung, aber der Verlauf davor bleibt sichtbar.
-
 - Das Konto-Menü hat einen Eintrag "PoE2 raw data", der GGGs API nach
   dem PoE2-Realm fragt und die Antwort als Rohtext zeigt. Er stellt
   dieselbe Frage dreimal — ohne Realm, mit `poe2` und mit einem
