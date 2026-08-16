@@ -194,7 +194,10 @@ def _demo_socketed(name: str, level: str, colour: str,
                    progress: float | None) -> dict:
     """Ein Sockel-Gem fuers Bild (§4.42). Die drei Zustaende — fertig,
     wartet auf einen Klick, am Leveln — sollen alle vorkommen."""
+    # ``frameType`` 4 wie in echten Daten: Der Streifen filtert seit dem
+    # Jewel-Fund darauf (§4.42), ohne das Feld blieben die Bilder leer.
     gem: dict = {"id": f"gem-{name}", "typeLine": name, "colour": colour,
+                 "frameType": 4,
                  "properties": [{"name": "Level", "values": [[level, 0]]}]}
     if progress is not None:
         gem["additionalProperties"] = [{"name": "Experience",
@@ -231,7 +234,8 @@ def _socketed_gem(level: int) -> dict:
     return {
         # Bewusst NICHT "Molten Strike": Das steht unten im Verlauf und
         # sähe aus, als hinge beides zusammen.
-        "id": "demo-gem-1", "typeLine": "Blade Vortex", "socket": 0, "colour": "B",
+        "id": "demo-gem-1", "typeLine": "Blade Vortex", "socket": 0,
+        "colour": "B", "frameType": 4,
         "properties": [{"name": "Level", "values": [[str(level), 0]], "displayMode": 0}],
         "additionalProperties": [
             {"name": "Experience", "values": [[f"{level * 1_000_000}/226180911", 0]],

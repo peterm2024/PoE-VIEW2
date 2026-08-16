@@ -4424,6 +4424,31 @@ Fehlen BEIDE Merkmale (weder "(Max)" noch Erfahrung, genau ein Gem von
 449), bleibt der Balken leer statt voll: Ein voller Balken hieße
 "fertig", und das wäre eine Behauptung ohne Grundlage.
 
+**Fertige Gems bekommen einen gelben Rahmen** (Peter, 2026-08-16: "so
+dass man deutlich erkennt, dass der Gem ausgelevelt ist"). Der volle
+Balken allein genügte nicht — er sieht aus wie ein Gem, das gerade eben
+die nächste Stufe erreicht hat. Die Rahmenfarbe ist dieselbe Warnfarbe
+wie die Kappe des Zustands "wartet auf einen Klick"; die beiden sind
+durch die Form unterschieden (Umriss gegen Querstreifen), nicht durch
+die Farbe. Das ist bewusst so gewählt und beobachtet: Sollte es im
+Betrieb verwirren, wäre die Kappe der Kandidat für eine eigene Farbe,
+denn nur sie verlangt eine Handlung.
+
+**Nicht jedes ``socketedItems`` ist ein Gem.** Peter, 2026-08-16: "Belt
+gibts glaube ich nicht für Gems, nur für Jewels." Er hat damit einen
+Fehler aufgedeckt: Ein Abyss-Jewel sitzt in derselben Liste wie die
+Gems, levelt aber nicht — und bekam einen eigenen, ewig leeren Balken.
+Genau dieses eine Jewel war jener vermeintliche Sonderfall "ein Gem,
+dessen Stufe die API nicht mitliefert", der hier und im Modul-Docstring
+als bekannte Ausnahme vermerkt stand. Seit der Filter auf ``frameType
+== 4`` steht, bleibt in seinem Bestand kein Balken ohne Beleg
+(448 Gems: 227 fertig, 65 wartend, 156 am Leveln).
+
+Nebenwirkung des Filters, die zweimal zugeschlagen hat: Testhilfen und
+die Demo-Daten für die README-Bilder bauten Gems **ohne**
+``frameType``. Beide mussten nachziehen — wer Daten nachbaut, muss
+nachbauen, was der Code prüft.
+
 **Gem-Farben sind hier richtig**, anders als bei der Zeilen-Markierung
 (§4.33): Dort ging es um EIN Item, in dem mehrere verschiedenfarbige Gems
 gleichzeitig aufsteigen können, weshalb Grün gewählt wurde. Hier hat
@@ -4621,11 +4646,12 @@ rechts daneben über die ganze Höhe.
 
 Der Platz reicht auch im Extremfall. **38 Sockel-Gems sind das Maximum,
 das ein Charakter tragen kann** — 6 Rüstung + 6 Waffe + 6 Zweitwaffe +
-4 Helm + 4 Handschuhe + 4 Stiefel + 3 + 3 Schildhand + je 1
-Abyss-Sockel in Ring und Gürtel. Peter hat die Zahl vorgerechnet, an
-seinem Cache nachgezählt stimmt sie (sein eigener Höchstwert: 33 Gems,
-Median 30 über 16 Charaktere). 38 Balken sind 264 px; bei 554 px
-Innenbreite bleiben 284 px für die Tabelle.
+4 Helm + 4 Handschuhe + 4 Stiefel + 3 + 3 Schildhand + je 1 Sockel in
+den beiden Ringen. Peter hat die Zahl vorgerechnet und anschließend
+meine Herleitung berichtigt: Der Gürtel nimmt keine Gems, nur Jewels,
+dafür zählen beide Ringe (§4.42). Die Summe bleibt 38; sein eigener
+Höchstwert liegt bei 33 Gems, Median 30 über 16 Charaktere. 38 Balken
+sind 264 px, bei 554 px Innenbreite bleiben 284 px für die Tabelle.
 
 Dabei entscheidet ein Detail über die Aufteilung: Die Tabelle **verlangt**
 senkrecht nur eine Zeile (`sizeHint`) und **füllt** den Rest über

@@ -76,7 +76,7 @@ def _panel_mit_inhalt(qapp, gem_anzahl: int = 12, favoriten: int = 2):
 
     gems = gem_progress_of([Item.model_validate({"typeLine": "Vaal Regalia",
         "socketedItems": [
-            {"typeLine": f"Gem {i}", "colour": "S",
+            {"typeLine": f"Gem {i}", "colour": "S", "frameType": 4,
              "properties": [{"name": "Level", "values": [["19", 0]]}],
              "additionalProperties": [{"name": "Experience",
                                        "values": [["1/2", 0]],

@@ -10,21 +10,32 @@ gelevelt ist."
 fertig?" müsste man eigentlich aus Stufe, Gem-Art und Erfahrung
 herleiten — ein Awakened-Gem ist bei 5 fertig, ein normales bei 20, ein
 korrumpiertes kann bei 21 stehen. Nichts davon ist nötig: Über Peters
-449 Sockel-Gems (16 Charaktere, 2026-08-13) steht die Stufe im Klartext
-als ``"20 (Max)"``, ``"5 (Max)"``, ``"1 (Max)"``, und genau diesen 226
-Gems fehlt zugleich das ``Experience``-Feld. Beide Merkmale zeigen
-dasselbe an, und keines muss geraten werden.
+448 Sockel-Gems (16 Charaktere, gezählt 2026-08-16) steht die Stufe im
+Klartext als ``"20 (Max)"``, ``"5 (Max)"``, ``"1 (Max)"``, und genau
+diesen Gems fehlt zugleich das ``Experience``-Feld. Beide Merkmale
+zeigen dasselbe an, und keines muss geraten werden.
 
 Damit drei Zustände, alle drei aus den Daten belegt:
 
-- **Fertig** (226 von 449): Stufe trägt "(Max)", kein Erfahrungsfeld.
-  Voller Balken.
+- **Fertig** (227 von 448): Stufe trägt "(Max)", kein Erfahrungsfeld.
+  Voller Balken mit gelbem Rahmen (Peter, 2026-08-16: "so dass man
+  deutlich erkennt, dass der Gem ausgelevelt ist"). Der volle Balken
+  allein genügte nicht — er sieht aus wie ein Gem, das gerade eben die
+  nächste Stufe erreicht hat.
 - **Wartet auf einen Klick** (65): Balken voll, aber nicht Max. Gems
   steigen in PoE nicht von selbst auf (`poe-verhalten.md` §4) — das ist
   Charakterstärke, die nur auf einen Mausklick wartet. Bekommt deshalb
   eine eigene Markierung; ohne sie sähe es aus wie "fertig".
-- **Am Leveln** (157): Der helle Teil ist der Fortschritt zur nächsten
+- **Am Leveln** (156): Der helle Teil ist der Fortschritt zur nächsten
   Stufe.
+
+**Nicht jedes ``socketedItems`` ist ein Gem.** Ein Abyss-Jewel im
+Gürtel oder Ring sitzt in derselben Liste, levelt aber nicht. Peter
+2026-08-16: "Belt gibts glaube ich nicht für Gems, nur für Jewels."
+Genau ein solches Jewel steckte in seinem Bestand, bekam einen eigenen,
+ewig leeren Balken — und war jenes vermeintliche "Gem, dessen Stufe die
+API nicht mitliefert", das hier früher als Sonderfall vermerkt war. Seit
+der Filter auf ``frameType == 4`` steht, bleibt kein Balken ohne Beleg.
 
 Die Aufbereitung (`gem_progress_of`) ist eine reine Funktion über
 ``Item``-Objekte: ohne Qt prüfbar, und die Zeichenroutine bekommt nur
@@ -48,6 +59,14 @@ from poe_view.ui.theme import (DASH_WARN, GEM_COLOR_OTHER, GEM_COLORS, blend,
 # und bleibt einzeln anklickbar breit genug für einen Tooltip.
 _BAR_W = 5
 _BAR_GAP = 2
+
+# GGGs ``frameType`` für ein Gem. Jewels (1 = Magic, 2 = Rare) stecken in
+# derselben ``socketedItems``-Liste, leveln aber nicht.
+_GEM_FRAME = 4
+
+# Rahmenstärke der Fertig-Markierung. 1 px lässt vom 5 px breiten Balken
+# noch 3 px Farbe stehen — genug, um die Gem-Farbe zu erkennen.
+_MAXED_FRAME_W = 1
 
 # Höhe des Streifens. Peter schlug 75 px vor; 60 lassen dem Graphen
 # darunter mehr Luft, ohne dass ein Drittel-Fortschritt undeutlich wird
@@ -108,16 +127,24 @@ def gem_progress_of(items: Sequence[Item]) -> list[GemProgress]:
     gems: list[GemProgress] = []
     for item in items:
         for gem in getattr(item, "socketedItems", None) or []:
-            if not isinstance(gem, dict):
+            if not isinstance(gem, dict) or gem.get("frameType") != _GEM_FRAME:
+                # In ``socketedItems`` steckt nicht nur, was levelt: Ein
+                # Abyss-Jewel im Gürtel oder Ring sitzt in derselben
+                # Liste (Peter, 2026-08-16: "Belt gibts glaube ich nicht
+                # für Gems, nur für Jewels"). Ohne diese Prüfung bekam
+                # es einen eigenen, ewig leeren Balken — und war genau
+                # jenes "eine Gem, dessen Stufe die API nicht
+                # mitliefert", das früher hier im Kommentar stand.
                 continue
             level = _level_text(gem)
             experience = _experience(gem)
             maxed = "(max)" in level.lower()
             # Ohne Erfahrungsfeld UND ohne "(Max)" wissen wir nichts —
-            # dann ein leerer Balken statt eines vollen. Betrifft in
-            # Peters Bestand genau ein Gem von 449, dessen Stufe die API
-            # gar nicht mitliefert; ein voller Balken hieße dort "fertig",
-            # und das wäre eine Behauptung ohne Grundlage.
+            # dann ein leerer Balken statt eines vollen: Ein voller
+            # hieße "fertig", und das wäre eine Behauptung ohne
+            # Grundlage. Seit dem Jewel-Filter oben tritt der Fall in
+            # Peters Bestand nicht mehr auf (448 Gems, keiner ohne
+            # Beleg) — der frühere Einzelfall WAR das Jewel.
             if maxed:
                 progress = 1.0
             elif experience:
@@ -207,6 +234,19 @@ class GemProgressBar(QWidget):
                 if gem.ready:
                     painter.fillRect(QRectF(x, 0, _BAR_W, _READY_CAP_H),
                                      QColor(DASH_WARN))
+                if gem.maxed:
+                    # Gelber Rahmen um den ganzen Balken (Peter,
+                    # 2026-08-16: "so dass man deutlich erkennt, dass der
+                    # Gem ausgelevelt ist"). Ein voller Balken allein
+                    # genügte nicht — er sieht aus wie ein Gem, das
+                    # gerade eben die nächste Stufe erreicht hat.
+                    # Der halbe Pixel Versatz hält die Linie scharf:
+                    # Qt zeichnet sie mittig auf den Pfad, sonst läge
+                    # die Hälfte außerhalb des Balkens.
+                    painter.setPen(QColor(DASH_WARN))
+                    painter.drawRect(QRectF(x + 0.5, 0.5,
+                                            _BAR_W - _MAXED_FRAME_W,
+                                            height - _MAXED_FRAME_W))
             if not self._gems:
                 painter.setPen(dimmed_text(self.palette()))
                 painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter,

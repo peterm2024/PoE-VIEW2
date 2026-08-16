@@ -19,7 +19,9 @@ def _item_with(*gems: dict) -> Item:
 
 def _gem(name: str, level: str, colour: str = "S",
          progress: float | None = None) -> dict:
-    gem: dict = {"typeLine": name, "colour": colour,
+    # ``frameType`` 4 ist GGGs Kennzeichen fuer ein Gem — ohne das ist
+    # es ein Jewel und gehoert nicht in den Streifen.
+    gem: dict = {"typeLine": name, "colour": colour, "frameType": 4,
                  "properties": [{"name": "Level", "values": [[level, 0]]}]}
     if progress is not None:
         gem["additionalProperties"] = [
@@ -74,9 +76,14 @@ def test_a_levelling_gem_carries_its_progress() -> None:
 def test_a_gem_without_any_evidence_stays_empty_instead_of_full() -> None:
     """Weder "(Max)" noch ein Erfahrungsfeld: Dann wissen wir nichts. Ein
     voller Balken hiesse "fertig" und waere eine Behauptung ohne
-    Grundlage — betrifft genau ein Gem von 449."""
+    Grundlage.
+
+    In Peters Bestand tritt der Fall seit dem Jewel-Filter nicht mehr auf
+    (448 Gems, keiner ohne Beleg) — der fruehere Einzelfall WAR das
+    Abyss-Jewel im Guertel. Die Regel bleibt trotzdem: GGG darf jederzeit
+    ein Gem ohne diese Felder liefern."""
     unklar, = gem_progress_of([_item_with(
-        {"typeLine": "Seltsames Gem", "colour": "S"})])
+        {"typeLine": "Seltsames Gem", "colour": "S", "frameType": 4})])
 
     assert unklar.progress == 0.0
     assert (unklar.ready, unklar.maxed) == (False, False)
@@ -202,3 +209,62 @@ def test_die_balken_ueberleben_die_tabelle_daneben(qapp) -> None:
     assert allein > 0
     assert panel._gems.width() == allein
     panel.close()
+
+
+# --- Nur echte Gems, und der Rahmen fuer fertige (2026-08-16) ---------- #
+
+def test_ein_abyss_jewel_im_guertel_ist_kein_gem() -> None:
+    """Peter, 2026-08-16: "Belt gibts glaube ich nicht fuer Gems, nur
+    fuer Jewels." In seinem Bestand steckte genau ein solches Jewel und
+    bekam einen eigenen, ewig leeren Balken — es war jenes vermeintliche
+    "Gem, dessen Stufe die API nicht mitliefert"."""
+    guertel = Item.model_validate({"typeLine": "Leather Belt", "socketedItems": [
+        {"typeLine": "Discharging Hypnotic Eye Jewel of Abuse", "frameType": 1,
+         "abyssJewel": True}]})
+
+    assert gem_progress_of([guertel]) == []
+
+
+def test_gems_neben_einem_jewel_bleiben_erhalten() -> None:
+    """Der Filter darf nicht die ganze Liste verwerfen."""
+    ring = Item.model_validate({"typeLine": "Unset Ring", "socketedItems": [
+        {"typeLine": "Hypnotic Eye Jewel", "frameType": 2},
+        {"typeLine": "Summon Skitterbots", "frameType": 4, "colour": "I",
+         "properties": [{"name": "Level", "values": [["19", 0]]}]}]})
+
+    gems = gem_progress_of([ring])
+
+    assert [g.name for g in gems] == ["Summon Skitterbots"]
+
+
+def test_ein_fertiges_gem_bekommt_einen_rahmen(qapp) -> None:
+    """Peter: "so dass man deutlich erkennt, dass der Gem ausgelevelt
+    ist." Ein voller Balken allein sieht aus wie ein Gem, das gerade die
+    naechste Stufe erreicht hat.
+
+    Geprueft wird die Farbe der Randpixel, nicht ein Bildvergleich."""
+    from PySide6.QtGui import QColor
+    from poe_view.ui.gem_progress import GemProgressBar
+    from poe_view.ui.theme import DASH_WARN
+
+    strip = GemProgressBar()
+    strip.set_gems(gem_progress_of([_item_with(_gem("Fertig", "20 (Max)", "I"))]))
+    strip.resize(20, 60)
+    bild = strip.grab().toImage()
+
+    assert QColor(bild.pixel(0, 30)).name() == QColor(DASH_WARN).name()
+    assert QColor(bild.pixel(2, 30)).name() != QColor(DASH_WARN).name()
+
+
+def test_ein_levelndes_gem_bekommt_keinen_rahmen(qapp) -> None:
+    from PySide6.QtGui import QColor
+    from poe_view.ui.gem_progress import GemProgressBar
+    from poe_view.ui.theme import DASH_WARN
+
+    strip = GemProgressBar()
+    strip.set_gems(gem_progress_of([_item_with(
+        _gem("Laeuft noch", "17", "I", progress=0.3))]))
+    strip.resize(20, 60)
+    bild = strip.grab().toImage()
+
+    assert QColor(bild.pixel(0, 30)).name() != QColor(DASH_WARN).name()

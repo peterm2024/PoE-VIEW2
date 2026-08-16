@@ -8,6 +8,9 @@ nach [SemVer](https://semver.org/lang/de/).
 
 ### Behoben
 
+- Ein Abyss-Jewel im Gürtel oder Ring wurde als Gem gezählt und bekam im
+  Leveling-Feld einen eigenen, dauerhaft leeren Balken. Jewels leveln
+  nicht und gehören nicht in den Streifen.
 - Ab etwa Stufe 91 blieben Level, Gesamterfahrung und XP/h im
   Leveling-Feld stehen und der Graph bekam keine neuen Abschnitte mehr.
   Ursache war die 32-Bit-Grenze von Qts `int` (2 147 483 647), die PoE
@@ -20,6 +23,9 @@ nach [SemVer](https://semver.org/lang/de/).
 
 ### Hinzugefügt
 
+- Fertig gelevelte Gems (Stufe 20, korrumpiert 21) haben jetzt einen
+  gelben Rahmen. Ein voller Balken allein sah aus wie ein Gem, das
+  gerade eben die nächste Stufe erreicht hat.
 - Rechtsklick auf ein Item, "Watch stack size", und es steht mit seiner
   Gesamtmenge in einer Tabelle an der rechten Seite des Leveling-Felds,
   neben Stufe, Rate und Gem-Balken (sieben Zeilen ohne Scrollen). Gezählt

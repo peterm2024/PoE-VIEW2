@@ -144,10 +144,11 @@ progress and the last three hours of experience.
   much Wild Crystallised Lifeforce you are sitting on. A `≥` marks a
   total that is still missing unloaded tabs.
 - **Gem progress**: one narrow bar per socketed gem, coloured by the
-  attribute it needs, showing how far it is from its next level. A full
-  bar means the gem is done — and if it is full below its maximum level,
-  a yellow cap marks it: gems never level up on their own, so that is
-  character power waiting to be claimed.
+  attribute it needs, showing how far it is from its next level. A
+  yellow outline marks a finished gem (level 20, or 21 corrupted). A
+  yellow cap means the opposite: the bar is full but the gem is below
+  its maximum — gems never level up on their own, so that is character
+  power waiting to be claimed.
 
 ### Staying up to date
 

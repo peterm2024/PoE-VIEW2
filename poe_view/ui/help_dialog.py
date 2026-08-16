@@ -269,10 +269,12 @@ may be more than it says. An item you own none of shows <b>0</b> rather
 than disappearing — that is the answer you were looking for.</p>
 <p>Above the graph, <b>one narrow bar per socketed gem</b> shows how far
 it is from its next level, coloured by the attribute it needs. Hover for
-its name and level. A <b>full bar</b> means the gem is done — either at
-its maximum level, or waiting for you to click it. Those waiting carry a
-<b>yellow cap</b>: gems never level up on their own, so that is free
-character power sitting unclaimed.</p>
+its name and level.</p>
+<p>A <b>yellow outline</b> means the gem is finished: level 20, or 21 if
+it is corrupted. Nothing left to do there.</p>
+<p>A <b>yellow cap</b> on top means the opposite — the bar is full but the
+gem is below its maximum. Gems never level up on their own, so that is
+free character power sitting unclaimed until you click it.</p>
 <p>The graph below covers the <b>last three hours</b>, one bar per
 finished area:</p>
 <ul>
