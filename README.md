@@ -138,7 +138,7 @@ progress and the last three hours of experience.
   a restart: measured sections are stored per account and drawn again
   next time, so closing the program does not empty it.
 - **Watched stack sizes**: right-click any item and pick *Watch stack
-  size* to put it in a small table at the top right of the levelling
+  size* to put it in a table filling the right-hand side of the levelling
   panel. It adds up every
   loaded stash tab and character of the league, so a glance tells you how
   much Wild Crystallised Lifeforce you are sitting on. A `≥` marks a

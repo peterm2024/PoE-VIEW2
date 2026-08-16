@@ -69,7 +69,7 @@ def test_without_a_character_the_graph_axis_disappears_too(qapp) -> None:
 
 # --- Anordnung nach Peters Skizze vom 2026-08-16 ------------------------ #
 
-def _panel_mit_inhalt(qapp):
+def _panel_mit_inhalt(qapp, gem_anzahl: int = 12, favoriten: int = 2):
     from poe_view.api.models import Item
     from poe_view.ui.favourites import FavouriteRow
     from poe_view.ui.gem_progress import gem_progress_of
@@ -81,13 +81,13 @@ def _panel_mit_inhalt(qapp):
              "additionalProperties": [{"name": "Experience",
                                        "values": [["1/2", 0]],
                                        "progress": 0.5}]}
-            for i in range(12)]})])
+            for i in range(gem_anzahl)]})])
     panel = LevelingPanel()
     panel.resize(578, 320)
     panel.show_character("WitchOfPeter", level=91, experience=2_151_302_311,
                          rate_text="114.7M XP/h", age_note="", gems=gems)
-    panel.set_favourites([FavouriteRow("Primal Crystallised Lifeforce", 5017),
-                          FavouriteRow("Vivid Crystallised Lifeforce", 5562)])
+    panel.set_favourites([FavouriteRow(f"Crystallised Lifeforce {i}", 5017 + i)
+                          for i in range(favoriten)])
     panel.show()
     qapp.processEvents()
     return panel
@@ -134,5 +134,64 @@ def test_der_graph_bekommt_den_rest(qapp) -> None:
 
     assert panel._graph.y() > panel._gems.y()
     assert panel._graph.height() > panel.favourites.height()
+
+    panel.close()
+
+
+def test_die_favoriten_reichen_bis_neben_die_gem_balken(qapp) -> None:
+    """Peter, 2026-08-16: "Koennen wir den Platz neben den Gem-Balken
+    nicht auch noch fuer die Fav-Tabelle nutzen?" Die Tabelle steht also
+    nicht nur neben dem Textblock, sondern reicht bis ans untere Ende des
+    Balkenstreifens."""
+    panel = _panel_mit_inhalt(qapp)
+
+    unterkante_balken = panel._gems.y() + panel._gems.height()
+    assert panel.favourites.y() + panel.favourites.height() >= unterkante_balken
+    assert panel.favourites.x() > panel._gems.x() + panel._gems.width() - 1
+
+    panel.close()
+
+
+def test_die_graph_hoehe_haengt_nicht_an_der_zahl_der_gems(qapp) -> None:
+    """Ohne Mindestbreite fuer den Textblock zog die Tabelle bei WENIGEN
+    Gems so viel Breite an sich, dass die Zahlenzeile umbrach — und jede
+    zusaetzliche Textzeile ging direkt vom Graphen ab. Gemessen waren das
+    126 statt 154 px, also ausgerechnet beim schmaleren Balkenstreifen
+    der kleinere Graph.
+
+    Ein Charakter kann hoechstens 38 Sockel-Gems tragen; beide Enden der
+    Spanne muessen dieselbe Graph-Hoehe ergeben."""
+    wenige = _panel_mit_inhalt(qapp, gem_anzahl=12)
+    viele = _panel_mit_inhalt(qapp, gem_anzahl=38)
+
+    assert wenige._graph.height() == viele._graph.height()
+    assert wenige._body.width() == viele._body.width()
+
+    wenige.close()
+    viele.close()
+
+
+def test_auch_38_gems_lassen_der_tabelle_platz(qapp) -> None:
+    """38 ist das Maximum: 6 Ruestung + 6 Waffe + 6 Zweitwaffe + 4 Helm
+    + 4 Handschuhe + 4 Stiefel + 3 + 3 Schildhand + je 1 Abyss-Sockel in
+    Ring und Guertel (an Peters Cache nachgezaehlt, sein Hoechstwert
+    liegt bei 33)."""
+    panel = _panel_mit_inhalt(qapp, gem_anzahl=38)
+
+    assert panel._gems.width() > 0
+    assert panel.favourites.width() >= panel.favourites.minimumSizeHint().width()
+    assert panel.favourites.isVisible()
+
+    panel.close()
+
+
+def test_ohne_gems_bleibt_die_tabelle_neben_dem_text(qapp) -> None:
+    """Ein Charakter ohne Sockel-Gems: Der Streifen verschwindet, die
+    Tabelle rueckt mit nach oben statt ins Leere zu greifen."""
+    panel = _panel_mit_inhalt(qapp, gem_anzahl=0)
+
+    assert panel._gems.isHidden()
+    assert panel.favourites.isVisible()
+    assert panel.favourites.y() <= panel._body.y()
 
     panel.close()

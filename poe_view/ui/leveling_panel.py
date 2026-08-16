@@ -20,6 +20,7 @@ from __future__ import annotations
 from typing import Sequence
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QFontMetrics
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout
 
 from poe_view.ui.favourites import FavouriteRow, FavouritesTable
@@ -37,6 +38,15 @@ class LevelingPanel(QFrame):
         self._body.setWordWrap(True)
         self._body.setTextFormat(Qt.TextFormat.RichText)
         self._body.setAlignment(Qt.AlignmentFlag.AlignTop)
+        # Untergrenze für die linke Spalte, aus der Schrift abgeleitet
+        # statt in Pixeln geraten. Ohne sie zieht die Favoriten-Tabelle
+        # daneben so viel Breite an sich, dass die Zahlenzeile umbricht —
+        # und jede zusätzliche Textzeile geht direkt vom Graphen ab. Die
+        # Zahl ist die breiteste Zeile mit festem Aufbau; der Satz
+        # "Rate follows after the next zone change" darf dagegen
+        # umbrechen, er ist Fließtext.
+        self._body.setMinimumWidth(QFontMetrics(self._body.font())
+                                   .horizontalAdvance("2 000 000 000 XP total"))
         # Die Gem-Balken ÜBER dem Graphen (Peters Vorgabe): Sie zeigen
         # einen Zustand, der Graph einen Verlauf — und der Zustand ist
         # das, wonach man beim Hinschauen zuerst sucht.
@@ -49,25 +59,29 @@ class LevelingPanel(QFrame):
         self.favourites = FavouritesTable()
         self._graph = XpGraph()
 
-        # Kopfzeile: links Name und Zahlen, rechts die Favoriten
-        # (Peter, 2026-08-16, mit Skizze). Die Tabelle füllt dabei die
-        # Höhe des Textblocks aus, statt darunter eine eigene Zeile zu
-        # belegen — das war der Punkt: Der Graph darunter gewinnt den
-        # Platz zurück.
-        kopf_text = QVBoxLayout()
-        kopf_text.setContentsMargins(0, 0, 0, 0)
-        kopf_text.addWidget(self._title)
-        kopf_text.addWidget(self._body)
-        kopf_text.addStretch(1)
+        # Oberer Bereich: links Name, Zahlen und Gem-Balken untereinander,
+        # rechts daneben die Favoriten über die ganze Höhe (Peter,
+        # 2026-08-16, in zwei Schritten — erst neben den Textblock, dann
+        # "können wir den Platz neben den Gem-Balken nicht auch noch
+        # nutzen?"). Rechts vom Balkenstreifen bleibt selbst im Extremfall
+        # Platz: 38 Sockel-Gems sind das Maximum, das ein Charakter
+        # tragen kann (6 Rüstung + 6 Waffe + 6 Zweitwaffe + 4 Helm +
+        # 4 Handschuhe + 4 Stiefel + 3 + 3 Schildhand + je 1 Abyss-Sockel
+        # in Ring und Gürtel), und das sind 264 px.
+        links = QVBoxLayout()
+        links.setContentsMargins(0, 0, 0, 0)
+        links.addWidget(self._title)
+        links.addWidget(self._body)
+        links.addStretch(1)
+        links.addWidget(self._gems)
 
-        kopf = QHBoxLayout()
-        kopf.setContentsMargins(0, 0, 0, 0)
-        kopf.addLayout(kopf_text, stretch=1)
-        kopf.addWidget(self.favourites, stretch=1)
+        oben = QHBoxLayout()
+        oben.setContentsMargins(0, 0, 0, 0)
+        oben.addLayout(links, stretch=1)
+        oben.addWidget(self.favourites, stretch=1)
 
         layout = QVBoxLayout(self)
-        layout.addLayout(kopf)
-        layout.addWidget(self._gems)
+        layout.addLayout(oben)
         layout.addWidget(self._graph, stretch=1)
 
     def clear(self) -> None:

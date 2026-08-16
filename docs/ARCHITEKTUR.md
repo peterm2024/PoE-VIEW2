@@ -4612,10 +4612,20 @@ Leveling-Felds: Name links, Menge rechts. Gezählt wird über alle
 geladenen Fächer **und** Charaktere der aktuellen Liga — Währung liegt
 oft im Rucksack.
 
-**Die Anordnung stammt aus Peters zweiter Skizze** (2026-08-16). Zuerst
-saß die Tabelle unten im Streifen neben den Gem-Balken; sie steht jetzt
-oben rechts, wo neben Name, Stufe und Rate ohnehin Fläche frei ist, und
-füllt deren Höhe aus. Die Gem-Balken bleiben, wo sie waren.
+**Die Anordnung entstand in zwei Schritten** (Peter, 2026-08-16). Zuerst
+saß die Tabelle unten im Streifen neben den Gem-Balken, dann kam sie
+nach oben rechts neben den Textblock — und schließlich: "Können wir den
+Platz neben den Gem-Balken nicht auch noch für die Fav-Tabelle nutzen?"
+Jetzt stehen Titel, Zahlen und Balken links untereinander, die Tabelle
+rechts daneben über die ganze Höhe.
+
+Der Platz reicht auch im Extremfall. **38 Sockel-Gems sind das Maximum,
+das ein Charakter tragen kann** — 6 Rüstung + 6 Waffe + 6 Zweitwaffe +
+4 Helm + 4 Handschuhe + 4 Stiefel + 3 + 3 Schildhand + je 1
+Abyss-Sockel in Ring und Gürtel. Peter hat die Zahl vorgerechnet, an
+seinem Cache nachgezählt stimmt sie (sein eigener Höchstwert: 33 Gems,
+Median 30 über 16 Charaktere). 38 Balken sind 264 px; bei 554 px
+Innenbreite bleiben 284 px für die Tabelle.
 
 Dabei entscheidet ein Detail über die Aufteilung: Die Tabelle **verlangt**
 senkrecht nur eine Zeile (`sizeHint`) und **füllt** den Rest über
@@ -4623,11 +4633,27 @@ senkrecht nur eine Zeile (`sizeHint`) und **füllt** den Rest über
 hätte sie den Graphen darunter auf 60 px zusammengedrückt. Was nicht in
 die Höhe des Textblocks passt, wird gescrollt.
 
-Gemessen an einem 578×320-Panel: Die Tabelle wuchs von 38 auf 61 px,
-Graph und Gem-Balken blieben unverändert bei 163 bzw. 60 px. Der Graph
-gewinnt also **nichts** — anders als vorhergesagt, denn die Gem-Balken
-sind mit 60 px ohnehin höher als die Tabelle je war. Gewonnen ist Platz
-für die Tabelle selbst, aus einer Fläche, die vorher leer war.
+Gemessen an einem 578×325-Panel: Die Tabelle wuchs von 38 über 61 auf
+141 px — sieben Zeilen statt zwei —, Graph und Gem-Balken blieben bei
+154 bzw. 60 px. Der Graph gewinnt also **nichts**, anders als von mir
+zunächst vorhergesagt: Die Gem-Balken sind mit 60 px ohnehin höher, als
+die Tabelle je war. Gewonnen ist Platz für die Tabelle selbst, aus einer
+Fläche, die vorher leer stand.
+
+**Der Textblock braucht dabei eine Mindestbreite**, aus der Schrift
+abgeleitet (`QFontMetrics` über "2 000 000 000 XP total") statt in
+Pixeln geraten. Ohne sie zog die Tabelle bei WENIGEN Gems so viel Breite
+an sich, dass die Zahlenzeile umbrach — und jede zusätzliche Textzeile
+ging direkt vom Graphen ab: 126 statt 154 px, ausgerechnet beim
+schmaleren Balkenstreifen der kleinere Graph. Der Fließtext ("Rate
+follows after the next zone change") darf weiterhin umbrechen.
+
+Zur Messung selbst: Alle Pixelwerte hier stammen aus dem
+Offscreen-Betrieb, dessen Ersatzschrift **gut doppelt so breit** ist wie
+eine echte Windows-Schrift. Für Verhältnisse und Regressionen taugen
+sie, als absolute Vorgabe nicht — deshalb steht in den Tests kein
+einziger Pixelwert, sondern nur Vergleiche (gleiche Graph-Höhe bei 12
+und 38 Gems).
 
 **Aufgenommen wird per Rechtsklick** in der Item-Tabelle (Peters
 Entscheidung gegen eine Eingabeliste im Settings-Dialog). Derselbe
