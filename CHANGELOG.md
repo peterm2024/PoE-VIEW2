@@ -6,6 +6,18 @@ nach [SemVer](https://semver.org/lang/de/).
 
 ## [Unveröffentlicht]
 
+### Behoben
+
+- Ab etwa Stufe 91 blieben Level, Gesamterfahrung und XP/h im
+  Leveling-Feld stehen und der Graph bekam keine neuen Abschnitte mehr.
+  Ursache war die 32-Bit-Grenze von Qts `int` (2 147 483 647), die PoE
+  mitten in Stufe 91 überschreitet — die Erfahrung kam dadurch nie in
+  der Oberfläche an. Betroffen war jeder Charakter darüber; Stufe 100
+  sind 4 250 334 444 Erfahrungspunkte.
+- Die Gem-Balken waren verschwunden, seit die Favoriten-Tabelle neben
+  sie gesetzt wurde: Sie meldeten keine eigene Breite an und bekamen
+  deshalb keine.
+
 ### Hinzugefügt
 
 - Rechtsklick auf ein Item, "Watch stack size", und es steht mit seiner

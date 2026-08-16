@@ -35,7 +35,7 @@ from __future__ import annotations
 
 from typing import NamedTuple, Sequence
 
-from PySide6.QtCore import QEvent, QRectF, Qt
+from PySide6.QtCore import QEvent, QRectF, QSize, Qt
 from PySide6.QtGui import QColor, QPainter
 from PySide6.QtWidgets import QSizePolicy, QToolTip, QWidget
 
@@ -143,11 +143,32 @@ class GemProgressBar(QWidget):
         super().__init__()
         self._gems: list[GemProgress] = []
         self.setFixedHeight(BAR_HEIGHT)
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        # Waagerecht ``Fixed``: Die Breite ergibt sich aus der Zahl der
+        # Gems, mehr Platz nützt nichts. Solange die Balken allein in
+        # einer Zeile standen, war das gleichgültig — seit die
+        # Favoriten-Tabelle daneben sitzt (§4.45), nicht mehr: Ohne
+        # eigenen Breitenwunsch fiel das Widget auf 0 px zusammen und die
+        # Balken verschwanden vollständig (2026-08-16, an Peters
+        # Bildschirmfotos aufgefallen).
+        self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+
+    def sizeHint(self) -> QSize:  # noqa: N802 — Qt-Namensschema
+        return QSize(self._wanted_width(), BAR_HEIGHT)
+
+    def minimumSizeHint(self) -> QSize:  # noqa: N802 — Qt-Namensschema
+        return self.sizeHint()
+
+    def _wanted_width(self) -> int:
+        """Alle Balken samt Zwischenraum, ohne den Abstand hinter dem
+        letzten."""
+        if not self._gems:
+            return 0
+        return len(self._gems) * (_BAR_W + _BAR_GAP) - _BAR_GAP
 
     def set_gems(self, gems: Sequence[GemProgress]) -> None:
         self._gems = list(gems)
         self.setVisible(bool(self._gems))
+        self.updateGeometry()  # neue Breite anmelden, sonst bleibt die alte
         self.update()
 
     def clear(self) -> None:

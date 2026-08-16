@@ -133,3 +133,72 @@ def test_the_strip_paints_all_three_states(qapp) -> None:
     strip.render(strip.grab())
 
     assert len(strip._gems) == 3
+
+
+# --- Breite neben der Favoriten-Tabelle (2026-08-16) -------------------- #
+
+def _n_gems(anzahl: int):
+    """``anzahl`` Sockel-Gems, ueber denselben Weg wie im Betrieb."""
+    return gem_progress_of([_item_with(
+        *[_gem(f"Gem {i}", "17", "D", progress=0.5) for i in range(anzahl)])])
+
+
+def _zwoelf_gems():
+    return _n_gems(12)
+
+
+def test_die_balken_melden_ihre_breite_an(qapp) -> None:
+    """Solange die Balken allein in einer Zeile standen, brauchten sie
+    keinen Breitenwunsch. Seit die Favoriten-Tabelle daneben sitzt, schon:
+    Ohne ihn fiel das Widget auf 0 px zusammen."""
+    from poe_view.ui.gem_progress import GemProgressBar
+
+    bar = GemProgressBar()
+    bar.set_gems(_zwoelf_gems())
+
+    assert bar.sizeHint().width() == 12 * 7 - 2
+    assert bar.minimumSizeHint().width() == bar.sizeHint().width()
+
+
+def test_die_breite_waechst_mit_der_zahl_der_gems(qapp) -> None:
+    from poe_view.ui.gem_progress import GemProgressBar
+
+    bar = GemProgressBar()
+    bar.set_gems(_n_gems(1))
+    schmal = bar.sizeHint().width()
+    bar.set_gems(_n_gems(20))
+
+    assert bar.sizeHint().width() > schmal
+
+
+def test_ohne_gems_wird_keine_breite_verlangt(qapp) -> None:
+    from poe_view.ui.gem_progress import GemProgressBar
+
+    bar = GemProgressBar()
+    bar.set_gems([])
+
+    assert bar.sizeHint().width() == 0
+
+
+def test_die_balken_ueberleben_die_tabelle_daneben(qapp) -> None:
+    """Der eigentliche Regressionstest: Peters Bildschirmfotos vom
+    2026-08-16 zeigten das Leveling-Feld ohne jeden Gem-Balken, weil die
+    Favoriten-Tabelle im selben Streifen allen Platz bekam."""
+    from poe_view.ui.favourites import FavouriteRow
+    from poe_view.ui.gem_progress import GemProgressBar
+    from poe_view.ui.leveling_panel import LevelingPanel
+
+    panel = LevelingPanel()
+    panel._gems.set_gems(_zwoelf_gems())
+    panel.resize(560, 320)
+    panel.show()
+    qapp.processEvents()
+    allein = panel._gems.width()
+
+    panel.set_favourites([FavouriteRow("Primal Crystallised Lifeforce", 5017),
+                          FavouriteRow("Vivid Crystallised Lifeforce", 5562)])
+    qapp.processEvents()
+
+    assert allein > 0
+    assert panel._gems.width() == allein
+    panel.close()

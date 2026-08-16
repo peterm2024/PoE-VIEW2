@@ -874,3 +874,42 @@ Behoben durch ein gemeinsames Budget in Zeilenhöhen für Text UND Linien (17 Ei
 **Eine Messung ist erst dann eine Messung, wenn sie das zählt, was knapp ist.** Beide Fälle waren sorgfältig belegt — 59.012 Items hier, echte Rohdaten dort — und beide zählten die falsche Größe: Textzeilen statt vertikaler Pixel, "Stück pro Chaos" als feste Einheit statt als eine von zwei möglichen Lesarten. Die Sorgfalt der Erhebung sagt nichts über die Richtigkeit der Einheit.
 
 **Und: Eine Zahl einer Fremd-API kann ihre Einheit wechseln, ohne dass jemand es ankündigt.** #63 hat den Wert richtig interpretiert und die Interpretation fest verdrahtet. Robuster ist eine Regel, die aus dem ableitet, was man unabhängig WEISS — hier: dass der Boden eine Obergrenze ist.
+
+## 69. Qts `int` ist 32-bittig — ab Stufe 91 kam die Erfahrung nie mehr in der Oberfläche an
+
+Peters Log vom 2026-08-16, 11:06:57, bei jedem Charakter-Abruf:
+
+```
+RuntimeWarning: libshiboken: Overflow: Value 2151302311 exceeds limits
+of type [signed] "int" (4bytes).
+  self.character_snapshot_loaded.emit(name, level, experience)
+OverflowError
+```
+
+`character_snapshot_loaded` war als `Signal(str, int, int)` deklariert. Qts `int` ist der C++-Typ, also **32 Bit mit Vorzeichen**: Schluss bei 2 147 483 647. PoE überschreitet diesen Wert mitten in Stufe 91; Stufe 100 sind 4 250 334 444. Ab da warf `emit` einen OverflowError, das Signal kam nie an, und `_on_character_snapshot` lief nicht mehr.
+
+Sichtbar war das als **Stillstand ohne Fehlermeldung**: Level, Gesamt-XP und XP/h im Leveling-Feld blieben auf dem letzten Stand unter der Grenze stehen, der Graph bekam keine neuen Abschnitte, und die Statuszeile zeigte alle paar Sekunden `FetchCharacterItemsJob:` — denn die Ausnahme flog aus `_dispatch` heraus in die allgemeine Fehlerbehandlung des Workers. Die Items kamen weiter an, weil `character_items_loaded` (`Signal(str, object, bool)`) vorher und ohne `int` gefeuert wird.
+
+Behoben durch `Signal(str, int, "qlonglong")` — 64 Bit, damit bis 9,2 Trillionen Luft.
+
+### Wie vermeiden
+
+**Ein `int` in einer Qt-Signatur ist nicht Pythons `int`.** Python rechnet beliebig genau, Qt nicht; die Grenze liegt dort, wo in Python noch gar nichts auffällt. Betroffen ist jede Zahl, die aus einer fremden Datenquelle kommt und wachsen kann — Erfahrung, Geldbeträge, Zeitstempel in Millisekunden, Byte-Größen.
+
+**Wo eine Zahl unbegrenzt wachsen kann, gehört `"qlonglong"` oder `object` in die Signatur**, nicht `int`. Die Kosten sind null, der Fehler dagegen fällt erst auf, wenn ein Nutzer die Grenze überschreitet — und dann als etwas, das nach einem hängenden Refresh aussieht, nicht nach einem Zahlenproblem.
+
+**Und: Eine Shiboken-Warnung auf der Konsole ist kein Schönheitsfehler.** Sie stand in Peters Terminal, sichtbar, mit dem exakten Wert und der exakten Zeile daneben — die Fehlersuche danach dauerte Minuten. Ohne den Blick ins Terminal wäre nur "die XP-Anzeige klemmt" übrig geblieben.
+
+## 70. Zwei Widgets in einer Zeile: Wer keine Breite anmeldet, bekommt keine
+
+Peters Bildschirmfotos vom 2026-08-16 zeigten das Leveling-Feld **ohne jeden Gem-Balken**. Der Charakter hatte Gems, die Balken waren am Vortag noch da.
+
+Ursache war der Einbau der Favoriten-Tabelle (§4.45): Sie kam mit `addWidget(self.favourites, stretch=1)` neben die Balken in eine `QHBoxLayout`. `GemProgressBar` hatte bis dahin nie einen Breitenwunsch gebraucht — allein in einer Zeile bekam es ohnehin die volle Breite und malte seine Balken ab x=0. Ohne `sizeHint` fällt ein `QWidget` aber auf seine Mindestgröße zurück, und die ist 0. Gemessen: **536 px allein, 0 px neben der Tabelle.**
+
+Behoben durch einen `sizeHint`, der die tatsächlich gebrauchte Breite meldet (Balkenzahl × 7 px − 2), plus waagerecht `Fixed` statt `Expanding` — mehr Platz nützt den Balken nicht — und ein `updateGeometry()` in `set_gems`, damit eine geänderte Gem-Zahl auch ankommt.
+
+### Wie vermeiden
+
+**Ein Widget, das bisher allein in seiner Zeile stand, ist ungetestet gegen Nachbarn.** Es kam nie in die Lage, seine Breite begründen zu müssen. Wer ihm einen Nachbarn danebenstellt, prüft zuerst, ob es einen `sizeHint` hat.
+
+**Der Regressionstest misst die Breite im zusammengebauten Panel**, nicht am einzelnen Widget: Der Fehler entstand aus dem Zusammenspiel, ein Test des Widgets allein hätte ihn nie gesehen. Genau das ist die Lücke, die die Testabdeckung dieses Projekts sonst hat — die Verdrahtung ist der ungetestete Teil, und hier hat sie zugeschlagen.

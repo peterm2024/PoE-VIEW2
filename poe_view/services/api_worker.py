@@ -211,7 +211,14 @@ class ApiWorker(QThread):
     # (Peter, 2026-08-10: XP/h-Anzeige) — eigenes Signal statt das obige zu
     # erweitern, damit die bestehenden Verwerter von ``character_items_loaded``
     # unangetastet bleiben.
-    character_snapshot_loaded = Signal(str, int, int)  # Charaktername, level, experience
+    # ``qlonglong`` (64 Bit) statt ``int`` für die Erfahrung: Qts ``int``
+    # ist 32-bittig und endet bei 2.147.483.647. In PoE wird dieser Wert
+    # mitten in Stufe 91 überschritten (Stufe 100 sind 4.250.334.444) —
+    # ab da warf ``emit`` einen OverflowError, das Signal kam nie an, und
+    # die XP-Anzeige blieb auf ihrem letzten Stand stehen, während im
+    # Terminal alle paar Sekunden eine Shiboken-Warnung auflief
+    # (Peters Log vom 2026-08-16, 11:06:57, bei 2.151.302.311).
+    character_snapshot_loaded = Signal(str, int, "qlonglong")  # Name, level, experience
     icon_loaded = Signal(str, object)          # url, bytes
     rate_limit_changed = Signal(str, object, float)  # policy, rules, wait_s
     job_error = Signal(str)                    # Fehlertext für die Statusbar

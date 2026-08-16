@@ -688,3 +688,28 @@ def test_load_all_tabs_reports_the_stash_id_of_each_fetched_tab(qapp, monkeypatc
 
     assert ids == ["map-a", "map-b", "map-c", "t1"]
     worker.client.close()
+
+
+# --- Erfahrung jenseits von 32 Bit (Peters Log, 2026-08-16) ------------- #
+
+def test_experience_above_two_billion_still_reaches_the_ui(qapp):
+    """Qts ``int`` ist 32-bittig und endet bei 2.147.483.647. PoE
+    ueberschreitet das mitten in Stufe 91; Stufe 100 sind 4.250.334.444.
+    Mit ``Signal(..., int)`` warf ``emit`` dort einen OverflowError, das
+    Signal kam nie an, und die XP-Anzeige stand still, waehrend im
+    Terminal alle paar Sekunden eine Shiboken-Warnung auflief.
+
+    Peters echter Wert aus dem Log: 2.151.302.311."""
+    worker = ApiWorker()
+    angekommen = []
+    worker.character_snapshot_loaded.connect(
+        lambda name, level, xp: angekommen.append((name, level, xp)))
+    try:
+        worker.character_snapshot_loaded.emit("WitchOfPeter", 91, 2_151_302_311)
+        worker.character_snapshot_loaded.emit("WitchOfPeter", 100, 4_250_334_444)
+    finally:
+        worker.client.close()
+        worker._ninja_http.close()
+
+    assert angekommen == [("WitchOfPeter", 91, 2_151_302_311),
+                          ("WitchOfPeter", 100, 4_250_334_444)]
