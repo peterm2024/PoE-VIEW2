@@ -4607,10 +4607,27 @@ Peter, 2026-08-15: "Oft gibt es Items, deren Stapelgröße ich gerne
 beobachten würde, z.B. Lifeforce. ... So weiß ich auf einen Blick,
 wieviel ich von z.B. 'Wild Crystallised Lifeforce' besitze."
 
-Eine schmale zweispaltige Tabelle rechts neben den Gem-Balken, im selben
-Streifen über dem XP-Graphen: Name links, Menge rechts. Gezählt wird
-über alle geladenen Fächer **und** Charaktere der aktuellen Liga —
-Währung liegt oft im Rucksack.
+Eine schmale zweispaltige Tabelle rechts neben dem Textblock des
+Leveling-Felds: Name links, Menge rechts. Gezählt wird über alle
+geladenen Fächer **und** Charaktere der aktuellen Liga — Währung liegt
+oft im Rucksack.
+
+**Die Anordnung stammt aus Peters zweiter Skizze** (2026-08-16). Zuerst
+saß die Tabelle unten im Streifen neben den Gem-Balken; sie steht jetzt
+oben rechts, wo neben Name, Stufe und Rate ohnehin Fläche frei ist, und
+füllt deren Höhe aus. Die Gem-Balken bleiben, wo sie waren.
+
+Dabei entscheidet ein Detail über die Aufteilung: Die Tabelle **verlangt**
+senkrecht nur eine Zeile (`sizeHint`) und **füllt** den Rest über
+`Expanding`. Mit dem Vorgabewert einer `QTableWidget` — gemessen 164 px —
+hätte sie den Graphen darunter auf 60 px zusammengedrückt. Was nicht in
+die Höhe des Textblocks passt, wird gescrollt.
+
+Gemessen an einem 578×320-Panel: Die Tabelle wuchs von 38 auf 61 px,
+Graph und Gem-Balken blieben unverändert bei 163 bzw. 60 px. Der Graph
+gewinnt also **nichts** — anders als vorhergesagt, denn die Gem-Balken
+sind mit 60 px ohnehin höher als die Tabelle je war. Gewonnen ist Platz
+für die Tabelle selbst, aus einer Fläche, die vorher leer war.
 
 **Aufgenommen wird per Rechtsklick** in der Item-Tabelle (Peters
 Entscheidung gegen eine Eingabeliste im Settings-Dialog). Derselbe
@@ -4648,9 +4665,10 @@ ob ein Generator durchläuft — das fiel bei einer Sabotage mit
 vorgeschaltetem `list(items)` nicht auf und bewies damit nichts über die
 Laufzeit.
 
-Höchstens zwölf Beobachtungen (`_MAX_FAVOURITES`), vier davon ohne
-Scrollen sichtbar. Wer mehr will, führt Inventar — dafür ist die
-Haupttabelle da. Gespeichert wird als JSON-Liste in `ui-settings.ini`,
+Höchstens zwölf Beobachtungen (`_MAX_FAVOURITES`); wie viele davon ohne
+Scrollen sichtbar sind, ergibt sich aus der Höhe des Textblocks daneben
+(bei drei Zeilen Text drei Einträge). Wer mehr will, führt Inventar —
+dafür ist die Haupttabelle da. Gespeichert wird als JSON-Liste in `ui-settings.ini`,
 bewusst nicht als QSettings-Stringliste: Die zerlegt einen einzelnen
 Eintrag beim Zurücklesen je nach Plattform wieder in Zeichen.
 
@@ -4667,7 +4685,9 @@ Mindestbreite, ein Durchlauf, Generator als Eingabe) und
 `tests/test_main_window_helpers.py` (Aufnehmen und Entlassen über das
 Kontextmenü, Überleben eines Neustarts, Summe aus Fächern und
 Charakteren, `≥` bei halb geladener Liga, Obergrenze, Item ohne
-brauchbaren Namen).
+brauchbaren Namen) sowie `tests/test_leveling_panel.py` für die
+Anordnung (Tabelle rechts vom Textblock, füllt dessen Höhe, Gem-Balken
+bleiben darunter, Graph behält den Rest).
 
 ---
 

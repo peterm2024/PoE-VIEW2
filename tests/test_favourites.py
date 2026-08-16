@@ -7,8 +7,8 @@ Peter, 2026-08-15: "So weiss ich auf einen Blick, wieviel ich von z.B.
 from __future__ import annotations
 
 from poe_view.api.models import Item
-from poe_view.ui.favourites import (INCOMPLETE_MARK, MAX_VISIBLE_ROWS,
-                                    ROW_HEIGHT, FavouriteRow, FavouritesTable,
+from poe_view.ui.favourites import (INCOMPLETE_MARK, ROW_HEIGHT,
+                                    FavouriteRow, FavouritesTable,
                                     favourite_rows)
 
 
@@ -123,24 +123,29 @@ def test_das_zeichen_fuer_unvollstaendig_erklaert_sich_im_tooltip(qapp):
 
 
 def test_ohne_zeilen_verschwindet_die_tabelle_ganz(qapp):
-    """Ein leerer Rahmen ueber dem Graphen behauptete, es gaebe hier
+    """Ein leerer Rahmen neben dem Textblock behauptete, es gaebe hier
     etwas zu sehen."""
     tabelle = FavouritesTable()
     tabelle.set_rows([FavouriteRow("Chaos Orb", 5)])
     tabelle.set_rows([])
 
     assert tabelle.isVisible() is False
-    assert tabelle.height() == 0
 
 
-def test_die_hoehe_waechst_nur_bis_zur_obergrenze(qapp):
-    """Darueber wird gescrollt, sonst frisst die Tabelle den Graphen."""
+def test_die_tabelle_verlangt_keine_hoehe_sondern_fuellt_sie(qapp):
+    """Peter, 2026-08-16: "die volle uns verbliebene Hoehe". Der
+    Vorgabewert einer QTableWidget waren gemessene 164 px — damit haette
+    die Tabelle den Graphen darunter auf 60 px zusammengedrueckt. Sie
+    soll die Hoehe des Textblocks daneben ausfuellen, nicht selbst
+    welche einfordern; was nicht hineinpasst, wird gescrollt."""
     tabelle = FavouritesTable()
-    viele = [FavouriteRow(f"Item {i}", i) for i in range(MAX_VISIBLE_ROWS + 6)]
-    tabelle.set_rows(viele)
+    eine = FavouritesTable()
+    eine.set_rows([FavouriteRow("Chaos Orb", 5)])
+    tabelle.set_rows([FavouriteRow(f"Item {i}", i) for i in range(20)])
 
-    assert tabelle.rowCount() == len(viele)
-    assert tabelle.height() <= MAX_VISIBLE_ROWS * ROW_HEIGHT + 2
+    assert tabelle.rowCount() == 20
+    assert tabelle.sizeHint().height() == ROW_HEIGHT + 2
+    assert tabelle.sizeHint().height() == eine.sizeHint().height()
 
 
 def test_ein_neuer_stand_ersetzt_den_alten(qapp):

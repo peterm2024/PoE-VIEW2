@@ -49,15 +49,25 @@ class LevelingPanel(QFrame):
         self.favourites = FavouritesTable()
         self._graph = XpGraph()
 
-        streifen = QHBoxLayout()
-        streifen.setContentsMargins(0, 0, 0, 0)
-        streifen.addWidget(self._gems)
-        streifen.addWidget(self.favourites, stretch=1)
+        # Kopfzeile: links Name und Zahlen, rechts die Favoriten
+        # (Peter, 2026-08-16, mit Skizze). Die Tabelle füllt dabei die
+        # Höhe des Textblocks aus, statt darunter eine eigene Zeile zu
+        # belegen — das war der Punkt: Der Graph darunter gewinnt den
+        # Platz zurück.
+        kopf_text = QVBoxLayout()
+        kopf_text.setContentsMargins(0, 0, 0, 0)
+        kopf_text.addWidget(self._title)
+        kopf_text.addWidget(self._body)
+        kopf_text.addStretch(1)
+
+        kopf = QHBoxLayout()
+        kopf.setContentsMargins(0, 0, 0, 0)
+        kopf.addLayout(kopf_text, stretch=1)
+        kopf.addWidget(self.favourites, stretch=1)
 
         layout = QVBoxLayout(self)
-        layout.addWidget(self._title)
-        layout.addWidget(self._body)
-        layout.addLayout(streifen)
+        layout.addLayout(kopf)
+        layout.addWidget(self._gems)
         layout.addWidget(self._graph, stretch=1)
 
     def clear(self) -> None:

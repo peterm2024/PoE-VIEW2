@@ -259,7 +259,8 @@ and a break does not make it decay: it simply stays where it was. GGG
 only publish experience when you leave an area, so the number can never
 be fresher than your last zone change; if it is more than a minute old,
 that is written next to it.</p>
-<p><b>Watched stack sizes</b> sit beside the gem bars. Right-click any
+<p><b>Watched stack sizes</b> sit at the top right, beside the level and
+rate. Right-click any
 item in the table and pick <i>Watch stack size</i>; its total across every
 loaded stash tab and character of this league then stays in view, whatever
 you are looking at. Right-click it again to stop. A <b>≥</b> in front of a

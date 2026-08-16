@@ -21,7 +21,8 @@ nach [SemVer](https://semver.org/lang/de/).
 ### Hinzugefügt
 
 - Rechtsklick auf ein Item, "Watch stack size", und es steht mit seiner
-  Gesamtmenge in einer kleinen Tabelle neben den Gem-Balken. Gezählt
+  Gesamtmenge in einer kleinen Tabelle oben rechts im Leveling-Feld,
+  neben Stufe und Rate. Gezählt
   wird über alle geladenen Fächer und Charaktere der Liga, sodass ein
   Blick genügt, um zu sehen, wie viel Lifeforce oder Währung
   zusammengekommen ist. Ein `≥` weist darauf hin, solange noch nicht

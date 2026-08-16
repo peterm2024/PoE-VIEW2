@@ -28,14 +28,10 @@ from PySide6.QtWidgets import (QHeaderView, QMenu, QSizePolicy, QTableWidget,
 from poe_view.api.models import Item
 
 # Zeilenhöhe und Schrift bewusst kleiner als in der Haupttabelle: Die
-# Tabelle teilt sich den Streifen über dem Graphen mit den Gem-Balken
-# (60 px hoch, §4.42) und darf ihn nicht sprengen.
+# Tabelle steht neben dem Textblock des Leveling-Felds und teilt sich
+# dessen Höhe — je Zeile weniger Platz heißt hier mehr Zeilen.
 ROW_HEIGHT = 18
 FONT_SIZE = 8
-
-# Ab hier wird die Liste scrollbar statt höher. Vier Zeilen passen neben
-# die Gem-Balken, ohne dass der Graph darunter schrumpft.
-MAX_VISIBLE_ROWS = 4
 
 INCOMPLETE_MARK = "≥"
 
@@ -111,8 +107,15 @@ class FavouritesTable(QTableWidget):
         font = QFont()
         font.setPointSize(FONT_SIZE)
         self.setFont(font)
+        # Senkrecht ``Expanding`` und keine feste Höhe (Peter,
+        # 2026-08-16: "die volle uns verbliebene Höhe"): Die Tabelle
+        # füllt neben dem Textblock aus, was dort da ist. Wie hoch das
+        # ist, entscheidet der Textblock — passen nicht alle Zeilen
+        # hinein, wird gescrollt, statt dem Graphen darunter Platz
+        # wegzunehmen.
         self.setSizePolicy(QSizePolicy.Policy.Expanding,
-                           QSizePolicy.Policy.Fixed)
+                           QSizePolicy.Policy.Expanding)
+        self.setMinimumHeight(ROW_HEIGHT + 2)
         self._rows: list[FavouriteRow] = []
         self.set_rows([])
 
@@ -137,11 +140,6 @@ class FavouritesTable(QTableWidget):
             self.setItem(zeile, 0, name)
             self.setItem(zeile, 1, menge)
         self.setVisible(bool(self._rows))
-        self.setFixedHeight(self._wanted_height())
-
-    def _wanted_height(self) -> int:
-        sichtbar = min(len(self._rows), MAX_VISIBLE_ROWS)
-        return sichtbar * ROW_HEIGHT + 2 if sichtbar else 0
 
     def name_at(self, row: int) -> str:
         """Für das Kontextmenü: Welcher Favorit steht in dieser Zeile?"""
@@ -165,6 +163,21 @@ class FavouritesTable(QTableWidget):
         if menu is not None:
             menu.exec(self.viewport().mapToGlobal(pos))
 
+    def sizeHint(self):  # noqa: N802 — Qt-Namensschema
+        """Senkrecht nur eine Zeile verlangen, obwohl das Widget beliebig
+        viele trägt.
+
+        Der Unterschied entscheidet über die Aufteilung des Panels: Qt
+        gibt einer Zeile die Höhe ihres größten ``sizeHint``. Mit dem
+        Vorgabewert einer ``QTableWidget`` (gemessen 164 px) hätte die
+        Tabelle den Graphen darunter auf 60 px zusammengedrückt. Gefragt
+        war das Gegenteil — die Tabelle soll die Höhe FÜLLEN, die der
+        Textblock daneben ohnehin belegt, und nicht selbst welche
+        einfordern. Was dann nicht hineinpasst, wird gescrollt."""
+        hint = super().sizeHint()
+        hint.setHeight(ROW_HEIGHT + 2)
+        return hint
+
     def minimumSizeHint(self):  # noqa: N802 — Qt-Namensschema
         """Genug Platz für die Mengenspalte plus ein paar Zeichen Name.
 
@@ -174,4 +187,5 @@ class FavouritesTable(QTableWidget):
         hint = super().minimumSizeHint()
         breite = QFontMetrics(self.font()).horizontalAdvance("≥ 000 000") + 40
         hint.setWidth(breite)
+        hint.setHeight(ROW_HEIGHT + 2)
         return hint
