@@ -266,7 +266,9 @@ loaded stash tab and character of this league then stays in view, whatever
 you are looking at. Right-click it again to stop. A <b>≥</b> in front of a
 number means some tabs of this league have not been loaded yet, so there
 may be more than it says. An item you own none of shows <b>0</b> rather
-than disappearing — that is the answer you were looking for.</p>
+than disappearing — that is the answer you were looking for.
+<b>Drag a row</b> to move it: the list stays in the order you put it in,
+across restarts, and is never re-sorted by amount behind your back.</p>
 <p>Above the graph, <b>one narrow bar per socketed gem</b> shows its
 <b>level</b> as the filled height, coloured by the attribute it needs.
 Read the strip as a profile of the character: the short bars are the

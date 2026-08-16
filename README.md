@@ -142,7 +142,9 @@ progress and the last three hours of experience.
   panel. It adds up every
   loaded stash tab and character of the league, so a glance tells you how
   much Wild Crystallised Lifeforce you are sitting on. A `≥` marks a
-  total that is still missing unloaded tabs.
+  total that is still missing unloaded tabs. Drag a row to reorder the
+  list; it keeps the order you gave it across restarts and is never
+  re-sorted by amount.
 - **Gem progress**: one narrow bar per socketed gem, its filled height
   the gem's **level**, coloured by the attribute it needs — the strip
   reads as a profile of the character, so the short bars are the gems

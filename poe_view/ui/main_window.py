@@ -1284,6 +1284,7 @@ class MainWindow(QMainWindow):
         # Item-Tabelle mehr — über den Rechtsklick dort wäre es nie
         # wieder loszuwerden.
         self.leveling.favourites.remove_requested.connect(self._toggle_favourite)
+        self.leveling.favourites.order_changed.connect(self._reorder_favourites)
         bottom_splitter = QSplitter(Qt.Orientation.Horizontal)
         bottom_splitter.addWidget(self.detail)
         bottom_splitter.addWidget(self.leveling)
@@ -1769,6 +1770,19 @@ class MainWindow(QMainWindow):
             namen.append(name)
         self._save_favourite_names(namen)
         self._update_favourites()
+
+    def _reorder_favourites(self, names: list[str]) -> None:
+        """Nach dem Ziehen: neue Reihenfolge sichern.
+
+        Sofort gespeichert, nicht erst beim Beenden — die Liste hat ihren
+        Zweck darin, dass sie über Sitzungen hinweg gleich bleibt, und
+        eine Sortierung, die ein Programmabsturz verschluckt, wäre genau
+        die Arbeit, die man zweimal macht.
+
+        Anschließend NICHT neu gezählt: Die Tabelle hat die Zeilen samt
+        Mengen schon umgehängt, und ein zweiter Durchlauf über alle Items
+        der Liga brächte dieselben Zahlen noch einmal."""
+        self._save_favourite_names([str(name) for name in names])
 
     def _update_favourites(self) -> None:
         """Die Mengen neu zählen und ins Leveling-Panel geben.

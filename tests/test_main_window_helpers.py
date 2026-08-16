@@ -8744,6 +8744,30 @@ def test_ein_item_ohne_brauchbaren_namen_bekommt_keinen_eintrag(qapp):
     win.worker.wait(5000)
 
 
+def test_die_neue_reihenfolge_ueberlebt_den_naechsten_start(qapp, tmp_path,
+                                                            monkeypatch):
+    """Peter, 2026-08-16: "Koennten wir die Fav-Item-Liste per Drag&Drop
+    umsortieren?" Der Sinn der Liste ist, dass sie ueber Sitzungen hinweg
+    gleich bleibt — eine Sortierung, die nur bis zum Beenden haelt, waere
+    Arbeit, die man zweimal macht. Geprueft wird die ganze Kette: Signal
+    der Tabelle, Speichern, Zurueckliest im naechsten Fenster."""
+    monkeypatch.setattr("poe_view.config.APP_DATA_DIR", tmp_path / "appdata")
+    erste = MainWindow()
+    for name in ("Chaos Orb", "Divine Orb", "Vaal Orb"):
+        erste._toggle_favourite(name)
+
+    erste.leveling.favourites.move_row(2, 0)
+
+    assert erste._favourite_names() == ["Vaal Orb", "Chaos Orb", "Divine Orb"]
+    erste.worker.stop()
+    erste.worker.wait(5000)
+
+    zweite = MainWindow()
+    assert zweite._favourite_names() == ["Vaal Orb", "Chaos Orb", "Divine Orb"]
+    zweite.worker.stop()
+    zweite.worker.wait(5000)
+
+
 def test_das_entlassen_aus_der_tabelle_ist_verdrahtet(qapp, tmp_path, monkeypatch):
     """Das Signal der Tabelle muss im Hauptfenster ankommen — sonst
     passiert beim Klick auf "Stop watching" nichts."""

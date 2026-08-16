@@ -14,6 +14,12 @@ Fach der Liga geladen, kann irgendwo mehr liegen. Die Zeile trägt dann
 ein ``≥`` — die Zahl bleibt brauchbar, behauptet aber nicht, alles zu
 sein. Ohne dieses Zeichen sähe eine halb geladene Liga wie ein
 Bestandsverlust aus.
+
+**Die Reihenfolge gehört dem Nutzer.** Sortiert wird nie automatisch,
+weil eine Zeile, die je nach Bestand die Position wechselt, sich nicht
+"auf einen Blick" ablesen lässt. Umgekehrt heißt das, dass sie sich von
+Hand setzen lassen muss — per Ziehen in der Tabelle (§``move_row``,
+Peter 2026-08-16).
 """
 
 from __future__ import annotations
@@ -60,7 +66,8 @@ def favourite_rows(items: Iterable[Item], names: Sequence[str],
 
     Die Reihenfolge stammt vom Nutzer und wird nicht nach Menge sortiert:
     Eine Zeile, die je nach Bestand die Position wechselt, kann man nicht
-    "auf einen Blick" ablesen — man müsste sie jedes Mal suchen.
+    "auf einen Blick" ablesen — man müsste sie jedes Mal suchen. Geändert
+    wird sie durch Ziehen in der Tabelle (§``FavouritesTable.move_row``).
 
     **Ein Durchlauf für alle Namen, nicht einer je Name.** An Peters
     echtem Bestand (58.621 Items) gemessen: zwölf Beobachtungen über
@@ -78,6 +85,28 @@ def favourite_rows(items: Iterable[Item], names: Sequence[str],
     return [FavouriteRow(name, summen[name], complete) for name in names]
 
 
+def reordered(names: Sequence[str], von: int, ziel: int) -> list[str]:
+    """``names`` mit dem Eintrag an Position ``von``, eingefügt VOR
+    Position ``ziel``.
+
+    ``ziel`` ist eine Einfügestelle, keine Zeile: Bei ``len(names)`` geht
+    der Eintrag ans Ende. Das ist der Grund für die Korrektur ``ziel > von``
+    — nach dem Herausnehmen rutscht alles dahinter eine Stelle vor, und
+    ohne sie landete ein nach unten gezogener Eintrag immer eine Position
+    zu tief.
+
+    Eigene Funktion statt Rechnerei im ``dropEvent``: Die
+    Off-by-one-Fälle (an dieselbe Stelle, ans Ende, über sich selbst
+    hinweg) lassen sich so ohne echtes Drag&Drop prüfen."""
+    if not 0 <= von < len(names):
+        return list(names)
+    rest = list(names)
+    name = rest.pop(von)
+    ziel = min(max(ziel, 0), len(names))
+    rest.insert(ziel - 1 if ziel > von else ziel, name)
+    return rest
+
+
 class FavouritesTable(QTableWidget):
     """Zwei Spalten ohne Kopfzeile: Name links, Menge rechts."""
 
@@ -87,13 +116,37 @@ class FavouritesTable(QTableWidget):
     # über den Rechtsklick dort nie wieder zu entfernen.
     remove_requested = Signal(str)
 
+    # Die neue Reihenfolge nach dem Ziehen, als Namensliste. Peter,
+    # 2026-08-16: "Könnten wir die Fav-Item-Liste per Drag&Drop
+    # umsortieren?" Die Reihenfolge stammt vom Nutzer und wird bewusst
+    # nicht nach Menge sortiert (§favourite_rows) — dann muss er sie auch
+    # ändern können, ohne die halbe Liste neu anzulegen.
+    order_changed = Signal(list)
+
     def __init__(self) -> None:
         super().__init__(0, 2)
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.customContextMenuRequested.connect(self._on_context_menu)
         self.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
+        # Eine Zeile auf einmal, und die ganze Zeile: Qts ``startDrag``
+        # zieht, was ausgewählt IST — mit ``NoSelection`` (dem früheren
+        # Wert) käme kein Ziehen zustande, weil die Auswahl leer bliebe.
+        self.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+        self.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        # ``NoFocus`` bleibt: Die Auswahl wird dadurch in der gedämpften
+        # Inaktiv-Farbe gezeichnet — sichtbar genug beim Ziehen, ohne die
+        # kleine Tabelle dauerhaft mit einem blauen Balken zu belegen.
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.setDropIndicatorShown(True)
+        # Setzt von sich aus ``dragEnabled`` und ``acceptDrops`` auf dem
+        # Widget UND auf dem Viewport (nachgemessen 2026-08-16) — die
+        # drei einzeln nachzuziehen sähe gründlich aus, änderte aber
+        # nichts.
+        self.setDragDropMode(QTableWidget.DragDropMode.InternalMove)
+        # Ohne das ersetzt Qt die Zielzeile, statt davor einzufügen — aus
+        # dem Umsortieren würde ein Überschreiben.
+        self.setDragDropOverwriteMode(False)
+        self._drag_name = ""
         self.horizontalHeader().hide()
         self.verticalHeader().hide()
         self.setShowGrid(False)
@@ -137,6 +190,13 @@ class FavouritesTable(QTableWidget):
             if not row.complete:
                 menge.setToolTip("Not every stash tab of this league is "
                                  "loaded — there may be more.")
+            # Ziehbar, aber selbst kein Ablageziel: Ohne
+            # ``ItemIsDropEnabled`` fällt ein Eintrag ZWISCHEN die Zeilen
+            # statt auf eine, und nur so zeigt Qt den Einfügestrich.
+            for feld in (name, menge):
+                feld.setFlags(Qt.ItemFlag.ItemIsEnabled
+                              | Qt.ItemFlag.ItemIsSelectable
+                              | Qt.ItemFlag.ItemIsDragEnabled)
             self.setItem(zeile, 0, name)
             self.setItem(zeile, 1, menge)
         self.setVisible(bool(self._rows))
@@ -162,6 +222,108 @@ class FavouritesTable(QTableWidget):
         menu = self.build_context_menu(self.rowAt(pos.y()))
         if menu is not None:
             menu.exec(self.viewport().mapToGlobal(pos))
+
+    # --- Umsortieren per Ziehen ---------------------------------------- #
+
+    def move_row(self, von: int, ziel: int) -> bool:
+        """Zeile ``von`` vor die Einfügestelle ``ziel`` schieben.
+
+        Gibt zurück, ob sich dabei etwas geändert hat. Als eigene Methode
+        herausgezogen, damit sich das Umsortieren prüfen lässt, ohne ein
+        echtes Drag&Drop zu erzeugen — dasselbe Vorgehen wie bei
+        ``build_context_menu``.
+
+        Die Tabelle ordnet sich selbst sofort um und meldet es erst
+        danach. Wer nur meldete, überließe die Anzeige dem Empfänger des
+        Signals; die Zeile bliebe bis zur nächsten Zählung dort liegen,
+        wo sie war, und das Ziehen sähe aus, als hätte es nicht
+        funktioniert."""
+        alt = [row.name for row in self._rows]
+        neu = reordered(alt, von, ziel)
+        if neu == alt:
+            return False
+        nach_name = {row.name: row for row in self._rows}
+        self.set_rows([nach_name[name] for name in neu])
+        self.order_changed.emit(neu)
+        return True
+
+    def drop_index(self, y: int) -> int:
+        """Vor welche Zeile fällt ein Eintrag, der bei ``y`` losgelassen
+        wird?
+
+        Unterhalb der letzten Zeile ans Ende: Sonst wäre ausgerechnet die
+        letzte Position nur zu erreichen, indem man auf die untere Hälfte
+        der letzten Zeile zielt. Innerhalb einer Zeile entscheidet die
+        Mitte, damit sich ein Eintrag auch VOR die erste Zeile setzen
+        lässt."""
+        zeile = self.rowAt(y)
+        if zeile < 0:
+            return self.rowCount()
+        mitte = self.rowViewportPosition(zeile) + self.rowHeight(zeile) / 2
+        return zeile if y < mitte else zeile + 1
+
+    def remember_drag_row(self) -> None:
+        """Beim Aufnehmen den gezogenen NAMEN merken, nicht die
+        Zeilennummer.
+
+        Qts Drag läuft in einer eigenen Ereignisschleife: Zwischen
+        Aufnehmen und Ablegen kommt die Mengen-Zählung durch und ruft
+        ``set_rows`` auf. Nachgemessen (2026-08-16) überlebt die
+        Zeilennummer das zwar — sie zeigt danach aber unter Umständen auf
+        einen ANDEREN Eintrag, etwa wenn währenddessen ein Favorit weiter
+        oben entlassen wurde. Nur bei leerer Liste wird sie -1. Der Name
+        ist die einzige Angabe, die den Vorgang übersteht.
+
+        Eigene Methode, weil ``startDrag`` im Test nicht aufrufbar ist:
+        Es öffnet eine modale Schleife und würde den Lauf anhalten."""
+        self._drag_name = self.name_at(self.currentRow())
+
+    def _dragged_row(self) -> int:
+        """Wo steht der gezogene Eintrag jetzt? ``-1``, wenn er inzwischen
+        verschwunden ist — dann wird nichts verschoben."""
+        if not self._drag_name:
+            return self.currentRow()
+        for index, row in enumerate(self._rows):
+            if row.name == self._drag_name:
+                return index
+        return -1
+
+    def startDrag(self, actions) -> None:  # noqa: N802 — Qt-Namensschema
+        self.remember_drag_row()
+        super().startDrag(actions)
+
+    def _accept_internal(self, event) -> None:
+        """Nur die eigenen Zeilen annehmen. Ein Item aus der Haupttabelle
+        hierher zu ziehen sähe aus, als würde es aufgenommen — dafür gibt
+        es den Rechtsklick, und ein stillschweigend verworfener Ablauf
+        wäre schlimmer als gar keiner."""
+        if event.source() is self:
+            event.setDropAction(Qt.DropAction.MoveAction)
+            event.accept()
+        else:
+            event.ignore()
+
+    def dragEnterEvent(self, event) -> None:  # noqa: N802 — Qt-Namensschema
+        self._accept_internal(event)
+
+    def dragMoveEvent(self, event) -> None:  # noqa: N802 — Qt-Namensschema
+        self._accept_internal(event)
+
+    def dropEvent(self, event) -> None:  # noqa: N802 — Qt-Namensschema
+        """Selbst umsortieren statt Qt machen zu lassen.
+
+        Qts ``InternalMove`` schiebt bei einer Tabelle ZELLEN und lässt
+        dabei leere Zeilen zurück; gemeint sind hier aber ganze Zeilen.
+        Deshalb wird das Ereignis hier abschließend behandelt und
+        ``super()`` nicht aufgerufen."""
+        if event.source() is not self:
+            event.ignore()
+            return
+        von = self._dragged_row()
+        self._drag_name = ""
+        event.setDropAction(Qt.DropAction.MoveAction)
+        event.accept()
+        self.move_row(von, self.drop_index(int(event.position().y())))
 
     def sizeHint(self):  # noqa: N802 — Qt-Namensschema
         """Senkrecht nur eine Zeile verlangen, obwohl das Widget beliebig

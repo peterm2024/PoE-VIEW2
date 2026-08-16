@@ -4819,16 +4819,69 @@ vier Lifeforce-Sorten heißen dort genau so, wie er sie genannt hat
 tragen gar kein `stackSize` — die zählen als eines, damit sich auch
 Karten und Uniques beobachten lassen.
 
+#### Umsortieren per Ziehen
+
+Peter, 2026-08-16: "Könnten wir die Fav-Item-Liste per Drag&Drop
+umsortieren?" Die Konsequenz aus der Entscheidung darüber: Wenn die
+Reihenfolge bewusst nicht nach Menge sortiert wird, damit jede Zeile
+ihren Platz behält, dann muss der Platz auch wählbar sein — sonst bleibt
+nur, die halbe Liste zu entlassen und neu anzulegen.
+
+Qts `InternalMove` wird eingeschaltet, aber nicht benutzt: Bei einer
+Tabelle schiebt es ZELLEN und lässt leere Zeilen zurück. `dropEvent`
+behandelt das Ereignis deshalb abschließend, rechnet die neue
+Reihenfolge selbst aus (`reordered`, eine reine Funktion — die
+Off-by-one-Fälle lassen sich so ohne echtes Drag&Drop prüfen) und ruft
+`super()` nicht auf. Die Tabelle hängt die Zeilen sofort selbst um und
+meldet erst danach: Wer nur meldete, überließe die Anzeige dem Empfänger
+des Signals, und bis zur nächsten Zählung sähe das Ziehen aus, als hätte
+es nicht funktioniert.
+
+Drei Feinheiten, jede aus einem gemessenen Befund:
+
+- **`setDragDropMode(InternalMove)` genügt.** Es setzt `dragEnabled` und
+  `acceptDrops` von sich aus, auf dem Widget wie auf dem Viewport. Die
+  drei einzeln nachzuziehen sah gründlich aus, war aber wirkungslos —
+  aufgefallen, weil eine Gegenprobe (`setDragEnabled(False)`) den Test
+  nicht zum Fallen brachte.
+- **`NoSelection` musste weichen.** Qts `startDrag` zieht, was ausgewählt
+  IST; mit der bisherigen Einstellung wäre die Auswahl immer leer
+  geblieben und kein Zug zustande gekommen. `NoFocus` bleibt: Die
+  Auswahl wird dadurch in der gedämpften Inaktiv-Farbe gezeichnet.
+- **Gemerkt wird der NAME, nicht die Zeilennummer.** Qts Drag läuft in
+  einer eigenen Ereignisschleife, in der die Mengen-Zählung durchkommt
+  und `set_rows` aufruft. Nachgemessen überlebt die Zeilennummer das
+  zwar (nur bei leerer Liste wird sie -1) — sie zeigt danach aber auf
+  einen ANDEREN Eintrag, wenn währenddessen ein Favorit weiter oben
+  entlassen wurde. Ist der gezogene Name verschwunden, passiert nichts.
+
+Die neue Reihenfolge wird sofort gespeichert, nicht erst beim Beenden:
+Der Zweck der Liste ist, dass sie über Sitzungen gleich bleibt.
+Anschließend wird nicht neu gezählt — die Tabelle hat die Zeilen samt
+Mengen schon umgehängt, ein zweiter Durchlauf über alle Items der Liga
+brächte dieselben Zahlen noch einmal.
+
 Getestet: `tests/test_favourites.py` (Addition, fehlender Bestand,
 Items ohne Stapelgröße, Anzeigename statt Basistyp, Reihenfolge,
 Zahlenformat samt `≥`, Tooltips, Verschwinden ohne Zeilen, Höhengrenze,
-Mindestbreite, ein Durchlauf, Generator als Eingabe) und
-`tests/test_main_window_helpers.py` (Aufnehmen und Entlassen über das
-Kontextmenü, Überleben eines Neustarts, Summe aus Fächern und
-Charakteren, `≥` bei halb geladener Liga, Obergrenze, Item ohne
-brauchbaren Namen) sowie `tests/test_leveling_panel.py` für die
-Anordnung (Tabelle rechts vom Textblock, füllt dessen Höhe, Gem-Balken
-bleiben darunter, Graph behält den Rest).
+Mindestbreite, ein Durchlauf, Generator als Eingabe; fürs Ziehen:
+Rechnung samt Off-by-one und Grenzfällen, Umhängen mitsamt Mengen,
+Ablagestelle unter dem Mauszeiger, Ablehnen von außen, Änderung während
+des Zugs) und `tests/test_main_window_helpers.py` (Aufnehmen und
+Entlassen über das Kontextmenü, Überleben eines Neustarts — auch das
+der Reihenfolge —, Summe aus Fächern und Charakteren, `≥` bei halb
+geladener Liga, Obergrenze, Item ohne brauchbaren Namen) sowie
+`tests/test_leveling_panel.py` für die Anordnung (Tabelle rechts vom
+Textblock, füllt dessen Höhe, Gem-Balken bleiben darunter, Graph behält
+den Rest).
+
+**Ein Test prüft, dass sich überhaupt etwas anfassen lässt**, mit echten
+Mausereignissen über `QTest` und einem `startDrag`, das nur mitschreibt
+statt einen modalen Drag-Lauf zu öffnen. Alle anderen Tests hier rufen
+`move_row`/`dropEvent` selbst auf und blieben auch dann grün, wenn kein
+Mensch eine Zeile greifen kann — genau der Fehler, der am selben Tag
+beim Fertig-Rahmen der Gem-Balken passiert ist: gebaut, geprüft,
+gemeldet, auf dem Schirm nicht benutzbar.
 
 ---
 

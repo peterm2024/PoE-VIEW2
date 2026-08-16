@@ -9,7 +9,7 @@ from __future__ import annotations
 from poe_view.api.models import Item
 from poe_view.ui.favourites import (INCOMPLETE_MARK, ROW_HEIGHT,
                                     FavouriteRow, FavouritesTable,
-                                    favourite_rows)
+                                    favourite_rows, reordered)
 
 
 def _summe(items, name: str) -> int:
@@ -237,3 +237,278 @@ def test_rechtsklick_neben_die_zeilen_oeffnet_kein_menue(qapp):
     tabelle.set_rows([FavouriteRow("Chaos Orb", 5)])
     assert tabelle.build_context_menu(-1) is None
     assert tabelle.build_context_menu(9) is None
+
+
+# --------------------- Umsortieren per Ziehen ---------------------------- #
+#
+# Peter, 2026-08-16: "Koennten wir die Fav-Item-Liste per Drag&Drop
+# umsortieren?" Geprueft wird die Rechnung (``reordered``), das Umhaengen
+# der Tabelle (``move_row``), die Ablagestelle unter dem Mauszeiger
+# (``drop_index``) und dass die Tabelle ueberhaupt ziehbar EINGERICHTET
+# ist — ohne das letzte laesst sich kein Eintrag anfassen, und keiner der
+# anderen Tests wuerde es merken.
+
+VIER = ["Chaos Orb", "Divine Orb", "Exalted Orb", "Vaal Orb"]
+
+
+def test_ein_eintrag_wandert_nach_oben():
+    assert reordered(VIER, 2, 0) == ["Exalted Orb", "Chaos Orb",
+                                     "Divine Orb", "Vaal Orb"]
+
+
+def test_ein_eintrag_wandert_nach_unten_und_landet_nicht_zu_tief():
+    """Der Off-by-one-Fall: Nach dem Herausnehmen rutscht alles dahinter
+    eine Stelle vor. Ohne die Korrektur laege "Chaos Orb" hier hinter
+    "Exalted Orb" statt davor."""
+    assert reordered(VIER, 0, 2) == ["Divine Orb", "Chaos Orb",
+                                     "Exalted Orb", "Vaal Orb"]
+
+
+def test_ans_ende_ziehen_geht():
+    assert reordered(VIER, 0, 4) == ["Divine Orb", "Exalted Orb",
+                                     "Vaal Orb", "Chaos Orb"]
+
+
+def test_auf_die_eigene_stelle_ziehen_aendert_nichts():
+    assert reordered(VIER, 1, 1) == VIER
+    assert reordered(VIER, 1, 2) == VIER
+
+
+def test_eine_unsinnige_zeile_laesst_die_liste_in_ruhe():
+    """Kommt aus ``currentRow()`` eine -1 (nichts ausgewaehlt), darf das
+    Ziehen die Liste nicht durcheinanderbringen."""
+    assert reordered(VIER, -1, 2) == VIER
+    assert reordered(VIER, 9, 2) == VIER
+
+
+def test_die_tabelle_haengt_die_zeile_um_und_meldet_die_neue_reihenfolge(qapp):
+    """Beides zusammen: Wuerde sie nur melden, bliebe die Zeile bis zur
+    naechsten Zaehlung liegen und das Ziehen saehe aus, als haette es
+    nicht funktioniert."""
+    tabelle = FavouritesTable()
+    tabelle.set_rows([FavouriteRow(name, i) for i, name in enumerate(VIER)])
+    gemeldet: list[list[str]] = []
+    tabelle.order_changed.connect(gemeldet.append)
+
+    assert tabelle.move_row(3, 0) is True
+
+    assert [z.name for z in tabelle.rows()][0] == "Vaal Orb"
+    assert gemeldet == [["Vaal Orb", "Chaos Orb", "Divine Orb", "Exalted Orb"]]
+
+
+def test_die_mengen_ziehen_mit_um(qapp):
+    """Umgehaengt werden ganze Zeilen. Blieben die Zahlen stehen, waere
+    die Tabelle nach einem Zug schlicht falsch."""
+    tabelle = FavouritesTable()
+    tabelle.set_rows([FavouriteRow("Chaos Orb", 5), FavouriteRow("Divine Orb", 3)])
+
+    tabelle.move_row(1, 0)
+
+    assert [(z.name, z.total) for z in tabelle.rows()] == [("Divine Orb", 3),
+                                                           ("Chaos Orb", 5)]
+
+
+def test_ein_zug_ohne_wirkung_meldet_nichts(qapp):
+    """Sonst schriebe jedes versehentliche Anfassen die Einstellungen
+    neu."""
+    tabelle = FavouritesTable()
+    tabelle.set_rows([FavouriteRow("Chaos Orb", 5), FavouriteRow("Divine Orb", 3)])
+    gemeldet: list[list[str]] = []
+    tabelle.order_changed.connect(gemeldet.append)
+
+    assert tabelle.move_row(0, 0) is False
+
+    assert gemeldet == []
+
+
+def test_unterhalb_der_letzten_zeile_bedeutet_ans_ende(qapp):
+    """Sonst waere ausgerechnet die letzte Position nur zu erreichen,
+    indem man die untere Haelfte der letzten Zeile trifft."""
+    tabelle = FavouritesTable()
+    tabelle.set_rows([FavouriteRow(name, 0) for name in VIER])
+    tabelle.resize(200, 400)
+
+    assert tabelle.drop_index(390) == 4
+
+
+def test_die_mitte_einer_zeile_entscheidet_ueber_davor_und_dahinter(qapp):
+    """Ohne die Unterscheidung liesse sich kein Eintrag VOR die erste
+    Zeile setzen."""
+    tabelle = FavouritesTable()
+    tabelle.set_rows([FavouriteRow(name, 0) for name in VIER])
+    tabelle.resize(200, 400)
+
+    assert tabelle.drop_index(1) == 0
+    assert tabelle.drop_index(ROW_HEIGHT - 1) == 1
+
+
+def test_die_tabelle_ist_ueberhaupt_ziehbar_eingerichtet(qapp):
+    """Der eigentliche Regressionstest. ``move_row`` liesse sich auch
+    dann pruefen, wenn kein Mensch eine Zeile anfassen kann — genau so
+    war die Tabelle vorher eingestellt (``NoSelection``, kein
+    ``dragEnabled``), und Qts ``startDrag`` zieht nur, was ausgewaehlt
+    ist."""
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QAbstractItemView
+
+    tabelle = FavouritesTable()
+    tabelle.set_rows([FavouriteRow("Chaos Orb", 5)])
+
+    assert tabelle.dragEnabled()
+    assert tabelle.viewport().acceptDrops()
+    assert tabelle.dragDropMode() == QAbstractItemView.DragDropMode.InternalMove
+    assert tabelle.selectionMode() != QAbstractItemView.SelectionMode.NoSelection
+    assert not tabelle.dragDropOverwriteMode()
+    flags = tabelle.item(0, 0).flags()
+    assert flags & Qt.ItemFlag.ItemIsDragEnabled
+    assert not flags & Qt.ItemFlag.ItemIsDropEnabled
+
+
+class _Ablage:
+    """Ein Ablage-Ereignis zum Anfassen.
+
+    Ein echtes ``QDropEvent`` hilft hier nicht: Sein ``source()`` kommt
+    aus Qts laufendem Drag-Vorgang und ist ausserhalb eines solchen
+    ``None`` — der Test wuerde also immer im Ignorieren-Zweig landen.
+    ``dropEvent`` ist eine Python-Methode und nimmt jedes Objekt, das
+    sich wie das Ereignis verhaelt.
+    """
+
+    def __init__(self, quelle, y: float) -> None:
+        self._quelle, self._y = quelle, y
+        self.angenommen = False
+        self.aktion = None
+
+    def source(self):
+        return self._quelle
+
+    def position(self):
+        from PySide6.QtCore import QPointF
+
+        return QPointF(5.0, self._y)
+
+    def setDropAction(self, aktion) -> None:  # noqa: N802 — Qt-Namensschema
+        self.aktion = aktion
+
+    def accept(self) -> None:
+        self.angenommen = True
+
+    def ignore(self) -> None:
+        self.angenommen = False
+
+
+def test_das_ablegen_sortiert_wirklich_um(qapp):
+    """Die Verdrahtung selbst: Ereignis rein, neue Reihenfolge raus.
+    ``move_row`` und ``drop_index`` einzeln zu pruefen genuegt nicht —
+    sie muessen auch verbunden sein."""
+    tabelle = FavouritesTable()
+    tabelle.set_rows([FavouriteRow(name, 0) for name in VIER])
+    tabelle.resize(200, 400)
+    gemeldet: list[list[str]] = []
+    tabelle.order_changed.connect(gemeldet.append)
+    tabelle.setCurrentCell(0, 0)
+    tabelle.remember_drag_row()
+
+    tabelle.dropEvent(_Ablage(tabelle, 390))   # unterhalb der letzten Zeile
+
+    assert [z.name for z in tabelle.rows()][-1] == "Chaos Orb"
+    assert gemeldet == [["Divine Orb", "Exalted Orb", "Vaal Orb", "Chaos Orb"]]
+
+
+def test_eine_aenderung_waehrend_des_ziehens_verschiebt_den_richtigen(qapp):
+    """Der Grund, warum beim Aufnehmen der NAME gemerkt wird und nicht
+    die Zeilennummer: Qts Drag laeuft in einer eigenen
+    Ereignisschleife, in der ``set_rows`` durchkommt. Nachgemessen
+    ueberlebt die Zeilennummer das — sie zeigt danach aber auf einen
+    ANDEREN Eintrag, wenn inzwischen ein Favorit weiter oben entlassen
+    wurde. Hier wird "Exalted Orb" gezogen; ueber die alte Nummer 2
+    landete stattdessen "Vaal Orb" oben."""
+    tabelle = FavouritesTable()
+    tabelle.set_rows([FavouriteRow(name, 0) for name in VIER])
+    tabelle.resize(200, 400)
+    tabelle.setCurrentCell(2, 0)                 # "Exalted Orb"
+    tabelle.remember_drag_row()
+
+    # Waehrend der Zug laeuft, wird "Chaos Orb" entlassen — alles
+    # darunter rutscht eine Zeile hoch.
+    tabelle.set_rows([FavouriteRow(name, 0) for name in VIER[1:]])
+    assert tabelle.currentRow() == 2, "Voraussetzung des Tests entfallen"
+
+    tabelle.dropEvent(_Ablage(tabelle, 1))       # ganz nach oben
+
+    assert [z.name for z in tabelle.rows()] == ["Exalted Orb", "Divine Orb",
+                                                "Vaal Orb"]
+
+
+def test_ein_waehrend_des_zugs_entlassener_favorit_wird_nicht_verschoben(qapp):
+    """Wer den gezogenen Eintrag nicht mehr findet, laesst die Liste in
+    Ruhe — irgendetwas anderes an seine Stelle zu schieben waere
+    schlimmer als ein wirkungsloser Zug."""
+    tabelle = FavouritesTable()
+    tabelle.set_rows([FavouriteRow(name, 0) for name in VIER])
+    tabelle.resize(200, 400)
+    tabelle.setCurrentCell(0, 0)                 # "Chaos Orb"
+    tabelle.remember_drag_row()
+    tabelle.set_rows([FavouriteRow(name, 0) for name in VIER[1:]])
+    gemeldet: list[list[str]] = []
+    tabelle.order_changed.connect(gemeldet.append)
+
+    tabelle.dropEvent(_Ablage(tabelle, 390))
+
+    assert [z.name for z in tabelle.rows()] == VIER[1:]
+    assert gemeldet == []
+
+
+def test_etwas_von_aussen_wird_nicht_angenommen(qapp):
+    """Ein Item aus der Haupttabelle hierher zu ziehen saehe aus, als
+    wuerde es aufgenommen. Dafuer gibt es den Rechtsklick — ein
+    stillschweigend verworfener Ablauf waere schlimmer als gar keiner."""
+    tabelle = FavouritesTable()
+    tabelle.set_rows([FavouriteRow(name, 0) for name in VIER])
+    gemeldet: list[list[str]] = []
+    tabelle.order_changed.connect(gemeldet.append)
+
+    ereignis = _Ablage(None, 10)
+    tabelle.dropEvent(ereignis)
+
+    assert ereignis.angenommen is False
+    assert [z.name for z in tabelle.rows()] == VIER
+    assert gemeldet == []
+
+
+def test_eine_echte_mausbewegung_startet_den_zug(qapp):
+    """Der Test, der heute frueh gefehlt haette: gebaut, geprueft,
+    gemeldet — und auf Peters Schirm nicht benutzbar. Alle anderen Tests
+    hier rufen ``move_row``/``dropEvent`` selbst auf und wuerden auch
+    dann gruen bleiben, wenn kein Mensch eine Zeile anfassen kann.
+
+    ``startDrag`` wird ueberschrieben, damit kein modaler Drag-Lauf
+    startet und den Testlauf anhaelt; geprueft wird nur, OB Qt es auf
+    eine Mausbewegung hin aufruft — und mit welcher Zeile."""
+    from PySide6.QtCore import QPoint, Qt
+    from PySide6.QtTest import QTest
+
+    gerufen: list[str] = []
+
+    class Mitschrift(FavouritesTable):
+        def startDrag(self, actions):  # noqa: N802 — Qt-Namensschema
+            self.remember_drag_row()
+            gerufen.append(self._drag_name)
+
+    tabelle = Mitschrift()
+    tabelle.set_rows([FavouriteRow(name, 0) for name in VIER])
+    tabelle.resize(200, 200)
+    tabelle.show()
+    QTest.qWaitForWindowExposed(tabelle)
+
+    start = QPoint(40, ROW_HEIGHT + ROW_HEIGHT // 2)      # zweite Zeile
+    QTest.mousePress(tabelle.viewport(), Qt.MouseButton.LeftButton, pos=start)
+    assert tabelle.currentRow() == 1, "das Druecken waehlt die Zeile nicht aus"
+    for schritt in (5, 15, 40, 80):
+        QTest.mouseMove(tabelle.viewport(), start + QPoint(0, schritt))
+        qapp.processEvents()
+    QTest.mouseRelease(tabelle.viewport(), Qt.MouseButton.LeftButton,
+                       pos=start + QPoint(0, 80))
+
+    assert gerufen == ["Divine Orb"]
+    tabelle.close()
