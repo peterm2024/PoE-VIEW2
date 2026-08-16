@@ -4408,9 +4408,9 @@ Daraus drei Zustände, jeder an echten Daten abgezählt:
 
 | Zustand | Merkmal | Anzahl | Darstellung |
 |---|---|---|---|
-| Fertig | "(Max)" in der Stufe, kein Erfahrungsfeld | 226 | voller Balken |
-| **Wartet auf einen Klick** | Balken voll, aber nicht Max | **65** | voller Balken + gelbe Kappe |
-| Am Leveln | Fortschritt < 1 | 157 | Teilfüllung |
+| Fertig | "(Max)" in der Stufe, kein Erfahrungsfeld | 226 | voller Balken in der gesättigten Gem-Farbe |
+| **Wartet auf einen Klick** | Balken voll, aber nicht Max | **65** | Füllung + gelbe Kappe |
+| Am Leveln | Fortschritt < 1 | 157 | Füllung + gelbe Erfahrungslinie |
 
 **Der mittlere Zustand ist nicht kosmetisch.** Gems steigen in PoE nicht
 von selbst auf (`poe-verhalten.md` §4); ein voller Balken unterhalb der
@@ -4420,42 +4420,93 @@ Stück allein in Peters Bestand. Ohne eigene Markierung sähe das aus wie
 Die Kappe trägt die Warnfarbe des Rate-Limit-Dashboards, mit derselben
 Bedeutung: hier passiert nichts von allein.
 
-Fehlen BEIDE Merkmale (weder "(Max)" noch Erfahrung, genau ein Gem von
-449), bleibt der Balken leer statt voll: Ein voller Balken hieße
-"fertig", und das wäre eine Behauptung ohne Grundlage.
+Fehlen BEIDE Merkmale (weder "(Max)" noch Erfahrung), bleibt der Balken
+leer statt voll: Ein voller Balken hieße "fertig", und das wäre eine
+Behauptung ohne Grundlage. In Peters Bestand tritt der Fall seit dem
+Jewel-Filter (s. u.) nicht mehr auf — der frühere Einzelfall WAR das
+Jewel —, aber GGG darf jederzeit ein Gem ohne diese Felder liefern.
 
-**Fertige Gems bekommen einen gelben Rahmen** (Peter, 2026-08-16: "so
-dass man deutlich erkennt, dass der Gem ausgelevelt ist"). Der volle
-Balken allein genügte nicht — er sieht aus wie ein Gem, das gerade eben
-die nächste Stufe erreicht hat. Die Rahmenfarbe ist dieselbe Warnfarbe
-wie die Kappe des Zustands "wartet auf einen Klick"; die beiden sind
-durch die Form unterschieden (Umriss gegen Querstreifen), nicht durch
-die Farbe. Sollte das im Betrieb verwirren, wäre die Kappe der Kandidat
-für eine eigene Farbe, denn nur sie verlangt eine Handlung.
+#### Die Höhe ist die Stufe, nicht der Fortschritt
 
-**Der erste Anlauf dafür war ein Leerlauf, und das ist die eigentliche
-Lehre.** Die Markierung war gebaut, gemessen und gemeldet — und Peter
-konnte sie auf seinem Schirm nicht finden. Der Grund: Ein fertiges Gem
-hat einen VOLLEN Balken, der Rahmen lag also auf der hellen Gem-Farbe,
-mit 1,13:1 gegen Grün und 1,01:1 gegen Grau. Physisch vorhanden,
-optisch nicht existent. Mein erster Reparaturversuch — die Füllung um
-einen Pixel einrücken — war sogar pixelgleich wirkungslos, weil der
-Rahmen zuletzt gezeichnet wird und die Füllung darunter ohnehin
-überdeckt (nachgemessen: 0 von 300 Pixeln verschieden).
+Peter, 2026-08-16: "Die aktuelle Stufe des Gems ist wichtiger als die
+aktuelle Erfahrung." Die erste Fassung füllte den Balken mit dem
+Fortschritt zur nächsten Stufe. Damit standen bis zu 33 Balken auf
+zufälligen Prozentwerten und sahen alle gleich wichtig aus — man konnte
+dem Streifen ansehen, wie weit einzelne Gems im Moment sind, aber nicht,
+wie weit der Charakter ist. Mit der Stufe als Höhe wird er zu einem
+Profil: Welches Gem hängt zurück, sieht man ohne einen einzigen Tooltip.
 
-Was hilft, ist ein **dunkler Nachbar**: Bei einem fertigen Gem steht die
-Gem-Farbe nur noch als schmaler Kern in der Mitte (`_MAXED_CORE_W`),
-links und rechts davon liegt Hintergrund, dann der Rahmen. Gelb gegen
-Hintergrund hat 6,4:1. Peter hat aus drei gerenderten Varianten
-gewählt (5 px mit 1 px Kern, 7 px mit 3 px Kern, oder unverändert) und
-die schmale genommen — die Balkenbreite von 5 px bleibt damit, wie er
-sie ursprünglich vorgegeben hatte.
+Drei Dinge stehen jetzt gleichzeitig im Balken:
+
+| Element | Bedeutung | Warum so |
+|---|---|---|
+| Füllhöhe, Gem-Farbe | Stufe / 20 | die Hauptaussage, deshalb die Fläche |
+| 1 px Linie, `GEM_XP_LINE` (#ffff00) | Fortschritt zur nächsten Stufe | nachgeordnet, deshalb eine Linie |
+| Voller Balken, gesättigte Farbe (`GEM_COLORS_DONE`) | fertig | keine Kontur, sondern Farbe (s. u.) |
+| Gelbe Kappe, `DASH_WARN` | wartet auf einen Klick | unverändert |
+
+**Die Erfahrungslinie läuft über die ganze Balkenhöhe, nicht innerhalb
+der Stufe.** Innerhalb wäre ihr Spielraum eine Zwanzigstel-Höhe, bei
+60 px also 3 px — eine Linie, die sich nicht bewegt, ist Zierde. Über
+die volle Höhe gelesen sagt sie dasselbe (Fortschritt in Prozent) und
+ist ablesbar. Bei 0 % und 100 % hält ein Anschlag sie im Balken, statt
+sie unten heraus- oder oben wegfallen zu lassen.
+
+**Stufe/20 gilt stur, auch für Gems mit kleinerer Höchststufe.** Über
+Peters 6248 Gems gezählt gibt es solche zuhauf (Portal, Quickstep,
+Convocation, Detonate Mines = 1; Empower/Enhance/Enlighten = 3; Brand
+Recall = 6), und ihre Höchststufe steht in keinem API-Feld — sie wäre
+nur über eine gepflegte Namensliste zu erraten, die mit jeder Liga
+veralten würde. Nötig ist das nicht: Sobald so ein Gem fertig ist, trägt
+es "(Max)" und wird voll gezeichnet. Nur ein *unfertiges* Enlighten
+steht zu tief im Balken — und das ist der Zustand, in dem "hier fehlt
+noch etwas" ohnehin stimmt.
+
+**Fertige Gems sind ein voller Balken in der gesättigten Gem-Farbe**
+(Peter: "Fertig gelevelte Gems werden einfach als intensiver 5px Balken
+dargestellt, z.B. 0xff0000"). Vier Farben, nicht eine: Ein einheitliches
+Rot für alles Fertige würde bei 226 von 449 Gems die Attribut-Zuordnung
+wegwerfen, also bei der Hälfte des Streifens. Zu Grau gibt es keine
+gesättigte Fassung, dort ist Weiß die Entsprechung (Peter: "bei weißen
+Gems benutzen wir Grau ↔ Weiß"). Die gelben Gems, die es seit kurzem
+gibt, fallen über denselben Weg wie jedes unbekannte Farbkürzel dorthin,
+ohne dass wir das Kürzel kennen müssten — in Peters Bestand kommt keines
+vor (S 179, I 170, D 120, G 4).
+
+Gemessen, weil eine Farbentscheidung ohne Zahl geraten ist: fertig gegen
+levelnd liegt bei ΔE2000 = 16,6 (rot) bis 31,4 (blau), in derselben
+Größenordnung wie der hell/dunkel-Unterschied im Balken selbst (21–30),
+der nachweislich lesbar ist. Die vier fertigen Farben liegen 33–87
+auseinander, die Attributfarbe bleibt also erkennbar. **Für Flächen ist
+ΔE2000 das richtige Maß, nicht WCAG-Kontrast**: Der misst Helligkeit und
+gilt für Text auf Grund; nach ihm hätten reines Rot und das gedämpfte
+Rot nur 1,06:1, obwohl sie sofort zu unterscheiden sind.
+
+#### Warum es kein gelber Rahmen wurde
+
+Der erste Anlauf am selben Tag war genau das: ein gelber Rahmen um
+fertige Gems. Er war gebaut, gemessen und gemeldet — und Peter konnte
+ihn auf seinem Schirm nicht finden. Der Grund: Ein fertiges Gem hat
+einen VOLLEN Balken, der Rahmen lag also auf der hellen Gem-Farbe, mit
+1,13:1 gegen Grün und 1,01:1 gegen Grau. Physisch vorhanden, optisch
+nicht existent. Mein erster Reparaturversuch — die Füllung um einen
+Pixel einrücken — war sogar pixelgleich wirkungslos, weil der Rahmen
+zuletzt gezeichnet wird und die Füllung darunter ohnehin überdeckt
+(nachgemessen: 0 von 300 Pixeln verschieden). Was dann half, war ein
+dunkler Nachbar: die Gem-Farbe nur noch als 1 px Kern, links und rechts
+Hintergrund, dann der Rahmen.
+
+Das funktionierte, aber der Preis war die Gem-Farbe selbst — von 5 px
+Balken blieb 1 px Farbe übrig. Peters Neuentwurf löst dasselbe Problem
+ohne diesen Preis, und daraus die Regel: **Auf 5 px Breite trägt eine
+Farbfläche, keine Kontur.** Der Rahmen samt `_MAXED_CORE_W` ist wieder
+entfernt.
 
 **Der leere Teil eines Balkens war ebenfalls unsichtbar**, aus demselben
 Grund und im selben Bildschirmfoto: 1,02–1,21:1 gegen den Hintergrund.
-Gems mit wenig Fortschritt sahen dadurch aus wie Lücken im Streifen, und
-"hier steckt kein Gem" ließ sich nicht von "Gem bei 5 %" unterscheiden.
-`_EMPTY_DIM` von 0,68 auf 0,45 gesenkt: jetzt 1,44–2,29:1.
+Balken mit wenig Füllung sahen dadurch aus wie Lücken im Streifen, und
+"hier steckt kein Gem" ließ sich nicht von "Gem auf Stufe 3"
+unterscheiden. `_EMPTY_DIM` von 0,68 auf 0,45 gesenkt: jetzt 1,44–2,29:1.
 
 Beides zusammen ist eine Lehre über das Vorgehen: **Farben gehören
 gemessen, nicht begutachtet** — und zwar gegen den Hintergrund, auf dem
@@ -4486,7 +4537,15 @@ jedes Gem seinen eigenen Balken.
 
 Getestet: `tests/test_gem_progress.py` (alle drei Zustände, Awakened und
 korrumpierte Höchststufen, fehlende Belege, Farbzuordnung samt "G" und
-leer, Reihenfolge, Ausblenden ohne Gems, Zeichnen aller Zustände).
+leer, Reihenfolge, Ausblenden ohne Gems, Zeichnen aller Zustände). Die
+Darstellung wird an Pixelspalten des ECHTEN Widgets geprüft, auf einer
+selbst gesetzten dunklen Palette: Höhe folgt der Stufe und nicht dem
+Fortschritt (Stufe 10 bei 90 % Fortschritt füllt halb), Deckel bei
+Stufe 21, Erfahrungslinie über die ganze Höhe (25 % und 75 % liegen
+30 px auseinander) und an beiden Enden im Balken, fertiges Gem
+einfarbig satt und ohne Linie, fertig gegen Stufe 20 unterscheidbar,
+Kappe erhalten. Jede dieser Aussagen ist gegengeprüft — die Änderung
+zurückgenommen, der Test muss fallen; sieben von sieben tun es.
 
 ### 4.43 PoE2-Rohdaten-Abzug (`services/poe2_probe.py`)
 

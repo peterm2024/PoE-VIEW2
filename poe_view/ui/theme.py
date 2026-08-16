@@ -131,6 +131,32 @@ LED_OFFLINE = DASH_BAD
 GEM_COLORS = {"S": "#c15c5c", "D": "#5cb85c", "I": "#5c8fc1"}
 GEM_COLOR_OTHER = "#b0b0b0"
 
+# Dieselben vier Farben in ihrer gesättigten Fassung — für FERTIGE Gems
+# (Peter, 2026-08-16: "Fertig gelevelte Gems werden einfach als
+# intensiver 5px Balken dargestellt, z.B. 0xff0000").
+#
+# Vier Farben, nicht eine: Ein einheitliches Rot für alles Fertige würde
+# ausgerechnet bei den 227 fertigen Gems die Attribut-Zuordnung
+# wegwerfen, also bei der Hälfte des Streifens. Zu Grau gibt es keine
+# gesättigte Fassung, dort ist Weiß die Entsprechung (Peter: "bei weißen
+# Gems benutzen wir Grau <-> Weiß").
+#
+# Diese Markierung ersetzt den gelben Rahmen vom selben Tag. Der war
+# gebaut und getestet und trotzdem unsichtbar: 1,13:1 gegen Grün,
+# 1,01:1 gegen Grau. Auf 5 px Breite trägt eine Farbfläche, keine Kontur.
+GEM_COLORS_DONE = {"S": "#ff0000", "D": "#00ff00", "I": "#0000ff"}
+GEM_COLOR_DONE_OTHER = "#ffffff"
+
+# Die Erfahrungslinie im Gem-Balken. Intensives Gelb, weil es gegen alle
+# acht Gem-Farben UND gegen den Hintergrund steht: 2,0-2,4:1 gegen die
+# gedämpften Farben, 6,4:1 gegen Dunkelgrau.
+#
+# Dass daneben mit DASH_WARN ein zweites, mattes Gelb im selben Balken
+# vorkommt (die Kappe für "wartet auf einen Klick"), ist bewusst in Kauf
+# genommen — Peter, 2026-08-16: "Die beiden Gelbtöne nebeneinander
+# spielen keine Rolle".
+GEM_XP_LINE = "#ffff00"
+
 
 def dimmed_text(palette: QPalette) -> QColor:
     """Textfarbe zu 50% Richtung Hintergrund gemischt — "wahrscheinlich

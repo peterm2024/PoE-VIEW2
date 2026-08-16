@@ -1,33 +1,50 @@
-"""Sockel-Gems als Fortschrittsbalken über dem XP-Graphen.
+"""Sockel-Gems als Balken über dem XP-Graphen.
 
-Peter, 2026-08-13: "Oberhalb des XP-Graphen machen wir einen Bereich in
-dem die XP als vertikale Linie je Gem zur nächsten Stufe prozentual
-angegeben sind und einen dunklen Bereich mit hellem Bereich füllen ...
-Dadurch sollte man gut erkennen können ob ein Gem fertig auf Stufe 20
-gelevelt ist."
+**Die Balkenhöhe ist die Stufe, nicht der Fortschritt.** Peter,
+2026-08-16: "Die aktuelle Stufe des Gems ist wichtiger als die aktuelle
+Erfahrung." Die erste Fassung füllte den Balken mit dem Fortschritt zur
+nächsten Stufe — damit standen 26 Balken auf zufälligen Prozentwerten
+und sahen alle gleich wichtig aus. Mit der Stufe als Höhe wird der
+Streifen zu einem Profil des Charakters: Welches Gem hängt zurück, sieht
+man, ohne einen einzigen Tooltip zu lesen.
 
-**Die schwierigste Frage daran beantwortet GGG selbst.** "Ist das Gem
-fertig?" müsste man eigentlich aus Stufe, Gem-Art und Erfahrung
-herleiten — ein Awakened-Gem ist bei 5 fertig, ein normales bei 20, ein
-korrumpiertes kann bei 21 stehen. Nichts davon ist nötig: Über Peters
-448 Sockel-Gems (16 Charaktere, gezählt 2026-08-16) steht die Stufe im
-Klartext als ``"20 (Max)"``, ``"5 (Max)"``, ``"1 (Max)"``, und genau
-diesen Gems fehlt zugleich das ``Experience``-Feld. Beide Merkmale
-zeigen dasselbe an, und keines muss geraten werden.
+Der Fortschritt ist damit nicht verloren, nur nachgeordnet: eine 1 px
+hohe Linie in intensivem Gelb, deren Höhe im Balken den Fortschritt zur
+nächsten Stufe angibt. Sie hängt bewusst NICHT an der Stufenfüllung,
+sondern läuft über die ganze Balkenhöhe. Innerhalb der Stufe wäre ihr
+Spielraum eine Zwanzigstel-Höhe, bei 60 px also 3 px — eine Linie, die
+sich nicht bewegt, ist Zierde.
+
+**Die schwierigste Frage beantwortet GGG selbst.** "Ist das Gem fertig?"
+müsste man eigentlich aus Stufe, Gem-Art und Erfahrung herleiten — ein
+Awakened-Gem ist bei 5 fertig, ein normales bei 20, ein korrumpiertes
+kann bei 21 stehen. Nichts davon ist nötig: Über Peters 448 Sockel-Gems
+(16 Charaktere, gezählt 2026-08-16) steht die Stufe im Klartext als
+``"20 (Max)"``, ``"5 (Max)"``, ``"1 (Max)"``, und genau diesen Gems
+fehlt zugleich das ``Experience``-Feld. Beide Merkmale zeigen dasselbe
+an, und keines muss geraten werden.
 
 Damit drei Zustände, alle drei aus den Daten belegt:
 
 - **Fertig** (227 von 448): Stufe trägt "(Max)", kein Erfahrungsfeld.
-  Voller Balken mit gelbem Rahmen (Peter, 2026-08-16: "so dass man
-  deutlich erkennt, dass der Gem ausgelevelt ist"). Der volle Balken
-  allein genügte nicht — er sieht aus wie ein Gem, das gerade eben die
-  nächste Stufe erreicht hat.
+  Voller Balken in der gesättigten Gem-Farbe (`GEM_COLORS_DONE`), ohne
+  Erfahrungslinie. Diese Markierung löst zugleich das Problem, an dem
+  ein gelber Rahmen am selben Tag gescheitert war: Auf 5 px Breite
+  trägt eine Farbfläche, keine Kontur.
 - **Wartet auf einen Klick** (65): Balken voll, aber nicht Max. Gems
   steigen in PoE nicht von selbst auf (`poe-verhalten.md` §4) — das ist
   Charakterstärke, die nur auf einen Mausklick wartet. Bekommt deshalb
   eine eigene Markierung; ohne sie sähe es aus wie "fertig".
-- **Am Leveln** (156): Der helle Teil ist der Fortschritt zur nächsten
-  Stufe.
+- **Am Leveln** (156): Höhe = Stufe, Linie = Fortschritt.
+
+**Die Höhe rechnet stur mit Stufe/20**, auch bei Gems, deren Höchststufe
+darunter liegt. Über Peters Bestand gezählt gibt es solche zuhauf
+(Portal/Quickstep/Convocation = 1, Empower/Enhance/Enlighten = 3, Brand
+Recall = 6), und ihre Höchststufe steht in keinem API-Feld — sie wäre
+nur über eine gepflegte Namensliste zu erraten. Nötig ist das nicht:
+Sobald so ein Gem fertig ist, trägt es "(Max)" und wird voll gezeichnet.
+Nur ein *unfertiges* Enlighten steht zu tief im Balken, und das ist der
+Zustand, in dem die Aussage "hier fehlt noch etwas" ohnehin stimmt.
 
 **Nicht jedes ``socketedItems`` ist ein Gem.** Ein Abyss-Jewel im
 Gürtel oder Ring sitzt in derselben Liste, levelt aber nicht. Peter
@@ -51,8 +68,9 @@ from PySide6.QtGui import QColor, QPainter
 from PySide6.QtWidgets import QSizePolicy, QToolTip, QWidget
 
 from poe_view.api.models import Item
-from poe_view.ui.theme import (DASH_WARN, GEM_COLOR_OTHER, GEM_COLORS, blend,
-                               dimmed_text)
+from poe_view.ui.theme import (DASH_WARN, GEM_COLOR_DONE_OTHER,
+                               GEM_COLOR_OTHER, GEM_COLORS, GEM_COLORS_DONE,
+                               GEM_XP_LINE, blend, dimmed_text)
 
 # Maße eines Balkens. Peters Vorgabe waren 3-5 px Breite; 5 plus 2 Lücke
 # trägt auch den vollsten Charakter in Peters Bestand (33 Gems → 231 px)
@@ -64,26 +82,15 @@ _BAR_GAP = 2
 # derselben ``socketedItems``-Liste, leveln aber nicht.
 _GEM_FRAME = 4
 
-# Rahmenstärke der Fertig-Markierung. 1 px lässt vom 5 px breiten Balken
-# noch 3 px Farbe stehen — genug, um die Gem-Farbe zu erkennen.
-#
-# Ein Versuch, die Sichtbarkeit durch bloßes Einrücken der Füllung zu
-# verbessern, war ein Leerlauf: Der Rahmen wird zuletzt gezeichnet und
-# überdeckt die Füllung ohnehin, das Ergebnis war pixelgleich (geprüft
-# 2026-08-16, 0 von 300 Pixeln verschieden).
-_MAXED_FRAME_W = 1
+# Bezugsgröße der Balkenhöhe: Stufe/20 (Peter, 2026-08-16: "Die Höhe
+# machen wir mittels Stufe/20"). Warum das auch für Gems mit kleinerer
+# Höchststufe reicht, steht oben im Modulkopf.
+_LEVEL_SCALE = 20
 
-# Breite der Farbfläche eines FERTIGEN Balkens. Sie ist schmaler als der
-# Balken, damit zwischen dem gelben Rahmen und der Gem-Farbe eine dunkle
-# Trennung liegt — daran hängt die Sichtbarkeit der Markierung.
-#
-# Gemessen: Gelb auf der vollen Gem-Farbe hat 1,13:1 gegen Grün und
-# 1,01:1 gegen Grau, ist also physisch vorhanden und trotzdem nicht zu
-# erkennen. Dasselbe Gelb gegen den Hintergrund hat 6,4:1. Ein dunkler
-# Nachbar ist damit kein Schönheitsdetail, sondern der ganze Trick.
-#
-# ``None`` schaltet zurück auf "Rahmen direkt auf der Füllung".
-_MAXED_CORE_W = 1
+# Die Erfahrungslinie. 1 px, damit sie den Balken liest statt ihn zu
+# überschreiben — die Stufe ist die Hauptaussage, der Fortschritt der
+# Zusatz.
+_XP_LINE_H = 1
 
 # Höhe des Streifens. Peter schlug 75 px vor; 60 lassen dem Graphen
 # darunter mehr Luft, ohne dass ein Drittel-Fortschritt undeutlich wird
@@ -103,7 +110,7 @@ _READY_CAP_H = 3
 # Der Wert stand bis 2026-08-16 auf 0,68 und war damit zu dunkel:
 # Gegen den Hintergrund der dunklen Windows-Oberfläche kam der leere
 # Teil auf 1,02–1,21:1 Kontrast, war also praktisch unsichtbar. In
-# Peters Bildschirmfoto sahen Gems mit wenig Fortschritt deshalb aus
+# Peters Bildschirmfoto sahen kaum gefüllte Balken deshalb aus
 # wie LÜCKEN im Streifen — man konnte "hier steckt kein Gem" nicht von
 # "Gem bei 5 %" unterscheiden, ausgerechnet den Zustand, den man sehen
 # will. Mit 0,45 sind es 1,44–2,29:1: noch klar dunkler als der volle
@@ -128,6 +135,28 @@ class GemProgress(NamedTuple):
         if self.ready:
             return f"{self.name} — level {self.level}, ready to level up"
         return f"{self.name} — level {self.level}, {self.progress:.0%} to next"
+
+    @property
+    def level_number(self) -> int:
+        """Die führenden Ziffern der Klartext-Stufe: "20 (Max)" → 20.
+
+        Aus dem Text gelesen statt als eigenes Feld geführt, weil GGG
+        genau diesen Text liefert und "(Max)" daran hängt — zwei Felder
+        aus einer Quelle könnten auseinanderlaufen. Steht dort etwas
+        Unerwartetes (``"?"``), ist die Stufe 0 und der Balken leer:
+        lieber "wir wissen es nicht" als eine geratene Höhe."""
+        ziffern = ""
+        for zeichen in self.level:
+            if not zeichen.isdigit():
+                break
+            ziffern += zeichen
+        return int(ziffern) if ziffern else 0
+
+    @property
+    def level_fill(self) -> float:
+        """Anteil der Balkenhöhe, den die Stufe füllt (0…1). Korrumpierte
+        Gems stehen bei 21 und würden über 1 hinauslaufen."""
+        return min(self.level_number / _LEVEL_SCALE, 1.0)
 
 
 def _level_text(gem: dict) -> str:
@@ -191,6 +220,18 @@ def gem_colour(colour: str) -> str:
     return GEM_COLORS.get(colour, GEM_COLOR_OTHER)
 
 
+def gem_colour_done(colour: str) -> str:
+    """Dieselbe Farbe in ihrer gesättigten Fassung — für fertige Gems.
+
+    Alles, was nicht S/D/I ist, wird weiß: die vier grauen ``"G"``-Gems
+    in Peters Bestand (Convocation & Co.) und die gelben, die es seit
+    kurzem gibt (Peter, 2026-08-16: "die nehmen wir vorerst zu den
+    weißen Gems dazu"). Für die gelben liegt uns kein einziger Datensatz
+    vor — sie fallen über denselben Weg hier hinein wie jedes andere
+    unbekannte Kürzel, ohne dass wir ihr Kürzel kennen müssten."""
+    return GEM_COLORS_DONE.get(colour, GEM_COLOR_DONE_OTHER)
+
+
 class GemProgressBar(QWidget):
     def __init__(self) -> None:
         super().__init__()
@@ -248,46 +289,35 @@ class GemProgressBar(QWidget):
         painter = QPainter(self)
         try:
             height = self.height()
-            # Der echte Hintergrund, nicht ein fest eingetippter Wert:
-            # Das dunkle Aussehen kommt von Windows, nicht von einer
-            # eigenen Palette — ein hart kodiertes Dunkelgrau stünde im
-            # hellen Systemdesign als Fleck da.
-            grund = self.palette().window().color()
             for index, gem in enumerate(self._gems):
                 x = index * (_BAR_W + _BAR_GAP)
                 if x + _BAR_W > self.width():
                     break        # lieber abschneiden als stauchen
+                if gem.maxed:
+                    # Fertig: voller Balken in der gesättigten Farbe,
+                    # sonst nichts. Keine Erfahrungslinie — ein fertiges
+                    # Gem hat kein Erfahrungsfeld mehr, eine Linie wäre
+                    # eine erfundene Angabe.
+                    painter.fillRect(QRectF(x, 0, _BAR_W, height),
+                                     QColor(gem_colour_done(gem.colour)))
+                    continue
                 hell = QColor(gem_colour(gem.colour))
                 dunkel = blend(hell, QColor("#000000"), _EMPTY_DIM)
-                if gem.maxed and _MAXED_CORE_W:
-                    # Fertig: Farbkern in der Mitte, ringsum dunkel, damit
-                    # der gelbe Rahmen gleich einen Nachbarn hat, gegen den
-                    # er sich abhebt (§_MAXED_CORE_W).
-                    rand = (_BAR_W - _MAXED_CORE_W) // 2
-                    painter.fillRect(QRectF(x, 0, _BAR_W, height), grund)
-                    painter.fillRect(QRectF(x + rand, rand, _MAXED_CORE_W,
-                                            height - 2 * rand), hell)
-                else:
-                    gefuellt = round(height * gem.progress)
-                    painter.fillRect(QRectF(x, 0, _BAR_W, height - gefuellt), dunkel)
-                    painter.fillRect(QRectF(x, height - gefuellt, _BAR_W, gefuellt),
-                                     hell)
+                stufe = round(height * gem.level_fill)
+                painter.fillRect(QRectF(x, 0, _BAR_W, height - stufe), dunkel)
+                painter.fillRect(QRectF(x, height - stufe, _BAR_W, stufe), hell)
+                # Die Erfahrung als Linie über die GANZE Balkenhöhe, nicht
+                # innerhalb der Stufe: dort hätte sie bei 60 px nur 3 px
+                # Spielraum. Der Anschlag hält sie auch bei 0 % und 100 %
+                # im Balken, statt sie unten heraus- oder oben
+                # wegfallen zu lassen.
+                linie = min(max(height - round(height * gem.progress), 0),
+                            height - _XP_LINE_H)
+                painter.fillRect(QRectF(x, linie, _BAR_W, _XP_LINE_H),
+                                 QColor(GEM_XP_LINE))
                 if gem.ready:
                     painter.fillRect(QRectF(x, 0, _BAR_W, _READY_CAP_H),
                                      QColor(DASH_WARN))
-                if gem.maxed:
-                    # Gelber Rahmen um den ganzen Balken (Peter,
-                    # 2026-08-16: "so dass man deutlich erkennt, dass der
-                    # Gem ausgelevelt ist"). Ein voller Balken allein
-                    # genügte nicht — er sieht aus wie ein Gem, das
-                    # gerade eben die nächste Stufe erreicht hat.
-                    # Der halbe Pixel Versatz hält die Linie scharf:
-                    # Qt zeichnet sie mittig auf den Pfad, sonst läge
-                    # die Hälfte außerhalb des Balkens.
-                    painter.setPen(QColor(DASH_WARN))
-                    painter.drawRect(QRectF(x + 0.5, 0.5,
-                                            _BAR_W - _MAXED_FRAME_W,
-                                            height - _MAXED_FRAME_W))
             if not self._gems:
                 painter.setPen(dimmed_text(self.palette()))
                 painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter,

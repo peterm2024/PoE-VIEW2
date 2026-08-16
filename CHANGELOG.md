@@ -23,9 +23,15 @@ nach [SemVer](https://semver.org/lang/de/).
 
 ### Hinzugefügt
 
-- Fertig gelevelte Gems (Stufe 20, korrumpiert 21) haben jetzt einen
-  gelben Rahmen. Ein voller Balken allein sah aus wie ein Gem, das
-  gerade eben die nächste Stufe erreicht hat.
+- Die Gem-Balken zeigen jetzt die **Stufe** als Höhe statt des
+  Fortschritts zur nächsten Stufe — der Streifen ist damit ein Profil
+  des Charakters und zeigt auf einen Blick, welches Gem zurückhängt. Der
+  Fortschritt steht weiterhin darin, als schmale gelbe Linie über die
+  ganze Balkenhöhe.
+- Fertig gelevelte Gems (Stufe 20, korrumpiert 21, Awakened 5) sind
+  jetzt ein voller Balken in der kräftigen Fassung ihrer Farbe — rot,
+  grün, blau oder weiß. Vorher sahen sie aus wie ein Gem, das gerade
+  eben die nächste Stufe erreicht hat.
 - Gems mit wenig Fortschritt sahen im Balkenstreifen aus wie Lücken:
   Der leere Teil eines Balkens war gegen den dunklen Hintergrund
   praktisch unsichtbar. Er ist jetzt heller und damit als Balken

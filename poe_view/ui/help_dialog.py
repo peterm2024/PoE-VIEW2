@@ -267,11 +267,15 @@ you are looking at. Right-click it again to stop. A <b>≥</b> in front of a
 number means some tabs of this league have not been loaded yet, so there
 may be more than it says. An item you own none of shows <b>0</b> rather
 than disappearing — that is the answer you were looking for.</p>
-<p>Above the graph, <b>one narrow bar per socketed gem</b> shows how far
-it is from its next level, coloured by the attribute it needs. Hover for
-its name and level.</p>
-<p>A <b>yellow outline</b> means the gem is finished: level 20, or 21 if
-it is corrupted. Nothing left to do there.</p>
+<p>Above the graph, <b>one narrow bar per socketed gem</b> shows its
+<b>level</b> as the filled height, coloured by the attribute it needs.
+Read the strip as a profile of the character: the short bars are the
+gems lagging behind. Hover for the name, level and progress.</p>
+<p>The thin <b>yellow line</b> inside a bar is the progress towards the
+next level, read across the whole height of the bar.</p>
+<p>A <b>solid bar in a vivid colour</b> — red, green, blue or white —
+means the gem is finished: level 20, or 21 if it is corrupted, or
+whatever its own maximum is. Nothing left to do there.</p>
 <p>A <b>yellow cap</b> on top means the opposite — the bar is full but the
 gem is below its maximum. Gems never level up on their own, so that is
 free character power sitting unclaimed until you click it.</p>

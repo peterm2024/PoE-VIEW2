@@ -211,7 +211,7 @@ def test_die_balken_ueberleben_die_tabelle_daneben(qapp) -> None:
     panel.close()
 
 
-# --- Nur echte Gems, und der Rahmen fuer fertige (2026-08-16) ---------- #
+# --- Nur echte Gems (2026-08-16) --------------------------------------- #
 
 def test_ein_abyss_jewel_im_guertel_ist_kein_gem() -> None:
     """Peter, 2026-08-16: "Belt gibts glaube ich nicht fuer Gems, nur
@@ -248,59 +248,153 @@ def _auf_dunklem_grund(strip):
     return strip
 
 
-def test_ein_fertiges_gem_bekommt_einen_rahmen_mit_dunkler_trennung(qapp) -> None:
-    """Peter: "so dass man deutlich erkennt, dass der Gem ausgelevelt
-    ist." Der erste Versuch war ein Leerlauf — der Rahmen lag direkt auf
-    der Gem-Farbe und hob sich mit gemessenen 1,13:1 gegen Gruen nicht
-    ab. Erst die dunkle Trennung zwischen Rahmen und Farbe macht ihn
-    sichtbar (6,4:1 gegen den Hintergrund).
+def _gezeichnet(*gems: dict):
+    """Den echten Streifen zeichnen und das Bild zurueckgeben.
 
-    Geprueft werden die Pixelspalten quer durch den Balken, kein
-    Bildvergleich: Rahmen, Trennung, Farbkern, Trennung, Rahmen."""
-    from PySide6.QtGui import QColor
-    from poe_view.ui.gem_progress import GemProgressBar
-    from poe_view.ui.theme import DASH_WARN
+    ``render()``/``grab()`` des echten Widgets, nie ein Nachbau: Ein
+    nachgebauter Streifen hatte am 2026-08-16 einen Unterschied
+    vorgetaeuscht, den es im Programm gar nicht gab."""
+    from poe_view.ui.gem_progress import BAR_HEIGHT, GemProgressBar
 
     strip = _auf_dunklem_grund(GemProgressBar())
-    strip.set_gems(gem_progress_of([_item_with(_gem("Fertig", "20 (Max)", "I"))]))
-    strip.resize(20, 60)
-    bild = strip.grab().toImage()
-    spalten = [QColor(bild.pixel(x, 30)).name() for x in range(5)]
-
-    gelb = QColor(DASH_WARN).name()
-    grund = "#2b2b2b"
-    assert spalten[0] == gelb and spalten[4] == gelb
-    assert spalten[1] == grund and spalten[3] == grund
-    assert spalten[2] not in (gelb, grund)          # die Gem-Farbe
+    strip.set_gems(gem_progress_of([_item_with(*gems)]))
+    strip.resize(20, BAR_HEIGHT)
+    return strip.grab().toImage()
 
 
-def test_der_rahmen_umschliesst_das_fertige_gem_auch_oben_und_unten(qapp) -> None:
+def _spalte(bild, x: int = 2) -> list[str]:
+    """Eine senkrechte Pixelspalte durch die Mitte eines Balkens."""
     from PySide6.QtGui import QColor
-    from poe_view.ui.gem_progress import GemProgressBar
+
+    return [QColor(bild.pixel(x, y)).name() for y in range(bild.height())]
+
+
+# --- Hoehe = Stufe, Linie = Erfahrung (2026-08-16) --------------------- #
+
+def test_die_balkenhoehe_folgt_der_stufe_und_nicht_dem_fortschritt(qapp) -> None:
+    """Peter, 2026-08-16: "Die aktuelle Stufe des Gems ist wichtiger als
+    die aktuelle Erfahrung." Vorher fuellte der Fortschritt den Balken,
+    jetzt die Stufe — bei Stufe 10 von 20 also die halbe Hoehe, ganz
+    gleich, wie weit die naechste Stufe ist.
+
+    Der Test setzt beide Werte bewusst weit auseinander (Stufe 10,
+    Fortschritt 90 %): Wuerde noch der Fortschritt zaehlen, waere der
+    Balken zu neun Zehnteln hell."""
+    from poe_view.ui.gem_progress import gem_colour
+
+    spalte = _spalte(_gezeichnet(_gem("Halb", "10", "D", progress=0.9)))
+    hell = gem_colour("D")
+
+    assert spalte[59] == hell           # unten gefuellt
+    assert spalte[31] == hell           # bis knapp ueber die Mitte
+    assert spalte[28] != hell           # darueber nicht mehr
+
+
+def test_die_stufe_deckelt_bei_zwanzig_damit_korrupte_gems_nicht_ueberlaufen(qapp) -> None:
+    """"21 (Max)" ist eine gueltige Stufe (23 Stueck in Peters Bestand).
+    Ungedeckelt kaeme 21/20 heraus und der gefuellte Teil waere hoeher
+    als der Balken."""
+    from poe_view.ui.gem_progress import GemProgress
+
+    assert GemProgress("x", "S", 1.0, "21 (Max)", True, False).level_fill == 1.0
+    assert GemProgress("x", "S", 0.0, "10", False, False).level_fill == 0.5
+
+
+def test_eine_unlesbare_stufe_gilt_als_null_statt_als_geraten(qapp) -> None:
+    """Liefert GGG etwas, das keine Zahl ist, bleibt der Balken leer —
+    dieselbe Regel wie beim Fortschritt ohne Beleg."""
+    from poe_view.ui.gem_progress import GemProgress
+
+    assert GemProgress("x", "S", 0.0, "?", False, False).level_number == 0
+
+
+def test_die_erfahrung_steht_als_gelbe_linie_ueber_der_ganzen_hoehe(qapp) -> None:
+    """Peter: "eine 1px Linie am jeweiligen Gem in Intensiv-Gelb fuer die
+    aktuelle Erfahrung" — und zwar ueber die ganze Balkenhoehe, nicht
+    innerhalb der Stufe. Innerhalb waere der Spielraum ein Zwanzigstel,
+    bei 60 px also 3 px; die Linie wuerde sich praktisch nicht bewegen.
+
+    Geprueft wird genau das: Zwei Gems gleicher Stufe, verschiedener
+    Erfahrung, muessen ihre Linie weit auseinander haben."""
+    from poe_view.ui.theme import GEM_XP_LINE
+
+    gelb = GEM_XP_LINE
+    frueh = _spalte(_gezeichnet(_gem("Frueh", "10", "D", progress=0.25))).index(gelb)
+    spaet = _spalte(_gezeichnet(_gem("Spaet", "10", "D", progress=0.75))).index(gelb)
+
+    assert spaet == 15 and frueh == 45          # 75 % bzw. 25 % von 60 px
+    assert frueh - spaet == 30                  # halbe Balkenhoehe Abstand
+
+
+def test_die_linie_bleibt_an_beiden_enden_im_balken(qapp) -> None:
+    """Bei 0 % laege sie rechnerisch eine Zeile UNTER dem Balken, bei
+    100 % genau auf der Oberkante. Beide Male soll man sie sehen."""
+    from poe_view.ui.theme import GEM_XP_LINE
+
+    leer = _spalte(_gezeichnet(_gem("Frisch", "10", "D", progress=0.0)))
+    voll = _spalte(_gezeichnet(_gem("Gleich", "10", "D", progress=0.999)))
+
+    assert leer[59] == GEM_XP_LINE
+    assert voll[0] == GEM_XP_LINE
+
+
+def test_ein_fertiges_gem_ist_ein_voller_balken_in_der_satten_farbe(qapp) -> None:
+    """Peter: "Fertig gelevelte Gems werden einfach als intensiver 5px
+    Balken dargestellt." Das loest zugleich, woran der gelbe Rahmen vom
+    selben Tag gescheitert war: Auf 5 px Breite traegt eine Farbflaeche,
+    keine Kontur (gemessen 1,13:1 gegen Gruen, 1,01:1 gegen Grau)."""
+    from poe_view.ui.theme import GEM_COLORS_DONE
+
+    spalte = _spalte(_gezeichnet(_gem("Fertig", "20 (Max)", "I")))
+
+    assert set(spalte) == {GEM_COLORS_DONE["I"]}    # von oben bis unten
+
+
+def test_ein_fertiges_gem_bekommt_keine_erfahrungslinie(qapp) -> None:
+    """Es hat kein Erfahrungsfeld mehr — eine Linie waere eine erfundene
+    Angabe. Deckt zugleich ab, dass der ``continue``-Zweig nicht
+    versehentlich weiterzeichnet."""
+    from poe_view.ui.theme import GEM_XP_LINE
+
+    assert GEM_XP_LINE not in _spalte(_gezeichnet(_gem("Fertig", "20 (Max)", "I")))
+
+
+def test_fertig_und_stufe_zwanzig_sind_klar_zu_unterscheiden(qapp) -> None:
+    """Der Fall, an dem die ganze Markierung haengt: Ein Gem auf Stufe 20
+    OHNE "(Max)" wartet auf einen Klick und ist voll — es darf nicht
+    aussehen wie ein fertiges. Satte Farbe gegen gedaempfte Farbe plus
+    goldene Kappe."""
+    fertig = _spalte(_gezeichnet(_gem("Fertig", "20 (Max)", "D")))
+    wartet = _spalte(_gezeichnet(_gem("Wartet", "20", "D", progress=1.0)))
+
+    assert fertig[30] != wartet[30]
+
+
+def test_die_goldene_kappe_bleibt_dem_wartenden_gem_erhalten(qapp) -> None:
+    """Peter, 2026-08-16: "Das mit der goldenen Kappe bei levelbaren Gems
+    behalten wir bei.\""""
     from poe_view.ui.theme import DASH_WARN
 
-    strip = _auf_dunklem_grund(GemProgressBar())
-    strip.set_gems(gem_progress_of([_item_with(_gem("Fertig", "20 (Max)", "I"))]))
-    strip.resize(20, 60)
-    bild = strip.grab().toImage()
-    gelb = QColor(DASH_WARN).name()
+    spalte = _spalte(_gezeichnet(_gem("Wartet", "20", "D", progress=1.0)))
 
-    assert QColor(bild.pixel(2, 0)).name() == gelb     # Oberkante
-    assert QColor(bild.pixel(2, 59)).name() == gelb    # Unterkante
+    assert spalte[0] == DASH_WARN and spalte[2] == DASH_WARN
+    assert spalte[59] != DASH_WARN
 
 
-def test_ein_levelndes_gem_bekommt_keinen_rahmen(qapp) -> None:
-    from PySide6.QtGui import QColor
-    from poe_view.ui.gem_progress import GemProgressBar
-    from poe_view.ui.theme import DASH_WARN
+def test_die_satten_farben_folgen_denselben_attributen(qapp) -> None:
+    """Vier Farben, nicht eine: Ein einheitliches Rot fuer alles Fertige
+    wuerde bei 227 von 448 Gems die Attribut-Zuordnung wegwerfen. Gelbe
+    Gems, die es seit kurzem gibt, fallen wie alles Unbekannte auf Weiss
+    (Peter: "die nehmen wir vorerst zu den weissen Gems dazu")."""
+    from poe_view.ui.gem_progress import gem_colour_done
+    from poe_view.ui.theme import GEM_COLOR_DONE_OTHER, GEM_COLORS_DONE
 
-    strip = GemProgressBar()
-    strip.set_gems(gem_progress_of([_item_with(
-        _gem("Laeuft noch", "17", "I", progress=0.3))]))
-    strip.resize(20, 60)
-    bild = strip.grab().toImage()
-
-    assert QColor(bild.pixel(0, 30)).name() != QColor(DASH_WARN).name()
+    assert gem_colour_done("S") == GEM_COLORS_DONE["S"]
+    assert gem_colour_done("D") == GEM_COLORS_DONE["D"]
+    assert gem_colour_done("I") == GEM_COLORS_DONE["I"]
+    assert gem_colour_done("G") == GEM_COLOR_DONE_OTHER
+    assert gem_colour_done("") == GEM_COLOR_DONE_OTHER
+    assert len(set(GEM_COLORS_DONE.values()) | {GEM_COLOR_DONE_OTHER}) == 4
 
 
 def test_ein_leerer_balken_bleibt_sichtbar(qapp) -> None:
