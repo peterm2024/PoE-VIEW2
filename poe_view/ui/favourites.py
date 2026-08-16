@@ -27,7 +27,7 @@ from __future__ import annotations
 from typing import Iterable, NamedTuple, Sequence
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QFont, QFontMetrics
+from PySide6.QtGui import QFont, QFontMetrics, QPainter
 from PySide6.QtWidgets import (QHeaderView, QMenu, QSizePolicy, QTableWidget,
                                QTableWidgetItem)
 
@@ -36,8 +36,20 @@ from poe_view.api.models import Item
 # Zeilenhöhe und Schrift bewusst kleiner als in der Haupttabelle: Die
 # Tabelle steht neben dem Textblock des Leveling-Felds und teilt sich
 # dessen Höhe — je Zeile weniger Platz heißt hier mehr Zeilen.
+#
+# Der Wunsch kommt allerdings nicht durch: Der senkrechte Header setzt
+# eine Untergrenze aus der Schriftgröße (gemessen 2026-08-16:
+# ``minimumSectionSize`` 23), und darunter geht ``setRowHeight`` nicht.
+# Die Zeilen sind damit 23 px hoch, nicht 18.
 ROW_HEIGHT = 18
 FONT_SIZE = 8
+
+# Der Einfügestrich beim Ziehen. Selbst gezeichnet, weil Qts eigener hier
+# nichts taugt: Über die volle Zeilenhöhe meldet Qt ``OnItem`` (gemessen
+# an jeder Position einer 23-px-Zeile) und zeichnet damit einen Rahmen um
+# eine Zeile statt einer Linie dazwischen — "hierhin kommt es" lässt sich
+# so nicht ablesen.
+_DROP_LINE_H = 2
 
 INCOMPLETE_MARK = "≥"
 
@@ -147,6 +159,7 @@ class FavouritesTable(QTableWidget):
         # dem Umsortieren würde ein Überschreiben.
         self.setDragDropOverwriteMode(False)
         self._drag_name = ""
+        self._drop_line = -1
         self.horizontalHeader().hide()
         self.verticalHeader().hide()
         self.setShowGrid(False)
@@ -244,6 +257,12 @@ class FavouritesTable(QTableWidget):
             return False
         nach_name = {row.name: row for row in self._rows}
         self.set_rows([nach_name[name] for name in neu])
+        # Die verschobene Zeile mitnehmen: Die Auswahl hängt an der
+        # Zeilennummer, und die zeigt nach dem Umhängen auf einen anderen
+        # Eintrag. Ohne das bliebe die Markierung dort liegen, wo der
+        # Eintrag WAR — man zieht etwas nach unten und oben leuchtet ein
+        # fremder Name auf.
+        self.selectRow(neu.index(alt[von]))
         self.order_changed.emit(neu)
         return True
 
@@ -292,22 +311,67 @@ class FavouritesTable(QTableWidget):
         self.remember_drag_row()
         super().startDrag(actions)
 
-    def _accept_internal(self, event) -> None:
+    def _accept_internal(self, event) -> bool:
         """Nur die eigenen Zeilen annehmen. Ein Item aus der Haupttabelle
         hierher zu ziehen sähe aus, als würde es aufgenommen — dafür gibt
         es den Rechtsklick, und ein stillschweigend verworfener Ablauf
         wäre schlimmer als gar keiner."""
-        if event.source() is self:
-            event.setDropAction(Qt.DropAction.MoveAction)
-            event.accept()
-        else:
+        if event.source() is not self:
             event.ignore()
+            return False
+        event.setDropAction(Qt.DropAction.MoveAction)
+        event.accept()
+        return True
+
+    def show_drop_line(self, vor_zeile: int) -> None:
+        """Den Einfügestrich vor ``vor_zeile`` zeigen (``-1`` versteckt
+        ihn). Neu gezeichnet wird nur bei einer Änderung — sonst flackerte
+        der Streifen bei jeder Mausbewegung."""
+        if vor_zeile != self._drop_line:
+            self._drop_line = vor_zeile
+            self.viewport().update()
+
+    def _drop_line_y(self) -> int:
+        """Oberkante der Zeile, vor die eingefügt wird. Am Ende der Liste
+        die Unterkante der letzten Zeile, um die Strichstärke nach oben
+        gerückt — sonst läge der Strich außerhalb des sichtbaren
+        Bereichs, genau an der Stelle, die man am häufigsten trifft."""
+        if 0 <= self._drop_line < self.rowCount():
+            return self.rowViewportPosition(self._drop_line)
+        letzte = self.rowCount() - 1
+        if letzte < 0:
+            return 0
+        unten = self.rowViewportPosition(letzte) + self.rowHeight(letzte)
+        return min(unten, self.viewport().height() - _DROP_LINE_H)
+
+    def paintEvent(self, event) -> None:  # noqa: N802 — Qt-Namensschema
+        super().paintEvent(event)
+        if self._drop_line < 0:
+            return
+        painter = QPainter(self.viewport())
+        try:
+            painter.fillRect(0, self._drop_line_y(), self.viewport().width(),
+                             _DROP_LINE_H, self.palette().highlight().color())
+        finally:
+            painter.end()
 
     def dragEnterEvent(self, event) -> None:  # noqa: N802 — Qt-Namensschema
         self._accept_internal(event)
 
     def dragMoveEvent(self, event) -> None:  # noqa: N802 — Qt-Namensschema
-        self._accept_internal(event)
+        """Annehmen UND den Einfügestrich nachführen.
+
+        Ohne das Nachführen zeigt die Tabelle beim Ziehen gar nichts an:
+        Qts eigener ``dragMoveEvent`` berechnet den Strich, wird hier aber
+        nicht aufgerufen — und selbst wenn, meldet Qt über die volle
+        Zeilenhöhe ``OnItem`` und zeichnet keine Linie."""
+        ziel = (self.drop_index(int(event.position().y()))
+                if self._accept_internal(event) else -1)
+        self.show_drop_line(ziel)
+
+    def dragLeaveEvent(self, event) -> None:  # noqa: N802 — Qt-Namensschema
+        self.show_drop_line(-1)
+        super().dragLeaveEvent(event)
 
     def dropEvent(self, event) -> None:  # noqa: N802 — Qt-Namensschema
         """Selbst umsortieren statt Qt machen zu lassen.
@@ -315,13 +379,26 @@ class FavouritesTable(QTableWidget):
         Qts ``InternalMove`` schiebt bei einer Tabelle ZELLEN und lässt
         dabei leere Zeilen zurück; gemeint sind hier aber ganze Zeilen.
         Deshalb wird das Ereignis hier abschließend behandelt und
-        ``super()`` nicht aufgerufen."""
+        ``super()`` nicht aufgerufen.
+
+        **Und deshalb darf hier NICHT ``MoveAction`` herauskommen.** Qts
+        ``startDrag`` ruft nach einem Drop mit ``MoveAction``
+        ``clearOrRemove()`` auf und löscht die noch ausgewählten Zeilen
+        aus dem Modell — gedacht für den Fall, dass die Zeilen woanders
+        neu entstanden sind. Hier haben wir sie aber selbst schon
+        umgehängt, die Auswahl steht danach auf einer FREMDEN Zeile, und
+        die verschwände. Nachgemessen (2026-08-16): Nach ``move_row``
+        umfasst die Auswahl weiterhin eine volle Zeile über beide
+        Spalten, also genau die Bedingung, unter der ``clearOrRemove``
+        löscht. ``IgnoreAction`` nimmt Qt den Anlass; angenommen ist das
+        Ereignis trotzdem."""
         if event.source() is not self:
             event.ignore()
             return
         von = self._dragged_row()
         self._drag_name = ""
-        event.setDropAction(Qt.DropAction.MoveAction)
+        self.show_drop_line(-1)
+        event.setDropAction(Qt.DropAction.IgnoreAction)
         event.accept()
         self.move_row(von, self.drop_index(int(event.position().y())))
 

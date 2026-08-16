@@ -4837,6 +4837,35 @@ meldet erst danach: Wer nur meldete, überließe die Anzeige dem Empfänger
 des Signals, und bis zur nächsten Zählung sähe das Ziehen aus, als hätte
 es nicht funktioniert.
 
+**Der erste Anlauf funktionierte und fühlte sich trotzdem falsch an.**
+Peter, direkt nach dem Ausprobieren: "Fühlt sich nicht richtig an, da
+stimmt was nicht." Nachgemessen waren es drei Dinge, keines davon in
+den bestehenden Tests sichtbar:
+
+1. **Es gab überhaupt keine Rückmeldung, wohin der Eintrag fällt.** Qts
+   Einfügestrich entsteht in `QAbstractItemView::dragMoveEvent` — der
+   hier überschrieben und nicht aufgerufen wurde. Und selbst mit Aufruf
+   käme nichts Brauchbares: Qt meldet an JEDER Position einer 23-px-Zeile
+   `OnItem` (an allen y-Werten durchgemessen), zeichnet also einen Rahmen
+   um eine Zeile statt einer Linie dazwischen. Die 2-px-Ränder, in denen
+   Qt `AboveItem`/`BelowItem` melden würde, sind mit der Maus praktisch
+   nicht zu treffen. Der Strich wird deshalb selbst gezeichnet, an
+   genau der Stelle, an der auch eingefügt wird.
+2. **Nach dem Zug stand die Markierung auf der falschen Zeile.** Die
+   Auswahl hängt an der Zeilennummer; die zeigt nach dem Umhängen auf
+   einen anderen Eintrag. Man zog etwas nach unten, und oben leuchtete
+   ein fremder Name auf. Jetzt wandert die Auswahl mit.
+3. **Der Drop meldete `MoveAction`** — und darauf ruft Qts `startDrag`
+   `clearOrRemove()` auf und löscht die noch ausgewählten Zeilen aus dem
+   Modell. Gedacht ist das für den Fall, dass die Zeilen woanders neu
+   entstanden sind; hier haben wir sie selbst umgehängt. Nachgemessen ist
+   die Bedingung erfüllt: Nach `move_row` umfasst die Auswahl weiterhin
+   eine volle Zeile über beide Spalten. Beobachten ließ sich die Löschung
+   nicht — dafür bräuchte es einen echten Drag-Lauf, und `QDrag::exec`
+   öffnet unter Windows eine native Schleife, die sich nicht
+   nachstellen lässt. `IgnoreAction` nimmt Qt den Anlass; angenommen ist
+   das Ereignis trotzdem.
+
 Drei Feinheiten, jede aus einem gemessenen Befund:
 
 - **`setDragDropMode(InternalMove)` genügt.** Es setzt `dragEnabled` und
@@ -4882,6 +4911,17 @@ statt einen modalen Drag-Lauf zu öffnen. Alle anderen Tests hier rufen
 Mensch eine Zeile greifen kann — genau der Fehler, der am selben Tag
 beim Fertig-Rahmen der Gem-Balken passiert ist: gebaut, geprüft,
 gemeldet, auf dem Schirm nicht benutzbar.
+
+Der Einfügestrich wird als **Unterschied zweier Aufnahmen** desselben
+Widgets geprüft, mit und ohne Strich, nicht an seiner Farbe. Der erste
+Anlauf suchte nach der Highlight-Farbe — die trägt aber auch die
+ausgewählte Zeile, und im Offscreen-Betrieb (helle Palette) sind beide
+identisch: Der Test hielt eine markierte Zeile für einen 19 px hohen
+Strich. Aus demselben Grund steht der Strich in den Tests bewusst NICHT
+auf der Zeile, die nach dem Zug ausgewählt ist — sonst wäre er im Bild
+nicht von der Markierung zu trennen und der Test bewiese nichts.
+Aufgefallen ist auch das nur an der Gegenprobe, die den Test nicht zum
+Fallen brachte.
 
 ---
 

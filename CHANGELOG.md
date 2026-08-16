@@ -24,8 +24,9 @@ nach [SemVer](https://semver.org/lang/de/).
 ### Hinzugefügt
 
 - Die Zeilen der Beobachtungsliste lassen sich per Ziehen umsortieren.
-  Die Reihenfolge wird sofort gespeichert und steht beim nächsten Start
-  wieder so da.
+  Ein Strich zeigt beim Ziehen, wo der Eintrag landet; unter die letzte
+  Zeile ziehen heißt ans Ende. Die Reihenfolge wird sofort gespeichert
+  und steht beim nächsten Start wieder so da.
 - Die Gem-Balken zeigen jetzt die **Stufe** als Höhe statt des
   Fortschritts zur nächsten Stufe — der Streifen ist damit ein Profil
   des Charakters und zeigt auf einen Blick, welches Gem zurückhängt. Der

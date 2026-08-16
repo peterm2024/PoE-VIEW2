@@ -512,3 +512,162 @@ def test_eine_echte_mausbewegung_startet_den_zug(qapp):
 
     assert gerufen == ["Divine Orb"]
     tabelle.close()
+
+
+# ------------------- Einfuegestrich und Move-Action ---------------------- #
+#
+# Peter, 2026-08-16, nach dem ersten Anlauf: "fuehlt sich nicht richtig
+# an, da stimmt was nicht." Nachgemessen waren es zwei Dinge: Beim Ziehen
+# war UEBERHAUPT KEINE Rueckmeldung zu sehen, wohin der Eintrag faellt,
+# und der Drop meldete MoveAction, worauf Qts startDrag hinterher
+# clearOrRemove() aufruft und eine Zeile loescht.
+
+def _strich_zeilen(tabelle) -> list[int]:
+    """Auf welchen Bildzeilen liegt der Einfuegestrich?
+
+    Ermittelt als UNTERSCHIED zweier Aufnahmen desselben Widgets, mit und
+    ohne Strich. Ihn an seiner Farbe zu erkennen ging daneben: Er traegt
+    die Auswahlfarbe, und die ausgewaehlte Zeile traegt sie auch — im
+    Offscreen-Betrieb (helle Palette) sind beide identisch, und der Test
+    hielt eine markierte Zeile fuer einen 19 px hohen Strich.
+
+    Beide Bilder vom ECHTEN Widget (``grab()``), nie nachgebaut."""
+    gemerkt = tabelle._drop_line
+    tabelle.show_drop_line(-1)
+    ohne = tabelle.grab().toImage()
+    tabelle.show_drop_line(gemerkt)
+    mit = tabelle.grab().toImage()
+    x = mit.width() // 2
+    return [y for y in range(mit.height())
+            if mit.pixel(x, y) != ohne.pixel(x, y)]
+
+
+def _tabelle_mit_vier(qapp):
+    tabelle = FavouritesTable()
+    tabelle.set_rows([FavouriteRow(name, 0) for name in VIER])
+    tabelle.resize(200, 160)
+    tabelle.show()
+    return tabelle
+
+
+def test_ohne_zug_gibt_es_keinen_strich(qapp):
+    assert _strich_zeilen(_tabelle_mit_vier(qapp)) == []
+
+
+def test_waehrend_des_zugs_zeigt_ein_strich_die_stelle(qapp):
+    """Das eigentliche "fuehlt sich nicht richtig an": Man zog und sah
+    nicht, wo der Eintrag landen wuerde. Qts eigener Indikator hilft
+    nicht — er meldet ueber die volle Zeilenhoehe ``OnItem`` und zeichnet
+    einen Rahmen um eine Zeile statt einer Linie dazwischen."""
+    tabelle = _tabelle_mit_vier(qapp)
+
+    tabelle.dragMoveEvent(_Ablage(tabelle, 50))
+    qapp.processEvents()
+
+    assert _strich_zeilen(tabelle) != []
+
+
+def test_der_strich_liegt_da_wo_auch_eingefuegt_wird(qapp):
+    """Sonst waere er schlimmer als keiner: Er verspraeche eine Stelle
+    und der Eintrag landete woanders."""
+    tabelle = _tabelle_mit_vier(qapp)
+
+    for maus_y in (2, 30, 70, 150):
+        tabelle.dragMoveEvent(_Ablage(tabelle, maus_y))
+        qapp.processEvents()
+        ziel = tabelle.drop_index(maus_y)
+        kante = (tabelle.rowViewportPosition(ziel) if ziel < tabelle.rowCount()
+                 else tabelle.rowViewportPosition(tabelle.rowCount() - 1)
+                 + tabelle.rowHeight(tabelle.rowCount() - 1))
+        gezeichnet = _strich_zeilen(tabelle)
+
+        assert gezeichnet, f"kein Strich bei y={maus_y}"
+        # Der Rahmen des Widgets verschiebt das ganze Bild um denselben
+        # Betrag gegen die Viewport-Koordinaten; verglichen wird deshalb
+        # der Abstand, nicht die absolute Zahl.
+        versatz = gezeichnet[0] - kante
+        assert 0 <= versatz <= 4, (
+            f"Strich bei y={maus_y} liegt {versatz} px neben der "
+            f"Einfuegestelle vor Zeile {ziel}")
+
+
+def test_am_ende_der_liste_bleibt_der_strich_sichtbar(qapp):
+    """Unterhalb der letzten Zeile ist die haeufigste Stelle ueberhaupt
+    (dorthin zieht man, wer ans Ende soll). Ohne Anschlag laege der
+    Strich ausserhalb des sichtbaren Bereichs."""
+    tabelle = _tabelle_mit_vier(qapp)
+
+    tabelle.dragMoveEvent(_Ablage(tabelle, 150))
+    qapp.processEvents()
+
+    assert _strich_zeilen(tabelle) != []
+
+
+def test_der_strich_verschwindet_beim_verlassen(qapp):
+    from PySide6.QtGui import QDragLeaveEvent
+
+    tabelle = _tabelle_mit_vier(qapp)
+    tabelle.dragMoveEvent(_Ablage(tabelle, 50))
+    qapp.processEvents()
+
+    tabelle.dragLeaveEvent(QDragLeaveEvent())
+    qapp.processEvents()
+
+    assert _strich_zeilen(tabelle) == []
+
+
+def test_der_strich_verschwindet_nach_dem_ablegen(qapp):
+    """Der Strich steht bewusst GANZ OBEN, die verschobene Zeile landet
+    unten: Der Strich traegt die Auswahlfarbe, und die verschobene Zeile
+    ist nach dem Zug ausgewaehlt — laegen beide uebereinander, waere der
+    Strich im Bild nicht von der Markierung zu unterscheiden und der
+    Test bewiese nichts. (Genau so war es zuerst; aufgefallen ist es nur
+    an der Gegenprobe, die den Test nicht zum Fallen brachte.)"""
+    tabelle = _tabelle_mit_vier(qapp)
+    tabelle.dragMoveEvent(_Ablage(tabelle, 2))       # Strich vor Zeile 0
+    qapp.processEvents()
+    assert _strich_zeilen(tabelle), "Voraussetzung des Tests entfallen"
+    tabelle.setCurrentCell(0, 0)
+    tabelle.remember_drag_row()
+
+    tabelle.dropEvent(_Ablage(tabelle, 150))         # ans Ende, waehlt Zeile 3
+    qapp.processEvents()
+
+    assert _strich_zeilen(tabelle) == []
+
+
+def test_der_drop_meldet_keine_move_action(qapp):
+    """Qts ``startDrag`` ruft nach einem Drop mit ``MoveAction``
+    ``clearOrRemove()`` auf und loescht die noch ausgewaehlten Zeilen aus
+    dem Modell. Hier haben wir die Zeilen selbst schon umgehaengt — die
+    Auswahl steht danach auf einer FREMDEN Zeile, und die verschwaende.
+
+    Nachgemessen: Nach ``move_row`` umfasst die Auswahl weiterhin eine
+    volle Zeile ueber beide Spalten, also genau die Bedingung, unter der
+    ``clearOrRemove`` loescht."""
+    from PySide6.QtCore import Qt
+
+    tabelle = _tabelle_mit_vier(qapp)
+    tabelle.setCurrentCell(0, 0)
+    tabelle.remember_drag_row()
+    ereignis = _Ablage(tabelle, 150)
+
+    tabelle.dropEvent(ereignis)
+
+    assert ereignis.aktion != Qt.DropAction.MoveAction
+    assert ereignis.angenommen is True          # angenommen ist es trotzdem
+
+
+def test_die_verschobene_zeile_bleibt_markiert(qapp):
+    """Die Auswahl haengt an der Zeilennummer, und die zeigt nach dem
+    Umhaengen auf einen anderen Eintrag. Ohne Nachfuehren zieht man einen
+    Eintrag nach unten und oben leuchtet ein fremder Name auf."""
+    tabelle = _tabelle_mit_vier(qapp)
+    tabelle.selectRow(0)
+
+    tabelle.move_row(0, 4)
+
+    markiert = sorted({i.row()
+                       for i in tabelle.selectionModel().selectedIndexes()})
+    assert markiert == [3]
+    assert tabelle.name_at(3) == "Chaos Orb"
