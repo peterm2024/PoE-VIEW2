@@ -23,6 +23,9 @@ nach [SemVer](https://semver.org/lang/de/).
 
 ### Hinzugefügt
 
+- In die Beobachtungsliste passen jetzt mehr Zeilen: Sie sind 18 statt
+  23 px hoch, wie ursprünglich vorgesehen — neben einem dreizeiligen
+  Textblock sind das sieben Einträge ohne Scrollen statt fünf.
 - Die Zeilen der Beobachtungsliste lassen sich per Ziehen umsortieren.
   Ein Strich zeigt beim Ziehen, wo der Eintrag landet; unter die letzte
   Zeile ziehen heißt ans Ende. Die Reihenfolge wird sofort gespeichert

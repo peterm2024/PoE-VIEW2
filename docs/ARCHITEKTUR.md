@@ -4749,8 +4749,10 @@ hätte sie den Graphen darunter auf 60 px zusammengedrückt. Was nicht in
 die Höhe des Textblocks passt, wird gescrollt.
 
 Gemessen an einem 578×325-Panel: Die Tabelle wuchs von 38 über 61 auf
-141 px — sieben Zeilen statt zwei —, Graph und Gem-Balken blieben bei
-154 bzw. 60 px. Der Graph gewinnt also **nichts**, anders als von mir
+141 px — sieben Zeilen statt zwei (mit den 18-px-Zeilen von unten; mit
+den 23 px, die der Header vorher erzwang, waren es nur fünf) —, Graph
+und Gem-Balken blieben bei 154 bzw. 60 px.
+Der Graph gewinnt also **nichts**, anders als von mir
 zunächst vorhergesagt: Die Gem-Balken sind mit 60 px ohnehin höher, als
 die Tabelle je war. Gewonnen ist Platz für die Tabelle selbst, aus einer
 Fläche, die vorher leer stand.
@@ -4807,8 +4809,19 @@ vorgeschaltetem `list(items)` nicht auf und bewies damit nichts über die
 Laufzeit.
 
 Höchstens zwölf Beobachtungen (`_MAX_FAVOURITES`); wie viele davon ohne
-Scrollen sichtbar sind, ergibt sich aus der Höhe des Textblocks daneben
-(bei drei Zeilen Text drei Einträge). Wer mehr will, führt Inventar —
+Scrollen sichtbar sind, ergibt sich aus der Höhe des Textblocks daneben.
+Die Zeilen sind mit 18 px flacher als in der Haupttabelle, damit mehr
+hineinpassen — **das musste dem senkrechten Header abgerungen werden**.
+Er erzwingt eine aus Schrift und Stil berechnete Untergrenze, unter die
+`setRowHeight` nicht kommt; auf Peters Windows waren das 23 px, die
+Zeilen also ein Fünftel höher als vorgesehen (bei 141 px Panelhöhe sechs
+Einträge statt sieben). Dass der Header versteckt ist, ändert daran
+nichts. `verticalHeader().setMinimumSectionSize(ROW_HEIGHT)` senkt die
+Grenze; nachgemessen liegt danach weder in der obersten noch in der
+untersten Bildzeile eines Eintrags ein Schriftpixel — die 8-pt-Schrift
+ist 15 px hoch. Warum der naheliegende Test dafür nichts taugt, steht in
+FALLSTRICKE #71: Offscreen liegt dieselbe Untergrenze bei 15, dort kommt
+die Zeilenhöhe auch ohne den Eingriff durch. Wer mehr will, führt Inventar —
 dafür ist die Haupttabelle da. Gespeichert wird als JSON-Liste in `ui-settings.ini`,
 bewusst nicht als QSettings-Stringliste: Die zerlegt einen einzelnen
 Eintrag beim Zurücklesen je nach Plattform wieder in Zeichen.

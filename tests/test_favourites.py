@@ -671,3 +671,56 @@ def test_die_verschobene_zeile_bleibt_markiert(qapp):
                        for i in tabelle.selectionModel().selectedIndexes()})
     assert markiert == [3]
     assert tabelle.name_at(3) == "Chaos Orb"
+
+
+# ------------------------- Zeilenhoehe (2026-08-17) ---------------------- #
+
+def test_die_zeilenhoehe_wird_nicht_vom_header_hochgedrueckt(qapp):
+    """``ROW_HEIGHT`` allein genuegt nicht: Der senkrechte Header setzt
+    aus Schrift und Stil eine Untergrenze, unter die ``setRowHeight``
+    nicht kommt. Auf Peters Windows waren das 23 px — die Zeilen waren
+    also 23 hoch statt 18, ein Fuenftel weniger Favoriten neben dem
+    Textblock. Ein versteckter Header begrenzt dabei genauso wie ein
+    sichtbarer.
+
+    **Geprueft wird die Untergrenze, nicht die Zeilenhoehe.** Die Hoehe
+    waere hier kein Beweis: Offscreen betraegt die Untergrenze nur 15
+    (gemessen 2026-08-17), dort kommen die 18 px auch ohne den Eingriff
+    durch, und der Test bliebe gruen, waehrend Peter 23-px-Zeilen sieht.
+    Dieselbe Falle wie bei der doppelt so breiten Ersatzschrift: Die
+    Testumgebung sieht anders aus als der Betrieb."""
+    tabelle = FavouritesTable()
+    tabelle.set_rows([FavouriteRow("Chaos Orb", 5),
+                      FavouriteRow("Divine Orb", 3)])
+
+    assert tabelle.verticalHeader().minimumSectionSize() == ROW_HEIGHT
+    assert tabelle.rowHeight(0) == ROW_HEIGHT
+    assert tabelle.rowViewportPosition(1) - tabelle.rowViewportPosition(0) \
+        == ROW_HEIGHT
+
+
+def test_die_schrift_wird_von_der_engeren_zeile_nicht_beschnitten(qapp):
+    """Die Untergrenze, die wir gesenkt haben, ist genau dagegen
+    gedacht: Eine Zeile kleiner als ihr Text schneidet ihn ab.
+
+    Geprueft am ECHTEN Bild und nicht an ``QFontMetrics``: In der
+    obersten und untersten Bildzeile eines Eintrags darf ausser dem
+    Hintergrund nichts liegen. (Gemessen ist die 8-pt-Schrift 15 px hoch
+    — offscreen wie nativ, die Ersatzschrift ist nur breiter, nicht
+    hoeher.)"""
+    from PySide6.QtGui import QColor
+
+    tabelle = FavouritesTable()
+    tabelle.set_rows([FavouriteRow("Wild Crystallised Lifeforce", 81352)])
+    tabelle.resize(260, 60)
+    tabelle.show()
+    bild = tabelle.grab().toImage()
+    oben = tabelle.rowViewportPosition(0) + 2      # + Rahmen des Widgets
+    grund = QColor(bild.pixel(bild.width() - 8, oben + 1)).name()
+
+    def fremde_pixel(y: int) -> int:
+        return sum(1 for x in range(6, bild.width() - 6)
+                   if QColor(bild.pixel(x, y)).name() != grund)
+
+    assert fremde_pixel(oben) == 0, "oben ragt Schrift aus der Zeile"
+    assert fremde_pixel(oben + ROW_HEIGHT - 1) == 0, "unten wird beschnitten"

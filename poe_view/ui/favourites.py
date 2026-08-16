@@ -37,10 +37,14 @@ from poe_view.api.models import Item
 # Tabelle steht neben dem Textblock des Leveling-Felds und teilt sich
 # dessen Höhe — je Zeile weniger Platz heißt hier mehr Zeilen.
 #
-# Der Wunsch kommt allerdings nicht durch: Der senkrechte Header setzt
-# eine Untergrenze aus der Schriftgröße (gemessen 2026-08-16:
-# ``minimumSectionSize`` 23), und darunter geht ``setRowHeight`` nicht.
-# Die Zeilen sind damit 23 px hoch, nicht 18.
+# **Der Wert allein genügt dafür nicht.** Der senkrechte Header setzt aus
+# der Schriftgröße eine Untergrenze, unter die ``setRowHeight`` nicht
+# kommt: gemessen 2026-08-16 ein ``minimumSectionSize`` von 23, womit die
+# Zeilen 23 px hoch waren statt 18 und ein Fünftel weniger Favoriten
+# neben den Textblock passten. Der Header muss die Grenze ausdrücklich
+# senken (siehe ``__init__``). Aufgefallen ist es beim Nachrechnen der
+# Ablagestellen fürs Ziehen, nicht an der Anzeige — die Tabelle sah
+# einfach nur etwas luftiger aus, als sie sollte.
 ROW_HEIGHT = 18
 FONT_SIZE = 8
 
@@ -162,6 +166,10 @@ class FavouritesTable(QTableWidget):
         self._drop_line = -1
         self.horizontalHeader().hide()
         self.verticalHeader().hide()
+        # Erst das lässt ``ROW_HEIGHT`` überhaupt wirken (§ROW_HEIGHT).
+        # Ein versteckter Header begrenzt die Zeilenhöhe genauso wie ein
+        # sichtbarer.
+        self.verticalHeader().setMinimumSectionSize(ROW_HEIGHT)
         self.setShowGrid(False)
         self.setWordWrap(False)
         self.horizontalScrollBarPolicy = Qt.ScrollBarPolicy.ScrollBarAlwaysOff

@@ -913,3 +913,51 @@ Behoben durch einen `sizeHint`, der die tatsächlich gebrauchte Breite meldet (B
 **Ein Widget, das bisher allein in seiner Zeile stand, ist ungetestet gegen Nachbarn.** Es kam nie in die Lage, seine Breite begründen zu müssen. Wer ihm einen Nachbarn danebenstellt, prüft zuerst, ob es einen `sizeHint` hat.
 
 **Der Regressionstest misst die Breite im zusammengebauten Panel**, nicht am einzelnen Widget: Der Fehler entstand aus dem Zusammenspiel, ein Test des Widgets allein hätte ihn nie gesehen. Genau das ist die Lücke, die die Testabdeckung dieses Projekts sonst hat — die Verdrahtung ist der ungetestete Teil, und hier hat sie zugeschlagen.
+
+## 71. Eine Zeilenhöhe, die nie ankam — und ein Test, der es nicht merken konnte
+
+**Problem:** `favourites.py` setzte `ROW_HEIGHT = 18` und rief für jede
+Zeile `setRowHeight(zeile, ROW_HEIGHT)` auf. Auf Peters Windows waren die
+Zeilen trotzdem **23 px** hoch. Die Absicht — "je Zeile weniger Platz
+heißt hier mehr Zeilen" — kam damit zu einem Fünftel nicht an: Neben dem
+Textblock passten sechs Favoriten statt sieben, bei kleinerem Panel drei
+statt vier.
+
+**Ursache:** `QHeaderView` erzwingt eine Untergrenze
+(`minimumSectionSize`), die es aus Schrift und Stil berechnet.
+`setRowHeight` kommt darunter nicht. Dass der Header per
+`verticalHeader().hide()` unsichtbar ist, ändert daran nichts — er
+begrenzt weiter.
+
+**Lösung:** Die Grenze ausdrücklich senken, bevor Zeilen gesetzt werden:
+
+```python
+self.verticalHeader().hide()
+self.verticalHeader().setMinimumSectionSize(ROW_HEIGHT)
+```
+
+Nachgemessen (nativ): `rowHeight(0)` 23 → 18, und in der obersten wie
+untersten Bildzeile eines Eintrags liegt kein Schriftpixel mehr — die
+8-pt-Schrift ist 15 px hoch, passt also mit 1,5 px Luft.
+
+**Der eigentliche Fallstrick steckt aber im Test.** Der naheliegende
+Test — `assert tabelle.rowHeight(0) == ROW_HEIGHT` — ist wertlos:
+
+| Umgebung | `minimumSectionSize` | Zeilenhöhe ohne den Eingriff |
+|---|---|---|
+| Windows (Betrieb) | 23 | **23** |
+| `QT_QPA_PLATFORM=offscreen` (Tests) | 15 | 18 |
+
+Offscreen liegt die Grenze unter 18, dort kommen die 18 px auch ohne
+Eingriff durch. Der Test wäre grün geblieben, während Peter
+23-px-Zeilen sieht. Aufgefallen ist es nur an der Gegenprobe: Der
+Eingriff wurde herausgenommen, und der Test blieb grün.
+
+**Wie vermeiden:** Wo eine Qt-Größe von Schrift oder Stil abhängt, nicht
+das Ergebnis prüfen, sondern **den Mechanismus** — hier
+`minimumSectionSize() == ROW_HEIGHT`, was in beiden Umgebungen dieselbe
+Antwort gibt. Und den Zahlenwert selbst immer ohne
+`QT_QPA_PLATFORM=offscreen` messen. Dieselbe Ursache wie bei der doppelt
+so breiten Ersatzschrift (#55) und der hellen Offscreen-Palette (§4.42):
+Die Testumgebung sieht anders aus als der Betrieb, und sie sieht
+freundlicher aus.
