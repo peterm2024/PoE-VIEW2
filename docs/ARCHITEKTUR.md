@@ -4430,9 +4430,39 @@ Balken allein genügte nicht — er sieht aus wie ein Gem, das gerade eben
 die nächste Stufe erreicht hat. Die Rahmenfarbe ist dieselbe Warnfarbe
 wie die Kappe des Zustands "wartet auf einen Klick"; die beiden sind
 durch die Form unterschieden (Umriss gegen Querstreifen), nicht durch
-die Farbe. Das ist bewusst so gewählt und beobachtet: Sollte es im
-Betrieb verwirren, wäre die Kappe der Kandidat für eine eigene Farbe,
-denn nur sie verlangt eine Handlung.
+die Farbe. Sollte das im Betrieb verwirren, wäre die Kappe der Kandidat
+für eine eigene Farbe, denn nur sie verlangt eine Handlung.
+
+**Der erste Anlauf dafür war ein Leerlauf, und das ist die eigentliche
+Lehre.** Die Markierung war gebaut, gemessen und gemeldet — und Peter
+konnte sie auf seinem Schirm nicht finden. Der Grund: Ein fertiges Gem
+hat einen VOLLEN Balken, der Rahmen lag also auf der hellen Gem-Farbe,
+mit 1,13:1 gegen Grün und 1,01:1 gegen Grau. Physisch vorhanden,
+optisch nicht existent. Mein erster Reparaturversuch — die Füllung um
+einen Pixel einrücken — war sogar pixelgleich wirkungslos, weil der
+Rahmen zuletzt gezeichnet wird und die Füllung darunter ohnehin
+überdeckt (nachgemessen: 0 von 300 Pixeln verschieden).
+
+Was hilft, ist ein **dunkler Nachbar**: Bei einem fertigen Gem steht die
+Gem-Farbe nur noch als schmaler Kern in der Mitte (`_MAXED_CORE_W`),
+links und rechts davon liegt Hintergrund, dann der Rahmen. Gelb gegen
+Hintergrund hat 6,4:1. Peter hat aus drei gerenderten Varianten
+gewählt (5 px mit 1 px Kern, 7 px mit 3 px Kern, oder unverändert) und
+die schmale genommen — die Balkenbreite von 5 px bleibt damit, wie er
+sie ursprünglich vorgegeben hatte.
+
+**Der leere Teil eines Balkens war ebenfalls unsichtbar**, aus demselben
+Grund und im selben Bildschirmfoto: 1,02–1,21:1 gegen den Hintergrund.
+Gems mit wenig Fortschritt sahen dadurch aus wie Lücken im Streifen, und
+"hier steckt kein Gem" ließ sich nicht von "Gem bei 5 %" unterscheiden.
+`_EMPTY_DIM` von 0,68 auf 0,45 gesenkt: jetzt 1,44–2,29:1.
+
+Beides zusammen ist eine Lehre über das Vorgehen: **Farben gehören
+gemessen, nicht begutachtet** — und zwar gegen den Hintergrund, auf dem
+sie wirklich liegen. Der Offscreen-Betrieb der Tests hat eine HELLE
+Palette (das dunkle Aussehen kommt von Windows, nicht von einer eigenen
+Palette), deshalb setzen die Tests die Fensterfarbe selbst auf ein
+Dunkelgrau, bevor sie Pixel vergleichen.
 
 **Nicht jedes ``socketedItems`` ist ein Gem.** Peter, 2026-08-16: "Belt
 gibts glaube ich nicht für Gems, nur für Jewels." Er hat damit einen

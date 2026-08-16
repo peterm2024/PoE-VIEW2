@@ -26,6 +26,10 @@ nach [SemVer](https://semver.org/lang/de/).
 - Fertig gelevelte Gems (Stufe 20, korrumpiert 21) haben jetzt einen
   gelben Rahmen. Ein voller Balken allein sah aus wie ein Gem, das
   gerade eben die nächste Stufe erreicht hat.
+- Gems mit wenig Fortschritt sahen im Balkenstreifen aus wie Lücken:
+  Der leere Teil eines Balkens war gegen den dunklen Hintergrund
+  praktisch unsichtbar. Er ist jetzt heller und damit als Balken
+  erkennbar.
 - Rechtsklick auf ein Item, "Watch stack size", und es steht mit seiner
   Gesamtmenge in einer Tabelle an der rechten Seite des Leveling-Felds,
   neben Stufe, Rate und Gem-Balken (sieben Zeilen ohne Scrollen). Gezählt

@@ -237,23 +237,56 @@ def test_gems_neben_einem_jewel_bleiben_erhalten() -> None:
     assert [g.name for g in gems] == ["Summon Skitterbots"]
 
 
-def test_ein_fertiges_gem_bekommt_einen_rahmen(qapp) -> None:
-    """Peter: "so dass man deutlich erkennt, dass der Gem ausgelevelt
-    ist." Ein voller Balken allein sieht aus wie ein Gem, das gerade die
-    naechste Stufe erreicht hat.
+def _auf_dunklem_grund(strip):
+    """Palette auf einen dunklen Grund setzen: Offscreen laeuft sonst mit
+    heller Palette, und die Trennung neben dem Rahmen waere weiss."""
+    from PySide6.QtGui import QColor
 
-    Geprueft wird die Farbe der Randpixel, nicht ein Bildvergleich."""
+    pal = strip.palette()
+    pal.setColor(pal.ColorRole.Window, QColor("#2b2b2b"))
+    strip.setPalette(pal)
+    return strip
+
+
+def test_ein_fertiges_gem_bekommt_einen_rahmen_mit_dunkler_trennung(qapp) -> None:
+    """Peter: "so dass man deutlich erkennt, dass der Gem ausgelevelt
+    ist." Der erste Versuch war ein Leerlauf — der Rahmen lag direkt auf
+    der Gem-Farbe und hob sich mit gemessenen 1,13:1 gegen Gruen nicht
+    ab. Erst die dunkle Trennung zwischen Rahmen und Farbe macht ihn
+    sichtbar (6,4:1 gegen den Hintergrund).
+
+    Geprueft werden die Pixelspalten quer durch den Balken, kein
+    Bildvergleich: Rahmen, Trennung, Farbkern, Trennung, Rahmen."""
     from PySide6.QtGui import QColor
     from poe_view.ui.gem_progress import GemProgressBar
     from poe_view.ui.theme import DASH_WARN
 
-    strip = GemProgressBar()
+    strip = _auf_dunklem_grund(GemProgressBar())
     strip.set_gems(gem_progress_of([_item_with(_gem("Fertig", "20 (Max)", "I"))]))
     strip.resize(20, 60)
     bild = strip.grab().toImage()
+    spalten = [QColor(bild.pixel(x, 30)).name() for x in range(5)]
 
-    assert QColor(bild.pixel(0, 30)).name() == QColor(DASH_WARN).name()
-    assert QColor(bild.pixel(2, 30)).name() != QColor(DASH_WARN).name()
+    gelb = QColor(DASH_WARN).name()
+    grund = "#2b2b2b"
+    assert spalten[0] == gelb and spalten[4] == gelb
+    assert spalten[1] == grund and spalten[3] == grund
+    assert spalten[2] not in (gelb, grund)          # die Gem-Farbe
+
+
+def test_der_rahmen_umschliesst_das_fertige_gem_auch_oben_und_unten(qapp) -> None:
+    from PySide6.QtGui import QColor
+    from poe_view.ui.gem_progress import GemProgressBar
+    from poe_view.ui.theme import DASH_WARN
+
+    strip = _auf_dunklem_grund(GemProgressBar())
+    strip.set_gems(gem_progress_of([_item_with(_gem("Fertig", "20 (Max)", "I"))]))
+    strip.resize(20, 60)
+    bild = strip.grab().toImage()
+    gelb = QColor(DASH_WARN).name()
+
+    assert QColor(bild.pixel(2, 0)).name() == gelb     # Oberkante
+    assert QColor(bild.pixel(2, 59)).name() == gelb    # Unterkante
 
 
 def test_ein_levelndes_gem_bekommt_keinen_rahmen(qapp) -> None:
@@ -268,3 +301,26 @@ def test_ein_levelndes_gem_bekommt_keinen_rahmen(qapp) -> None:
     bild = strip.grab().toImage()
 
     assert QColor(bild.pixel(0, 30)).name() != QColor(DASH_WARN).name()
+
+
+def test_ein_leerer_balken_bleibt_sichtbar(qapp) -> None:
+    """Peters Bildschirmfoto vom 2026-08-16: Gems mit wenig Fortschritt
+    sahen aus wie LUECKEN im Streifen. Gemessen hatte der dunkle Teil
+    1,02-1,21:1 gegen den Hintergrund, war also unsichtbar; jetzt sind
+    es 1,44-2,29:1.
+
+    Geprueft wird, dass sich der dunkle Teil ueberhaupt vom Hintergrund
+    unterscheidet — nicht ein bestimmter Farbwert."""
+    from PySide6.QtGui import QColor
+    from poe_view.ui.gem_progress import GemProgressBar
+
+    strip = _auf_dunklem_grund(GemProgressBar())
+    strip.set_gems(gem_progress_of([_item_with(
+        _gem("Kaum gelevelt", "3", "D", progress=0.03))]))
+    strip.resize(20, 60)
+    bild = strip.grab().toImage()
+
+    oben = QColor(bild.pixel(2, 5))          # der leere Teil
+    assert oben.name() != "#2b2b2b", "leerer Balken verschwindet im Hintergrund"
+    unten = QColor(bild.pixel(2, 59))        # der gefuellte Teil
+    assert unten.name() != oben.name()       # und beide sind unterscheidbar

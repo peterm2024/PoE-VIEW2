@@ -66,7 +66,24 @@ _GEM_FRAME = 4
 
 # Rahmenstärke der Fertig-Markierung. 1 px lässt vom 5 px breiten Balken
 # noch 3 px Farbe stehen — genug, um die Gem-Farbe zu erkennen.
+#
+# Ein Versuch, die Sichtbarkeit durch bloßes Einrücken der Füllung zu
+# verbessern, war ein Leerlauf: Der Rahmen wird zuletzt gezeichnet und
+# überdeckt die Füllung ohnehin, das Ergebnis war pixelgleich (geprüft
+# 2026-08-16, 0 von 300 Pixeln verschieden).
 _MAXED_FRAME_W = 1
+
+# Breite der Farbfläche eines FERTIGEN Balkens. Sie ist schmaler als der
+# Balken, damit zwischen dem gelben Rahmen und der Gem-Farbe eine dunkle
+# Trennung liegt — daran hängt die Sichtbarkeit der Markierung.
+#
+# Gemessen: Gelb auf der vollen Gem-Farbe hat 1,13:1 gegen Grün und
+# 1,01:1 gegen Grau, ist also physisch vorhanden und trotzdem nicht zu
+# erkennen. Dasselbe Gelb gegen den Hintergrund hat 6,4:1. Ein dunkler
+# Nachbar ist damit kein Schönheitsdetail, sondern der ganze Trick.
+#
+# ``None`` schaltet zurück auf "Rahmen direkt auf der Füllung".
+_MAXED_CORE_W = 1
 
 # Höhe des Streifens. Peter schlug 75 px vor; 60 lassen dem Graphen
 # darunter mehr Luft, ohne dass ein Drittel-Fortschritt undeutlich wird
@@ -80,9 +97,18 @@ BAR_HEIGHT = 60
 _READY_CAP_H = 3
 
 # Wie dunkel der noch nicht gefüllte Teil ist. Dunkel genug, dass der
-# helle Teil klar heraussticht, hell genug, dass die Farbe des Gems noch
-# erkennbar bleibt — sonst wäre der leere Balken nur ein grauer Strich.
-_EMPTY_DIM = 0.68
+# helle Teil klar heraussticht, hell genug, dass der Balken überhaupt
+# noch als Balken zu sehen ist.
+#
+# Der Wert stand bis 2026-08-16 auf 0,68 und war damit zu dunkel:
+# Gegen den Hintergrund der dunklen Windows-Oberfläche kam der leere
+# Teil auf 1,02–1,21:1 Kontrast, war also praktisch unsichtbar. In
+# Peters Bildschirmfoto sahen Gems mit wenig Fortschritt deshalb aus
+# wie LÜCKEN im Streifen — man konnte "hier steckt kein Gem" nicht von
+# "Gem bei 5 %" unterscheiden, ausgerechnet den Zustand, den man sehen
+# will. Mit 0,45 sind es 1,44–2,29:1: noch klar dunkler als der volle
+# Teil, aber als Balken erkennbar.
+_EMPTY_DIM = 0.45
 
 
 class GemProgress(NamedTuple):
@@ -222,15 +248,30 @@ class GemProgressBar(QWidget):
         painter = QPainter(self)
         try:
             height = self.height()
+            # Der echte Hintergrund, nicht ein fest eingetippter Wert:
+            # Das dunkle Aussehen kommt von Windows, nicht von einer
+            # eigenen Palette — ein hart kodiertes Dunkelgrau stünde im
+            # hellen Systemdesign als Fleck da.
+            grund = self.palette().window().color()
             for index, gem in enumerate(self._gems):
                 x = index * (_BAR_W + _BAR_GAP)
                 if x + _BAR_W > self.width():
                     break        # lieber abschneiden als stauchen
                 hell = QColor(gem_colour(gem.colour))
                 dunkel = blend(hell, QColor("#000000"), _EMPTY_DIM)
-                gefuellt = round(height * gem.progress)
-                painter.fillRect(QRectF(x, 0, _BAR_W, height - gefuellt), dunkel)
-                painter.fillRect(QRectF(x, height - gefuellt, _BAR_W, gefuellt), hell)
+                if gem.maxed and _MAXED_CORE_W:
+                    # Fertig: Farbkern in der Mitte, ringsum dunkel, damit
+                    # der gelbe Rahmen gleich einen Nachbarn hat, gegen den
+                    # er sich abhebt (§_MAXED_CORE_W).
+                    rand = (_BAR_W - _MAXED_CORE_W) // 2
+                    painter.fillRect(QRectF(x, 0, _BAR_W, height), grund)
+                    painter.fillRect(QRectF(x + rand, rand, _MAXED_CORE_W,
+                                            height - 2 * rand), hell)
+                else:
+                    gefuellt = round(height * gem.progress)
+                    painter.fillRect(QRectF(x, 0, _BAR_W, height - gefuellt), dunkel)
+                    painter.fillRect(QRectF(x, height - gefuellt, _BAR_W, gefuellt),
+                                     hell)
                 if gem.ready:
                     painter.fillRect(QRectF(x, 0, _BAR_W, _READY_CAP_H),
                                      QColor(DASH_WARN))
