@@ -68,8 +68,14 @@ Imports oder bei Pfaden relativ zu `__file__` statt zur `.exe` (siehe
 
 **Bekannter Stolperstein:** Windows SmartScreen und Virenscanner warnen
 bei unsignierten Anwendungen vor einem unbekannten Herausgeber. Das ist
-bei nicht codesignierten PyInstaller-Builds normal. Ein entsprechender
-Hinweis im Release-Text erspart Rückfragen.
+bei nicht codesignierten PyInstaller-Builds normal.
+
+Der Hinweis darauf gehört **nicht** in den Release-Text, sondern steht
+dauerhaft in der README unter "Download" — also dort, wo jemand liest,
+BEVOR er die Datei holt. Hier stand früher die Empfehlung, ihn in jedes
+Release zu schreiben; nachgesehen hat es kein Release je getan (v0.7.0
+bis v0.9.0 alle ohne), und richtig war das auch: In jeder Fassung
+wiederholt wäre er Rauschen vor dem eigentlichen Änderungstext.
 
 ## 3. Tag + GitHub Release
 
