@@ -4936,6 +4936,76 @@ nicht von der Markierung zu trennen und der Test bewiese nichts.
 Aufgefallen ist auch das nur an der Gegenprobe, die den Test nicht zum
 Fallen brachte.
 
+### 4.46 Charakterbogen-Export (`ui/character_sheet.py`)
+
+Peter, 2026-08-21: "eine Hommage, mit den ganzen Eigenschaften und Items
+und verwendeten Gems und Levels, im Stile der alten Pen&Paper RPGs."
+Rechtsklick auf einen Charakter (Kontextmenü der `CharacterList`) →
+Speichern-Dialog → Markdown-Datei.
+
+**Keine berechneten Werte.** Peter hatte ursprünglich an das
+Spiel-eigene Charakterblatt gedacht — Leben, Mana, Energieschild, die
+drei Attribute, DPS-Aufschlüsselung. Nachgemessen am kompletten Cache
+eines Charakters (`character_items`, alle Item-Rohdaten): Kein einziges
+dieser Felder existiert irgendwo als Schlüssel, weder in der
+Charakterliste noch im Item-Endpunkt. Diese Zahlen entstehen im
+Spielclient aus dem VOLLEN Passivbaum plus sämtlichen Item-Mods —
+dieselbe Rechnung, die Path of Building nachbaut. Sie nachzubilden wäre
+ein eigenes Projekt, kein Feature nebenbei. Der Bogen zeigt deshalb
+Ausrüstung und Gems; die Hommage an alte Papierbögen kommt über die
+**Form** (Gliederung nach Körperslot, leere Plätze bleiben sichtbar),
+nicht über erfundene Zahlen.
+
+**Slot-Reihenfolge und -Beschriftung kommen aus der Paperdoll**, nicht
+aus einer zweiten Liste: `DOLL_SLOTS`/`SWAP_SLOTS`/`TRINKET_SLOT` standen
+bis dahin `paperdoll.py`-intern (`_DOLL_SLOTS` etc.) und wurden dafür
+öffentlich gemacht — derselbe Grund, aus dem `EQUIPPED_SLOTS` schon
+vorher öffentlich war: eine zweite, eigene Liste liefe bei der nächsten
+Slot-Änderung leicht auseinander. Die zehn Kernplätze erscheinen immer,
+auch leer (die Silhouette eines Papierbogens bleibt vollständig);
+Tausch-Waffenset und Trinket nur, wenn tatsächlich etwas darin steckt —
+dieselbe Regel wie in der Paperdoll selbst.
+
+**Gems stehen gruppiert unter dem Ausrüstungsteil, in dem sie sitzen**,
+mit einem Attribut-Kürzel ausgeschrieben (`Str`/`Dex`/`Int` statt GGGs
+`S`/`D`/`I` — ein Kürzel allein sagt einem Fremden nichts) und demselben
+`tooltip`-Text wie der Gem-Balken über dem XP-Graphen (§4.42): "level 4,
+57% to next" bzw. "level 1 (Max)". Zwei Darstellungen derselben Zahl
+dürfen nicht auseinanderlaufen, deshalb dieselbe Quelle. Nur `gem_progress_of`
+selbst entscheidet außerdem, ob überhaupt ein Gem vorliegt — ``item=None``
+(kein Slot belegt) braucht keinen eigenen Zweig, weil `getattr(None, …)`
+dort ohnehin auf den Vorgabewert fällt.
+
+**Mods** kommen aus denselben Funktionen wie `item_export_text`
+(implizit, explizit, alle Zusatzlisten wie Verzauberung/Fraktur) — aber
+ohne dessen PoB-Abschnittstrennung, ein Papierbogen muss nicht zwischen
+"implizit" und "explizit" unterscheiden. In einer Markdown-Tabellenzelle
+gibt es keinen echten Zeilenumbruch; mehrere Mods stehen deshalb durch
+`<br>` getrennt (GitHub-Flavored Markdown, funktioniert auch beim
+Drucken über den Browser).
+
+**Stufe und Erfahrung kommen aus `_XpWatch`**, nicht aus
+`Character.level` — dieselbe Zahl, die das Leveling-Feld zeigt. Ohne
+laufende Beobachtung (Charakter nie geöffnet) fällt die Anzeige auf
+`character.level` zurück und lässt die Erfahrung ganz weg, statt eine
+unbekannte Zahl zu behaupten.
+
+**Der Export ist eine ausdrückliche Handlung wie der CSV-Export**: Ist
+der Charakter noch nie geöffnet worden (`_character_items` kennt ihn
+nicht), erscheint ein Hinweis statt eines leeren Blatts oder eines
+stillen Wartens auf einen Ladevorgang — anders als die Paperdoll, die
+bei fehlendem Cache auf das Ergebnis des gerade laufenden Klicks wartet.
+Ein Export soll nicht raten, wann "gerade eben geladen" gemeint ist.
+
+Getestet: `tests/test_character_sheet.py` (reine Funktion — Kopf,
+Ausrüstungstabelle samt leerer Slots und Tausch-/Trinket-Bedingung,
+Flaschen-Reihenfolge, Mod-Zusammenfassung, Gem-Gruppierung samt
+Attribut-Tag und Sonderfall "(Max)") und drei Verdrahtungstests in
+`tests/test_main_window_helpers.py` (Datei entsteht mit erwartetem
+Inhalt, Hinweis statt Dialog ohne geladene Items, Signal der
+Charakterliste kommt im Hauptfenster an). Sieben Gegenproben an der
+reinen Funktion, drei weitere an der Verdrahtung, alle greifen.
+
 ---
 
 ## 5. UI-Konzept (Oberflächenvorschlag)

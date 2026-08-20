@@ -6,6 +6,15 @@ nach [SemVer](https://semver.org/lang/de/).
 
 ## [Unveröffentlicht]
 
+### Hinzugefügt
+
+- Rechtsklick auf einen Charakter, "Export character sheet…", erzeugt
+  einen Charakterbogen als Markdown-Datei: Ausrüstung nach Körperslot
+  (im Stile alter Pen&Paper-Rollenspiele) und die eingesetzten Gems
+  samt Stufe, gruppiert nach dem Ausrüstungsteil, in dem sie stecken.
+  Keine berechneten Werte wie Leben oder Resistenzen — GGGs API liefert
+  sie nicht, sie entstehen im Spielclient aus dem vollen Passivbaum.
+
 ## [0.10.0] - 2026-08-17
 
 ### Behoben

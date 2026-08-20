@@ -102,6 +102,12 @@ progress and the last three hours of experience.
 - **Character paperdoll** (double-click a character): equipment laid out
   as a doll instead of flat table rows, including the jewels socketed in
   the passive tree.
+- **Character sheet export** (right-click a character): a Markdown
+  document laid out like an old pen-and-paper RPG sheet — equipment by
+  body slot and the gems socketed into each piece, with their level.
+  No computed stats (life, resistances, DPS): the API doesn't provide
+  them, they come from the game client simulating the full passive
+  tree.
 - **Enlarged item view** (double-click an item): large icon and the full
   property and mod text without the compact detail panel's line
   clipping. Divination cards show their real artwork from GGG's own CDN

@@ -55,7 +55,7 @@ from poe_view.ui.theme import RARITY_COLORS
 # Trennung wie in ``help_dialog.py``/``settings_dialog.py``). Bewusst die
 # Slot-Namen aus dem Spiel selbst, nicht die der API: Ein Spieler kennt
 # "Off Hand", nicht "Offhand2".
-_DOLL_SLOTS = (
+DOLL_SLOTS = (
     (0, 2, "Helm", "Helmet"),
     (0, 3, "Amulet", "Amulet"),
     (1, 0, "Weapon", "Weapon"),
@@ -74,8 +74,8 @@ _DOLL_SLOTS = (
 # erscheint nur an einem LEEREN Platz, und leer wird hier keiner angelegt.
 # Trotzdem englisch gehalten wie alles andere — der Tag, an dem diese
 # Plätze doch dauerhaft stehen, soll nicht überraschen.
-_SWAP_SLOTS = (("Weapon2", "Weapon (swap)"), ("Offhand2", "Off Hand (swap)"))
-_TRINKET_SLOT = ("Trinket", "Trinket")
+SWAP_SLOTS = (("Weapon2", "Weapon (swap)"), ("Offhand2", "Off Hand (swap)"))
+TRINKET_SLOT = ("Trinket", "Trinket")
 
 # Alle ``inventoryId``-Werte, die ein Charakter tatsächlich TRÄGT statt im
 # Rucksack ("MainInventory") zu haben — die Puppe oben plus Flaschen (eigener
@@ -84,11 +84,13 @@ _TRINKET_SLOT = ("Trinket", "Trinket")
 # für die Diagnose der ToDo-Meldung "angelegte Items werden nach einem
 # Zonenwechsel fälschlich als frisch erkannt" braucht — eine zweite,
 # eigene Liste hätte bei einer künftigen Slot-Änderung leicht auseinanderlaufen
-# können.
+# können. ``DOLL_SLOTS``/``SWAP_SLOTS``/``TRINKET_SLOT`` sind aus demselben
+# Grund öffentlich: ``character_sheet.py`` braucht dieselbe Reihenfolge und
+# dieselben Beschriftungen fürs Ausrüstungskapitel des Exports.
 EQUIPPED_SLOTS: frozenset[str] = frozenset(
-    {slot_id for _, _, slot_id, _ in _DOLL_SLOTS}
-    | {slot_id for slot_id, _ in _SWAP_SLOTS}
-    | {_TRINKET_SLOT[0], "Flask"}
+    {slot_id for _, _, slot_id, _ in DOLL_SLOTS}
+    | {slot_id for slot_id, _ in SWAP_SLOTS}
+    | {TRINKET_SLOT[0], "Flask"}
 )
 
 
@@ -191,7 +193,7 @@ class PaperdollDialog(QDialog):
 
         doll_box = QGroupBox("Equipment")
         doll_grid = QGridLayout(doll_box)
-        for row, col, slot_id, label in _DOLL_SLOTS:
+        for row, col, slot_id, label in DOLL_SLOTS:
             slot_items = by_slot.get(slot_id)
             btn = _SlotButton(label)
             btn.set_item(slot_items[0] if slot_items else None,
@@ -209,7 +211,7 @@ class PaperdollDialog(QDialog):
         flask_row.addStretch()
 
         extra_row = QHBoxLayout()
-        for slot_id, label in _SWAP_SLOTS + (_TRINKET_SLOT,):
+        for slot_id, label in SWAP_SLOTS + (TRINKET_SLOT,):
             slot_items = by_slot.get(slot_id)
             if not slot_items:
                 continue  # nicht jeder Charakter hat ein Tausch-Set/Trinket

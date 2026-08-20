@@ -5,7 +5,7 @@ Netzzugriff, kein Worker nötig."""
 from PySide6.QtGui import QFont, QFontMetrics
 
 from poe_view.api.models import Character, Item
-from poe_view.ui.paperdoll import (_DOLL_SLOTS, _NAME_LINES, PaperdollDialog,
+from poe_view.ui.paperdoll import (DOLL_SLOTS, _NAME_LINES, PaperdollDialog,
                                    _fit_name, _SlotButton)
 
 
@@ -50,8 +50,8 @@ def test_the_grid_matches_the_arrangement_in_the_game(qapp) -> None:
 
     Geprueft werden Lagebeziehungen, keine festen Koordinaten: Wo genau
     das Raster anfaengt, ist Geschmack — was neben was liegt, nicht."""
-    zeile = {slot: r for r, _c, slot, _label in _DOLL_SLOTS}
-    spalte = {slot: c for _r, c, slot, _label in _DOLL_SLOTS}
+    zeile = {slot: r for r, _c, slot, _label in DOLL_SLOTS}
+    spalte = {slot: c for _r, c, slot, _label in DOLL_SLOTS}
 
     # Helm und Amulett teilen sich die oberste Zeile, Amulett rechts
     assert zeile["Helm"] == zeile["Amulet"]
@@ -96,7 +96,7 @@ def test_flasks_are_ordered_by_their_x_coordinate(qapp) -> None:
 
 def test_weapon_swap_and_trinket_slots_only_appear_when_present(qapp) -> None:
     dialog_without = PaperdollDialog(_char(), [], pixmap_for=lambda item: None)
-    assert len(_slot_buttons(dialog_without)) == len(_DOLL_SLOTS)  # nur die zehn Kern-Slots
+    assert len(_slot_buttons(dialog_without)) == len(DOLL_SLOTS)  # nur die zehn Kern-Slots
 
     dialog_with = PaperdollDialog(_char(), [_item("Weapon2", "Swap Weapon"),
                                             _item("Trinket", "Ancient Sliver")],
@@ -104,7 +104,7 @@ def test_weapon_swap_and_trinket_slots_only_appear_when_present(qapp) -> None:
     labels = _labels(dialog_with)
     assert "Swap Weapon" in labels
     assert "Ancient Sliver" in labels
-    assert len(_slot_buttons(dialog_with)) == len(_DOLL_SLOTS) + 2
+    assert len(_slot_buttons(dialog_with)) == len(DOLL_SLOTS) + 2
 
 
 def test_passive_jewels_are_slots_like_everything_else(qapp) -> None:

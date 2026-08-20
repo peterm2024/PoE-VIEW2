@@ -19,7 +19,7 @@ from poe_view.services.api_worker import FetchPricesJob, FetchStashListJob
 from poe_view.services.poe2_probe import Probe, ProbeCall
 from poe_view.ui import external_tools
 from poe_view.ui.item_table import CONFIGURABLE_COLUMNS
-from poe_view.ui.main_window import MainWindow, _stable_item_dump
+from poe_view.ui.main_window import MainWindow, _stable_item_dump, _XpWatch
 
 NESTED = [
     {"id": "root1", "name": "#", "type": "QuadStash", "metadata": {}},
@@ -8779,6 +8779,80 @@ def test_das_entlassen_aus_der_tabelle_ist_verdrahtet(qapp, tmp_path, monkeypatc
     win.leveling.favourites.remove_requested.emit("Chaos Orb")
 
     assert win._favourite_names() == []
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+# ----------------------- Charakterbogen-Export --------------------------- #
+#
+# Peter, 2026-08-21: "eine Hommage ... im Stile der alten Pen&Paper RPGs".
+# Der Baustein selbst ist in tests/test_character_sheet.py durchgeprueft;
+# hier nur die Verdrahtung: Rechtsklick -> Speichern-Dialog -> Datei.
+
+def test_export_character_sheet_writes_the_expected_file(qapp, monkeypatch, tmp_path):
+    win = MainWindow()
+    char = make_char("WitchOfPeter", "Standard")
+    item = Item.model_validate({
+        "typeLine": "Darkwood Sceptre", "baseType": "Darkwood Sceptre",
+        "inventoryId": "Weapon", "frameType": 0,
+        "socketedItems": [{
+            "typeLine": "Fireball", "colour": "I", "frameType": 4,
+            "properties": [{"name": "Level", "values": [["4", 0]]}]}]})
+    win._on_character_items("WitchOfPeter", [item], False)
+    win._xp_watch["WitchOfPeter"] = _XpWatch(
+        since=0.0, since_experience=0, level=42, current_experience=1_000_000)
+    target = tmp_path / "sheet.md"
+    monkeypatch.setattr("poe_view.ui.main_window.QFileDialog.getSaveFileName",
+                        staticmethod(lambda *a, **k: (str(target), "Markdown files (*.md)")))
+
+    win._on_character_sheet_requested(char)
+
+    text = target.read_text(encoding="utf-8")
+    assert "# WitchOfPeter" in text
+    assert "Level 42" in text
+    assert "Darkwood Sceptre" in text
+    assert "Fireball" in text
+    assert f"Exported character sheet to {target}." in win._status_msg.text()
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_export_character_sheet_needs_the_character_opened_first(qapp, monkeypatch, tmp_path):
+    """Ohne geladene Items gaebe es nichts zu exportieren — statt eines
+    leeren Blatts ein Hinweis, dieselbe Haltung wie beim CSV-Export
+    ("Laden bleibt eine ausdrueckliche Handlung")."""
+    win = MainWindow()
+    char = make_char("NochNieGeoeffnet", "Standard")
+    aufgerufen = []
+    monkeypatch.setattr("poe_view.ui.main_window.QFileDialog.getSaveFileName",
+                        staticmethod(lambda *a, **k: aufgerufen.append(1) or ("", "")))
+    monkeypatch.setattr("poe_view.ui.main_window.QMessageBox.information",
+                        staticmethod(lambda *a, **k: None))
+
+    win._on_character_sheet_requested(char)
+
+    assert aufgerufen == []  # der Speichern-Dialog wurde gar nicht erst geoeffnet
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_der_charakterbogen_ist_am_kontextmenue_verdrahtet(qapp, monkeypatch, tmp_path):
+    """Das Signal der Charakterliste muss im Hauptfenster ankommen."""
+    win = MainWindow()
+    char = make_char("WitchOfPeter", "Standard")
+    win._on_character_items("WitchOfPeter", [
+        Item.model_validate({"typeLine": "Chaos Orb", "frameType": 5,
+                             "inventoryId": "MainInventory"})], False)
+    target = tmp_path / "sheet.md"
+    monkeypatch.setattr("poe_view.ui.main_window.QFileDialog.getSaveFileName",
+                        staticmethod(lambda *a, **k: (str(target), "Markdown files (*.md)")))
+
+    win.character_list.character_sheet_requested.emit(char)
+
+    assert target.exists()
 
     win.worker.stop()
     win.worker.wait(5000)

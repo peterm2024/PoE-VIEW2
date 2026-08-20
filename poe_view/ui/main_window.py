@@ -64,6 +64,7 @@ from poe_view.ui.item_history import (BASE_COL as HISTORY_BASE_COL,
                                       VALUE_COL as HISTORY_VALUE_COL,
                                       HistoryEntry, ItemHistoryModel)
 from poe_view.ui.item_zoom import ItemZoomDialog
+from poe_view.ui.character_sheet import build_character_sheet
 from poe_view.ui.paperdoll import EQUIPPED_SLOTS, PaperdollDialog
 from poe_view.ui.settings_dialog import SettingsDialog
 from poe_view.ui.rate_limit_dashboard import RateLimitDashboard
@@ -1161,6 +1162,8 @@ class MainWindow(QMainWindow):
         self.character_list.character_refresh_requested.connect(self._on_character_refresh)
         self.character_list.character_paperdoll_requested.connect(
             self._on_character_paperdoll_requested)
+        self.character_list.character_sheet_requested.connect(
+            self._on_character_sheet_requested)
         self.character_list.export_visible_requested.connect(self._export_csv)
         self.character_list.setMaximumHeight(220)
 
@@ -3756,6 +3759,36 @@ class MainWindow(QMainWindow):
         self._paperdoll_dialog = PaperdollDialog(char, items, self.table_model.pixmap_for,
                                                  parent=self)
         self._paperdoll_dialog.show()
+
+    def _on_character_sheet_requested(self, char: Character) -> None:
+        """Rechtsklick "Export character sheet…" (Peter, 2026-08-21: "eine
+        Hommage ... im Stile der alten Pen&Paper RPGs"). Anders als die
+        Paperdoll wartet dieser Weg NICHT auf einen laufenden Ladevorgang
+        — ein Export ist eine ausdrückliche, einmalige Handlung (dieselbe
+        Haltung wie beim CSV-Export: "Laden bleibt eine ausdrückliche
+        Handlung", §_export_rows), kein guter Ort für eine stille
+        Warteschlange."""
+        items = self._character_items.get(char.name)
+        if items is None:
+            QMessageBox.information(
+                self, "Character Sheet",
+                f"{char.name} hasn't been opened yet — select it first "
+                "to load its equipment.")
+            return
+        watch = self._xp_watch.get(char.name)
+        text = build_character_sheet(
+            char, items,
+            level=watch.level if watch else None,
+            experience=watch.current_experience if watch else None)
+        default_name = f"{char.league or 'league'}-{char.name}-character-sheet.md"
+        default_path = str(config.downloads_dir() / default_name)
+        path, _selected_filter = QFileDialog.getSaveFileName(
+            self, "Export Character Sheet", default_path, "Markdown files (*.md)")
+        if not path:
+            return
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(text)
+        self._status_msg.setText(f"Exported character sheet to {path}.")
 
     @staticmethod
     def _diff_character_items(
