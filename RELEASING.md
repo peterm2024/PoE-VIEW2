@@ -57,13 +57,19 @@ Grafik ändert, die Vorlagen in `assets/icon/` austauschen und einmal
 `python tools/make_icon.py` laufen lassen — das baut die sieben
 Größenstufen neu zusammen.
 
-**Vor dem Hochladen manuell testen.** Die `.exe` in einen leeren Ordner
-kopieren, ausdrücklich ohne `.env`, da Nutzer sie genau so erhalten.
-Anschließend starten und den vollständigen Login-Flow durchspielen:
-Browser öffnet sich, Anmeldung bei GGG, Rückkehr in die Anwendung, Liga
-und Stash laden. PyInstaller-Builds können an Stellen brechen, die im
-Betrieb über `python main.py` nie auffallen, etwa bei fehlenden Hidden
-Imports oder bei Pfaden relativ zu `__file__` statt zur `.exe` (siehe
+**Vor dem Hochladen manuell testen.** Die `.exe` nach `C:\Users\peter\
+PoE-VIEW2\PoE-VIEW2.exe` kopieren (vorhandene Datei überschreiben) —
+ein fester Ordner außerhalb des Repos, auf den eine Verknüpfung zeigen
+kann, ohne sie nach jedem Release neu zu setzen. Er liegt bewusst
+außerhalb von `Projekte\PoE-VIEW2`, damit ihn `git clean`,
+Branch-Wechsel oder ein `dist/`-Rebuild nie berühren, und enthält
+absichtlich nichts außer der `.exe` — insbesondere kein `.env`, da
+Nutzer die Datei genau so erhalten. Anschließend von dort starten und
+den vollständigen Login-Flow durchspielen: Browser öffnet sich,
+Anmeldung bei GGG, Rückkehr in die Anwendung, Liga und Stash laden.
+PyInstaller-Builds können an Stellen brechen, die im Betrieb über
+`python main.py` nie auffallen, etwa bei fehlenden Hidden Imports oder
+bei Pfaden relativ zu `__file__` statt zur `.exe` (siehe
 `poe_view/config.py`).
 
 **Bekannter Stolperstein:** Windows SmartScreen und Virenscanner warnen
