@@ -8958,3 +8958,82 @@ def test_der_charakterbogen_ist_am_kontextmenue_verdrahtet(qapp, monkeypatch, tm
 
     win.worker.stop()
     win.worker.wait(5000)
+
+
+def _char(name: str, level: int, league: str = "Standard") -> Character:
+    return Character.model_validate({"name": name, "class": "Witch",
+                                     "level": level, "league": league})
+
+
+def test_levelaufstieg_kommt_in_der_charakterliste_an(qapp, monkeypatch) -> None:
+    """Peter, 2026-08-21: "Die Character-Anzeige haengt bei mir momentan
+    auf Stufe 13, obwohl mein Char inzwischen Stufe 24 ist."
+
+    Ursache: Liste und Charakterdaten kommen aus VERSCHIEDENEN Endpunkten.
+    Nur ``/character`` fuellt ``_all_characters``, und der laeuft praktisch
+    nie — in Peters Log 4 Listenabrufe gegen 1301 Einzelabrufe. Der frische
+    Level lag bei jedem einzelnen davon vor, landete aber nur im
+    Leveling-Feld."""
+    win = MainWindow()
+    win._current_league = "Standard"
+    win._all_characters = [_char("WitchOfPeter", 13), _char("Demo Ranger", 40)]
+    win._apply_character_league_filter()
+    monkeypatch.setattr(win, "_persist_cache", lambda: None)
+    assert "WitchOfPeter (Witch 13)" in [
+        win.character_list.item(i).text() for i in range(win.character_list.count())]
+
+    win._on_character_snapshot("WitchOfPeter", 24, 500_000)
+
+    beschriftungen = [win.character_list.item(i).text()
+                      for i in range(win.character_list.count())]
+    assert "WitchOfPeter (Witch 24)" in beschriftungen
+    assert "WitchOfPeter (Witch 13)" not in beschriftungen
+    assert win._all_characters[0].level == 24  # auch die Quelle, nicht nur die Anzeige
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_levelaufstieg_zeichnet_die_liste_nur_bei_echter_aenderung_neu(qapp, monkeypatch) -> None:
+    """``_on_character_snapshot`` laeuft bei JEDEM Abruf mit, im Auto-Modus
+    also alle paar Sekunden. Ein Neuaufbau der Liste je Takt waere
+    Dauerbetrieb fuer nichts — und jeder Neuaufbau muesste die Auswahl
+    wiederherstellen."""
+    win = MainWindow()
+    win._current_league = "Standard"
+    win._all_characters = [_char("WitchOfPeter", 24)]
+    win._apply_character_league_filter()
+    monkeypatch.setattr(win, "_persist_cache", lambda: None)
+
+    aufrufe = []
+    monkeypatch.setattr(win.character_list, "set_characters",
+                        lambda chars: aufrufe.append(chars))
+
+    win._on_character_snapshot("WitchOfPeter", 24, 500_000)  # unveraenderter Level
+    assert aufrufe == []
+
+    win._on_character_snapshot("WitchOfPeter", 25, 600_000)  # jetzt gestiegen
+    assert len(aufrufe) == 1
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_levelaufstieg_eines_unbekannten_charakters_stoert_nicht(qapp, monkeypatch) -> None:
+    """Ein Snapshot kann einen Charakter betreffen, den die Liste (noch)
+    nicht kennt — z. B. weil er nach dem letzten Listenabruf im Spiel neu
+    angelegt wurde. Das darf nicht knallen; die Liste holt ihn beim
+    naechsten echten Listenabruf nach."""
+    win = MainWindow()
+    win._current_league = "Standard"
+    win._all_characters = [_char("WitchOfPeter", 24)]
+    win._apply_character_league_filter()
+    monkeypatch.setattr(win, "_persist_cache", lambda: None)
+
+    win._on_character_snapshot("NeuerHeld", 3, 1_000)
+
+    assert [c.name for c in win._all_characters] == ["WitchOfPeter"]
+    assert win._all_characters[0].level == 24
+
+    win.worker.stop()
+    win.worker.wait(5000)

@@ -3416,6 +3416,41 @@ class MainWindow(QMainWindow):
         self._status_msg.setText(f"Loading equipment: {char.name}…")
         self.worker.submit(FetchCharacterItemsJob(char.name))
 
+    def _apply_level_to_character_list(self, name: str, level: int) -> None:
+        """Frischen Level aus ``/character/{name}`` in die Charakterliste
+        übernehmen.
+
+        **Warum das überhaupt nötig ist:** Die Liste (Name, Klasse, Level)
+        stammt aus einem ANDEREN Endpunkt als die Charakterdaten selbst —
+        ``/character`` gegen ``/character/{name}``. Nur der erste füllt
+        ``_all_characters``, und er läuft praktisch nie: In Peters Log
+        stehen 1301 Einzelabrufe gegen 4 Listenabrufe, der letzte davon
+        beim Programmstart. Ein Charakter, der während der Sitzung von 13
+        auf 24 steigt, stand deshalb stundenlang mit "13" in der Liste,
+        obwohl der richtige Wert bei jedem einzelnen der 1301 Abrufe
+        mitgeliefert wurde — er landete nur ausschließlich im
+        Leveling-Feld (``_XpWatch``), nie in der Liste daneben.
+
+        Die Listenabrufe zu häufen wäre der falsche Hebel: Ihre eigene
+        Policy ist die knappste von allen (``character-list-request-limit``,
+        real 2 pro 10s und 5 pro 300s), und die Antwort enthält nichts,
+        was hier nicht schon vorliegt. Bleibt eine Lücke, die dieser Weg
+        NICHT schließt: Ein Charakter, der gar nicht abgerufen wird, altert
+        weiter vor sich hin, und ein im Spiel NEU angelegter taucht erst
+        beim nächsten echten Listenabruf auf (Programmstart, Liga-Wechsel,
+        "⟳ Refresh"). Beides braucht die Liste, nicht diesen Wert.
+
+        Nur bei echter Änderung neu zeichnen — ein Neuaufbau der Liste je
+        Takt wäre sonst Dauerbetrieb für nichts."""
+        char = next((c for c in self._all_characters if c.name == name), None)
+        if char is None or char.level == level:
+            return
+        char.level = level
+        self._apply_character_league_filter()
+        # Sonst zeigte die Liste nach einem Neustart wieder den alten Stand:
+        # _all_characters wandert genau so in den Datei-Cache (§4.7).
+        self._persist_cache()
+
     def _on_character_snapshot(self, name: str, level: int, experience: int) -> None:
         """Läuft bei JEDEM Abruf von ``/character/{name}`` mit, egal ob
         gerade angezeigt oder ein stiller Hintergrund-Refresh — anders als
@@ -3429,6 +3464,12 @@ class MainWindow(QMainWindow):
         Ein RÜCKGANG zählt als Änderung wie jeder andere: Ab Akt 5 kostet
         der Tod in PoE Erfahrung, das ist ein echtes Ereignis und gehört
         in die Rechnung, nicht herausgefiltert."""
+        # VOR dem _XpWatch-Zweig: Der allererste Abruf eines Charakters in
+        # dieser Sitzung legt nur die Basis an und kehrt zurück — genau
+        # dieser Abruf trägt aber den frischesten Level und ist der, der
+        # kurz nach dem Programmstart einen veralteten Listenstand
+        # geradezieht.
+        self._apply_level_to_character_list(name, level)
         watch = self._xp_watch.get(name)
         if watch is None:
             # Der Verlauf kommt aus der vorigen Sitzung zurück (§4.44),

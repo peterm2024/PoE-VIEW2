@@ -6,6 +6,16 @@ nach [SemVer](https://semver.org/lang/de/).
 
 ## [Unveröffentlicht]
 
+### Behoben
+
+- Der Level in der Charakterliste blieb während einer Sitzung auf dem
+  Stand vom Programmstart stehen — ein Charakter, der von Stufe 13 auf
+  24 stieg, wurde stundenlang als "13" geführt. Liste und
+  Charakterdaten kommen aus verschiedenen Endpunkten von GGG, und nur
+  die Liste war stehengeblieben; der richtige Level lag bei jedem
+  einzelnen Charakter-Abruf bereits vor und landete bisher nur im
+  Leveling-Feld. Die Auswahl in der Liste überlebt das Aktualisieren.
+
 ### Geändert
 
 - Der Auto-Modus taktet jetzt nach dem tatsächlichen Rate-Limit von GGG

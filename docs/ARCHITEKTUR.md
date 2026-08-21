@@ -1614,6 +1614,35 @@ stattdessen ihre eigene Aktualität kontrollierbar:
    `_on_stash_refresh`, und schaltet die Ansicht auf diesen Charakter um
    (wie ein Klick, nur mit erzwungenem Neuladen statt Cache-Treffer).
 
+**Der Level in der LISTE kommt aus einem anderen Endpunkt als die
+Charakterdaten** (`MainWindow._apply_level_to_character_list`,
+FALLSTRICKE #73). `_all_characters` — und damit die Beschriftung "Name
+(Klasse Level)" — füllt ausschließlich `GET /character` (Plural). Der
+läuft praktisch nie: in Peters Log 4 Listenabrufe gegen 1301
+Einzelabrufe, der letzte beim Programmstart. Ein Charakter, der während
+der Sitzung von Stufe 13 auf 24 stieg, stand deshalb stundenlang mit
+"13" in der Liste. Der richtige Wert lag dabei die ganze Zeit vor:
+`GET /character/{name}` liefert ihn mit, das Signal
+`character_snapshot_loaded` trägt ihn — er landete nur ausschließlich im
+Leveling-Feld (`_XpWatch`), nie in der Liste daneben.
+`_on_character_snapshot` schreibt ihn jetzt zusätzlich in den passenden
+`Character` und zeichnet die Liste neu, aber nur bei echter Änderung.
+
+Die Listenabrufe zu häufen wäre der falsche Hebel gewesen:
+`character-list-request-limit` ist mit real 2 pro 10 s und 5 pro 300 s
+die knappste Policy überhaupt, und die Antwort enthält nichts, was hier
+nicht schon vorliegt. Was der Weg NICHT abdeckt und auch nicht abdecken
+kann: ein Charakter, der gar nicht abgerufen wird, altert weiter vor
+sich hin, und ein im Spiel neu angelegter taucht erst beim nächsten
+echten Listenabruf auf (Programmstart, Liga-Wechsel, "⟳ Refresh").
+
+Weil die Liste dadurch mitten im Spielen neu gezeichnet wird, stellt
+`CharacterList.set_characters` die Auswahl wieder her — über den
+**Namen**, nicht die Zeilennummer: Die Liste ist nach Level sortiert,
+ein Aufstieg kann den Charakter also verschieben. `setCurrentItem` löst
+kein `itemClicked` aus, die Wiederherstellung kann somit keinen Abruf
+nach sich ziehen.
+
 ---
 
 ### 4.14 Preis-Anzeige (`api/ninja.py`, `services/price_cache.py`)

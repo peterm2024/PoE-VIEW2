@@ -29,13 +29,24 @@ class CharacterList(QListWidget):
         self.customContextMenuRequested.connect(self._on_context_menu)
 
     def set_characters(self, characters: list[Character]) -> None:
-        """Flache Liste, absteigend nach Level. Erwartet bereits liga-gefilterte Charaktere."""
+        """Flache Liste, absteigend nach Level. Erwartet bereits liga-gefilterte Charaktere.
+
+        **Die Auswahl überlebt den Neuaufbau** (über den NAMEN, nicht die
+        Zeilennummer — ein Levelaufstieg kann die Sortierung ändern). Seit
+        die Liste bei jedem Levelaufstieg neu gezeichnet wird (§_on_
+        character_snapshot) wäre sie sonst mitten im Spielen plötzlich
+        abgewählt. ``setCurrentItem`` löst dabei kein ``itemClicked`` aus,
+        die Wiederherstellung kann also keinen Abruf nach sich ziehen."""
+        vorher = self.currentItem()
+        ausgewaehlt = vorher.data(_DATA_ROLE).name if vorher is not None else None
         self.clear()
         for char in sorted(characters, key=lambda c: (-c.level, c.name)):
             label = f"{char.name} ({char.class_} {char.level})"
             item = QListWidgetItem(label)
             item.setData(_DATA_ROLE, char)
             self.addItem(item)
+            if char.name == ausgewaehlt:
+                self.setCurrentItem(item)
 
     def _on_click(self, item: QListWidgetItem) -> None:
         self.character_selected.emit(item.data(_DATA_ROLE))

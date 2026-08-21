@@ -1065,3 +1065,69 @@ Pfad kennen, auf dem die Antwort **ausbleiben** darf. Vorher war ein
 verworfener Job folgenlos, nachher ist er ein Deadlock. Die Testsuite sah
 das nicht, weil kein Test die Zweitinstanz mit dem Takt zusammen dachte —
 der Probestart mit Peters echter Umgebung schon.
+
+## 73. Der Level stand seit Stunden falsch da — obwohl er alle paar Sekunden frisch hereinkam
+
+**Problem:** Peter, 2026-08-21: "Die Character-Anzeige hängt bei mir
+momentan auf Stufe 13, obwohl mein Char inzwischen Stufe 24 ist."
+
+**Ursache:** Liste und Charakterdaten kommen aus **verschiedenen
+Endpunkten**, und nur einer davon lief.
+
+| | Endpunkt | Abrufe im Log |
+|---|---|---|
+| Charakter-**Liste** (Name, Klasse, Level) | `GET /character` | **4** |
+| Charakter-**Daten** (Items, Level, XP) | `GET /character/{name}` | **1301** |
+
+`_all_characters` — die Quelle der Beschriftung "Name (Klasse Level)" —
+füllt ausschließlich der erste. Der letzte Listenabruf lag beim
+Programmstart, also stand dort für den Rest der Sitzung die Stufe von
+damals.
+
+**Der bittere Teil: der richtige Wert lag die ganze Zeit vor.** Jeder der
+1301 Einzelabrufe liefert den Level mit, und das Signal
+`character_snapshot_loaded` (Name, Level, Erfahrung) trug ihn auch schon
+bis in `MainWindow`. Nur war dort genau ein Verwerter angeschlossen:
+`_XpWatch` fürs Leveling-Feld. Die Liste zwei Zentimeter daneben bekam
+ihn nie zu sehen. Kein fehlender Abruf, keine kaputte Antwort — eine
+Zuordnung, die nur zur Hälfte gezogen wurde.
+
+**Lösung:** `_on_character_snapshot` schreibt den Level zusätzlich in den
+passenden `Character` in `_all_characters` und zeichnet die Liste neu
+(`_apply_level_to_character_list`). Bewusst **nur bei echter Änderung** —
+der Snapshot läuft im Auto-Modus alle paar Sekunden, ein Neuaufbau je
+Takt wäre Dauerbetrieb für nichts. Und der Aufruf steht **vor** dem
+`_XpWatch`-Zweig, weil der allererste Abruf eines Charakters in einer
+Sitzung dort früh zurückkehrt — ausgerechnet der Abruf, der kurz nach
+dem Programmstart einen veralteten Listenstand geradezieht.
+
+**Nicht gewählt: die Liste häufiger abrufen.**
+`character-list-request-limit` ist mit real 2 pro 10 s und 5 pro 300 s
+die knappste Policy im ganzen Projekt, und ihre Antwort enthält für
+diesen Zweck nichts, was nicht ohnehin schon da ist. Eine Lücke bleibt
+dadurch offen, und das ist Absicht: Ein Charakter, der gar nicht
+abgerufen wird, altert weiter vor sich hin, und ein im Spiel neu
+angelegter taucht erst beim nächsten echten Listenabruf auf
+(Programmstart, Liga-Wechsel, "⟳ Refresh"). Beides braucht die Liste,
+nicht diesen Wert.
+
+**Ein Folgeproblem, das der Fix selbst erzeugt hat.** Die Liste wird
+jetzt mitten im Spielen neu aufgebaut, und `set_characters` beginnt mit
+`self.clear()` — der gerade beobachtete Charakter wäre bei jedem
+Levelaufstieg plötzlich abgewählt gewesen. Die Auswahl überlebt den
+Neuaufbau jetzt, gemerkt wird dabei der **Name**, nicht die
+Zeilennummer: Die Liste ist nach Level sortiert, ein Aufstieg kann den
+Charakter also nach oben schieben, und an der alten Zeilennummer säße
+danach ein anderer. Genau diese Verwechslung gab es hier schon einmal,
+beim Umsortieren der Favoritenliste per Drag&Drop (2026-08-16, Befund 2).
+Dass die Wiederherstellung keinen Abruf auslöst, hängt daran, dass
+`setCurrentItem` kein `itemClicked` emittiert — mit einem Test
+festgenagelt, damit es nicht später jemand auf `itemSelectionChanged`
+umstellt.
+
+**Wie vermeiden:** Wenn dieselbe Größe aus zwei Quellen kommen kann,
+gehört die Frage dazu, wie oft jede davon tatsächlich läuft — nicht nur,
+ob sie korrekt ist. Hier waren beide Pfade fehlerfrei; falsch war das
+Verhältnis 4 zu 1301. Und ein neu eingeführtes Signal ist erst fertig
+verdrahtet, wenn geprüft ist, **welche** Anzeigen von seinem Inhalt leben,
+nicht nur die eine, für die es gebaut wurde.

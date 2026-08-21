@@ -109,3 +109,48 @@ def test_context_menu_offers_export_visible_items_without_a_character(qapp, monk
 
     assert export_received == [True]
     assert refresh_received == []  # kein Charakter unter dem Cursor
+
+
+def test_auswahl_ueberlebt_den_neuaufbau(qapp) -> None:
+    """Seit die Liste bei jedem Levelaufstieg neu gezeichnet wird
+    (§MainWindow._apply_level_to_character_list), darf der Neuaufbau die
+    Auswahl nicht wegwerfen — sonst wäre der beobachtete Charakter
+    mitten im Spielen plötzlich abgewählt."""
+    widget = CharacterList()
+    widget.set_characters([make_char("Beobachtet", 13), make_char("Andere", 40)])
+    widget.setCurrentItem(widget.item(1))  # nach Level sortiert steht "Andere" oben
+    assert widget.currentItem().text() == "Beobachtet (Witch 13)"
+
+    widget.set_characters([make_char("Beobachtet", 24), make_char("Andere", 40)])
+
+    assert widget.currentItem() is not None
+    assert widget.currentItem().text() == "Beobachtet (Witch 24)"
+
+
+def test_auswahl_wandert_mit_wenn_der_levelaufstieg_umsortiert(qapp) -> None:
+    """Gemerkt wird der NAME, nicht die Zeilennummer: Ein Levelaufstieg
+    kann den Charakter in der nach Level sortierten Liste nach oben
+    schieben — an der alten Zeilennummer säße dann ein anderer."""
+    widget = CharacterList()
+    widget.set_characters([make_char("Steiger", 13), make_char("Andere", 40)])
+    widget.setCurrentItem(widget.item(1))  # "Steiger" steht unten
+    assert widget.currentItem().text() == "Steiger (Witch 13)"
+
+    widget.set_characters([make_char("Steiger", 55), make_char("Andere", 40)])
+
+    assert widget.currentRow() == 0  # jetzt oben
+    assert widget.currentItem().text() == "Steiger (Witch 55)"
+
+
+def test_neuaufbau_loest_keinen_abruf_aus(qapp) -> None:
+    """Die wiederhergestellte Auswahl darf kein ``character_selected``
+    nach sich ziehen — sonst feuerte jeder Levelaufstieg einen Abruf."""
+    widget = CharacterList()
+    widget.set_characters([make_char("Beobachtet", 13)])
+    widget.setCurrentItem(widget.item(0))
+
+    received = []
+    widget.character_selected.connect(received.append)
+    widget.set_characters([make_char("Beobachtet", 14)])
+
+    assert received == []
