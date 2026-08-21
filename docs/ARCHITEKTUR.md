@@ -604,8 +604,8 @@ zurück, da ein Fach aus der vorherigen Liga sonst irreführend wäre.
 
 ### 4.8 Hintergrund-Auto-Refresh (`MainWindow._maybe_auto_refresh`)
 
-Ein `QTimer` im Main-Thread lädt alle `AUTO_REFRESH_INTERVAL_MS` (40 s)
-im Hintergrund bis zu zwei Stash-Tabs neu, ohne Zutun des Nutzers:
+Der Auto-Modus hat zwei Pflichten und erledigt je Takt genau **eine**,
+abwechselnd:
 
 1. **Das gerade angezeigte Fach ODER der gerade angezeigte Charakter**
    (`MainWindow._current_stash_id` bzw. `_current_character_name`, beide
@@ -616,9 +616,12 @@ im Hintergrund bis zu zwei Stash-Tabs neu, ohne Zutun des Nutzers:
    entfällt. Charaktere haben KEINEN eigenen Sweep (siehe §4.13) — nur
    das gerade offene Fach ODER der gerade offene Charakter wird hier
    behandelt, nie beide gleichzeitig.
-2. **Der normale Sweep-Kandidat** (`_pick_auto_refresh_candidate`, siehe
-   unten) — füllt nach und nach den Rest der Truhe. Ist er identisch mit
-   dem gerade angezeigten Fach, wird er nicht doppelt angefragt.
+2. **Der Sweep** (`_drive_auto_sweep`) — frischt nach und nach den Rest
+   der Truhe auf.
+
+Liefert die Pflicht, die gerade an der Reihe ist, nichts (nichts
+geöffnet bzw. kein Sweep-Kandidat), übernimmt die andere noch im SELBEN
+Takt, statt ihn verfallen zu lassen.
 
 **Korrektur (FALLSTRICKE #27):** Ein stiller (`silent=True`) Treffer für
 GENAU das gerade offene Einzelfach zeichnet inzwischen auch die sichtbare
@@ -629,11 +632,25 @@ selbst, "lebte" also gar nicht sichtbar. Ein stiller Treffer für ein
 ANDERES Fach (der Sweep-Kandidat) oder während einer Aggregat-/Such-
 Ansicht bleibt weiterhin unangetastet.
 
-Da pro Tick jetzt bis zu zwei statt einem Job rausgeht, wurde
-`AUTO_REFRESH_INTERVAL_MS` verdoppelt (20 s → 40 s) — die
-Gesamt-Anfragerate ans Rate-Limit bleibt damit wie vorher, sonst würde ein
-Tick den Worker-Thread in `RateLimitManager.check_and_wait` in eine
-Warteschleife (Timeout) laufen lassen.
+**Der Takt kommt vom Rate-Limiter, nicht aus einer Konstante**
+(FALLSTRICKE #72). Bis 2026-08-21 hing Auto an einem eigenen `QTimer` mit
+festen `AUTO_REFRESH_INTERVAL_MS` (40 s) und war damit der einzige Modus,
+der GGGs tatsächliches Budget nicht las. An Peters echtem Log gemessen
+(Sitzung 2026-08-21, 00:13–02:30): 195 Charakter-Abrufe, wo unter dem
+Takt, den Single/Stash längst fahren, 632 hineingepasst hätten; das
+300-s-Fenster stand im Median bei 8 von 30 Treffern. Auto steht deshalb
+jetzt mit in `STEPPING_REFRESH_MODES` und hängt an derselben
+`_drive_refresh_mode`-Kette (unten) — der eigene Timer ist entfallen.
+
+Dass es bei EINEM Job je Takt bleibt, ist dabei kein Detail: Der
+gerechnete Takt beschreibt den Abstand zwischen zwei *Requests*, nicht
+zwischen zwei Ticks. Beide Pflichten in einem Takt wären der doppelte
+Durchsatz, den die Rechnung zulässt — genau der Fehler hinter FALLSTRICKE
+#34 und #47. Der frühere Schutz gegen einen Doppel-Abruf (Sweep-Kandidat
+gegen `_current_stash_id` prüfen) ist dafür entfallen: Zwischen beiden
+Pflichten liegt jetzt ein voller Takt, in dem das offene Fach seinen
+Zeitstempel bereits aufgefrischt hat — es ist danach das jüngste und wird
+von beiden Kandidatenauswahlen ("ältester zuerst") von selbst gemieden.
 
 **Auswahl (`_pick_auto_refresh_candidate`):**
 
@@ -653,6 +670,21 @@ Warteschleife (Timeout) laufen lassen.
 3. Aus den verbleibenden Kandidaten gewinnt der mit dem **ältesten**
    Ladezeitpunkt (noch nie geladene Tabs gewinnen dabei immer gegen jeden
    bereits bekannten, auch sehr alten Tab).
+
+**Rückfall auf den Stash-Rundlauf (`_drive_auto_sweep`).** Die 1-Tag-Regel
+oben lässt in einer durchgeladenen Liga — dem Normalfall — irgendwann
+KEINEN Kandidaten mehr übrig, und dann tat der Sweep früher schlicht
+nichts: In Peters Log vom 2026-08-21 ging zwischen 00:14 und 01:30, also
+76 Minuten lang, kein einziger Sweep-Abruf raus, ohne jede Spur in der
+Oberfläche (FALLSTRICKE #72). Liefert `_pick_auto_refresh_candidate`
+nichts, übernimmt deshalb `_pick_stash_mode_candidate` — derselbe
+Rundlauf, den der Stash-Modus fährt (gefüllte Fächer vor leeren,
+Remove-only zuletzt, Fach-Liste am Rundenende). Die 1-Tag-Regel bleibt
+trotzdem vorne: Sie beantwortet eine andere Frage als der Rundlauf — sie
+holt Unbekanntes nach, er hält Bekanntes frisch. Weil Auto damit auch
+`_stash_mode_list_refresh_due` erbt, wertet `_drive_auto_sweep` das Flag
+mit aus; sonst bliebe es für immer stehen (nur der Stash-Modus setzt es
+sonst zurück) und eine im Spiel umsortierte Truhe unentdeckt.
 
 **Budget-Schutz:** Vor jedem Auto-Refresh-Versuch prüft
 `RateLimitManager.headroom_fraction()` (Minimum der "noch frei"-Anteile
@@ -722,13 +754,14 @@ einen optionalen `league`-Parameter, da `_count_silent_refresh` mit der
 Liga AUS DEM SIGNAL rechnet, nicht zwangsläufig der aktiven (FALLSTRICKE #10).
 
 **Sekündliche Countdown-Anzeige** (`MainWindow._update_auto_refresh_countdown`,
-per `QTimer` unabhängig vom 40s-Auto-Refresh-Takt) zeigt zusätzlich
-entweder "Next auto-refresh in Xs" (`_auto_refresh_timer.remainingTime()`)
-oder den Grund, warum der nächste Tick nichts täte
-(`_auto_refresh_blocked_reason()` — no league, busy, not logged in, league
-ended, rate limit budget) — Countdown-Text und tatsächliches Verhalten
+per `QTimer`) zeigt zusätzlich entweder "&lt;Modus&gt; — next update in Xs"
+(aus `_refresh_mode_next_due`) oder den Grund, warum der nächste Takt
+nichts täte (`_refresh_idle_reason()`; im Auto-Modus zusätzlich
+`_auto_refresh_blocked_reason()` — no league, busy, not logged in, league
+ended, rate limit budget) — Anzeige und tatsächliches Verhalten
 teilen sich dieselbe Guard-Methode, damit sie nie auseinanderlaufen.
-Derselbe Timer-Tick ruft auch `RateLimitManager.snapshot()` ab und füttert
+Derselbe Sekunden-Tick treibt auch die Takt-Kette aller Modi an
+(`_drive_refresh_mode`, unten) und ruft `RateLimitManager.snapshot()` ab und füttert
 damit das Rate-Limit-Dashboard, unabhängig von echten Requests (siehe
 §4.3, FALLSTRICKE #32).
 
@@ -736,10 +769,16 @@ damit das Rate-Limit-Dashboard, unabhängig von echten Requests (siehe
 Toolbar ("Mode: Auto / Single / Stash / Pause", additiv neben dem normalen
 "Refresh"-Button) schaltet zwischen vier Strategien um:
 
-- **Auto** — das oben beschriebene Verhalten (Standard).
+- **Auto** — das oben beschriebene Verhalten (Standard): abwechselnd
+  offene Ansicht und Sweep, im selben Takt wie die beiden folgenden Modi,
+  aber mit der zusätzlichen Notreserve `AUTO_REFRESH_MIN_HEADROOM` für
+  manuelle Klicks. Rechnerisch kommt damit jede der beiden Pflichten auf
+  den doppelten Takt-Abstand (bei 30/300 s also rund 26 s) — mehr als die
+  40 s von früher, und der Sweep läuft überhaupt erst wieder.
 - **Single** — hält ausschließlich die aktuell gewählte Zeile (Fach oder
   Charakter, `_pick_single_target`) aktuell, im Takt von
-  `steady_pace_interval_s()`.
+  `steady_pace_interval_s()`. Weiterhin der schnellste Weg für EINE
+  Ansicht: Ohne zweite Pflicht bekommt sie jeden Takt (rund 13 s).
 - **Stash** — zyklisiert endlos durch die ganze Truhe der aktuellen Liga,
   gefüllte Fächer (Items > 0) vor leeren (`_pick_stash_mode_candidate`), im
   selben Takt. Sonst würde ein einmal als leer bekanntes Fach nie wieder

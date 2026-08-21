@@ -826,8 +826,8 @@ def test_character_refresh_bypasses_cache_and_switches_view(qapp, monkeypatch) -
 
 def test_maybe_auto_refresh_keeps_currently_displayed_character_live(qapp, monkeypatch) -> None:
     """der gerade angezeigte Charakter soll wie das gerade
-    angezeigte Truhenfach bei jedem Tick live gehalten werden — der normale
-    Stash-Sweep läuft daneben unverändert weiter."""
+    angezeigte Truhenfach live gehalten werden — der Stash-Sweep kommt im
+    nächsten Takt dran, nicht im selben (§_maybe_auto_refresh)."""
     win = MainWindow()
     win._current_league = "Standard"
     now = datetime.now(timezone.utc)
@@ -840,14 +840,14 @@ def test_maybe_auto_refresh_keeps_currently_displayed_character_live(qapp, monke
     monkeypatch.setattr(win.worker.rate_limiter, "headroom_fraction", lambda: 1.0)
 
     win._maybe_auto_refresh()
+    assert len(submitted) == 1  # EIN Job je Takt, nicht zwei
+    assert submitted[0].name == "WitchOfPeter"
+    assert submitted[0].silent is True
 
-    character_jobs = [j for j in submitted if hasattr(j, "name")]
-    stash_jobs = [j for j in submitted if hasattr(j, "stash_id")]
-    assert len(character_jobs) == 1
-    assert character_jobs[0].name == "WitchOfPeter"
-    assert character_jobs[0].silent is True
-    assert len(stash_jobs) == 1  # normaler Sweep läuft unabhängig weiter
-    assert stash_jobs[0].stash_id == "t1"
+    win._refresh_mode_pending = False  # Antwort ist da, nächster Takt
+    win._maybe_auto_refresh()
+    assert len(submitted) == 2  # jetzt der Sweep
+    assert submitted[1].stash_id == "t1"
 
     win.worker.stop()
     win.worker.wait(5000)
@@ -1086,7 +1086,7 @@ def test_auto_refresh_countdown_shows_seconds_when_not_blocked(qapp, monkeypatch
     win._update_auto_refresh_countdown()
 
     assert win._auto_refresh_blocked_reason() is None
-    assert "Next auto-refresh in" in win._refresh_status_label.text()
+    assert "Auto — next update in" in win._refresh_status_label.text()
 
     win.worker.stop()
     win.worker.wait(5000)
@@ -1763,16 +1763,30 @@ def test_refresh_mode_stash_cycles_through_the_league_on_the_steady_pace(qapp, m
     win.worker.wait(5000)
 
 
-def test_refresh_mode_auto_is_a_no_op_for_drive_refresh_mode(qapp, monkeypatch) -> None:
+def test_auto_haengt_am_gerechneten_takt_statt_an_40_sekunden(qapp, monkeypatch) -> None:
+    """Kern der Änderung vom 2026-08-21: Auto war der einzige Modus mit
+    einer FESTEN Zahl (40s) und lief damit an GGGs echtem Budget vorbei —
+    in Peters Log stand das 300s-Fenster im Median bei 8 von 30 Treffern.
+    Jetzt taktet Auto über dieselbe ``_drive_refresh_mode``-Kette wie
+    Single/Stash, also aus ``steady_pace_interval_s``."""
     win = MainWindow()
     win._current_league = "Standard"
     win._current_stash_id = "t1"
     submitted = []
     monkeypatch.setattr(win.worker, "submit", lambda job: submitted.append(job))
+    monkeypatch.setattr(win.worker.rate_limiter, "headroom_fraction", lambda: 1.0)
+    monkeypatch.setattr(win.worker.rate_limiter, "steady_pace_interval_s",
+                        lambda policy_name=None: 12.5)
 
     win._drive_refresh_mode()  # Modus ist per Default "auto"
+    assert len(submitted) == 1  # kein No-Op mehr
 
-    assert submitted == []
+    win._note_refresh_mode_job_done()  # Antwort da → nächster Takt steht
+    ahead = win._refresh_mode_next_due - time.monotonic()
+    assert 11.5 < ahead <= 12.5, "Takt kommt aus dem Rate-Limiter, nicht aus einer Konstante"
+
+    win._drive_refresh_mode()  # noch nicht fällig
+    assert len(submitted) == 1
 
     win.worker.stop()
     win.worker.wait(5000)
@@ -2419,9 +2433,9 @@ def test_restore_cached_data_does_not_leak_a_different_accounts_legacy_file(
 
 
 def test_maybe_auto_refresh_also_refreshes_currently_displayed_tab(qapp, monkeypatch) -> None:
-    """das gerade angezeigte Fach soll bei jedem Auto-Refresh-
-    Tick ZUSÄTZLICH zum normalen Sweep-Kandidaten aktualisiert werden — auch
-    wenn es frisch geladen ist (die 1-Tag-Schonfrist gilt nur für den Sweep)."""
+    """das gerade angezeigte Fach soll live gehalten werden — auch wenn es
+    frisch geladen ist (die 1-Tag-Schonfrist gilt nur für den Sweep). Der
+    Sweep-Kandidat folgt im NÄCHSTEN Takt, nicht im selben."""
     win = MainWindow()
     win._current_league = "Standard"
     now = datetime.now(timezone.utc)
@@ -2437,31 +2451,119 @@ def test_maybe_auto_refresh_also_refreshes_currently_displayed_tab(qapp, monkeyp
     monkeypatch.setattr(win.worker.rate_limiter, "headroom_fraction", lambda: 1.0)
 
     win._maybe_auto_refresh()
+    win._refresh_mode_pending = False
+    win._maybe_auto_refresh()
 
-    assert {job.stash_id for job in submitted} == {"current", "stale"}
+    assert [job.stash_id for job in submitted] == ["current", "stale"]
     assert all(job.silent is True for job in submitted)
 
     win.worker.stop()
     win.worker.wait(5000)
 
 
-def test_maybe_auto_refresh_dedupes_when_current_tab_is_also_the_sweep_candidate(
-        qapp, monkeypatch) -> None:
+def test_auto_wechselt_zwischen_offener_ansicht_und_sweep_ab(qapp, monkeypatch) -> None:
+    """Über mehrere Takte hinweg müssen sich beide Pflichten sauber
+    abwechseln — sonst verhungert eine von beiden. Genau das war der
+    Befund vom 2026-08-21: 49 Abrufe desselben offenen Fachs in Folge, kein
+    einziger Sweep dazwischen."""
     win = MainWindow()
     win._current_league = "Standard"
-    now = datetime.now(timezone.utc)
-    win._leaf_stashes = [_make_leaf("t1", "Tab 1")]
-    win._last_loaded["Standard"] = {"t1": (now - timedelta(days=5)).isoformat()}
-    win._current_stash_id = "t1"
+    old = (datetime.now(timezone.utc) - timedelta(days=5)).isoformat()
+    win._leaf_stashes = [_make_leaf("current", "Current"), _make_leaf("a", "A"), _make_leaf("b", "B")]
+    win._last_loaded["Standard"] = {"current": old, "a": old, "b": old}
+    win._current_stash_id = "current"
 
     submitted = []
     monkeypatch.setattr(win.worker, "submit", lambda job: submitted.append(job))
     monkeypatch.setattr(win.worker.rate_limiter, "headroom_fraction", lambda: 1.0)
 
-    win._maybe_auto_refresh()
+    for _ in range(4):
+        win._maybe_auto_refresh()
+        # Der jeweils frisch geladene Kandidat wird "jung" — sonst bliebe
+        # er ewig der älteste und der Sweep träte auf der Stelle.
+        win._last_loaded["Standard"][submitted[-1].stash_id] = \
+            datetime.now(timezone.utc).isoformat()
+        win._refresh_mode_pending = False
 
-    assert len(submitted) == 1  # nicht doppelt anfragen, wenn beide dasselbe Fach meinen
-    assert submitted[0].stash_id == "t1"
+    ids = [job.stash_id for job in submitted]
+    assert ids[0] == "current" and ids[2] == "current"  # jeder zweite Takt: offene Ansicht
+    assert set(ids[1::2]) == {"a", "b"}                 # dazwischen wandert der Sweep weiter
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_auto_sweep_faellt_auf_den_stash_rundlauf_zurueck(qapp, monkeypatch) -> None:
+    """Der eigentliche Befund vom 2026-08-21: Ist jedes Fach jünger als
+    einen Tag (durchgeladene Liga = Normalfall), liefert
+    ``_pick_auto_refresh_candidate`` NICHTS mehr und der Sweep stand 76
+    Minuten still. Jetzt übernimmt der Rundlauf des Stash-Modus."""
+    win = MainWindow()
+    win._current_league = "Standard"
+    fresh = datetime.now(timezone.utc).isoformat()
+    win._leaf_stashes = [_make_leaf("t1", "Tab 1"), _make_leaf("t2", "Tab 2")]
+    win._last_loaded["Standard"] = {"t1": fresh, "t2": fresh}
+    win._current_character_name = "WitchOfPeter"  # offene Ansicht ist ein Charakter
+
+    submitted = []
+    monkeypatch.setattr(win.worker, "submit", lambda job: submitted.append(job))
+    monkeypatch.setattr(win.worker.rate_limiter, "headroom_fraction", lambda: 1.0)
+
+    assert win._pick_auto_refresh_candidate() is None  # 1-Tag-Regel hat nichts mehr
+    assert win._drive_auto_sweep() is True             # der Rundlauf schon
+    assert submitted[-1].stash_id in {"t1", "t2"}
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+@pytest.mark.parametrize("mode", ["auto", "single", "stash"])
+def test_taktende_modi_schicken_in_der_zweitinstanz_nichts_los(qapp, monkeypatch, mode) -> None:
+    """Zweitinstanz auf demselben Konto: Der Worker verwirft jeden Job
+    lautlos (§_skip_read_only) und meldet nichts zurück. Ohne Guard setzte
+    der Takt ``_refresh_mode_pending`` und wartete für den Rest der
+    Sitzung auf eine Antwort, die nie kommt — die Kette wäre tot."""
+    win = MainWindow()
+    win._current_league = "Standard"
+    win._leaf_stashes = [_make_leaf("t1", "Tab 1")]
+    win._last_loaded["Standard"] = {
+        "t1": (datetime.now(timezone.utc) - timedelta(days=5)).isoformat()}
+    win._current_stash_id = "t1"
+    win._refresh_mode = mode
+    win._read_only = True
+
+    submitted = []
+    monkeypatch.setattr(win.worker, "submit", lambda job: submitted.append(job))
+    monkeypatch.setattr(win.worker.rate_limiter, "headroom_fraction", lambda: 1.0)
+
+    win._drive_refresh_mode()
+
+    assert submitted == []
+    assert win._refresh_mode_pending is False  # Kette bleibt lauffähig
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_auto_sweep_zieht_die_fachliste_am_rundenende_nach(qapp, monkeypatch) -> None:
+    """Mit dem Rückfall auf den Stash-Rundlauf erbt der Auto-Modus auch
+    dessen Rundenabschluss: ``_stash_mode_list_refresh_due``. Würde Auto
+    das Flag ignorieren, bliebe eine im Spiel umsortierte oder erweiterte
+    Truhe unentdeckt — und das Flag stünde für immer, weil nur der
+    Stash-Modus es je zurücksetzt."""
+    win = MainWindow()
+    win._current_league = "Standard"
+    win._leaf_stashes = [_make_leaf("t1", "Tab 1")]
+    win._last_loaded["Standard"] = {"t1": datetime.now(timezone.utc).isoformat()}
+    win._stash_mode_list_refresh_due = True
+
+    submitted = []
+    monkeypatch.setattr(win.worker, "submit", lambda job: submitted.append(job))
+
+    assert win._drive_auto_sweep() is True
+    assert isinstance(submitted[-1], FetchStashListJob)
+    assert submitted[-1].silent is True
+    assert win._stash_mode_list_refresh_due is False  # nur einmal, nicht in Endlosschleife
 
     win.worker.stop()
     win.worker.wait(5000)

@@ -961,3 +961,107 @@ Antwort gibt. Und den Zahlenwert selbst immer ohne
 so breiten Ersatzschrift (#55) und der hellen Offscreen-Palette (§4.42):
 Die Testumgebung sieht anders aus als der Betrieb, und sie sieht
 freundlicher aus.
+
+## 72. Eine Konstante, die ihre eigene Begründung überlebt hat — und ein Sweep, der 76 Minuten stillstand
+
+**Problem:** Peter, aus der ToDo-Liste: "Den Auto-Mode beschleunigen? Ich
+habe das Gefühl, dass der Auto-Refresh sehr langsam ist, wie war hier der
+genaue Ablauf?" Ein Gefühl, kein Fehlerbericht — also gemessen statt
+geraten, an der echten `poe-view2.log` (Sitzung vom 2026-08-21,
+00:13–02:30, 137 Minuten, durchgehend Auto-Modus).
+
+**Drei Befunde, und keiner davon war ein Bug im engeren Sinn:**
+
+*Erstens: der Sweep stand still.* Zwischen 00:14:27 und 01:30:18 — 76
+Minuten — ging kein einziger Sweep-Abruf raus. Danach 49-mal in Folge
+dasselbe Fach, im Abstand von exakt 40 s: das gerade geöffnete.
+`_pick_auto_refresh_candidate` liefert nur Fächer, die noch nie geladen
+wurden oder älter als `AUTO_REFRESH_MIN_AGE` (1 Tag) sind. In einer
+durchgeladenen Liga trifft beides auf kein einziges Fach zu — der Sweep
+hatte schlicht nichts zu tun. Damit war Auto nicht "Single plus Sweep",
+sondern ein Single ohne Sweep.
+
+*Zweitens: die 40 s waren mit dem zweiten Job begründet, den es nicht mehr
+gab.* Der Kommentar an `AUTO_REFRESH_INTERVAL_MS` sagte es selbst: von
+20 s auf 40 s verdoppelt, "damit die Gesamt-Anfragerate trotz bis zu zwei
+Jobs pro Tick unverändert bleibt" (#27). Im Alltag ging aber nur einer
+raus. Die Verdoppelung galt weiter, ihr Grund nicht.
+
+*Drittens: Auto war der letzte Modus mit einer festen Zahl.* Single und
+Stash rechnen ihren Takt seit Runde 6 (#45) aus GGGs echten Headern
+(`steady_pace_interval_s`, bei 30/300 s rund 13 s) und haben mit
+`pacing_blocked` (#47) eine eigene Obergrenze. Auto kannte beides nicht.
+
+**Gemessen, was das kostet:**
+
+| | in der Sitzung | unter dem Takt von Single/Stash möglich |
+|---|---|---|
+| Charakter-Abrufe | 195 | 632 (31 %) |
+| Stash-Abrufe | 90 | 632 (14 %) |
+
+Das 300-s-Fenster stand dabei im Median bei **8 von 30** Treffern, für
+beide Endpunkte getrennt (GGG vergibt `character-request-limit` und
+`stash-request-limit` je einen eigenen Topf). Die Bremsschwelle liegt bei
+24,6. Zwei Drittel des Budgets blieben dauerhaft liegen.
+
+**Lösung:** Auto in `STEPPING_REFRESH_MODES` aufgenommen und der eigene
+40-s-`QTimer` ersatzlos entfernt — der Modus hängt jetzt an derselben
+`_drive_refresh_mode`-Kette wie Single und Stash. Zwei Anpassungen macht
+das nötig:
+
+- **Ein Job je Takt, abwechselnd.** Der gerechnete Takt beschreibt den
+  Abstand zwischen zwei *Requests*, nicht zwischen zwei Ticks. Beide
+  Pflichten in einem Takt wären der doppelte Durchsatz, den die Rechnung
+  zulässt — genau die Art Fehler, die schon zweimal in einer
+  300-s-Zwangspause endete (#34, #47). Auto wechselt sich deshalb ab:
+  offene Ansicht, Sweep, offene Ansicht, … Liefert die Pflicht, die an
+  der Reihe ist, nichts, übernimmt die andere noch im selben Takt.
+- **Der Sweep fällt auf den Rundlauf des Stash-Modus zurück**
+  (`_pick_stash_mode_candidate`), sobald die 1-Tag-Regel nichts mehr
+  hergibt. Die Regel bleibt trotzdem vorne, weil sie eine andere Frage
+  beantwortet als der Rundlauf: sie holt Unbekanntes nach, er hält
+  Bekanntes frisch.
+
+Ergebnis: offene Ansicht alle ~26 s statt 40 s, Sweep alle ~26 s statt
+gar nicht, und der Takt passt sich der tatsächlichen Policy an, statt
+eine Zahl zu raten.
+
+**Der alte Doppel-Abruf-Schutz konnte dabei entfallen** — und das ist die
+Stelle, an der man beim Lesen stutzt. Früher gingen beide Jobs im selben
+Tick raus, weshalb der Sweep-Kandidat ausdrücklich gegen
+`_current_stash_id` geprüft werden musste. Jetzt liegt ein voller Takt
+dazwischen, in dem das offene Fach seinen Zeitstempel bereits aufgefrischt
+hat; es ist danach das *jüngste* und wird von beiden Kandidatenauswahlen
+("ältester zuerst") von selbst gemieden. Nur in einer Liga mit einem
+einzigen Fach fallen beide zusammen, und dann verhält sich Auto dort wie
+Single — was richtig ist, nicht doppelt.
+
+**Beim Umbau eine eigene Regression gefunden — durch den Probestart, nicht
+durch die Tests.** Nach dem Umbau die App einmal wirklich gestartet; im
+Log stand "Konto … wird bereits von einer anderen Instanz bewirtschaftet —
+diese läuft nur lesend" (`instance_lock`, #65). Das ist der Fall, in dem
+`ApiWorker._skip_read_only` jeden Job **lautlos verwirft** — ohne Antwort,
+ohne Signal. Der alte Auto-Modus überlebte das, weil sein Sweep gar kein
+`_refresh_mode_pending` setzte; er feuerte nur nutzlos ins Leere. Die neue
+Takt-Kette setzt das Flag und hätte für den Rest der Sitzung auf eine
+Antwort gewartet, die nie kommt — Hintergrund-Refresh tot, ohne
+Fehlermeldung. `_refresh_current_view` schützte sich aus genau diesem
+Grund längst selbst; die Modus-Zweige daneben nicht. Der Guard sitzt jetzt
+zentral in `_drive_refresh_mode`, was denselben latenten Fehler in
+Single und Stash gleich mit erledigt.
+
+**Wie vermeiden:** Eine Konstante, deren Wert in ihrem eigenen Kommentar
+aus einer anderen Größe hergeleitet wird ("verdoppelt, weil jetzt zwei
+Jobs"), ist eine Wette darauf, dass diese andere Größe so bleibt. Ändert
+sich die Bedingung, kippt die Zahl lautlos ins Falsche — sichtbar wird das
+nur, wenn jemand nachrechnet. Und: Ein Mechanismus, der aus gutem Grund
+eine Schonfrist kennt, braucht eine Antwort auf die Frage, was er tut,
+wenn *alles* geschont ist. Hier war die Antwort "nichts", 76 Minuten lang,
+ohne jede Spur in der Oberfläche.
+
+Drittens, aus der Regression oben: Wer einen Mechanismus auf eine
+Quittungs-Kette umstellt ("Flag setzen, auf Antwort warten"), muss jeden
+Pfad kennen, auf dem die Antwort **ausbleiben** darf. Vorher war ein
+verworfener Job folgenlos, nachher ist er ein Deadlock. Die Testsuite sah
+das nicht, weil kein Test die Zweitinstanz mit dem Takt zusammen dachte —
+der Probestart mit Peters echter Umgebung schon.

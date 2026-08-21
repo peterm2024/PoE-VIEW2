@@ -6,6 +6,18 @@ nach [SemVer](https://semver.org/lang/de/).
 
 ## [Unveröffentlicht]
 
+### Geändert
+
+- Der Auto-Modus taktet jetzt nach dem tatsächlichen Rate-Limit von GGG
+  statt nach festen 40 Sekunden — demselben gerechneten Takt, den
+  "Single" und "Stash" schon fahren. Zusätzlich frischt sein
+  Hintergrund-Durchlauf die Truhe auch dann weiter auf, wenn jedes Fach
+  jünger als einen Tag ist; bis dahin stand er in diesem Fall still, was
+  im Alltag der Normalfall war. An einem echten Log gemessen: Die offene
+  Ansicht wurde 195-mal aktualisiert, wo unter dem neuen Takt 632
+  möglich gewesen wären, und das Rate-Limit-Fenster war dabei im Median
+  nur zu gut einem Viertel ausgelastet.
+
 ### Hinzugefügt
 
 - Rechtsklick auf einen Charakter, "Export character sheet…", erzeugt

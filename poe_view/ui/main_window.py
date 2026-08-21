@@ -461,13 +461,12 @@ def _gem_level_changed(previous: Item, current: Item) -> bool:
 
 
 class MainWindow(QMainWindow):
-    # Hintergrund-Auto-Refresh: nie jünger als 1 Tag anfassen
-    # (dafür reicht der manuelle Refresh völlig). Pro Tick können jetzt BIS
-    # ZU ZWEI Jobs rausgehen (das gerade angezeigte Fach + der normale
-    # Sweep-Kandidat) — Intervall verdoppelt, damit die Gesamt-Anfragerate
-    # ans Rate-Limit gegenüber vorher gleich bleibt und wir nicht in dessen
-    # Sperre (Timeout) laufen.
-    AUTO_REFRESH_INTERVAL_MS = 40_000
+    # Vorrang-Regel des Sweeps: Fächer, die jünger als einen Tag sind,
+    # fasst er von sich aus nicht an (dafür reicht der manuelle Refresh
+    # völlig). Ist danach KEIN Kandidat mehr übrig — der Normalfall,
+    # sobald eine Liga einmal durchgeladen ist —, fällt der Sweep auf den
+    # Rundlauf des Stash-Modus zurück, statt stillzustehen
+    # (§_pick_auto_sweep_candidate).
     AUTO_REFRESH_MIN_AGE = timedelta(days=1)
     # Nur eine kleine Notreserve für manuelle Klicks halten, kein hartes
     # 50/50-Splitting mehr (Peter: "sollte doch eigentlich permanent
@@ -513,10 +512,18 @@ class MainWindow(QMainWindow):
     # Items noch deutlich Luft darunter.
     LIVE_SEARCH_ITEM_LIMIT = 50_000
 
-    # Refresh-Modi, die sich selbst im Takt weitertreiben
-    # (§_drive_refresh_mode). "auto" läuft stattdessen am 40s-Timer,
-    # "pause" gar nicht — für beide ist _drive_refresh_mode ein No-Op.
-    STEPPING_REFRESH_MODES = ("single", "stash")
+    # Refresh-Modi, die sich selbst im gerechneten Takt weitertreiben
+    # (§_drive_refresh_mode). Nur "pause" gehört nicht dazu — dort ist
+    # _drive_refresh_mode ein No-Op.
+    #
+    # "auto" hing bis 2026-08-21 stattdessen an einem FESTEN 40s-Timer und
+    # war damit der einzige Modus, der das Rate-Limit-Budget nicht aus
+    # GGGs Headern ausrechnete. An Peters echtem Log gemessen (Sitzung vom
+    # 2026-08-21, 00:13-02:30): 195 Charakter-Abrufe, wo unter dem Takt,
+    # den Single/Stash längst fahren, 632 hineingepasst hätten; das
+    # 300s-Fenster stand im Median bei 8 von 30 Treffern. Siehe
+    # ARCHITEKTUR.md §4.8 und FALLSTRICKE #72.
+    STEPPING_REFRESH_MODES = ("single", "stash", "auto")
 
     def __init__(self) -> None:
         super().__init__()
@@ -618,6 +625,11 @@ class MainWindow(QMainWindow):
         self._stash_mode_round_picks = 0  # normale Picks seit dem letzten Coverage-Pick
         self._stash_mode_coverage_cursor = 0  # Rundlauf-Index durch die leeren Fächer, §_pick_stash_mode_candidate
         self._stash_mode_list_refresh_due = False  # nächster Tick lädt die Fach-LISTE neu, §_drive_refresh_mode
+        # Auto-Modus wechselt sich Takt für Takt zwischen seinen zwei
+        # Pflichten ab (offene Ansicht / Sweep) — §_maybe_auto_refresh.
+        # Startet bei der offenen Ansicht: Die sieht der Nutzer, sie soll
+        # nicht erst einen Takt später anspringen.
+        self._auto_next_is_sweep = False
         # Angeklicktes Fach, das im Stash-Modus als nächstes drankommen soll
         # (§_prioritise_selection_in_refresh_mode) — vordrängeln statt sofort feuern.
         self._refresh_mode_priority_id: str | None = None
@@ -697,16 +709,6 @@ class MainWindow(QMainWindow):
         # funktioniert bereits vor `worker.start()`.
         self.worker.submit(BootstrapJob())
 
-        # VOR `_build_ui()`: der Aufbau rendert bereits den Baum aus dem
-        # Cache und aktualisiert dabei die Refresh-Anzeige, die seit dem
-        # Zusammenlegen der beiden Statuszeilen-Segmente auch den
-        # Countdown dieses Timers liest. Stünde er weiter unten, liefe
-        # der Start in ein fehlendes Attribut.
-        self._auto_refresh_timer = QTimer(self)
-        self._auto_refresh_timer.setInterval(self.AUTO_REFRESH_INTERVAL_MS)
-        self._auto_refresh_timer.timeout.connect(self._maybe_auto_refresh)
-        self._auto_refresh_timer.start()
-
         self._build_ui()
         # NACH `_build_ui()` (die Anzeige muss stehen), aber VOR
         # `worker.start()`: Bis dahin ist die Job-Queue nur gefüllt, nicht
@@ -718,9 +720,9 @@ class MainWindow(QMainWindow):
         self.worker.start()
         self._apply_zone_watcher_config(*self._load_zone_watcher_config())
 
-        # Sekündliches Ticken der Countdown-Anzeige — unabhängig vom
-        # Auto-Refresh-Timer selbst, der nur alle AUTO_REFRESH_INTERVAL_MS
-        # feuert. Peter: "ca. 5 Minuten gewartet ohne dass irgendwas
+        # Sekündliches Ticken der Countdown-Anzeige — und zugleich der
+        # Herzschlag, an dem alle taktenden Modi hängen
+        # (§_drive_refresh_mode). Peter: "ca. 5 Minuten gewartet ohne dass irgendwas
         # passiert ist" — ohne sichtbaren Countdown ist von außen nicht zu
         # unterscheiden, ob der Timer noch läuft oder der nächste Tick aus
         # gutem Grund (Rate-Limit, Token abgelaufen, …) nichts tut.
@@ -1017,8 +1019,9 @@ class MainWindow(QMainWindow):
         self._refresh_mode_combo = QComboBox()
         self._refresh_mode_combo.addItems(["Auto", "Single", "Stash", "Pause"])
         self._refresh_mode_combo.setToolTip(
-            "Auto: keeps the open tab/character live, sweeps the rest of the "
-            "stash in the background (default, reserves budget for manual clicks).\n"
+            "Auto: alternates between keeping the open tab/character live and "
+            "sweeping the rest of the stash, on the same steady clock as the "
+            "modes below (default, reserves budget for manual clicks).\n"
             "Single: refreshes just the currently selected tab or character "
             "on a steady clock, as tight as the rate limit allows.\n"
             "Stash: cycles through the whole stash on that same steady clock, "
@@ -2058,11 +2061,12 @@ class MainWindow(QMainWindow):
         """Auch vom Token-Ablauf MITTEN in der Session erreicht (nicht nur
         beim Start) — ``AuthError`` kann aus jedem Job kommen, auch einem
         stillen Auto-Refresh-Tick. ``_logged_in = False`` stoppt in diesem
-        Fall den Auto-Refresh (§4.8), sonst würde er alle 40s mit demselben,
+        Fall den Auto-Refresh (§4.8), sonst würde er im Takt mit demselben,
         bereits als ungültig bekannten Token weiter gegen die API laufen —
         real beobachtet: mehrere Minuten lang HTTP 401 im Log, alle exakt
-        AUTO_REFRESH_INTERVAL_MS auseinander, bis der Nutzer den Login-Button
-        von Hand bemerkt (Rückfrage "Automatik hat nicht hingehauen").
+        einen Takt auseinander (damals der feste 40s-Timer), bis der Nutzer
+        den Login-Button von Hand bemerkt (Rückfrage "Automatik hat nicht
+        hingehauen").
 
         Ändert BEWUSST NICHTS an ``self._account_name`` oder den geladenen
         Fach-/Item-/Charakterdaten — ein unfreiwilliger Token-Ablauf soll
@@ -2546,9 +2550,9 @@ class MainWindow(QMainWindow):
         self._note_refresh_mode_job_done()
 
     def _note_refresh_mode_job_done(self) -> None:
-        """Ein eigener Job des Single-/Stash-Modus ist durch (Erfolg wie
+        """Ein eigener Job eines taktenden Modus ist durch (Erfolg wie
         Fehler): Kette freigeben und den nächsten Takt AB JETZT zählen.
-        Im "auto"-Modus ein No-Op, da ``_drive_refresh_mode`` dort nichts tut.
+        Im "pause"-Modus ein No-Op, da ``_drive_refresh_mode`` dort nichts tut.
 
         Der Takt läuft bewusst ab dem ENDE eines Requests, nicht ab seinem
         Absenden. Wartet der Rate-Limiter mitten im Job minutenlang
@@ -4477,8 +4481,8 @@ class MainWindow(QMainWindow):
     def _on_zone_changed(self, zone_name: str) -> None:
         """Peter, 2026-08-01: "Erst nach Zonenwechsel gibt es einen
         Refresh" — live bestätigt (FALLSTRICKE #58). Lädt NUR die gerade
-        offene Ansicht neu (wie der gezielte Teil von
-        ``_maybe_auto_refresh``), kein Sweep, kein Burst — ein einzelner
+        offene Ansicht neu (dieselbe ``_refresh_current_view`` wie die
+        gezielte Pflicht des Auto-Modus), kein Sweep, kein Burst — ein einzelner
         Request pro Zonenwechsel. Abbruchgründe und Burst-Budget teilt er
         sich mit dem Händler-Trigger (``_on_inventory_event``): Seit
         beide dieselbe Schuldenrechnung füttern, wäre eine Ausnahme für
@@ -4548,10 +4552,10 @@ class MainWindow(QMainWindow):
         self._status_msg.setText(f"Error: {message}")
         log.error("%s", message)
         # Ein gescheiterter Job überspringt den Erfolgs-Signal-Pfad, über
-        # den die Single-/Stash-Modus-Kette sich sonst selbst weitertreibt
+        # den die Kette eines taktenden Modus sich sonst selbst weitertreibt
         # (§_drive_refresh_mode) — ohne diesen Reset könnte ein einzelner
         # Fehler (z. B. ein transienter Netzwerk-Hänger) die Kette für den
-        # Rest der Session stillschweigend stoppen. Im "auto"-Modus ein No-Op.
+        # Rest der Session stillschweigend stoppen. Im "pause"-Modus ein No-Op.
         # Der Takt wird dabei mitgezählt wie bei Erfolg: ein Fehlschlag darf
         # keinen Sofort-Retry auslösen, der das Rate-Limit-Budget verheizt.
         if self._refresh_mode in self.STEPPING_REFRESH_MODES:
@@ -4700,11 +4704,14 @@ class MainWindow(QMainWindow):
     # --- Hintergrund-Auto-Refresh ---------------------- #
 
     def _auto_refresh_blocked_reason(self) -> str | None:
-        """Grund, warum der nächste Tick nichts täte, oder ``None``, wenn er
-        normal laufen würde. Von ``_maybe_auto_refresh`` als Guard genutzt
-        und von ``_update_auto_refresh_countdown`` für die Statuszeile —
-        eine Quelle für beides, damit Countdown-Text und tatsächliches
-        Verhalten nie auseinanderlaufen."""
+        """Grund, warum der nächste Takt des Auto-Modus nichts täte, oder
+        ``None``, wenn er normal laufen würde. Von ``_maybe_auto_refresh``
+        als Guard genutzt und von ``_refresh_idle_reason`` für die
+        Statuszeile — eine Quelle für beides, damit Anzeige und
+        tatsächliches Verhalten nie auseinanderlaufen.
+
+        Das sind die Gründe, die NUR für Auto gelten; die für jeden
+        taktenden Modus stehen in ``_drive_refresh_mode``."""
         if not self._current_league:
             return "no league selected"
         if self._worker_busy or self._bulk_dialog is not None:
@@ -4890,9 +4897,17 @@ class MainWindow(QMainWindow):
         mitfüllten — real endete das in 289s Zwangspause
         (FALLSTRICKE #47)."""
         if self._refresh_mode not in self.STEPPING_REFRESH_MODES:
-            return  # "auto" läuft am eigenen Timer, "pause" gar nicht
+            return  # "pause" heißt: gar keine Hintergrund-Anfragen
         if (self._refresh_mode_pending or not self._logged_in
                 or not self._current_league or self._current_league_is_archived()):
+            return
+        if self._read_only:
+            # Zweitinstanz auf demselben Konto (§instance_lock): Der Worker
+            # verwürfe jeden Job lautlos (§_skip_read_only) — dann käme aber
+            # auch nie die Antwort zurück, die ``_refresh_mode_pending``
+            # wieder freigibt, und die Kette stünde für den Rest der Sitzung
+            # still. ``_refresh_current_view`` schützt sich aus genau diesem
+            # Grund schon selbst; hier gilt es für alle taktenden Modi.
             return
         if self._bulk_dialog is not None:
             # "Load All Tabs" taktet sich selbst durch die ganze Truhe
@@ -4934,42 +4949,98 @@ class MainWindow(QMainWindow):
             self.worker.submit(FetchStashItemsJob(
                 self._current_league, candidate.id, candidate.display_name,
                 parent_id=candidate.parent, silent=True))
+        elif self._refresh_mode == "auto":
+            self._maybe_auto_refresh()
 
     def _maybe_auto_refresh(self) -> None:
-        """Läuft per QTimer und lädt höchstens zwei Dinge neu:
+        """EIN Schritt des Auto-Modus. Der Modus hat zwei Pflichten und
+        erledigt je Takt genau eine, abwechselnd:
 
         1. Das gerade angezeigte Fach oder den gerade angezeigten
            Charakter, unabhängig vom Alter der Daten, damit die offene
            Ansicht aktuell bleibt. Beide schließen sich gegenseitig aus,
            siehe ``_current_stash_id`` und ``_current_character_name``.
-        2. Den normalen Sweep-Kandidaten, der nach und nach den Rest der
-           Truhe füllt.
+        2. Den Sweep, der nach und nach den Rest der Truhe auffrischt
+           (§_pick_auto_sweep_candidate).
 
-        Beides nur, wenn genug Rate-Limit-Budget für manuelle Abfragen
-        übrig bleibt (§4.8). Da pro Tick bis zu zwei Jobs entstehen, ist
-        ``AUTO_REFRESH_INTERVAL_MS`` doppelt so groß wie zu der Zeit, als
-        nur ein Job je Tick abging.
+        Liefert die Pflicht, die gerade an der Reihe ist, nichts — nichts
+        geöffnet bzw. kein Sweep-Kandidat —, übernimmt die andere noch im
+        SELBEN Takt, statt ihn ungenutzt verfallen zu lassen.
+
+        **Warum abwechselnd und nicht beides pro Takt (bis 2026-08-21 so):**
+        Der Takt kommt aus ``steady_pace_interval_s`` und beschreibt den
+        Abstand zwischen zwei REQUESTS, nicht zwischen zwei Ticks. Zwei
+        Jobs je Takt wären also der doppelte Durchsatz, den die Rechnung
+        zulässt — genau die Art Fehler, die schon zweimal in einer
+        300s-Zwangspause endete (FALLSTRICKE #34, #47). Ein Job je Takt
+        hält den Modus dagegen exakt in derselben Spur wie Single/Stash.
+
+        **Der alte Doppel-Abruf-Schutz ist damit entfallen:** Früher gingen
+        beide Jobs im selben Tick raus, weshalb der Sweep-Kandidat
+        ausdrücklich gegen ``_current_stash_id`` geprüft werden musste.
+        Jetzt liegt zwischen beiden Pflichten ein voller Takt, in dem das
+        offene Fach seinen Zeitstempel bereits aufgefrischt hat — es ist
+        danach das JÜNGSTE und wird von beiden Kandidatenauswahlen
+        (ältester zuerst) von selbst gemieden. Nur in einer Liga mit einem
+        einzigen Fach fallen sie zusammen; dann verhält sich Auto dort wie
+        Single, was richtig ist, und nicht wie ein Doppel-Request.
+
+        Zusätzlich zu den Gründen, die für alle taktenden Modi gelten
+        (§_drive_refresh_mode), gibt Auto als der "höfliche" Modus noch
+        weiteren Anlässen nach — laufender Worker, Notreserve fürs
+        Rate-Limit-Budget (§_auto_refresh_blocked_reason).
 
         Charaktere haben keinen eigenen Sweep. Anders als bei mehreren
         hundert Stash-Tabs ist die Charakterliste klein genug, dass ein
         automatischer Durchlauf keinen Mehrwert brächte; nicht angezeigte
         Charaktere bleiben bis zum nächsten Klick oder einem manuellen
-        Refresh per Rechtsklick unverändert.
-
-        Läuft nur im Modus "auto" — Single/Stash treiben sich über
-        ``_drive_refresh_mode`` selbst an, ausgelöst durch Job-Abschlüsse
-        statt durch diesen 40s-Takt (§_drive_refresh_mode)."""
+        Refresh per Rechtsklick unverändert."""
         if self._refresh_mode != "auto":
             return
         if self._auto_refresh_blocked_reason() is not None:
             return
-        current_id = self._current_stash_id
-        self._refresh_current_view()
-        candidate = self._pick_auto_refresh_candidate()
-        if candidate is not None and candidate.id != current_id:
-            self.worker.submit(FetchStashItemsJob(
-                self._current_league, candidate.id, candidate.display_name,
-                parent_id=candidate.parent, silent=True))
+        duties = (self._drive_auto_sweep, self._refresh_current_view)
+        if not self._auto_next_is_sweep:
+            duties = tuple(reversed(duties))
+        self._auto_next_is_sweep = not self._auto_next_is_sweep
+        for duty in duties:
+            if duty():
+                return
+
+    def _drive_auto_sweep(self) -> bool:
+        """Sweep-Schritt des Auto-Modus — gibt zurück, ob ein Job rausging.
+
+        Vorrang hat weiterhin die 1-Tag-Regel
+        (``_pick_auto_refresh_candidate``): noch nie geladene Fächer
+        zuerst, danach alles, was älter als einen Tag ist. Erst wenn die
+        nichts mehr hergibt, übernimmt der Rundlauf des Stash-Modus
+        (``_pick_stash_mode_candidate``, gefüllte Fächer vor leeren,
+        Remove-only zuletzt, Fach-Liste am Rundenende).
+
+        Ohne diesen Rückfall stand der Sweep im Alltag schlicht still: In
+        Peters Log vom 2026-08-21 ging zwischen 00:14 und 01:30 — 76
+        Minuten — kein einziger Sweep-Abruf raus, weil in der
+        durchgeladenen Liga jedes Fach jünger als einen Tag war. Auto war
+        damit nicht "Single plus Sweep", sondern ein Single ohne Sweep.
+        Die 1-Tag-Regel bleibt trotzdem vorne, weil sie eine andere Frage
+        beantwortet als der Rundlauf: sie holt Unbekanntes nach, er hält
+        Bekanntes frisch."""
+        if self._stash_mode_list_refresh_due:
+            # Der Rundlauf hat eine volle Runde hinter sich (§_pick_stash_
+            # mode_candidate) und will einmalig die Fach-LISTE sehen, sonst
+            # bliebe eine im Spiel umsortierte Truhe für immer unentdeckt.
+            self._stash_mode_list_refresh_due = False
+            self._refresh_mode_pending = True
+            self.worker.submit(FetchStashListJob(self._current_league, silent=True))
+            return True
+        candidate = self._pick_auto_refresh_candidate() or self._pick_stash_mode_candidate()
+        if candidate is None:
+            return False
+        self._refresh_mode_pending = True
+        self.worker.submit(FetchStashItemsJob(
+            self._current_league, candidate.id, candidate.display_name,
+            parent_id=candidate.parent, silent=True))
+        return True
 
     def _refresh_current_view(self) -> bool:
         """Lädt das gerade angezeigte Fach oder den gerade angezeigten
@@ -5043,16 +5114,21 @@ class MainWindow(QMainWindow):
             return "no league selected"
         if self._refresh_mode == "pause":
             return "Pause — no background requests"
-        if self._refresh_mode in self.STEPPING_REFRESH_MODES:
-            # Pausiert der Takt wegen zu vollen Fensters, gehört genau das
-            # ins Label — ein weiterlaufender Countdown, der bei 0s stehen
-            # bleibt, sähe wieder wie ein Hänger aus (§pacing_blocked).
-            if self.worker.rate_limiter.pacing_blocked(self._refresh_mode_policy):
-                mode_name = self._refresh_mode_combo.currentText()
-                return f"{mode_name} — waiting for rate-limit headroom"
-            return None
-        reason = self._auto_refresh_blocked_reason()
-        return f"Auto-refresh paused ({reason})" if reason is not None else None
+        if self._refresh_mode == "auto":
+            # Auto gibt zusätzlich zum gemeinsamen Takt-Grund unten noch
+            # eigenen Anlässen nach (Worker beschäftigt, Notreserve fürs
+            # Budget) — die gehören genauso ins Label, sonst zählt
+            # "unchanged for X" eine Pause als geprüfte Zeit mit.
+            reason = self._auto_refresh_blocked_reason()
+            if reason is not None:
+                return f"Auto-refresh paused ({reason})"
+        # Pausiert der Takt wegen zu vollen Fensters, gehört genau das
+        # ins Label — ein weiterlaufender Countdown, der bei 0s stehen
+        # bleibt, sähe wieder wie ein Hänger aus (§pacing_blocked).
+        if self.worker.rate_limiter.pacing_blocked(self._refresh_mode_policy):
+            mode_name = self._refresh_mode_combo.currentText()
+            return f"{mode_name} — waiting for rate-limit headroom"
+        return None
 
     def _refresh_state_text(self) -> str:
         """Was der Hintergrund-Refresh gerade tut — bzw. warum nicht."""
@@ -5061,12 +5137,9 @@ class MainWindow(QMainWindow):
         idle = self._refresh_idle_reason()
         if idle is not None:
             return idle
-        if self._refresh_mode in self.STEPPING_REFRESH_MODES:
-            mode_name = self._refresh_mode_combo.currentText()
-            seconds = max(0, round(self._refresh_mode_next_due - time.monotonic()))
-            return f"{mode_name} — next update in {seconds}s"
-        seconds = max(0, self._auto_refresh_timer.remainingTime() // 1000)
-        return f"Next auto-refresh in {seconds}s"
+        mode_name = self._refresh_mode_combo.currentText()
+        seconds = max(0, round(self._refresh_mode_next_due - time.monotonic()))
+        return f"{mode_name} — next update in {seconds}s"
 
     def _update_refresh_status(self) -> None:
         """Zustand und Sweep-Zähler in EINER Anzeige (Peter, 2026-08-04:
