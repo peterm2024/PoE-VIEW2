@@ -39,11 +39,13 @@ from poe_view.services.api_worker import (ApiWorker, BootstrapJob,
                                           FetchCharactersJob, FetchIconJob,
                                           FetchLeaguesJob, FetchPricesJob,
                                           FetchStashItemsJob,
-                                          FetchStashListJob, LoginJob,
+                                          FetchStashListJob, LOGIN_EXPIRED,
+                                          LOGIN_NO_TOKEN, LoginJob,
                                           LogoutJob, Poe2ProbeJob)
 from poe_view.services.csv_export import export_items, sanitize_filename
 from poe_view.ui import external_tools
 from poe_view.ui.help_dialog import HelpDialog
+from poe_view.ui.login_prompts import SessionExpiredDialog, WelcomeDialog
 from poe_view.ui.character_list import CharacterList
 from poe_view.ui.item_detail import ItemDetail
 from poe_view.ui.favourites import favourite_rows
@@ -630,6 +632,12 @@ class MainWindow(QMainWindow):
         # Startet bei der offenen Ansicht: Die sieht der Nutzer, sie soll
         # nicht erst einen Takt später anspringen.
         self._auto_next_is_sweep = False
+        # Nicht-modale Login-Dialoge (§4.47). Als Attribut, nicht lokal:
+        # Ein QDialog ohne Referenz wird eingesammelt, sobald die
+        # erzeugende Methode zurückkehrt — und verschwindet dabei wieder
+        # vom Bildschirm.
+        self._welcome_dialog: WelcomeDialog | None = None
+        self._session_expired_dialog: SessionExpiredDialog | None = None
         # Angeklicktes Fach, das im Stash-Modus als nächstes drankommen soll
         # (§_prioritise_selection_in_refresh_mode) — vordrängeln statt sofort feuern.
         self._refresh_mode_priority_id: str | None = None
@@ -2054,10 +2062,95 @@ class MainWindow(QMainWindow):
         # bliebe sie die ganze Sitzung grau: ``offline_changed`` meldet nur
         # ZUSTANDSWECHSEL, und wer nie offline war, bekommt nie ein Signal.
         self._set_connection_led("online")
+        self._close_login_prompts()
         self.worker.submit(FetchLeaguesJob())
         self.worker.submit(FetchCharactersJob())
 
-    def _on_login_required(self, reason: str) -> None:
+    # --- Login sichtbar machen (§4.47) ---------------------------------- #
+
+    _WELCOME_SEEN_KEY = "welcome/seen"
+    _WELCOME_ON_STARTUP_KEY = "welcome/on_startup"
+
+    def _cache_summary_text(self) -> str:
+        """Eine Zeile für den Willkommensdialog: Lohnt sich das Einloggen
+        überhaupt, oder ist ohnehin alles da?
+
+        Gezählt werden die Fächer MIT DATEN (``_last_loaded``), nicht die
+        bekannten Fächer: Ein Baum mit 2295 Einträgen, von denen zwei
+        geladen sind, wäre eine irreführende Zahl."""
+        leagues = len(self._stash_trees)
+        tabs = sum(len(v) for v in self._last_loaded.values())
+        characters = len(self._all_characters)
+        if not (leagues or tabs or characters):
+            return "No local data yet — logging in is the only way to see anything."
+        stamps = [iso for league in self._last_loaded.values() for iso in league.values()]
+        stamps += list(self._character_items_loaded.values())
+        teile = [f"{leagues} league(s)", f"{tabs} stash tab(s) with data",
+                 f"{characters} character(s)"]
+        text = "Stored on this PC: " + ", ".join(teile) + "."
+        if stamps:
+            neueste = datetime.fromisoformat(max(stamps)).astimezone()
+            text += f" Last updated {neueste:%Y-%m-%d %H:%M}."
+        return text
+
+    def _maybe_show_welcome_dialog(self) -> None:
+        """Startdialog, wenn kein gültiges Token vorliegt.
+
+        Peters Wunsch war "beim ersten Start zum Konfigurieren und Login,
+        danach nur noch wenn kein Token da ist". Beides ist dieselbe
+        Bedingung: Beim allerersten Start GIBT es nie ein gültiges Token.
+        Unterschiedlich ist nur der Inhalt — ``first_run`` blendet den
+        "Getting started"-Abschnitt ein.
+
+        Der Dialog wird als Attribut gehalten, nicht nur lokal: Ein
+        nicht-modaler ``QDialog`` ohne Referenz wird eingesammelt, sobald
+        die Methode zurückkehrt, und verschwindet wieder vom Bildschirm."""
+        settings = self._settings()
+        first_run = str(settings.value(self._WELCOME_SEEN_KEY, "")).lower() not in ("true", "1")
+        on_startup = str(settings.value(self._WELCOME_ON_STARTUP_KEY, "true")).lower() in ("true", "1")
+        settings.setValue(self._WELCOME_SEEN_KEY, "true")
+        if not (first_run or on_startup):
+            return
+        dialog = WelcomeDialog(self._cache_summary_text(), first_run=first_run,
+                               show_on_startup=on_startup)
+        dialog.login_requested.connect(lambda: self.worker.submit(LoginJob()))
+        dialog.settings_requested.connect(self._open_settings_dialog)
+        dialog.finished.connect(
+            lambda _result: self._settings().setValue(
+                self._WELCOME_ON_STARTUP_KEY,
+                "true" if dialog.show_again.isChecked() else "false"))
+        self._welcome_dialog = dialog
+        dialog.show()
+
+    def _show_session_expired_dialog(self, reason: str) -> None:
+        """Ablauf mitten in der Sitzung. Nicht-modal, damit der Cache
+        durchsuchbar bleibt (§4.8, FALLSTRICKE #46).
+
+        Nur EIN Exemplar: Nach einem 401 kann eine ganze Reihe bereits
+        eingereihter Jobs hinterherlaufen und jeweils denselben Anlass
+        melden — ohne diese Sperre stapelten sich die Fenster."""
+        vorhandener = self._session_expired_dialog
+        if vorhandener is not None and vorhandener.isVisible():
+            vorhandener.raise_()
+            return
+        dialog = SessionExpiredDialog(reason)
+        dialog.login_requested.connect(lambda: self.worker.submit(LoginJob()))
+        self._session_expired_dialog = dialog
+        dialog.show()
+
+    def _close_login_prompts(self) -> None:
+        """Nach einem erfolgreichen Login haben beide Dialoge ihren Zweck
+        erfüllt — ein stehengebliebenes "Your login has expired" neben
+        einem angemeldeten Fenster wäre schlicht falsch. Betrifft auch
+        den Fall, dass der Login über den Toolbar-Knopf lief, während
+        das Popup offen stand."""
+        for attribut in ("_welcome_dialog", "_session_expired_dialog"):
+            dialog = getattr(self, attribut)
+            if dialog is not None:
+                dialog.close()
+                setattr(self, attribut, None)
+
+    def _on_login_required(self, reason: str, kind: str = "") -> None:
         """Auch vom Token-Ablauf MITTEN in der Session erreicht (nicht nur
         beim Start) — ``AuthError`` kann aus jedem Job kommen, auch einem
         stillen Auto-Refresh-Tick. ``_logged_in = False`` stoppt in diesem
@@ -2072,7 +2165,15 @@ class MainWindow(QMainWindow):
         Fach-/Item-/Charakterdaten — ein unfreiwilliger Token-Ablauf soll
         die gerade sichtbare (Cache-)Ansicht nicht wegreißen. Ein echter
         Kontowechsel läuft stattdessen über ``_on_logout_clicked`` (bewusst
-        vom Nutzer ausgelöst) oder wird in ``_on_logged_in`` erkannt."""
+        vom Nutzer ausgelöst) oder wird in ``_on_logged_in`` erkannt.
+
+        ``kind`` unterscheidet die drei Anlässe (§4.47): Programmstart
+        ohne Token, Ablauf mitten in der Sitzung, ausdrücklicher Logout.
+        Der Aufräumteil unten ist für alle drei gleich, nur der Hinweis
+        an den Nutzer nicht — nach einem selbst ausgelösten Logout wäre
+        ein Fenster "Sie sind nicht mehr angemeldet" eine Frechheit.
+        Default ``""`` heißt "Anlass unbekannt": dann nur aufräumen, kein
+        Dialog."""
         self._logged_in = False
         self._login_button.setText("🔑 Log in")
         self._login_button.setMenu(None)
@@ -2084,6 +2185,10 @@ class MainWindow(QMainWindow):
         # nichts, und Rot hieße hier "GGG ist weg", obwohl der Server
         # einwandfrei laufen kann.
         self._set_connection_led("unknown")
+        if kind == LOGIN_NO_TOKEN:
+            self._maybe_show_welcome_dialog()
+        elif kind == LOGIN_EXPIRED:
+            self._show_session_expired_dialog(reason)
 
     def _on_logout_clicked(self) -> None:
         """Nutzer wählt "Log out" im Konto-Menü (Peter, 2026-08-02, zum
@@ -5243,6 +5348,11 @@ class MainWindow(QMainWindow):
             self._raw_data_viewer.close()
         if self._poe2_viewer is not None:
             self._poe2_viewer.close()
+        # Die Login-Dialoge sind nicht-modale EIGENSTÄNDIGE Fenster (kein
+        # Elternteil, sonst wären sie modal an das Hauptfenster gebunden) —
+        # ein offenes davon hielte Qt am Leben, nachdem das Hauptfenster
+        # zu ist, und die App liefe ohne sichtbares Fenster weiter.
+        self._close_login_prompts()
         self.worker.stop()
         if not self.worker.wait(3000):
             log.warning("ApiWorker reagierte nicht innerhalb von 3s auf stop() — erzwinge Beendigung.")

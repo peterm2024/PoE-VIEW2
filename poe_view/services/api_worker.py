@@ -194,13 +194,28 @@ class BulkProgress:
     next_wait_s: float    # Taktpause bis zum nächsten Abruf (~11s)
 
 
+# Anlässe für ``ApiWorker.login_required``. Alle drei bedeuten "kein
+# gültiges Token mehr", verlangen im UI aber Verschiedenes: Beim Start
+# ohne Token soll der Willkommensdialog kommen, bei einem Ablauf mitten
+# in der Sitzung das Ablauf-Popup — und nach einem ausdrücklichen Logout
+# gar nichts, denn dann weiß der Nutzer es selbst am besten.
+LOGIN_NO_TOKEN = "no_token"    # Programmstart, kein/abgelaufenes Token gespeichert
+LOGIN_EXPIRED = "expired"      # HTTP 401 aus einem laufenden Job
+LOGIN_LOGGED_OUT = "logged_out"  # Nutzer hat selbst abgemeldet
+
+
 class ApiWorker(QThread):
     """Arbeitet die Job-Queue ab, bis ``stop()`` gerufen wird."""
 
     # Signale. 'object' statt konkreter Typen, damit
     # pydantic-Modelle und Listen unverändert durchgereicht werden können.
     logged_in = Signal(str)                    # Profil-/Account-Name
-    login_required = Signal(str)               # Grund (Anzeige im UI)
+    # Grund (Anzeige im UI) + ANLASS aus den LOGIN_*-Konstanten oben. Der Anlass ist
+    # nachgerüstet, weil das UI die drei Fälle verschieden behandeln muss
+    # (Willkommensdialog / Ablauf-Popup / kommentarlos) und der Grundtext
+    # dafür eine untaugliche Grundlage ist: Er ist für Menschen
+    # geschrieben und ändert sich mit jeder Umformulierung.
+    login_required = Signal(str, str)          # Grund, Anlass
     leagues_loaded = Signal(object)            # list[str]
     characters_loaded = Signal(object)         # list[Character]
     stash_list_loaded = Signal(object, bool)   # list[StashTab], silent
@@ -281,7 +296,7 @@ class ApiWorker(QThread):
                 # völlig intaktes Token vernichten (FALLSTRICKE #35).
                 if self.client.has_token:
                     token_store.delete_token()
-                self.login_required.emit(str(exc))
+                self.login_required.emit(str(exc), LOGIN_EXPIRED)
             except Exception as exc:  # noqa: BLE001 — Worker darf nie sterben
                 if _is_connectivity_issue(exc):
                     if _is_maintenance_bad_request(exc):
@@ -377,7 +392,7 @@ class ApiWorker(QThread):
                 self._login()
             case LogoutJob():
                 token_store.delete_token()
-                self.login_required.emit("Logged out.")
+                self.login_required.emit("Logged out.", LOGIN_LOGGED_OUT)
             case FetchLeaguesJob():
                 self.status.emit("Loading leagues…")
                 self.leagues_loaded.emit(self.client.get_leagues())
@@ -438,7 +453,7 @@ class ApiWorker(QThread):
                 age_h = (time.time() - float(token.get("obtained_at", 0))) / 3600
                 log.info("Bootstrap: Token verworfen — vor %.1f h geholt, "
                          "expires_in=%s s.", age_h, token.get("expires_in"))
-            self.login_required.emit("No valid token — please log in.")
+            self.login_required.emit("No valid token — please log in.", LOGIN_NO_TOKEN)
             return
         self.client.set_token(token["access_token"])
         self._after_auth()

@@ -6,6 +6,18 @@ nach [SemVer](https://semver.org/lang/de/).
 
 ## [Unveröffentlicht]
 
+### Hinzugefügt
+
+- Ein Willkommensfenster beim Start, wenn keine gültige Anmeldung
+  vorliegt: Es nennt den Stand der lokal gespeicherten Daten und bietet
+  Anmelden oder Weiterarbeiten ohne Anmeldung an. Beim allerersten Start
+  kommt ein kurzer "Getting started"-Teil dazu. Abschaltbar über ein
+  Häkchen im Fenster selbst.
+- Läuft die Anmeldung mitten in der Sitzung ab, sagt das jetzt ein
+  eigenes Fenster statt nur der Statuszeile. Beide Fenster blockieren
+  nichts — die lokal gespeicherten Daten bleiben durchsuchbar. Nach einem
+  selbst ausgelösten Abmelden erscheint bewusst keins von beiden.
+
 ### Behoben
 
 - Der Level in der Charakterliste blieb während einer Sitzung auf dem

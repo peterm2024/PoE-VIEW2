@@ -15,7 +15,8 @@ from PySide6.QtWidgets import QMenu
 from poe_view.api.models import Character, Item, StashTab
 from poe_view.api.ninja import PriceIndex
 from poe_view.services import price_cache
-from poe_view.services.api_worker import FetchPricesJob, FetchStashListJob
+from poe_view.services.api_worker import (FetchPricesJob, FetchStashListJob,
+                                          LOGIN_EXPIRED, LOGIN_NO_TOKEN)
 from poe_view.services.poe2_probe import Probe, ProbeCall
 from poe_view.ui import external_tools
 from poe_view.ui.item_table import CONFIGURABLE_COLUMNS
@@ -9035,5 +9036,165 @@ def test_levelaufstieg_eines_unbekannten_charakters_stoert_nicht(qapp, monkeypat
     assert [c.name for c in win._all_characters] == ["WitchOfPeter"]
     assert win._all_characters[0].level == 24
 
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_kein_token_beim_start_oeffnet_den_willkommensdialog(qapp) -> None:
+    """Peter, 2026-08-21: "habe gerade schon wieder vergessen mich
+    einzuloggen". Vorher sagte das nur die Statuszeile, die die naechste
+    Meldung ueberschreiben kann."""
+    win = MainWindow()
+    win._on_login_required("No valid token — please log in.", LOGIN_NO_TOKEN)
+
+    assert win._welcome_dialog is not None
+    assert win._welcome_dialog.isVisible()
+    assert win._session_expired_dialog is None
+
+    win._close_login_prompts()
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_ablauf_mitten_in_der_sitzung_oeffnet_das_popup(qapp) -> None:
+    win = MainWindow()
+    win._on_login_required("HTTP 401", LOGIN_EXPIRED)
+
+    assert win._session_expired_dialog is not None
+    assert win._session_expired_dialog.isVisible()
+    assert win._welcome_dialog is None
+
+    win._close_login_prompts()
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_selbst_ausgeloester_logout_zeigt_keinen_dialog(qapp) -> None:
+    """Nach einem ausdruecklichen Logout waere ein Fenster "Sie sind nicht
+    mehr angemeldet" eine Frechheit — der Nutzer hat es gerade selbst
+    getan. Alle drei Anlaesse teilen sich dasselbe Signal, nur der Hinweis
+    unterscheidet sich."""
+    from poe_view.services.api_worker import LOGIN_LOGGED_OUT
+    win = MainWindow()
+    win._on_login_required("Logged out.", LOGIN_LOGGED_OUT)
+
+    assert win._welcome_dialog is None
+    assert win._session_expired_dialog is None
+    assert win._logged_in is False  # aufgeraeumt wird trotzdem
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_mehrere_401_stapeln_keine_popups(qapp) -> None:
+    """Nach einem 401 laeuft die Reihe bereits eingereihter Jobs weiter
+    und meldet jeweils denselben Anlass."""
+    win = MainWindow()
+    win._on_login_required("HTTP 401", LOGIN_EXPIRED)
+    erstes = win._session_expired_dialog
+    for _ in range(4):
+        win._on_login_required("HTTP 401", LOGIN_EXPIRED)
+
+    assert win._session_expired_dialog is erstes
+
+    win._close_login_prompts()
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_erfolgreicher_login_raeumt_die_dialoge_weg(qapp, monkeypatch) -> None:
+    """Ein stehengebliebenes "Your login has expired" neben einem
+    angemeldeten Fenster waere schlicht falsch — auch wenn der Login ueber
+    den Toolbar-Knopf lief, waehrend das Popup offen stand."""
+    win = MainWindow()
+    monkeypatch.setattr(win, "_switch_active_account_data", lambda name: None)
+    monkeypatch.setattr(win.worker, "submit", lambda job: None)
+    win._on_login_required("HTTP 401", LOGIN_EXPIRED)
+    assert win._session_expired_dialog is not None
+
+    win._on_logged_in("TestAccount#1234")
+
+    assert win._session_expired_dialog is None
+    assert win._welcome_dialog is None
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_willkommensdialog_bleibt_weg_wenn_das_haekchen_aus_ist(qapp) -> None:
+    """Das Haekchen wirkt erst NACH dem ersten Start: Beim allerersten Mal
+    soll der Dialog in jedem Fall kommen, sonst gaebe es keine Gelegenheit,
+    ihn ueberhaupt zu sehen."""
+    win = MainWindow()
+    settings = win._settings()
+    settings.setValue(MainWindow._WELCOME_SEEN_KEY, "true")
+    settings.setValue(MainWindow._WELCOME_ON_STARTUP_KEY, "false")
+
+    win._on_login_required("No valid token", LOGIN_NO_TOKEN)
+
+    assert win._welcome_dialog is None
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_erster_start_zeigt_den_dialog_auch_bei_abgeschaltetem_haekchen(qapp) -> None:
+    win = MainWindow()
+    settings = win._settings()
+    settings.remove(MainWindow._WELCOME_SEEN_KEY)
+    settings.setValue(MainWindow._WELCOME_ON_STARTUP_KEY, "false")
+
+    win._on_login_required("No valid token", LOGIN_NO_TOKEN)
+
+    assert win._welcome_dialog is not None
+
+    win._close_login_prompts()
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_cache_zusammenfassung_ohne_daten(qapp) -> None:
+    win = MainWindow()
+    assert "No local data yet" in win._cache_summary_text()
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_cache_zusammenfassung_zaehlt_faecher_mit_daten(qapp) -> None:
+    """Nicht die BEKANNTEN Faecher: Ein Baum mit 2295 Eintraegen, von denen
+    zwei geladen sind, waere eine irrefuehrende Zahl."""
+    win = MainWindow()
+    win._stash_trees = {"Standard": [], "Settlers": []}
+    win._last_loaded = {"Standard": {"a": "2026-08-21T10:00:00+00:00",
+                                     "b": "2026-08-21T11:00:00+00:00"},
+                        "Settlers": {"c": "2026-08-20T09:00:00+00:00"}}
+    win._all_characters = [_char("WitchOfPeter", 24)]
+
+    text = win._cache_summary_text()
+
+    assert "2 league(s)" in text
+    assert "3 stash tab(s) with data" in text
+    assert "1 character(s)" in text
+    assert "Last updated" in text
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_abgeschaltetes_haekchen_wird_beim_schliessen_gespeichert(qapp) -> None:
+    """Sonst waere das Haekchen ein Bedienelement ohne Wirkung: Der Dialog
+    kaeme beim naechsten Start wieder."""
+    win = MainWindow()
+    win._on_login_required("No valid token", LOGIN_NO_TOKEN)
+    dialog = win._welcome_dialog
+    assert dialog is not None
+
+    dialog.show_again.setChecked(False)
+    dialog.reject()  # "Continue offline"
+
+    gespeichert = str(win._settings().value(MainWindow._WELCOME_ON_STARTUP_KEY))
+    assert gespeichert.lower() == "false"
+
+    win._close_login_prompts()
     win.worker.stop()
     win.worker.wait(5000)

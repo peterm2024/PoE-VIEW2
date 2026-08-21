@@ -22,12 +22,14 @@ def test_logout_dispatch_deletes_the_token_and_requests_login(qapp, monkeypatch)
     monkeypatch.setattr(api_worker_module.token_store, "delete_token",
                         lambda: deleted.append(True))
     required = []
-    worker.login_required.connect(required.append)
+    worker.login_required.connect(lambda grund, anlass: required.append((grund, anlass)))
 
     worker._dispatch(LogoutJob())
 
     assert deleted == [True]
-    assert required == ["Logged out."]
+    # Der Anlass unterscheidet den selbst ausgeloesten Logout vom Ablauf
+    # mitten in der Sitzung: Nur Letzterer darf ein Popup ausloesen (§4.47).
+    assert required == [("Logged out.", api_worker_module.LOGIN_LOGGED_OUT)]
     worker.client.close()
 
 
@@ -483,7 +485,7 @@ def test_a_401_without_a_token_does_not_delete_the_stored_token(qapp, monkeypatc
     monkeypatch.setattr(worker.client, "get_stashes",
                         lambda league: (_ for _ in ()).throw(AuthError("401")))
     required = []
-    worker.login_required.connect(required.append)
+    worker.login_required.connect(lambda grund, anlass: required.append((grund, anlass)))
 
     worker.submit(FetchStashListJob("Allflame"))
     worker.stop()
@@ -491,6 +493,7 @@ def test_a_401_without_a_token_does_not_delete_the_stored_token(qapp, monkeypatc
 
     assert deleted == [], "kein Token gesetzt -> nichts zu verwerfen"
     assert len(required) == 1  # Login wird trotzdem angefordert
+    assert required[0][1] == api_worker_module.LOGIN_EXPIRED
     worker.client.close()
 
 

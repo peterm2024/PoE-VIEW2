@@ -5076,6 +5076,86 @@ reinen Funktion, drei weitere an der Verdrahtung, alle greifen.
 
 ---
 
+### 4.47 Login sichtbar machen (`ui/login_prompts.py`)
+
+Peter, 2026-08-21: "habe gerade schon wieder vergessen mich
+einzuloggen". Ein fehlender Login machte sich bis dahin nur zweifach
+bemerkbar — die Beschriftung des Toolbar-Knopfes wechselte auf
+"🔑 Log in", und in der Statuszeile stand ein Satz, den die nächste
+Meldung überschreiben kann. Der eigentliche Grund, warum das so leicht
+zu übersehen ist, steckt aber in einer früheren Entscheidung: Weil der
+Datei-Cache Baum, Charakterliste und Items auch ohne Login weiter
+anzeigt (§4.7, §4.12, FALLSTRICKE #46), **sieht ein nicht angemeldetes
+PoE-VIEW2 aus wie ein angemeldetes, das gerade nichts Neues findet.**
+
+Zwei Dialoge, beide nicht-modal (Peters Entscheidung): Ein modaler
+Dialog würde ausgerechnet das Durchsuchen der lokalen Daten blockieren,
+das ohne Login ausdrücklich weiterlaufen soll.
+
+**Drei Anlässe, ein Signal.** `ApiWorker.login_required` meldete bisher
+nur einen Grundtext. Der taugt nicht als Unterscheidungsmerkmal — er ist
+für Menschen geschrieben und ändert sich mit jeder Umformulierung —, das
+Signal trägt deshalb jetzt zusätzlich einen Anlass aus `LOGIN_NO_TOKEN`
+/ `LOGIN_EXPIRED` / `LOGIN_LOGGED_OUT`:
+
+| Anlass | Auslöser | Reaktion |
+|---|---|---|
+| `LOGIN_NO_TOKEN` | Programmstart ohne gültiges Token (`_bootstrap`) | `WelcomeDialog` |
+| `LOGIN_EXPIRED` | HTTP 401 aus einem laufenden Job | `SessionExpiredDialog` |
+| `LOGIN_LOGGED_OUT` | Nutzer meldet sich selbst ab | nichts |
+
+Der dritte Fall ist der Grund für die Unterscheidung: Nach einem selbst
+ausgelösten Logout wäre ein Fenster "Sie sind nicht mehr angemeldet"
+eine Frechheit. Der Aufräumteil in `_on_login_required` läuft in allen
+drei Fällen gleich, nur der Hinweis nicht.
+
+**Wann der Willkommensdialog kommt.** Peters Wunsch war "beim ersten
+Start zum Konfigurieren und Login, danach nur noch wenn kein Token da
+ist". Beides ist dieselbe Bedingung — beim allerersten Start GIBT es nie
+ein gültiges Token. Unterschiedlich ist nur der Inhalt: `first_run`
+(Merker `welcome/seen` in `ui-settings.ini`) blendet zusätzlich einen
+"Getting started"-Abschnitt ein. Der führt bewusst in den echten
+Settings-Dialog, statt dessen Bedienelemente hier ein zweites Mal
+aufzubauen — eine Kopie des Zone-Refresh-Feldes samt Pfad-Prüfung wäre
+beim nächsten Umbau die Stelle, die stehen bleibt.
+
+Das Häkchen "Show this when I am not logged in" (`welcome/on_startup`)
+schaltet den Dialog ab, **wirkt aber erst nach dem ersten Start**: Beim
+allerersten Mal erscheint er in jedem Fall, sonst gäbe es keine
+Gelegenheit, ihn überhaupt zu sehen.
+
+**Der Datenstand im Dialog** (`_cache_summary_text`) beantwortet, ob sich
+das Einloggen lohnt. Gezählt werden die Fächer MIT DATEN
+(`_last_loaded`), nicht die bekannten: Ein Baum mit 2295 Einträgen, von
+denen zwei geladen sind, wäre eine irreführende Zahl.
+
+**Beide Dialoge hängen als Attribut am Fenster**, nicht als lokale
+Variable — ein nicht-modaler `QDialog` ohne Referenz wird eingesammelt,
+sobald die erzeugende Methode zurückkehrt, und verschwindet dabei wieder
+vom Bildschirm. Umgekehrt schließt `closeEvent` sie ausdrücklich: Als
+eigenständige Fenster ohne Elternteil hielte ein offenes davon Qt am
+Leben, nachdem das Hauptfenster zu ist. `_close_login_prompts` räumt sie
+außerdem nach jedem erfolgreichen Login weg, auch wenn der über den
+Toolbar-Knopf lief, während das Popup offenstand. Vom Ablauf-Popup gibt
+es nur EIN Exemplar: Nach einem 401 läuft die Reihe bereits eingereihter
+Jobs weiter und meldet jeweils denselben Anlass — ohne diese Sperre
+stapelten sich die Fenster.
+
+**Zwei Befunde aus dem nativen Probelauf**, die offscreen unsichtbar
+geblieben wären (FALLSTRICKE #55, #71, #74):
+
+1. Ohne Mindestbreite schrumpft Qt den Dialog auf die Breite des
+   längsten Knopfes — gemessen 262 px, worin die umbrechenden Absätze zu
+   sechs- und siebenzeiligen Türmen werden. `_MIN_WIDTH = 430` bringt sie
+   auf drei bis vier Zeilen.
+2. `color: palette(mid)` für die Detailzeile ergab in Peters dunklem
+   Windows-Design **1.13:1** — keine Dämpfung, sondern Unsichtbarkeit.
+   Ersetzt durch `muted_colour()`, das die Textfarbe zu 65 % in Richtung
+   Hintergrund mischt und dadurch in beiden Systemdesigns über 4.5:1
+   bleibt (gemessen: 7.69:1 dunkel).
+
+---
+
 ## 5. UI-Konzept (Oberflächenvorschlag)
 
 Ein Hauptfenster: Navigation links (Charaktere + Stash getrennt), Items

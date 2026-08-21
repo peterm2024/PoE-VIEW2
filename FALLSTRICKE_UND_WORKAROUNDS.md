@@ -1131,3 +1131,68 @@ ob sie korrekt ist. Hier waren beide Pfade fehlerfrei; falsch war das
 Verhältnis 4 zu 1301. Und ein neu eingeführtes Signal ist erst fertig
 verdrahtet, wenn geprüft ist, **welche** Anzeigen von seinem Inhalt leben,
 nicht nur die eine, für die es gebaut wurde.
+
+## 74. `palette(mid)` als Textfarbe: 1,13:1 — gedämpft heißt nicht unsichtbar
+
+**Problem:** Die Detailzeile im neuen Ablauf-Popup (§4.47) — der rohe
+Grund, z. B. "HTTP 401: token rejected" — sollte sich als Nebeninfo vom
+Haupttext abheben. Naheliegender Weg im Stylesheet:
+
+```python
+detail.setStyleSheet("color: palette(mid);")
+```
+
+Im nativen Probelauf war die Zeile praktisch nicht zu sehen.
+
+**Nachgemessen** (WCAG-Kontrast, weil es um Text auf Grund geht — für
+zwei Flächen nebeneinander wäre ΔE das richtige Maß, siehe die
+Gem-Balken-Entscheidung vom 2026-08-16):
+
+| Rolle | Farbe | gegen `window` #1e1e1e |
+|---|---|---|
+| `text` / `windowText` | #ffffff | 16,67:1 |
+| **`mid`** | **#282828** | **1,13:1** |
+| `dark` | #1e1e1e | 1,00:1 |
+| `midlight` | #5a5a5a | 2,42:1 |
+| `light` | #787878 | 3,78:1 |
+
+**Ursache:** Die grauen Palettenrollen sind für **3D-Rahmenschattierung**
+gedacht, nicht für Text. `mid` liegt bauartbedingt nahe am Hintergrund —
+in einem dunklen Design fällt es damit praktisch mit ihm zusammen.
+Bemerkenswert: KEINE der grauen Rollen schafft die 4,5:1 für normalen
+Text, `light` als hellste kommt auf 3,78:1.
+
+**Warum kein fest eingetipptes Grau:** Das wäre der zweite Fehler in
+Folge. Ein Wert, der auf #1e1e1e gut aussieht, ist im hellen
+Systemdesign ein Fleck — dieselbe Lehre wie beim Hintergrund der
+Gem-Balken (§4.42), wo das dunkle Aussehen von Windows kommt und nicht
+von einer eigenen Palette.
+
+**Lösung:** `login_prompts.muted_colour(palette)` mischt die Textfarbe zu
+65 % in Richtung Hintergrund. Das dreht sich in einem hellen Design von
+selbst um (dort wandert Schwarz Richtung Weiß) und ist damit
+theme-sicher:
+
+| Design | Ergebnis | Kontrast |
+|---|---|---|
+| dunkel (#ffffff auf #1e1e1e) | #b0b0b0 | **7,69:1** |
+| hell (#000000 auf #ffffff) | #595959 | **7,00:1** |
+
+Der Faktor 0,65 ist keine geschmackliche Zahl, sondern die, die in
+BEIDEN Richtungen über 4,5:1 bleibt — mit einem Test festgehalten, der
+genau das nachrechnet, statt eine Farbe zu vergleichen.
+
+**Zwei Tests, nicht einer.** "Lesbar" allein reicht als Bedingung nicht:
+Der einfachste Weg, sie zu erfüllen, wäre die normale Textfarbe — und
+damit wäre die Dämpfung weg. Der zweite Test hält deshalb fest, dass die
+Zeile schwächer ist als der Haupttext. Erst beide zusammen beschreiben,
+was gewollt ist.
+
+**Wie vermeiden:** Eine Palettenrolle zu benutzen ist noch keine
+Theme-Sicherheit — sie muss auch für den Zweck gedacht sein. Und der
+Befund wäre in der Testsuite nie aufgefallen: `QT_QPA_PLATFORM=offscreen`
+hat eine HELLE Palette, dort ergibt `mid` einen sichtbaren Grauton.
+Dritter Fall derselben Ursache nach der doppelt breiten Ersatzschrift
+(#55) und der Zeilenhöhe (#71) — die Testumgebung sieht anders aus als
+der Betrieb, und sie sieht freundlicher aus. Farbe und Größe gehören in
+einen nativen Probelauf.
