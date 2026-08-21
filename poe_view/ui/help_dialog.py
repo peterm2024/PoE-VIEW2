@@ -184,6 +184,11 @@ non-empty tabs first.</li>
 <li><b>Pause</b> — no background requests at all. Clicks and
 "Load All Tabs" still work and get the full budget.</li>
 </ul>
+<p>Above the tree, <b>Hide empty</b> takes tabs that are known to hold
+no items out of the list. Tabs that were never loaded stay — an empty
+count column means unknown, not empty. This only changes the view: every
+tab keeps being refreshed in the background, so one reappears the moment
+you put something in it.</p>
 <p>GGG's API publishes new character data almost only after a zone
 change, a second or two later. PoE-VIEW2 can watch the game's own
 <code>Client.txt</code> for that moment — and for vendor trades and
@@ -247,7 +252,9 @@ for this league</b> when that is the case. It is a limit of the data
 source, not a fault in PoE-VIEW2 — there is nothing to fix or
 configure.</p>
 <p>Prices are community data, not official, and are cached for up to six
-hours.</p>
+hours. Next to the total the status bar names how old the current set
+is — <b>poe.ninja 2 h ago</b> — so you can tell a genuinely cheap item
+from a stale price. Hover it for the exact time it was fetched.</p>
 """),
     ("Levelling", """
 <h3>Levelling</h3>

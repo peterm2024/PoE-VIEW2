@@ -249,6 +249,7 @@ class StashTree(QTreeWidget):
         self._stash_nodes: dict[str, QTreeWidgetItem] = {}  # stash_id → Knoten
         self._offline = False  # GGG nicht erreichbar (MainWindow.set_offline)
         self._last_updated_id: str | None = None  # zuletzt per mark_loaded aktualisiertes Fach
+        self._hide_empty = False  # nur Anzeige, §set_hide_empty
         self.itemClicked.connect(self._on_click)
 
     def set_offline(self, offline: bool) -> None:
@@ -289,6 +290,7 @@ class StashTree(QTreeWidget):
         for stash_id, node in self._stash_nodes.items():
             self._set_status(node, stash_id, last_loaded.get(stash_id))
             self._set_position(node, positions.get(stash_id))
+        self._apply_hide_empty()
 
     def mark_loaded(self, stash_id: str, last_loaded_iso: str, count: int | None = None) -> None:
         """Nach einem erfolgreichen Ladevorgang: ⬇ durch Refresh-Button+Alter ersetzen
@@ -304,6 +306,10 @@ class StashTree(QTreeWidget):
         if count is not None:
             node.setText(_COL_COUNT, str(count))
             self._refresh_ancestor_totals(node)
+            # Erst der Ladevorgang macht aus "unbekannt" eine Null — und
+            # umgekehrt taucht ein Fach, in das der Nutzer im Spiel etwas
+            # gelegt hat, hier von selbst wieder auf.
+            self._apply_hide_empty()
 
     def update_label(self, stash_id: str, label: str) -> None:
         """Namensspalte eines Knotens nachträglich ändern — z. B. wenn ein
@@ -339,6 +345,50 @@ class StashTree(QTreeWidget):
                 self._set_position(node, positions.get(child.id))
         if expand:
             parent_node.setExpanded(True)
+        self._apply_hide_empty()
+
+    # --- Leere Fächer ausblenden (§4.48) ------------------------------- #
+
+    def set_hide_empty(self, hide: bool) -> None:
+        """Fächer ohne Items nur AUSBLENDEN, nicht entfernen (Peters
+        Bedingung: "im Hintergrund werden natürlich weiterhin alle Stashes
+        gescannt, sonst würden wir niemals mitbekommen, das ein Stash
+        nicht mehr leer ist").
+
+        Das ist keine Zusicherung nebenbei, sondern folgt aus der
+        Umsetzung: Ausgeblendet wird über ``setHidden`` am Baumknoten.
+        ``MainWindow._leaf_stashes`` — die Liste, aus der sich Sweep,
+        Refresh-Modi und "Load All Tabs" bedienen — sieht davon nichts.
+        Ein ausgeblendetes Fach wird also weiter abgerufen und taucht
+        wieder auf, sobald etwas darin liegt."""
+        self._hide_empty = hide
+        self._apply_hide_empty()
+
+    def _apply_hide_empty(self) -> None:
+        for i in range(self.topLevelItemCount()):
+            self._hide_empty_below(self.topLevelItem(i))
+
+    def _hide_empty_below(self, node: QTreeWidgetItem) -> bool:
+        """Rekursiv ausblenden; gibt zurück, ob der Knoten sichtbar bleibt.
+
+        **Maßstab ist die angezeigte Anzahl**, nicht ein interner Wert:
+        Ausgeblendet wird genau, was in der Anzahl-Spalte als "0" steht.
+        Ein Fach mit LEERER Anzahl-Spalte ist nicht leer, sondern
+        unbekannt (noch nie geladen, ⬇) — würde es mit verschwinden, käme
+        der Nutzer nie an ein Fach heran, das er noch gar nicht kennt.
+
+        Ordner und Sektions-Gruppen verschwinden nur, wenn NICHTS mehr
+        darunter sichtbar ist. Ein Ordner ohne Kinder zählt dabei als
+        Blatt und bleibt (seine Anzahl-Spalte ist leer)."""
+        sichtbares_kind = False
+        for i in range(node.childCount()):
+            if self._hide_empty_below(node.child(i)):
+                sichtbares_kind = True
+        if node.childCount():
+            node.setHidden(self._hide_empty and not sichtbares_kind)
+        else:
+            node.setHidden(self._hide_empty and node.text(_COL_COUNT) == "0")
+        return not node.isHidden()
 
     def _set_position(self, node: QTreeWidgetItem, position: int | None) -> None:
         node.setText(_COL_POSITION, "" if position is None else str(position))

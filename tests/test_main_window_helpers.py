@@ -4714,11 +4714,24 @@ def test_on_prices_loaded_stores_index_and_writes_through_to_disk_cache(qapp, mo
     win.worker.wait(5000)
 
 
+
+def _wertsumme(win) -> str:
+    """Nur der Wertsummen-Teil des Statuszeilen-Labels, ohne die
+    poe.ninja-Altersangabe dahinter (§4.49).
+
+    Die Altersangabe hat eigene Tests; ohne diese Trennung muesste jede
+    Zusicherung ueber die Summe sie mitschleppen und wuerde bei der
+    naechsten Formulierungsaenderung dort mit umfallen."""
+    text = win._value_sum_label.text()
+    kopf = text.split("  ·  ")[0]
+    return "" if kopf.startswith("poe.ninja ") else kopf
+
+
 def test_on_prices_loaded_updates_table_and_value_sum_for_the_current_league(qapp) -> None:
     win = MainWindow()
     win._current_league = "Standard"
     win.table_model.set_items([Item.model_validate({"typeLine": "Chaos Orb", "stackSize": 10})])
-    assert win._value_sum_label.text() == ""  # noch kein Preis-Index
+    assert _wertsumme(win) == ""  # noch kein Preis-Index
 
     index = PriceIndex()
     index._simple["Chaos Orb"] = 1.0
@@ -4728,7 +4741,7 @@ def test_on_prices_loaded_updates_table_and_value_sum_for_the_current_league(qap
     index._simple["Exalted Orb"] = 50.0
     win._on_prices_loaded("Standard", index)
 
-    assert win._value_sum_label.text() == "Value: 10c"
+    assert _wertsumme(win) == "Value: 10c"
     win.worker.stop()
     win.worker.wait(5000)
 
@@ -4745,7 +4758,7 @@ def test_on_prices_loaded_ignores_a_league_that_is_not_currently_shown(qapp) -> 
     other_index._simple["Exalted Orb"] = 50.0  # siehe oben: sonst gilt der Index als leer
     win._on_prices_loaded("Hardcore", other_index)
 
-    assert win._value_sum_label.text() == ""
+    assert _wertsumme(win) == ""
     win.worker.stop()
     win.worker.wait(5000)
 
@@ -4761,7 +4774,7 @@ def test_league_changed_applies_the_cached_price_index_to_the_table(qapp, monkey
     win._on_league_changed("Standard")
     win.table_model.set_items([Item.model_validate({"typeLine": "Chaos Orb", "stackSize": 10})])
 
-    assert win._value_sum_label.text() == "Value: 10c"
+    assert _wertsumme(win) == "Value: 10c"
     win.worker.stop()
     win.worker.wait(5000)
 
@@ -4777,7 +4790,7 @@ def test_value_sum_label_shows_total_across_different_item_names(qapp) -> None:
         Item.model_validate({"typeLine": "Exalted Orb", "stackSize": 2}),
     ])
 
-    assert win._value_sum_label.text() == "Value: 110c"
+    assert _wertsumme(win) == "Value: 110c"
     win.worker.stop()
     win.worker.wait(5000)
 
@@ -4792,7 +4805,7 @@ def test_a_league_without_prices_says_so_instead_of_staying_blank(qapp) -> None:
     win._price_indexes["Solo Self-Found"] = PriceIndex()  # nur die Chaos-Orb-Referenz
     win.table_model.set_items([Item.model_validate({"typeLine": "Some Rare"})])
 
-    assert win._value_sum_label.text() == "No prices for this league"
+    assert _wertsumme(win) == "No prices for this league"
     assert "Solo Self-Found" in win._value_sum_label.toolTip()
 
     win.worker.stop()
@@ -4811,7 +4824,7 @@ def test_the_hint_replaces_the_sum_even_when_chaos_orbs_would_add_up(qapp) -> No
     win.table_model.set_items([
         Item.model_validate({"typeLine": "Chaos Orb", "frameType": 5, "stackSize": 20})])
 
-    assert win._value_sum_label.text() == "No prices for this league"
+    assert _wertsumme(win) == "No prices for this league"
 
     win.worker.stop()
     win.worker.wait(5000)
@@ -4827,8 +4840,11 @@ def test_a_league_with_prices_shows_no_hint_and_no_stale_tooltip(qapp) -> None:
     win.table_model.set_items([
         Item.model_validate({"typeLine": "Exalted Orb", "frameType": 5, "stackSize": 2})])
 
-    assert win._value_sum_label.text() == "Value: 100c"
-    assert win._value_sum_label.toolTip() == ""
+    assert _wertsumme(win) == "Value: 100c"
+    # Nicht auf einen LEEREN Tooltip pruefen: Dort steht seit §4.49 der
+    # poe.ninja-Datenstand. Gemeint war immer, dass der SSF-Hinweis nicht
+    # haengenbleibt — genau das wird hier geprueft.
+    assert "poe.ninja derives prices" not in win._value_sum_label.toolTip()
 
     win.worker.stop()
     win.worker.wait(5000)
@@ -4839,7 +4855,7 @@ def test_value_sum_label_hidden_when_nothing_visible_has_a_known_price(qapp) -> 
     win.table_model.set_price_index(_price_index(**{"Chaos Orb": 1.0}))
     win.table_model.set_items([Item.model_validate({"typeLine": "Some Unpriced Rare"})])
 
-    assert win._value_sum_label.text() == ""
+    assert _wertsumme(win) == ""
     win.worker.stop()
     win.worker.wait(5000)
 
@@ -4852,7 +4868,7 @@ def test_value_sum_label_skips_unpriced_items_but_sums_the_rest(qapp) -> None:
         Item.model_validate({"typeLine": "Some Unpriced Rare"}),
     ])
 
-    assert win._value_sum_label.text() == "Value: 5.0c"
+    assert _wertsumme(win) == "Value: 5.0c"
     win.worker.stop()
     win.worker.wait(5000)
 
@@ -4863,11 +4879,11 @@ def test_value_sum_label_follows_the_type_filter(qapp) -> None:
     win.table_model.set_items([
         Item.model_validate({"typeLine": "Chaos Orb", "stackSize": 10, "frameType": 5}),
     ])
-    assert win._value_sum_label.text() == "Value: 10c"
+    assert _wertsumme(win) == "Value: 10c"
 
     win._type_checks[5].setChecked(False)  # Currency aus
 
-    assert win._value_sum_label.text() == ""
+    assert _wertsumme(win) == ""
     win.worker.stop()
     win.worker.wait(5000)
 
@@ -9196,5 +9212,105 @@ def test_abgeschaltetes_haekchen_wird_beim_schliessen_gespeichert(qapp) -> None:
     assert gespeichert.lower() == "false"
 
     win._close_login_prompts()
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+# --- "Hide empty" und poe.ninja-Datenstand (§4.48/§4.49) -------------- #
+
+def test_hide_empty_haekchen_wirkt_auf_den_baum_und_wird_gemerkt(qapp) -> None:
+    win = MainWindow()
+    assert win._hide_empty_box.isChecked() is False
+
+    win._hide_empty_box.setChecked(True)
+
+    assert win.tree._hide_empty is True
+    assert str(win._settings().value(MainWindow._HIDE_EMPTY_SETTING_KEY)).lower() == "true"
+    # Neues Fenster liest den Stand zurueck
+    zweites = MainWindow()
+    assert zweites._hide_empty_box.isChecked() is True
+    assert zweites.tree._hide_empty is True
+
+    for w in (win, zweites):
+        w.worker.stop()
+        w.worker.wait(5000)
+
+
+def test_hide_empty_ruehrt_die_ladbaren_faecher_nicht_an(qapp) -> None:
+    """Peters Bedingung: reine Anzeige. _leaf_stashes speist Sweep,
+    Refresh-Modi und "Load All Tabs" — wuerde das Haekchen dort etwas
+    entfernen, blieben ausgeblendete Faecher fuer immer leer, weil sie nie
+    wieder abgerufen wuerden."""
+    win = MainWindow()
+    win._leaf_stashes = [_make_leaf("a", "A"), _make_leaf("b", "B")]
+    vorher = list(win._leaf_stashes)
+
+    win._hide_empty_box.setChecked(True)
+
+    assert win._leaf_stashes == vorher
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_preis_datenstand_steht_neben_der_wertsumme(qapp, monkeypatch) -> None:
+    """Peter: "Wir brauchen irgendwo die Info, welcher Datenstand von
+    PoE.Ninja ist"."""
+    win = MainWindow()
+    win._current_league = "Settlers"
+    monkeypatch.setattr("poe_view.ui.main_window.price_cache.fetched_at",
+                        lambda league: time.time() - 2 * 3600)
+
+    win._update_value_sum()
+
+    assert "poe.ninja 2 h ago" in win._value_sum_label.text()
+    assert "poe.ninja prices fetched" in win._value_sum_label.toolTip()
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_preis_datenstand_erscheint_auch_ohne_bepreiste_zeile(qapp, monkeypatch) -> None:
+    """Dass Preise VORLIEGEN, ist eine andere Aussage als dass eine Summe
+    zustande kommt — sonst verschwaende die Altersangabe genau dann, wenn
+    man sich fragt, warum nichts bepreist ist."""
+    win = MainWindow()
+    win._current_league = "Settlers"
+    monkeypatch.setattr("poe_view.ui.main_window.price_cache.fetched_at",
+                        lambda league: time.time() - 30 * 60)
+
+    win._update_value_sum()  # keine Zeilen sichtbar -> keine Summe
+
+    assert "Value:" not in win._value_sum_label.text()
+    assert "poe.ninja 30 min ago" in win._value_sum_label.text()
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_ohne_gecachte_preise_keine_altersangabe(qapp, monkeypatch) -> None:
+    win = MainWindow()
+    win._current_league = "Settlers"
+    monkeypatch.setattr("poe_view.ui.main_window.price_cache.fetched_at",
+                        lambda league: None)
+
+    win._update_value_sum()
+
+    assert "poe.ninja" not in win._value_sum_label.text()
+    assert win._value_sum_label.toolTip() == ""
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_altersangabe_waehlt_die_einheit_nach_alter(qapp, monkeypatch) -> None:
+    win = MainWindow()
+    win._current_league = "Settlers"
+    for versatz, erwartet in [(5 * 60, "5 min ago"), (3 * 3600, "3 h ago"),
+                              (5 * 86400, "5 d ago")]:
+        monkeypatch.setattr("poe_view.ui.main_window.price_cache.fetched_at",
+                            lambda league, v=versatz: time.time() - v)
+        assert win._price_age_text() == f"poe.ninja {erwartet}"
+
     win.worker.stop()
     win.worker.wait(5000)

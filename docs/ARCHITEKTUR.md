@@ -5156,6 +5156,66 @@ geblieben wären (FALLSTRICKE #55, #71, #74):
 
 ---
 
+### 4.48 Leere Fächer ausblenden (`StashTree.set_hide_empty`)
+
+Peter: "Neben dem Titel 'Stash' eine Checkbox mit 'Hide empty stashes' —
+dient lediglich zur Anzeige, im Hintergrund werden natürlich weiterhin
+alle Stashes gescannt, sonst würden wir niemals mitbekommen, das ein
+Stash nicht mehr leer ist."
+
+Diese Zusicherung ist keine Absichtserklärung, sondern folgt aus der
+Umsetzung: Ausgeblendet wird über `QTreeWidgetItem.setHidden` am
+Baumknoten. `MainWindow._leaf_stashes` — die Liste, aus der sich Sweep,
+Refresh-Modi und "Load All Tabs" bedienen — sieht davon nichts. Ein
+ausgeblendetes Fach wird also weiter abgerufen, und `mark_loaded`
+bewertet die Ausblendung danach neu; es taucht von selbst wieder auf.
+An Peters echtem Cache gemessen: 71 von 152 Baumknoten verschwinden
+(47 %), `_leaf_stashes` bleibt unverändert bei 128.
+
+**Maßstab ist die angezeigte Anzahl**, nicht ein interner Wert:
+Ausgeblendet wird genau, was in der Anzahl-Spalte als `0` steht. Eine
+LEERE Anzahl-Spalte heißt "unbekannt" (noch nie geladen, ⬇), nicht
+"leer" — würden diese Fächer mitverschwinden, käme der Nutzer nie an
+eines heran, das er noch gar nicht kennt, und ausgerechnet die sind die
+interessanten. Ordner und Sektions-Gruppen verschwinden nur, wenn nichts
+mehr darunter sichtbar ist.
+
+Neu bewertet wird an drei Stellen: `set_stashes` (neuer Baum),
+`set_children` (Sektionen eines Spezial-Fachs kommen nach) und
+`mark_loaded` (erst der Ladevorgang macht aus "unbekannt" eine Null —
+und umgekehrt). Der Stand liegt in `ui-settings.ini` unter
+`stash_tree/hide_empty`.
+
+---
+
+### 4.49 poe.ninja-Datenstand (`price_cache.fetched_at`)
+
+Peter: "Wir brauchen irgendwo die Info, welcher Datenstand von PoE.Ninja
+ist." Der Cache vermerkte `fetched_at` schon immer, gab es aber nicht
+heraus.
+
+`fetched_at()` ist bewusst von `load()` getrennt: `load()` liefert bei
+einem abgelaufenen Eintrag `None` — für den Aufrufer heißt das "neu
+abrufen" —, und genau in dem Moment ist die Frage "wie alt sind die
+Preise gerade?" am interessantesten. Die Prüfung auf `CACHE_VERSION`
+bleibt trotzdem: Ein Eintrag aus einer anderen Rechenvorschrift
+beschreibt keine Preise, die noch angezeigt würden, dann wäre auch sein
+Alter irreführend.
+
+Angezeigt neben der Wertsumme in der Statuszeile ("Value: 12 div  ·
+poe.ninja 2 h ago"), weil beides dieselbe Frage beantwortet: wie ernst
+ist diese Zahl zu nehmen. **Auch ohne Summe**, denn dass Preise
+vorliegen, ist eine andere Aussage als dass eine Summe zustande kommt —
+sonst verschwände die Altersangabe genau dann, wenn man sich fragt,
+warum nichts bepreist ist. Der Tooltip nennt den genauen Zeitpunkt und
+die TTL.
+
+An Peters echtem Cache: Allflame 2 h, Hardcore 2 min, SSF Allflame 26 h,
+SSF R Allflame 37 min, Standard 2 min — die Spannweite macht sichtbar,
+was vorher unsichtbar war.
+
+---
+
 ## 5. UI-Konzept (Oberflächenvorschlag)
 
 Ein Hauptfenster: Navigation links (Charaktere + Stash getrennt), Items

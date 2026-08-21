@@ -126,6 +126,24 @@ def load(league: str, ttl_seconds: float | None = None) -> PriceIndex | None:
         return None
 
 
+def fetched_at(league: str) -> float | None:
+    """Unix-Zeit des letzten erfolgreichen poe.ninja-Abrufs dieser Liga,
+    oder ``None``, wenn nichts gecacht ist.
+
+    Getrennt von ``load()``: Das Alter interessiert die Anzeige auch
+    dann, wenn der Eintrag ABGELAUFEN ist (§4.49). ``load()`` liefert
+    dort bewusst ``None`` — "neu abrufen" —, und genau in dem Moment ist
+    die Frage "wie alt sind die Preise gerade?" am interessantesten.
+    Die Prüfung auf ``CACHE_VERSION`` bleibt trotzdem: Ein Eintrag aus
+    einer anderen Rechenvorschrift beschreibt keine Preise, die wir noch
+    anzeigen würden."""
+    entry = _read_raw().get(league)
+    if entry is None or entry.get("version") != CACHE_VERSION:
+        return None
+    stamp = entry.get("fetched_at")
+    return float(stamp) if isinstance(stamp, (int, float)) else None
+
+
 def _read_raw() -> dict:
     if not _CACHE_FILE.is_file():
         return {}

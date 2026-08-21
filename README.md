@@ -51,9 +51,16 @@ progress and the last three hours of experience.
 
 - **OAuth2 login (PKCE)** against the official GGG API. The access
   token is stored in the Windows Credential Manager, not in plain text
-  on disk.
+  on disk. Starting without a valid login opens a welcome window that
+  names what is already stored locally and offers to log in or carry on
+  offline; if the login expires while the app is running, a separate
+  window says so. Neither blocks anything — local data stays browsable
+  either way.
 - **Stash tree** with folders; special tabs (map and unique stash) are
-  automatically grouped by section or category.
+  automatically grouped by section or category. **Hide empty** takes
+  tabs known to hold nothing out of the view — tabs never loaded stay,
+  and every tab keeps being refreshed in the background, so one
+  reappears as soon as it holds something.
 - **Item table** with icon, source tab, position (tab number and grid
   coordinate, distinguishing tabs with the same name), name, base type,
   level, quality, stack size, item level, requirements (level, Str,
@@ -117,7 +124,9 @@ progress and the last three hours of experience.
   status bar. Covers currency, fragments, uniques (including 5- and
   6-link pricing), gems (matched exactly by level, quality, and
   corruption), divination cards, scarabs, essences, and fossils. Unknown
-  prices stay empty rather than showing 0.
+  prices stay empty rather than showing 0. The status bar also names how
+  old the current price set is, so a genuinely cheap item is
+  distinguishable from a stale price.
 - **Copy for Path of Building**: right-clicking an item puts it on the
   clipboard in the game's own item text format, ready to paste into PoB.
   Aimed at stash items in particular — PoB imports characters by itself,
@@ -162,11 +171,13 @@ progress and the last three hours of experience.
 
 ### Staying up to date
 
-- **Refresh modes** (toolbar dropdown), all sharing the rate-limit
-  budget without exhausting it: *Auto* keeps the open view fresh and
-  gradually fills in the rest of the stash, *Single* focuses only on the
-  current selection, *Stash* cycles continuously through the whole
-  league, and *Pause* stops all background requests.
+- **Refresh modes** (toolbar dropdown), all on the same clock, computed
+  from the rate limit GGG actually reports rather than a fixed number:
+  *Auto* alternates between keeping the open view fresh and sweeping the
+  rest of the stash, *Single* focuses only on the current selection,
+  *Stash* cycles continuously through the whole league, and *Pause*
+  stops all background requests. Auto additionally keeps a small reserve
+  free so a manual click never waits.
 - **Change highlighting** in the character view: rows that appeared or
   changed since the last refresh are highlighted, and items that
   disappeared stay visible for one cycle in grey and struck through. An

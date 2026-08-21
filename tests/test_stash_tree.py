@@ -932,3 +932,133 @@ def test_selecting_an_empty_folder_emits_nothing(qapp) -> None:
 
     assert stash_selected == []
     assert selection_changed == []
+
+
+# --- "Hide empty" (§4.48) --------------------------------------------- #
+
+def _baum_mit_zaehlern(voll: int = 3) -> StashTree:
+    """Ein Ordner mit einem leeren und einem gefuellten Fach, dazu ein
+    leeres und ein nie geladenes Fach auf oberster Ebene."""
+    data = [
+        {"id": "leer", "name": "Leer", "type": "CurrencyStash", "metadata": {"items": 0}},
+        {"id": "voll", "name": "Voll", "type": "CurrencyStash", "metadata": {"items": voll}},
+        {"id": "unbekannt", "name": "Nie geladen", "type": "CurrencyStash", "metadata": {}},
+        {"id": "ordner", "name": "Ordner", "type": "Folder", "metadata": {"folder": True},
+         "children": [
+             {"id": "o_leer", "name": "Leer drin", "type": "CurrencyStash", "metadata": {"items": 0}},
+         ]},
+    ]
+    tree = StashTree()
+    tree.set_stashes([StashTab.model_validate(d) for d in data])
+    return tree
+
+
+def _sichtbar(tree: StashTree) -> list[str]:
+    namen = []
+
+    def lauf(knoten):
+        for i in range(knoten.childCount()):
+            kind = knoten.child(i)
+            if not kind.isHidden():
+                namen.append(kind.text(_COL_NAME).replace("📁 ", ""))
+            lauf(kind)
+
+    for i in range(tree.topLevelItemCount()):
+        node = tree.topLevelItem(i)
+        if not node.isHidden():
+            namen.append(node.text(_COL_NAME).replace("📁 ", ""))
+        lauf(node)
+    return namen
+
+
+def test_hide_empty_blendet_nur_die_bekannt_leeren_aus(qapp) -> None:
+    """Peter: Checkbox "Hide empty stashes" neben dem Stash-Titel."""
+    tree = _baum_mit_zaehlern()
+    assert "Leer" in _sichtbar(tree)
+
+    tree.set_hide_empty(True)
+
+    sichtbar = _sichtbar(tree)
+    assert "Leer" not in sichtbar
+    assert "Voll" in sichtbar
+
+
+def test_nie_geladene_faecher_bleiben_sichtbar(qapp) -> None:
+    """Eine LEERE Anzahl-Spalte heisst "unbekannt", nicht "leer". Wuerden
+    diese Faecher mitverschwinden, kaeme der Nutzer nie an ein Fach heran,
+    das er noch gar nicht kennt — und ausgerechnet die sind die
+    interessanten."""
+    tree = _baum_mit_zaehlern()
+    tree.set_hide_empty(True)
+    assert "Nie geladen" in _sichtbar(tree)
+
+
+def test_ordner_verschwindet_nur_wenn_nichts_mehr_darunter_liegt(qapp) -> None:
+    """Ein Ordner ist selbst weder leer noch voll — er zaehlt, was unter
+    ihm noch sichtbar ist. Sein einziges Fach ist leer, also geht er mit;
+    sobald dort etwas liegt, kommt er zurueck."""
+    tree = _baum_mit_zaehlern()
+    tree.set_hide_empty(True)
+    assert "Ordner" not in _sichtbar(tree)
+
+    tree.mark_loaded("o_leer", datetime.now(timezone.utc).isoformat(), count=5)
+
+    sichtbar = _sichtbar(tree)
+    assert "Ordner" in sichtbar
+    assert "Leer drin" in sichtbar
+
+
+def test_sektionen_eines_spezialfachs_werden_mitgeprueft(qapp) -> None:
+    """set_children haengt die Sektionen eines Map-/Unique-Fachs nach
+    (nicht zu verwechseln mit Ordnern — die stehen gar nicht in
+    _stash_nodes). Auch dieser Weg muss die Ausblendung neu bewerten,
+    sonst haengen frisch entdeckte leere Sektionen sichtbar im Baum."""
+    tree = StashTree()
+    tree.set_stashes([StashTab.model_validate(
+        {"id": "map", "name": "Map Stash", "type": "MapStash", "metadata": {}})])
+    tree.set_hide_empty(True)
+
+    tree.set_children("map", [
+        StashTab.model_validate({"id": "t1", "name": "Tier 1", "type": "MapStash",
+                                 "metadata": {"items": 0}}),
+        StashTab.model_validate({"id": "t2", "name": "Tier 2", "type": "MapStash",
+                                 "metadata": {"items": 4}}),
+    ])
+
+    sichtbar = _sichtbar(tree)
+    assert "Tier 1" not in sichtbar
+    assert "Tier 2" in sichtbar
+
+
+def test_ausschalten_holt_alles_zurueck(qapp) -> None:
+    tree = _baum_mit_zaehlern()
+    tree.set_hide_empty(True)
+    tree.set_hide_empty(False)
+    assert "Leer" in _sichtbar(tree)
+    assert "Ordner" in _sichtbar(tree)
+
+
+def test_ein_gefuelltes_fach_taucht_nach_dem_laden_wieder_auf(qapp) -> None:
+    """Peters Bedingung: "im Hintergrund werden natuerlich weiterhin alle
+    Stashes gescannt, sonst wuerden wir niemals mitbekommen, das ein Stash
+    nicht mehr leer ist". Genau dieser Weg zurueck."""
+    tree = _baum_mit_zaehlern()
+    tree.set_hide_empty(True)
+    assert "Leer" not in _sichtbar(tree)
+
+    tree.mark_loaded("leer", datetime.now(timezone.utc).isoformat(), count=7)
+
+    assert "Leer" in _sichtbar(tree)
+
+
+def test_hide_empty_laesst_die_ladbaren_faecher_unangetastet(qapp) -> None:
+    """Ausgeblendet wird ueber setHidden am Knoten — der Baum bleibt
+    vollstaendig. Waere hier stattdessen etwas aus der Struktur entfernt
+    worden, fiele es auch aus Sweep und "Load All Tabs" heraus."""
+    tree = _baum_mit_zaehlern()
+    vorher = tree.topLevelItemCount()
+
+    tree.set_hide_empty(True)
+
+    assert tree.topLevelItemCount() == vorher
+    assert tree._stash_nodes.keys() >= {"leer", "voll", "unbekannt", "o_leer"}

@@ -6,8 +6,20 @@ nach [SemVer](https://semver.org/lang/de/).
 
 ## [Unveröffentlicht]
 
+## [0.11.0] - 2026-08-22
+
 ### Hinzugefügt
 
+- Häkchen "Hide empty" über dem Stash-Baum: Fächer, von denen bekannt
+  ist, dass nichts darin liegt, verschwinden aus der Ansicht. Nie
+  geladene Fächer bleiben stehen — eine leere Anzahl-Spalte heißt
+  "unbekannt", nicht "leer". Reine Anzeige: Im Hintergrund werden
+  weiterhin alle Fächer abgerufen, ein ausgeblendetes taucht also
+  wieder auf, sobald etwas darin liegt.
+- Die Statuszeile nennt neben der Wertsumme, wie alt die
+  poe.ninja-Preise der aktuellen Liga sind ("poe.ninja 2 h ago"), mit
+  dem genauen Abrufzeitpunkt im Tooltip. So ist ein tatsächlich
+  billiges Item von einem veralteten Preis zu unterscheiden.
 - Ein Willkommensfenster beim Start, wenn keine gültige Anmeldung
   vorliegt: Es nennt den Stand der lokal gespeicherten Daten und bietet
   Anmelden oder Weiterarbeiten ohne Anmeldung an. Beim allerersten Start
@@ -17,6 +29,12 @@ nach [SemVer](https://semver.org/lang/de/).
   eigenes Fenster statt nur der Statuszeile. Beide Fenster blockieren
   nichts — die lokal gespeicherten Daten bleiben durchsuchbar. Nach einem
   selbst ausgelösten Abmelden erscheint bewusst keins von beiden.
+- Rechtsklick auf einen Charakter, "Export character sheet…", erzeugt
+  einen Charakterbogen als Markdown-Datei: Ausrüstung nach Körperslot
+  (im Stile alter Pen&Paper-Rollenspiele) und die eingesetzten Gems
+  samt Stufe, gruppiert nach dem Ausrüstungsteil, in dem sie stecken.
+  Keine berechneten Werte wie Leben oder Resistenzen — GGGs API liefert
+  sie nicht, sie entstehen im Spielclient aus dem vollen Passivbaum.
 
 ### Behoben
 
@@ -39,15 +57,6 @@ nach [SemVer](https://semver.org/lang/de/).
   Ansicht wurde 195-mal aktualisiert, wo unter dem neuen Takt 632
   möglich gewesen wären, und das Rate-Limit-Fenster war dabei im Median
   nur zu gut einem Viertel ausgelastet.
-
-### Hinzugefügt
-
-- Rechtsklick auf einen Charakter, "Export character sheet…", erzeugt
-  einen Charakterbogen als Markdown-Datei: Ausrüstung nach Körperslot
-  (im Stile alter Pen&Paper-Rollenspiele) und die eingesetzten Gems
-  samt Stufe, gruppiert nach dem Ausrüstungsteil, in dem sie stecken.
-  Keine berechneten Werte wie Leben oder Resistenzen — GGGs API liefert
-  sie nicht, sie entstehen im Spielclient aus dem vollen Passivbaum.
 
 ## [0.10.0] - 2026-08-17
 
@@ -911,7 +920,9 @@ Erste veröffentlichte Version.
 Die technischen Hintergründe einzelner Entscheidungen stehen in
 [FALLSTRICKE_UND_WORKAROUNDS.md](FALLSTRICKE_UND_WORKAROUNDS.md).
 
-[Unveröffentlicht]: https://github.com/peterm2024/PoE-VIEW2/compare/v0.9.0...HEAD
+[Unveröffentlicht]: https://github.com/peterm2024/PoE-VIEW2/compare/v0.11.0...HEAD
+[0.11.0]: https://github.com/peterm2024/PoE-VIEW2/compare/v0.10.0...v0.11.0
+[0.10.0]: https://github.com/peterm2024/PoE-VIEW2/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/peterm2024/PoE-VIEW2/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/peterm2024/PoE-VIEW2/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/peterm2024/PoE-VIEW2/compare/v0.6.0...v0.7.0

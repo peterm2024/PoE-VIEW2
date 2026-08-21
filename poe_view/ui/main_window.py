@@ -19,7 +19,8 @@ from PySide6.QtCore import QSettings, Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import (QAction, QDesktopServices, QGuiApplication,
                            QKeySequence, QMouseEvent, QPixmap, QShortcut)
 from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QCompleter,
-                               QDialog, QFileDialog, QLabel, QLineEdit,
+                               QDialog, QFileDialog, QHBoxLayout, QLabel,
+                               QLineEdit,
                                QMainWindow, QMenu, QMessageBox, QProgressBar,
                                QProgressDialog, QSizePolicy, QSplitter,
                                QTableView, QToolBar, QToolButton, QVBoxLayout,
@@ -1180,7 +1181,22 @@ class MainWindow(QMainWindow):
 
         stash_label = QLabel("Stash")
         stash_label.setStyleSheet("font-weight: 600; padding: 2px 4px;")
+        self._hide_empty_box = QCheckBox("Hide empty")
+        self._hide_empty_box.setToolTip(
+            "Hide stash tabs that are known to hold no items.\n"
+            "Tabs that have never been loaded stay visible — an empty count "
+            "column means unknown, not empty.\n"
+            "This only affects the tree; every tab keeps being refreshed in "
+            "the background, so a tab reappears as soon as you put something in it.")
+        self._hide_empty_box.setChecked(self._load_hide_empty())
+        self._hide_empty_box.toggled.connect(self._on_hide_empty_toggled)
+        stash_header = QHBoxLayout()
+        stash_header.setContentsMargins(0, 0, 0, 0)
+        stash_header.addWidget(stash_label)
+        stash_header.addStretch(1)
+        stash_header.addWidget(self._hide_empty_box)
         self.tree = StashTree()
+        self.tree.set_hide_empty(self._hide_empty_box.isChecked())
         self.tree.stash_selected.connect(self._on_stash_selected)
         self.tree.selection_changed.connect(self._show_stash_selection)
         self.tree.export_visible_requested.connect(self._export_csv)
@@ -1189,7 +1205,7 @@ class MainWindow(QMainWindow):
 
         left_layout.addWidget(char_label)
         left_layout.addWidget(self.character_list)
-        left_layout.addWidget(stash_label)
+        left_layout.addLayout(stash_header)
         left_layout.addWidget(self.tree, stretch=1)
 
         # Rechte Seite: Tabelle + Detail
@@ -1709,7 +1725,6 @@ class MainWindow(QMainWindow):
             self._value_sum_label.setText(self._NO_PRICES_TEXT)
             self._value_sum_label.setToolTip(self._NO_PRICES_TOOLTIP)
             return
-        self._value_sum_label.setToolTip("")
         total = 0.0
         known = False
         for row in range(self.proxy.rowCount()):
@@ -1718,10 +1733,39 @@ class MainWindow(QMainWindow):
             if value is not None:
                 total += value
                 known = True
-        if not known:
-            self._value_sum_label.setText("")
-            return
-        self._value_sum_label.setText(f"Value: {format_chaos_value(total, index)}")
+        alter = self._price_age_text()
+        summe = f"Value: {format_chaos_value(total, index)}" if known else ""
+        self._value_sum_label.setText("  ·  ".join(t for t in (summe, alter) if t))
+        self._value_sum_label.setToolTip(self._price_age_tooltip())
+
+    def _price_age_text(self) -> str:
+        """Wie alt sind die poe.ninja-Preise dieser Liga (Peter: "Wir
+        brauchen irgendwo die Info, welcher Datenstand von PoE.Ninja
+        ist").
+
+        Steht neben der Wertsumme statt in einem eigenen Feld: Beides
+        beantwortet dieselbe Frage — wie ernst ist diese Zahl zu nehmen.
+        Erscheint auch dann, wenn gerade kein sichtbares Item einen Preis
+        hat; dass Preise VORLIEGEN, ist eine andere Aussage als dass eine
+        Summe zustande kommt."""
+        stamp = price_cache.fetched_at(self._current_league) if self._current_league else None
+        if stamp is None:
+            return ""
+        stunden = (time.time() - stamp) / 3600
+        if stunden < 1:
+            return f"poe.ninja {max(1, round(stunden * 60))} min ago"
+        if stunden < 48:
+            return f"poe.ninja {round(stunden)} h ago"
+        return f"poe.ninja {round(stunden / 24)} d ago"
+
+    def _price_age_tooltip(self) -> str:
+        stamp = price_cache.fetched_at(self._current_league) if self._current_league else None
+        if stamp is None:
+            return ""
+        geholt = datetime.fromtimestamp(stamp).astimezone()
+        return (f"poe.ninja prices fetched {geholt:%Y-%m-%d %H:%M}.\n"
+                f"They are refetched when they get older than "
+                f"{round(price_cache.TTL_SECONDS / 3600)} h.")
 
     # --- Spalten-Sichtbarkeit + Reihenfolge der Item-Tabelle --------- #
 
@@ -1730,6 +1774,18 @@ class MainWindow(QMainWindow):
     # Einzelfach, an bei Aggregat) und ist deshalb nicht konfigurierbar
     # (CONFIGURABLE_COLUMNS, siehe item_table.py).
     DEFAULT_HIDDEN_COLUMNS = frozenset({"Type"})
+
+    _HIDE_EMPTY_SETTING_KEY = "stash_tree/hide_empty"
+
+    def _load_hide_empty(self) -> bool:
+        return str(self._settings().value(self._HIDE_EMPTY_SETTING_KEY, "")).lower() in ("true", "1")
+
+    def _on_hide_empty_toggled(self, hide: bool) -> None:
+        """Reine Anzeige-Einstellung (§4.48) — sie fasst weder
+        ``_leaf_stashes`` noch den Cache an, der Hintergrund-Refresh läuft
+        über alle Fächer weiter."""
+        self.tree.set_hide_empty(hide)
+        self._settings().setValue(self._HIDE_EMPTY_SETTING_KEY, "true" if hide else "false")
 
     def _settings(self) -> QSettings:
         """INI-Datei statt Registry, konsistent zum Datei-Cache-Ansatz."""

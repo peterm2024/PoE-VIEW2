@@ -2,6 +2,7 @@
 drei PriceIndex-Strukturen (einfach/Gems/Links) durch JSON."""
 
 import json
+import time
 
 from poe_view.api.models import Item
 from poe_view.api.ninja import PriceIndex
@@ -168,3 +169,39 @@ def test_a_real_result_keeps_the_normal_ttl_even_though_empty_flag_exists(tmp_pa
     path.write_text(json.dumps(raw), encoding="utf-8")
 
     assert price_cache.load("Standard") is not None
+
+
+def test_fetched_at_liefert_den_zeitstempel(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(price_cache, "_CACHE_FILE", tmp_path / "prices.json")
+    assert price_cache.fetched_at("Settlers") is None
+
+    price_cache.save("Settlers", _index_with_all_kinds())
+
+    stamp = price_cache.fetched_at("Settlers")
+    assert stamp is not None and abs(stamp - time.time()) < 5
+
+
+def test_fetched_at_gilt_auch_fuer_einen_ABGELAUFENEN_eintrag(tmp_path, monkeypatch) -> None:
+    """Getrennt von load() aus genau diesem Grund: load() liefert bei einem
+    abgelaufenen Eintrag bewusst None ("neu abrufen") — und genau dann ist
+    die Frage "wie alt sind die Preise gerade?" am interessantesten."""
+    monkeypatch.setattr(price_cache, "_CACHE_FILE", tmp_path / "prices.json")
+    price_cache.save("Settlers", _index_with_all_kinds())
+    roh = json.loads((tmp_path / "prices.json").read_text(encoding="utf-8"))
+    roh["Settlers"]["fetched_at"] = time.time() - 99 * 3600
+    (tmp_path / "prices.json").write_text(json.dumps(roh), encoding="utf-8")
+
+    assert price_cache.load("Settlers") is None      # abgelaufen
+    assert price_cache.fetched_at("Settlers") is not None  # Alter trotzdem bekannt
+
+
+def test_fetched_at_ignoriert_eine_alte_rechenvorschrift(tmp_path, monkeypatch) -> None:
+    """Ein Eintrag aus einer anderen CACHE_VERSION beschreibt keine Preise,
+    die wir noch anzeigen wuerden — dann waere auch sein Alter irrefuehrend."""
+    monkeypatch.setattr(price_cache, "_CACHE_FILE", tmp_path / "prices.json")
+    price_cache.save("Settlers", _index_with_all_kinds())
+    roh = json.loads((tmp_path / "prices.json").read_text(encoding="utf-8"))
+    roh["Settlers"]["version"] = "uralt"
+    (tmp_path / "prices.json").write_text(json.dumps(roh), encoding="utf-8")
+
+    assert price_cache.fetched_at("Settlers") is None
