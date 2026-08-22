@@ -168,3 +168,55 @@ def test_gedaempfte_zeile_ist_wirklich_gedaempft(qapp) -> None:
     voll = _kontrast((255, 255, 255), (30, 30, 30))
     gedaempft = _kontrast((farbe.red(), farbe.green(), farbe.blue()), (30, 30, 30))
     assert gedaempft < voll
+
+
+# --- Bleibt ueber dem Hauptfenster (§4.47) ---------------------------- #
+
+def test_dialoge_nehmen_ein_elternfenster_an(qapp) -> None:
+    """Peter, 2026-08-22: "Koennen wir den Login-Dialog auf Top-Layer legen,
+    so dass er sich nicht vom Hauptfenster verdecken laesst? Nicht modal,
+    aber Top-Layer."
+
+    Geprueft wird der MECHANISMUS, nicht das Ergebnis: Offscreen gibt es
+    keinen Fenstermanager, die tatsaechliche Stapelreihenfolge ist dort
+    nicht zu messen (dieselbe Lehre wie FALLSTRICKE #71). Die Elternschaft
+    ist das, was Windows fuer die Reihenfolge auswertet."""
+    from PySide6.QtWidgets import QWidget
+    eltern = QWidget()
+
+    for dialog in (WelcomeDialog("egal", parent=eltern),
+                   SessionExpiredDialog("egal", parent=eltern)):
+        assert dialog.parent() is eltern
+
+
+def test_elternteil_macht_die_dialoge_nicht_modal(qapp) -> None:
+    """Der Punkt, an dem eine fruehere Fassung dieses Codes falsch lag: Ein
+    Elternteil bindet den Dialog in die Fenster-Reihenfolge ein, macht ihn
+    aber NICHT modal. Beides zusammen ist genau Peters Wunsch."""
+    from PySide6.QtWidgets import QWidget
+    eltern = QWidget()
+
+    assert WelcomeDialog("egal", parent=eltern).isModal() is False
+    assert SessionExpiredDialog("egal", parent=eltern).isModal() is False
+
+
+def test_dialoge_schweben_nicht_ueber_fremden_programmen(qapp) -> None:
+    """Gegenstueck: WindowStaysOnTopHint waere der naheliegende, aber
+    falsche Weg — der Dialog laege dann auch ueber Path of Exile im
+    Fenstermodus und ueber dem Browser, in dem man sich anmelden soll.
+    Peters Satz nennt ausdruecklich das Hauptfenster."""
+    from PySide6.QtCore import Qt as QtNs
+    from PySide6.QtWidgets import QWidget
+    eltern = QWidget()
+
+    for dialog in (WelcomeDialog("egal", parent=eltern),
+                   SessionExpiredDialog("egal", parent=eltern)):
+        assert not (dialog.windowFlags() & QtNs.WindowType.WindowStaysOnTopHint)
+
+
+def test_dialoge_gehen_auch_ohne_elternteil(qapp) -> None:
+    """Die uebrigen Tests hier bauen sie ohne Elternteil — das muss
+    weiterhin funktionieren, sonst waere jeder davon nur noch ein Test
+    seiner eigenen Vorbedingung."""
+    assert WelcomeDialog("egal").parent() is None
+    assert SessionExpiredDialog().parent() is None

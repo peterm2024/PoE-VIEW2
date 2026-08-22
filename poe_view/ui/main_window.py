@@ -633,10 +633,11 @@ class MainWindow(QMainWindow):
         # Startet bei der offenen Ansicht: Die sieht der Nutzer, sie soll
         # nicht erst einen Takt später anspringen.
         self._auto_next_is_sweep = False
-        # Nicht-modale Login-Dialoge (§4.47). Als Attribut, nicht lokal:
-        # Ein QDialog ohne Referenz wird eingesammelt, sobald die
-        # erzeugende Methode zurückkehrt — und verschwindet dabei wieder
-        # vom Bildschirm.
+        # Nicht-modale Login-Dialoge (§4.47). Als Attribut, weil wir sie
+        # später wiederfinden müssen: schließen nach einem geglückten
+        # Login, und beim Ablauf-Popup verhindern, dass sich mehrere
+        # stapeln. Am Leben hält sie seit 2026-08-22 das Hauptfenster als
+        # Elternteil, nicht mehr diese Referenz.
         self._welcome_dialog: WelcomeDialog | None = None
         self._session_expired_dialog: SessionExpiredDialog | None = None
         # Angeklicktes Fach, das im Stash-Modus als nächstes drankommen soll
@@ -2158,9 +2159,9 @@ class MainWindow(QMainWindow):
         Unterschiedlich ist nur der Inhalt — ``first_run`` blendet den
         "Getting started"-Abschnitt ein.
 
-        Der Dialog wird als Attribut gehalten, nicht nur lokal: Ein
-        nicht-modaler ``QDialog`` ohne Referenz wird eingesammelt, sobald
-        die Methode zurückkehrt, und verschwindet wieder vom Bildschirm."""
+        Der Dialog hängt als Kind am Hauptfenster und liegt dadurch
+        dauerhaft darüber (§_LoginPromptBase). Gemerkt wird er trotzdem,
+        um ihn nach einem geglückten Login wieder schließen zu können."""
         settings = self._settings()
         first_run = str(settings.value(self._WELCOME_SEEN_KEY, "")).lower() not in ("true", "1")
         on_startup = str(settings.value(self._WELCOME_ON_STARTUP_KEY, "true")).lower() in ("true", "1")
@@ -2168,7 +2169,7 @@ class MainWindow(QMainWindow):
         if not (first_run or on_startup):
             return
         dialog = WelcomeDialog(self._cache_summary_text(), first_run=first_run,
-                               show_on_startup=on_startup)
+                               show_on_startup=on_startup, parent=self)
         dialog.login_requested.connect(lambda: self.worker.submit(LoginJob()))
         dialog.settings_requested.connect(self._open_settings_dialog)
         dialog.finished.connect(
@@ -2189,7 +2190,7 @@ class MainWindow(QMainWindow):
         if vorhandener is not None and vorhandener.isVisible():
             vorhandener.raise_()
             return
-        dialog = SessionExpiredDialog(reason)
+        dialog = SessionExpiredDialog(reason, parent=self)
         dialog.login_requested.connect(lambda: self.worker.submit(LoginJob()))
         self._session_expired_dialog = dialog
         dialog.show()
@@ -5404,10 +5405,10 @@ class MainWindow(QMainWindow):
             self._raw_data_viewer.close()
         if self._poe2_viewer is not None:
             self._poe2_viewer.close()
-        # Die Login-Dialoge sind nicht-modale EIGENSTÄNDIGE Fenster (kein
-        # Elternteil, sonst wären sie modal an das Hauptfenster gebunden) —
-        # ein offenes davon hielte Qt am Leben, nachdem das Hauptfenster
-        # zu ist, und die App liefe ohne sichtbares Fenster weiter.
+        # Die Login-Dialoge hängen als Kinder am Hauptfenster (§4.47) und
+        # gingen mit ihm ohnehin zu. Ausdrücklich schließen kostet nichts
+        # und macht die Absicht sichtbar, statt sie Qts Aufräumen zu
+        # überlassen.
         self._close_login_prompts()
         self.worker.stop()
         if not self.worker.wait(3000):

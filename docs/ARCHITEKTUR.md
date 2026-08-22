@@ -5129,12 +5129,37 @@ das Einloggen lohnt. Gezählt werden die Fächer MIT DATEN
 (`_last_loaded`), nicht die bekannten: Ein Baum mit 2295 Einträgen, von
 denen zwei geladen sind, wäre eine irreführende Zahl.
 
-**Beide Dialoge hängen als Attribut am Fenster**, nicht als lokale
-Variable — ein nicht-modaler `QDialog` ohne Referenz wird eingesammelt,
-sobald die erzeugende Methode zurückkehrt, und verschwindet dabei wieder
-vom Bildschirm. Umgekehrt schließt `closeEvent` sie ausdrücklich: Als
-eigenständige Fenster ohne Elternteil hielte ein offenes davon Qt am
-Leben, nachdem das Hauptfenster zu ist. `_close_login_prompts` räumt sie
+**Beide Dialoge hängen als Kind am Hauptfenster** (Peter, 2026-08-22:
+"Können wir den Login-Dialog auf Top-Layer legen, so dass er sich nicht
+vom Hauptfenster verdecken lässt? Nicht modal, aber Top-Layer"). Genau
+das ist die ganze Technik dahinter: Ein Kind-Dialog liegt beim
+Fenstermanager dauerhaft über seinem Elternfenster. Vorher waren es zwei
+gleichrangige Fenster, und ein Klick ins Hauptfenster schob den Dialog
+dahinter.
+
+Nativ gegen die WinAPI gemessen (offscreen gibt es keinen
+Fenstermanager, die Stapelreihenfolge ist dort nicht prüfbar — dieselbe
+Lehre wie FALLSTRICKE #71):
+
+| | `transientParent` | nach `raise_()` aufs Hauptfenster |
+|---|---|---|
+| mit Elternteil | Hauptfenster | Dialog bleibt oben |
+| ohne (bis 2026-08-22) | keiner | Dialog rutscht dahinter |
+
+**Bewusst NICHT `WindowStaysOnTopHint`:** Das hielte den Dialog über
+allem, auch über Path of Exile im Fenstermodus und über dem Browser, in
+dem man sich gerade anmelden soll. Ein Elternteil reicht genau so weit
+wie die Anforderung. Und es macht den Dialog **nicht** modal — das
+entscheidet allein `setModal`/`windowModality`. (Eine frühere Fassung
+behauptete im Code das Gegenteil und begründete damit, keinen Elternteil
+zu setzen; das war schlicht falsch.)
+
+Gemerkt werden sie trotzdem als Attribut — nicht mehr, um sie am Leben
+zu halten (das tut jetzt der Elternteil), sondern um sie
+wiederzufinden: schließen nach einem geglückten Login, und beim
+Ablauf-Popup verhindern, dass sich mehrere stapeln. `closeEvent`
+schließt sie ausdrücklich; nötig wäre es mit Elternteil nicht mehr,
+aber es macht die Absicht sichtbar. `_close_login_prompts` räumt sie
 außerdem nach jedem erfolgreichen Login weg, auch wenn der über den
 Toolbar-Knopf lief, während das Popup offenstand. Vom Ablauf-Popup gibt
 es nur EIN Exemplar: Nach einem 401 läuft die Reihe bereits eingereihter

@@ -26,7 +26,7 @@ from __future__ import annotations
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import (QCheckBox, QDialog, QFrame, QHBoxLayout,
-                               QLabel, QPushButton, QVBoxLayout)
+                               QLabel, QPushButton, QVBoxLayout, QWidget)
 
 # Anteil der Textfarbe in einer "gedämpften" Nebenzeile; der Rest ist
 # Hintergrund. 0.65 ist keine geschmackliche Zahl, sondern nachgerechnet:
@@ -76,8 +76,27 @@ class _LoginPromptBase(QDialog):
     # Groesse: Wer eine groessere Schrift eingestellt hat, braucht mehr.
     _MIN_WIDTH = 430
 
-    def __init__(self, title: str) -> None:
-        super().__init__()
+    def __init__(self, title: str, parent: QWidget | None = None) -> None:
+        # **Elternteil = das Hauptfenster, und das ist die ganze Technik
+        # hinter "bleibt oben"** (Peter, 2026-08-22: "Können wir den
+        # Login-Dialog auf Top-Layer legen, so dass er sich nicht vom
+        # Hauptfenster verdecken lässt? Nicht modal, aber Top-Layer").
+        # Ein Kind-Dialog liegt beim Fenstermanager dauerhaft über seinem
+        # Elternfenster; ohne Elternteil sind es zwei gleichrangige
+        # Fenster, und ein Klick ins Hauptfenster schiebt den Dialog
+        # dahinter.
+        #
+        # BEWUSST NICHT ``WindowStaysOnTopHint``: Das hielte den Dialog
+        # über ALLEM, auch über Path of Exile im Fenstermodus und über
+        # dem Browser, in dem man sich gerade anmelden soll. Peters Satz
+        # nennt ausdrücklich das Hauptfenster, und genau so weit reicht
+        # ein Elternteil.
+        #
+        # Und es macht den Dialog NICHT modal — das entscheidet allein
+        # ``setModal``/``windowModality``, nicht die Elternschaft. (In
+        # einer früheren Fassung stand hier das Gegenteil als Begründung
+        # dafür, keinen Elternteil zu setzen. Das war schlicht falsch.)
+        super().__init__(parent)
         self.setWindowTitle(title)
         self.setModal(False)
         self.setMinimumWidth(self._MIN_WIDTH)
@@ -111,8 +130,8 @@ class WelcomeDialog(_LoginPromptBase):
     settings_requested = Signal()
 
     def __init__(self, cache_summary: str, *, first_run: bool = False,
-                 show_on_startup: bool = True) -> None:
-        super().__init__("Welcome to PoE-VIEW2")
+                 show_on_startup: bool = True, parent: QWidget | None = None) -> None:
+        super().__init__("Welcome to PoE-VIEW2", parent)
         layout = QVBoxLayout(self)
 
         headline = QLabel("<b>You are not logged in.</b>")
@@ -181,8 +200,8 @@ class SessionExpiredDialog(_LoginPromptBase):
     sind — sonst liest sich die Meldung wie ein Abbruch, obwohl fast
     alles weiterläuft."""
 
-    def __init__(self, reason: str = "") -> None:
-        super().__init__("Login expired")
+    def __init__(self, reason: str = "", parent: QWidget | None = None) -> None:
+        super().__init__("Login expired", parent)
         layout = QVBoxLayout(self)
 
         headline = QLabel("<b>Your Path of Exile login has expired.</b>")

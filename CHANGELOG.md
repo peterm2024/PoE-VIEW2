@@ -6,6 +6,14 @@ nach [SemVer](https://semver.org/lang/de/).
 
 ## [Unveröffentlicht]
 
+### Behoben
+
+- Das Anmelde- und das Ablauf-Fenster ließen sich vom Hauptfenster
+  verdecken. Beide liegen jetzt dauerhaft darüber, bleiben aber
+  weiterhin nicht-modal — das Hauptfenster ist unterdessen bedienbar,
+  und über andere Programme (Path of Exile, den Browser) legen sie sich
+  bewusst nicht.
+
 ## [0.11.0] - 2026-08-22
 
 ### Hinzugefügt

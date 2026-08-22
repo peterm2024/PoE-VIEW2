@@ -9314,3 +9314,23 @@ def test_altersangabe_waehlt_die_einheit_nach_alter(qapp, monkeypatch) -> None:
 
     win.worker.stop()
     win.worker.wait(5000)
+
+
+def test_login_dialoge_haengen_am_hauptfenster(qapp) -> None:
+    """Damit sie nicht dahinter verschwinden koennen (§4.47). Der Test sitzt
+    hier und nicht nur bei den Dialogen selbst: Dass die KLASSE ein
+    Elternteil annimmt, nuetzt nichts, wenn das Hauptfenster keins
+    uebergibt."""
+    win = MainWindow()
+
+    win._on_login_required("No valid token", LOGIN_NO_TOKEN)
+    assert win._welcome_dialog.parent() is win
+    assert win._welcome_dialog.isModal() is False
+
+    win._on_login_required("HTTP 401", LOGIN_EXPIRED)
+    assert win._session_expired_dialog.parent() is win
+    assert win._session_expired_dialog.isModal() is False
+
+    win._close_login_prompts()
+    win.worker.stop()
+    win.worker.wait(5000)
