@@ -6,4 +6,4 @@ Schichten (Abhängigkeiten zeigen nur nach unten, siehe docs/ARCHITEKTUR.md §3)
   api/      reines Python: OAuth, HTTP-Client, Rate-Limiter, Datenmodelle
 """
 
-__version__ = "0.11.0"
+__version__ = "0.11.1"

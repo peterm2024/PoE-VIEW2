@@ -54,8 +54,8 @@ progress and the last three hours of experience.
   on disk. Starting without a valid login opens a welcome window that
   names what is already stored locally and offers to log in or carry on
   offline; if the login expires while the app is running, a separate
-  window says so. Neither blocks anything — local data stays browsable
-  either way.
+  window says so. Both stay above the main window without blocking it —
+  local data stays browsable either way.
 - **Stash tree** with folders; special tabs (map and unique stash) are
   automatically grouped by section or category. **Hide empty** takes
   tabs known to hold nothing out of the view — tabs never loaded stay,
