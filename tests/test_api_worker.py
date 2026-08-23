@@ -716,3 +716,75 @@ def test_experience_above_two_billion_still_reaches_the_ui(qapp):
 
     assert angekommen == [("WitchOfPeter", 91, 2_151_302_311),
                           ("WitchOfPeter", 100, 4_250_334_444)]
+
+
+# --- Ein Fach, das es bei GGG nicht gibt (Peter, 2026-08-24) ----------- #
+#
+# Sein Log: neun Abrufe desselben Map-Stash-Unterfachs in fuenf Minuten,
+# jeder mit HTTP 404 und Traceback, kein einziger Abruf auf ein anderes
+# Fach derselben Liga.
+
+
+def _404_worker(monkeypatch):
+    worker = ApiWorker()
+    worker.client.set_token("test")  # sonst ueberspringt run() Daten-Jobs
+    monkeypatch.setattr(worker.client, "get_stash",
+                        lambda league, sid, parent_id=None: (_ for _ in ()).throw(
+                            ApiError(404, 'HTTP 404 for /stash/Allflame/m1/sub: '
+                                          '{"stash":null}')))
+    return worker
+
+
+def test_a_404_on_a_stash_is_reported_as_missing_not_as_an_error(qapp, monkeypatch) -> None:
+    """Kein Programmfehler, sondern GGGs Antwort auf ein Fach, das es
+    serverseitig nicht gibt. Der Empfaenger muss die Kennung bekommen —
+    ohne sie kann er es nicht aus dem Rundlauf nehmen."""
+    worker = _404_worker(monkeypatch)
+    missing, errors = [], []
+    worker.stash_missing.connect(lambda liga, sid, text: missing.append((liga, sid, text)))
+    worker.job_error.connect(errors.append)
+
+    worker.submit(FetchStashItemsJob("Allflame", "sub", "1", parent_id="m1", silent=True))
+    worker.stop()
+    worker.run()
+
+    assert missing == [("Allflame", "sub", "")]   # still: kein Text fuer die Statusleiste
+    assert errors == [], "job_error wuerde die Kette ein zweites Mal freigeben"
+    worker.client.close()
+
+
+def test_a_clicked_tab_that_is_gone_says_so(qapp, monkeypatch) -> None:
+    """Beim bewussten Klick soll der Nutzer erfahren, warum nichts kommt —
+    anders als beim stillen Rundlauf, der die Statuszeile nicht kapern darf."""
+    worker = _404_worker(monkeypatch)
+    missing = []
+    worker.stash_missing.connect(lambda liga, sid, text: missing.append(text))
+
+    worker.submit(FetchStashItemsJob("Allflame", "sub", "1", parent_id="m1"))
+    worker.stop()
+    worker.run()
+
+    assert missing == ["1: GGG does not have this tab"]
+    worker.client.close()
+
+
+def test_a_404_on_something_else_stays_an_error(qapp, monkeypatch) -> None:
+    """Gegenprobe: Nur der Fach-Abruf hat diese Sonderbehandlung. Ein 404
+    anderswo ist weiterhin ein Fehler mit Traceback — sonst verschwaende
+    ein echter Programmfehler still."""
+    worker = ApiWorker()
+    worker.client.set_token("test")
+    monkeypatch.setattr(worker.client, "get_character_items",
+                        lambda name: (_ for _ in ()).throw(
+                            ApiError(404, "HTTP 404 for /character/Weg")))
+    missing, errors = [], []
+    worker.stash_missing.connect(lambda liga, sid, text: missing.append(text))
+    worker.job_error.connect(errors.append)
+
+    worker.submit(FetchCharacterItemsJob("Weg"))
+    worker.stop()
+    worker.run()
+
+    assert missing == []
+    assert len(errors) == 1
+    worker.client.close()

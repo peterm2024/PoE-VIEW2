@@ -102,7 +102,8 @@ program has nowhere to keep a secret, and it says nothing about your
 login going wrong. The permissions the page lists are all read-only; the
 API offers this tool no way to change anything on your account.</p>
 <p>Pick a league in the second toolbar row, then click a stash tab or a
-character on the left. Tabs are fetched when you first open them, not
+character on the left. The league you picked last comes back the next
+time you start. Tabs are fetched when you first open them, not
 all at once — that keeps the tool inside the API rate limit.</p>
 <p>Once data has been loaded it stays available offline. If the API is
 unreachable, or during GGG maintenance, you keep browsing the last known

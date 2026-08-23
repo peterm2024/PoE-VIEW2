@@ -917,6 +917,82 @@ def test_pick_auto_refresh_candidate_includes_never_loaded_tabs(qapp) -> None:
     win.worker.wait(5000)
 
 
+def test_a_tab_that_ggg_does_not_have_leaves_the_sweep(qapp) -> None:
+    """Peters Log vom 2026-08-24: neun Abrufe desselben Map-Stash-
+    Unterfachs in fuenf Minuten, kein einziger auf ein anderes Fach.
+
+    Der Grund steckt in der Auswahl selbst: Ein nie geladenes Fach gilt als
+    unendlich alt und gewinnt damit jeden Vergleich — und weil der Abruf
+    404 liefert, wird nie ein Ladezeitpunkt geschrieben, der das aendern
+    wuerde. Ohne Merker bleibt es fuer immer der naechste Kandidat."""
+    win = MainWindow()
+    win._current_league = "Allflame"
+    win._leaf_stashes = [_make_leaf("tot", "1"), _make_leaf("echt", "Currency")]
+    win._last_loaded["Allflame"] = {}
+
+    assert win._pick_auto_refresh_candidate().id in ("tot", "echt")   # Vorbedingung
+    win._on_stash_missing("Allflame", "tot", "")
+
+    for _ in range(3):   # der Rundlauf muss WEITERlaufen, nicht nur einmal
+        assert win._pick_auto_refresh_candidate().id == "echt"
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_a_missing_tab_only_leaves_the_sweep_in_its_own_league(qapp) -> None:
+    """Fach-Kennungen sind je Liga vergeben. Ein Merker ohne Liga haette
+    in einer anderen Liga ein voellig unbeteiligtes Fach ausgesperrt."""
+    win = MainWindow()
+    win._current_league = "Standard"
+    win._leaf_stashes = [_make_leaf("tot", "1")]
+    win._last_loaded["Standard"] = {}
+    win._on_stash_missing("Allflame", "tot", "")
+
+    kandidat = win._pick_auto_refresh_candidate()
+    assert kandidat is not None and kandidat.id == "tot"
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_a_tab_that_works_again_returns_to_the_sweep(qapp) -> None:
+    """Legt der Nutzer eine Karte in ein leeres Map-Stash-Unterfach, gibt es
+    das Fach ploetzlich. Der Merker darf dann nicht bis zum Programmende
+    nachhaengen."""
+    win = MainWindow()
+    win._current_league = "Allflame"
+    win._leaf_stashes = [_make_leaf("tot", "1")]
+    win._last_loaded["Allflame"] = {}
+    win._on_stash_missing("Allflame", "tot", "")
+    assert win._pick_auto_refresh_candidate() is None    # Vorbedingung
+
+    win._on_stash_items("Allflame", "tot", "1", [], True)
+
+    assert win._missing_stashes["Allflame"] == set()
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_a_missing_tab_releases_the_refresh_chain(qapp) -> None:
+    """Dieser Weg loest bewusst kein ``job_error`` aus (das wuerde die Kette
+    ein zweites Mal freigeben und einen Takt verschlucken). Damit liegt die
+    Freigabe hier — ohne sie stuende der taktende Modus fuer den Rest der
+    Sitzung, wie schon einmal beim Nur-Lese-Fenster."""
+    win = MainWindow()
+    win._current_league = "Allflame"
+    win._refresh_mode = "auto"
+    win._refresh_mode_pending = True
+
+    win._on_stash_missing("Allflame", "tot", "")
+
+    assert win._refresh_mode_pending is False
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
 def test_pick_auto_refresh_candidate_prefers_never_loaded_over_stale(qapp) -> None:
     """Nie geladene Tabs gelten als 'unendlich alt' und gewinnen gegen jeden
     bereits bekannten (auch sehr alten) stale Tab."""
@@ -4315,6 +4391,85 @@ def test_no_separator_when_no_expired_leagues(qapp, monkeypatch) -> None:
 
     order = [win._league_combo.itemText(i) for i in range(win._league_combo.count())]
     assert order == ["Standard"]  # kein "" (Trennstrich) ohne abgelaufene Ligen
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_the_league_from_the_last_session_comes_back(qapp, monkeypatch) -> None:
+    """Peter, 2026-08-24: "Wir sollten uns merken, welche Liga zuletzt
+    ausgewaehlt war, und die nach dem Neustart anzeigen." Ohne den Merker
+    landet man wieder auf der inhaltsreichsten Liga (§_sort_by_content) —
+    die eigene Ligen-Wahl ueberlebte den Neustart nicht."""
+    erste = MainWindow()
+    monkeypatch.setattr(erste.worker, "submit", lambda job: None)
+    erste._stash_trees = {"Hardcore": [_make_leaf("h1", "Currency 1")],
+                          "Standard": [_make_leaf("s1", "Currency 1")]}
+    erste._all_characters = [make_char("Held", "Standard")]   # Standard waere die Vorgabe
+    erste._on_leagues(["Standard", "Hardcore"])
+    erste._league_combo.setCurrentText("Hardcore")
+    erste.worker.stop()
+    erste.worker.wait(5000)
+
+    zweite = MainWindow()
+    monkeypatch.setattr(zweite.worker, "submit", lambda job: None)
+    zweite._stash_trees = {"Hardcore": [_make_leaf("h1", "Currency 1")],
+                           "Standard": [_make_leaf("s1", "Currency 1")]}
+    zweite._all_characters = [make_char("Held", "Standard")]
+    zweite._on_leagues(["Standard", "Hardcore"])
+
+    assert zweite._league_combo.currentText() == "Hardcore"
+    assert zweite._current_league == "Hardcore"
+
+    zweite.worker.stop()
+    zweite.worker.wait(5000)
+
+
+def test_a_league_that_is_gone_falls_back_to_the_first_entry(qapp, monkeypatch) -> None:
+    """Temporaere Ligen enden. Der gemerkte Name darf dann nicht dazu
+    fuehren, dass gar nichts ausgewaehlt ist — es bleibt beim bisherigen
+    Verhalten, also dem ersten Eintrag."""
+    erste = MainWindow()
+    monkeypatch.setattr(erste.worker, "submit", lambda job: None)
+    erste._stash_trees = {"Allflame": [_make_leaf("a1", "Currency 1")],
+                          "Standard": [_make_leaf("s1", "Currency 1")]}
+    erste._on_leagues(["Standard", "Allflame"])
+    erste._league_combo.setCurrentText("Allflame")
+    erste.worker.stop()
+    erste.worker.wait(5000)
+
+    zweite = MainWindow()
+    monkeypatch.setattr(zweite.worker, "submit", lambda job: None)
+    zweite._stash_trees = {"Standard": [_make_leaf("s1", "Currency 1")]}
+    zweite._on_leagues(["Standard"])          # Allflame gibt es nicht mehr
+
+    assert zweite._league_combo.currentText() == "Standard"
+
+    zweite.worker.stop()
+    zweite.worker.wait(5000)
+
+
+def test_the_remembered_league_does_not_override_a_running_session(qapp, monkeypatch) -> None:
+    """Der gemerkte Wert gilt nur, solange nichts gewaehlt IST. Sonst risse
+    jeder Rebuild mitten in der Sitzung (neue Liga-Antwort, Kontowechsel)
+    die Auswahl auf den Startwert zurueck.
+
+    Dass beides auseinanderlaufen kann, ist kein konstruierter Fall: Ein
+    zweites Fenster (Nur-Lese-Instanz, §instance_lock) schreibt in
+    DIESELBE ui-settings.ini. Wechselt man dort die Liga, steht im Merker
+    etwas anderes als hier auf dem Bildschirm."""
+    win = MainWindow()
+    monkeypatch.setattr(win.worker, "submit", lambda job: None)
+    win._stash_trees = {"Hardcore": [_make_leaf("h1", "Currency 1")],
+                        "Standard": [_make_leaf("s1", "Currency 1")]}
+    win._on_leagues(["Standard", "Hardcore"])
+    win._league_combo.setCurrentText("Hardcore")
+    # Das zweite Fenster steht auf Standard und hat das gerade abgelegt.
+    win._settings().setValue(win._LAST_LEAGUE_SETTING_KEY, "Standard")
+
+    win._on_leagues(["Standard", "Hardcore"])   # Rebuild mitten in der Sitzung
+
+    assert win._league_combo.currentText() == "Hardcore"
 
     win.worker.stop()
     win.worker.wait(5000)

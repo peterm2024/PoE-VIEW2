@@ -223,3 +223,131 @@ def test_the_429_retry_keeps_the_query(monkeypatch) -> None:
     assert gesehen == [("/character", {"realm": "poe2"}),
                        ("/character", {"realm": "poe2"})]
     client.close()
+
+
+# --- Was liefert die Charakter-Antwort ueberhaupt? (Peter, 2026-08-24) -- #
+#
+# "Bekommen wir eigentlich die aktuelle Goldmenge angezeigt?" — nicht zu
+# beantworten, solange niemand aufschreibt, was in der Antwort steht.
+# Antwort aus Peters echtem Log: kein Gold. Die Mitschrift bleibt trotzdem
+# drin, weil sie meldet, wenn GGG spaeter mehr liefert.
+
+
+def _bekannte_antwort() -> dict:
+    """Eine Antwort, wie sie am 2026-08-24 wirklich kam (gekuerzt) —
+    ausschliesslich Felder, die wir kennen."""
+    return {"character": {
+        "name": "WitchOfPeter",
+        "level": 34,
+        "experience": 9_416_504,
+        "equipment": [{"typeLine": "Sword", "inventoryId": "Weapon"}],
+        "inventory": [],
+        "metadata": {"version": 2},
+    }}
+
+
+def _zeilen(caplog, anfang: str) -> list[str]:
+    return [r.getMessage() for r in caplog.records if r.getMessage().startswith(anfang)]
+
+
+def test_the_character_fields_land_in_the_log_once(monkeypatch, caplog) -> None:
+    """Die Zeile nennt jedes Feld mit seiner Form und sagt getrennt, was
+    davon ungenutzt bleibt — sie kostet keinen eigenen Request, also darf
+    sie auch nicht bei jedem Abruf erneut anfallen."""
+    client = PoeApiClient(RateLimitManager())
+    monkeypatch.setattr(client, "_get",
+                        lambda path, policy_hint=None: _bekannte_antwort())
+
+    with caplog.at_level("INFO", logger="poe_view.api.client"):
+        client.get_character_items("WitchOfPeter")
+        client.get_character_items("WitchOfPeter")
+
+    zeilen = _zeilen(caplog, "Charakter-Antwort")
+    assert len(zeilen) == 1, "einmal je Sitzung, nicht bei jedem Abruf"
+    assert "equipment[1]" in zeilen[0]          # Liste: nur die Laenge
+    assert "metadata{version}" in zeilen[0]     # Objekt: nur die Schluessel
+    assert "level" in zeilen[0]
+    assert "ungenutzt: metadata, name" in zeilen[0]
+    client.close()
+
+
+def test_no_field_line_without_a_character(monkeypatch, caplog) -> None:
+    """Eine leere Antwort darf den einen Schuss nicht verbrauchen —
+    sonst haette ein fehlgeschlagener erster Abruf die Frage fuer die
+    ganze Sitzung unbeantwortbar gemacht."""
+    antworten = [{"character": {}}, _bekannte_antwort()]
+    client = PoeApiClient(RateLimitManager())
+    monkeypatch.setattr(client, "_get",
+                        lambda path, policy_hint=None: antworten.pop(0))
+
+    with caplog.at_level("INFO", logger="poe_view.api.client"):
+        client.get_character_items("Leer")
+        client.get_character_items("WitchOfPeter")
+
+    zeilen = _zeilen(caplog, "Charakter-Antwort")
+    assert len(zeilen) == 1
+    assert "WitchOfPeter" in zeilen[0]
+    client.close()
+
+
+def test_the_log_line_carries_no_item_contents(monkeypatch, caplog) -> None:
+    """Nur Form, keine Werte: Ein voller Charakter im Log waere jedes Mal
+    ein paar hundert Kilobyte und verdeckte alles andere."""
+    client = PoeApiClient(RateLimitManager())
+    monkeypatch.setattr(client, "_get",
+                        lambda path, policy_hint=None: _bekannte_antwort())
+
+    with caplog.at_level("INFO", logger="poe_view.api.client"):
+        client.get_character_items("WitchOfPeter")
+
+    zeile, = _zeilen(caplog, "Charakter-Antwort")
+    assert "Sword" not in zeile
+    assert "9416504" not in zeile.replace(" ", "")
+    client.close()
+
+
+def test_a_field_we_have_never_seen_is_flagged_loudly(monkeypatch, caplog) -> None:
+    """Der eigentliche Grund, warum die Mitschrift dauerhaft drinbleibt:
+    Nach einem GGG-Patch soll auffallen, dass es plotzlich mehr gibt. Eine
+    Zeile mehr in einer langen Aufzaehlung faellt niemandem auf, eine
+    WARNING schon."""
+    antwort = _bekannte_antwort()
+    antwort["character"]["goldAmount"] = 12_345
+
+    client = PoeApiClient(RateLimitManager())
+    monkeypatch.setattr(client, "_get", lambda path, policy_hint=None: antwort)
+    with caplog.at_level("INFO", logger="poe_view.api.client"):
+        client.get_character_items("WitchOfPeter")
+
+    warnung, = _zeilen(caplog, "NEUE Felder")
+    assert "goldAmount" in warnung
+    client.close()
+
+
+def test_a_new_field_inside_a_known_object_is_flagged_too(monkeypatch, caplog) -> None:
+    """Eine Ebene tief wird mitgeprueft: Ein neues Feld in ``metadata``
+    waere sonst unsichtbar, obwohl die Zeile es auflistet."""
+    antwort = _bekannte_antwort()
+    antwort["character"]["metadata"] = {"version": 2, "gold": 500}
+
+    client = PoeApiClient(RateLimitManager())
+    monkeypatch.setattr(client, "_get", lambda path, policy_hint=None: antwort)
+    with caplog.at_level("INFO", logger="poe_view.api.client"):
+        client.get_character_items("WitchOfPeter")
+
+    warnung, = _zeilen(caplog, "NEUE Felder")
+    assert "metadata.gold" in warnung
+    client.close()
+
+
+def test_a_familiar_answer_stays_quiet(monkeypatch, caplog) -> None:
+    """Die Gegenprobe: Solange nichts Neues kommt, gibt es auch keine
+    Warnung. Eine, die jedes Mal anschlaegt, liest bald niemand mehr."""
+    client = PoeApiClient(RateLimitManager())
+    monkeypatch.setattr(client, "_get",
+                        lambda path, policy_hint=None: _bekannte_antwort())
+    with caplog.at_level("INFO", logger="poe_view.api.client"):
+        client.get_character_items("WitchOfPeter")
+
+    assert _zeilen(caplog, "NEUE Felder") == []
+    client.close()

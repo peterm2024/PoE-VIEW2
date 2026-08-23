@@ -74,9 +74,66 @@ def _target(path: str, params: dict[str, str] | None) -> str:
     return f"{path}?{urlencode(params)}"
 
 
+# Die Felder der Charakter-Antwort, die dieses Programm ausliest. Alles
+# andere landet einmal je Sitzung als "ungenutzt" im Log
+# (``_log_character_fields``) — wir heben die Rohantwort nirgends auf,
+# also wäre sonst nicht zu sehen, was GGG sonst noch mitschickt.
+_USED_CHARACTER_FIELDS = frozenset({
+    "equipment", "inventory", "jewels", "rucksack", "level", "experience",
+})
+
+
+# Was am 2026-08-24 tatsächlich in der Antwort stand, gemessen an einem
+# echten Charakter — verschachtelte Felder mit ihrem Elternfeld davor.
+# Alles, was hier NICHT steht, meldet ``_log_character_fields`` als neu.
+# Der Sinn ist die Warnung nach einem GGG-Patch oder Liga-Start: Ein neues
+# Feld ist der Moment, in dem sich nachsehen lohnt (so ist die XP/h-Anzeige
+# entstanden, §4.33). Ein Fehlalarm heißt hier nur "das hatten wir noch
+# nicht" — etwa ein Feld, das es in Peters Liga nicht gibt.
+_KNOWN_CHARACTER_FIELDS = frozenset({
+    "class", "equipment", "experience", "id", "inventory", "jewels",
+    "league", "level", "metadata", "name", "passives", "realm", "rucksack",
+    "ruthless",
+    "metadata.version",
+    "passives.bandit_choice", "passives.hashes", "passives.hashes_ex",
+    "passives.jewel_data", "passives.mastery_effects",
+    "passives.pantheon_major", "passives.pantheon_minor",
+    "passives.skill_overrides",
+})
+
+
+def _field_names(char: dict) -> list[str]:
+    """Feldnamen eine Ebene tief: ``level``, ``passives.hashes``.
+
+    Eine Ebene, nicht beliebig tief: Gold oder Ähnliches stünde entweder
+    oben oder in einem der wenigen Objekte daneben. Der Inhalt von
+    ``equipment`` dagegen sind Items, deren Felder wir längst kennen —
+    die vollständig abzulaufen brächte nichts als Rauschen."""
+    namen = []
+    for schluessel, wert in char.items():
+        namen.append(schluessel)
+        if isinstance(wert, dict):
+            namen.extend(f"{schluessel}.{unter}" for unter in wert)
+    return namen
+
+
+def _field_shape(wert: object) -> str:
+    """Ein Feld in einem Wort: ``inventory[12]``, ``metadata{version}``,
+    ``level``. Werte werden bewusst NICHT mitgeschrieben — die Zeile soll
+    zeigen, was es gibt, und nicht den halben Charakter ins Log kippen."""
+    if isinstance(wert, dict):
+        return "{" + ",".join(sorted(wert)) + "}" if wert else "{}"
+    if isinstance(wert, list):
+        return f"[{len(wert)}]"
+    return ""
+
+
 class PoeApiClient:
     def __init__(self, rate_limiter: RateLimitManager, access_token: str | None = None) -> None:
         self.rate_limiter = rate_limiter
+        # Einmal je Sitzung schreibt ``_log_character_fields`` die Felder
+        # der Charakter-Antwort mit.
+        self._character_fields_logged = False
         self._http = httpx.Client(
             base_url=config.API_BASE,
             headers={"User-Agent": config.user_agent()},
@@ -173,10 +230,47 @@ class PoeApiClient:
         zusätzliches Auslesen derselben Antwort."""
         data = self._get(f"/character/{quote(name)}")
         char = data.get("character", {})
+        self._log_character_fields(name, char)
         items = (char.get("equipment", []) + char.get("inventory", [])
                  + char.get("jewels", []) + char.get("rucksack", []))
         return (char.get("level", 0), char.get("experience", 0),
                 [Item.model_validate(i) for i in items])
+
+    def _log_character_fields(self, name: str, char: dict) -> None:
+        """Einmal je Sitzung mitschreiben, welche Felder ``/character/{name}``
+        überhaupt liefert — und welche davon wir wegwerfen.
+
+        Anlass (Peter, 2026-08-24): "Bekommen wir eigentlich die aktuelle
+        Goldmenge angezeigt?" Beantworten ließ sich das nicht. Die
+        Rohantwort wird nirgends aufgehoben, hier werden gezielt die
+        bekannten Schlüssel herausgelesen, und das Rohdaten-Fenster gibt es
+        nur für Truhenfächer. Was GGG sonst noch mitschickt, war damit
+        unsichtbar.
+
+        Die Zeile kostet keinen zusätzlichen Request: Der Abruf läuft
+        ohnehin alle paar Sekunden, solange ein Charakter offen ist. Genau
+        so ist die XP/h-Anzeige entstanden (§4.33) — ``level`` und
+        ``experience`` lagen längst in jeder Antwort und wurden
+        stillschweigend verworfen."""
+        if self._character_fields_logged or not char:
+            return
+        self._character_fields_logged = True
+        felder = [f"{schluessel}{_field_shape(wert)}"
+                  for schluessel, wert in sorted(char.items())]
+        ungenutzt = sorted(set(char) - _USED_CHARACTER_FIELDS)
+        log.info("Charakter-Antwort (%s) trägt: %s — davon ungenutzt: %s",
+                 name, ", ".join(felder),
+                 ", ".join(ungenutzt) if ungenutzt else "(nichts)")
+        neu = sorted(set(_field_names(char)) - _KNOWN_CHARACTER_FIELDS)
+        if neu:
+            # Eigene Zeile und eine Stufe lauter: Die Liste oben fällt
+            # niemandem auf, der nicht ohnehin danach sucht. Genau dieser
+            # Fall — GGG liefert plötzlich mehr — ist aber der einzige
+            # Grund, warum die Mitschrift dauerhaft drinbleibt.
+            log.warning("NEUE Felder in der Charakter-Antwort: %s. Bisher nicht "
+                        "gesehen — lohnt einen Blick, ob etwas Brauchbares "
+                        "dabei ist (_KNOWN_CHARACTER_FIELDS in api/client.py "
+                        "nachziehen).", ", ".join(neu))
 
     # --- Rohabrufe für einen anderen Realm (PoE2-Abzug, §4.43) --------- #
     #

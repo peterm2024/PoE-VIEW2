@@ -1196,3 +1196,71 @@ Dritter Fall derselben Ursache nach der doppelt breiten Ersatzschrift
 (#55) und der Zeilenhöhe (#71) — die Testumgebung sieht anders aus als
 der Betrieb, und sie sieht freundlicher aus. Farbe und Größe gehören in
 einen nativen Probelauf.
+
+## 75. Ein Fach, das es nicht gibt, war für immer der nächste Kandidat
+
+**Ausgangslage (Peter, 2026-08-24, während er die neue Fassung testete):**
+"Aktuell kommen Errors." Im Log stand seit 00:23 alle paar Sekunden
+derselbe Traceback:
+
+```
+HTTP 404 for /stash/Allflame/aa4e0f1249/f8241fb933: {"stash":null}
+```
+
+Es ist das Unterfach „1" im Map-Stash „M". GGG führt es in der
+Fächerliste, beantwortet den Abruf aber mit 404 und einem leeren Stash —
+Map-Stash-Unterfächer entstehen serverseitig offenbar erst, wenn eine
+Karte darin liegt. Die Antwort ist also gültig, kein Fehler.
+
+**Der Schaden war nicht der 404, sondern dass er sich nie erledigte.**
+`_pick_auto_refresh_candidate()` behandelt ein nie geladenes Fach als
+unendlich alt, damit sich eine frische Truhe von selbst füllt. Genau
+diese Regel wird hier zur Falle: Der Abruf scheitert → es wird kein
+Ladezeitpunkt geschrieben → beim nächsten Takt ist dasselbe Fach wieder
+das älteste. Der Rundlauf hing fest und kam an kein anderes Fach mehr
+heran.
+
+In fünf Minuten von Peters Log: **neun Abrufe auf das tote Fach, kein
+einziger auf ein anderes Fach derselben Liga.** Der Sweep stand, während
+das Fenster den Eindruck machte, er liefe.
+
+**Was der Umbau vom 21.08. damit zu tun hat (und was nicht.)** Die
+Auswahl ist unverändert, den 404 gibt es in Peters Logs schon seit dem
+17.08. Verändert hat sich der Takt: Vorher lief der Sweep alle 40
+Sekunden, seit dem Umbau in jedem zweiten Takt der gerechneten Kadenz.
+Aus einem gelegentlichen Ärgernis wurde damit ein Dauerlauf. Die
+Fehlerursache ist älter als der Umbau — die Sichtbarkeit nicht.
+
+**Der Fix**: Ein 404 auf einen Fach-Abruf ist kein `job_error` mehr,
+sondern ein eigenes Signal (`ApiWorker.stash_missing`) mit Liga und
+Kennung. `MainWindow._on_stash_missing()` merkt sich das Fach je Liga,
+und beide Rundläufe überspringen es. Ein geglückter Abruf hebt den Merker
+wieder auf — legt der Nutzer eine Karte hinein, gehört das Fach zurück in
+den Rundlauf. Der Merker ist sitzungslokal und steht bewusst nicht im
+Cache: Ob es das Fach gibt, entscheidet GGG, nicht unser letzter
+Programmlauf.
+
+**Zwei Fallen dabei, die der Fix selbst aufgestellt hätte:**
+
+- **Nicht zusätzlich `job_error` emittieren.** Beide Empfänger geben die
+  Kette des taktenden Modus frei (`_note_refresh_mode_job_done`), und
+  zweimal freigeben addiert zweimal das Intervall — ein verschluckter
+  Takt. Die Statusmeldung für einen bewusst angeklickten Fach reist
+  deshalb im selben Signal mit, leer bei einem stillen Abruf.
+- **Die Freigabe der Kette nicht vergessen.** Der neue Weg umgeht
+  `_on_error`, wo sie bisher stand. Ohne sie stünde der taktende Modus
+  für den Rest der Sitzung — derselbe Fehler wie beim Nur-Lese-Fenster
+  in #72.
+
+**Lehre, allgemeiner:** Eine Auswahlregel, die „noch nie passiert" als
+höchste Priorität behandelt, braucht eine Antwort auf „was, wenn es nie
+passieren KANN". Sonst wählt sie den einen Fall, der nicht funktioniert,
+gegen alle anderen, die es täten.
+
+Getestet: `tests/test_api_worker.py` (404 auf einen Fach-Abruf meldet
+`stash_missing` statt `job_error`, mit Text nur beim bewussten Klick;
+Gegenprobe: ein 404 anderswo bleibt ein Fehler mit Traceback),
+`tests/test_main_window_helpers.py` (das tote Fach fällt aus dem
+Rundlauf und der läuft weiter, der Merker gilt nur in seiner Liga, ein
+geglückter Abruf hebt ihn auf, die Kette wird freigegeben).
+

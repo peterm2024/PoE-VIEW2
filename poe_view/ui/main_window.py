@@ -628,6 +628,12 @@ class MainWindow(QMainWindow):
         self._stash_mode_round_picks = 0  # normale Picks seit dem letzten Coverage-Pick
         self._stash_mode_coverage_cursor = 0  # Rundlauf-Index durch die leeren Fächer, §_pick_stash_mode_candidate
         self._stash_mode_list_refresh_due = False  # nächster Tick lädt die Fach-LISTE neu, §_drive_refresh_mode
+        # Fächer, die GGG mit 404 beantwortet hat, je Liga (§4.50). Sie
+        # fallen aus dem automatischen Rundlauf; ein bewusster Klick
+        # versucht es weiterhin, und ein geglückter Abruf nimmt sie wieder
+        # auf. Sitzungslokal und bewusst nicht im Cache: Ob es das Fach
+        # gibt, entscheidet GGG, nicht unser letzter Programmlauf.
+        self._missing_stashes: dict[str, set[str]] = {}
         # Auto-Modus wechselt sich Takt für Takt zwischen seinen zwei
         # Pflichten ab (offene Ansicht / Sweep) — §_maybe_auto_refresh.
         # Startet bei der offenen Ansicht: Die sieht der Nutzer, sie soll
@@ -1491,7 +1497,12 @@ class MainWindow(QMainWindow):
         nicht" (Start vor der ersten API-Antwort, §4.12): dann gilt der
         gesamte Cache als "oben", ohne Abtrennung, da wir noch nicht
         unterscheiden können, was inzwischen abgelaufen ist."""
-        previous = self._league_combo.currentText()
+        # Beim ERSTEN Aufbau ist noch nichts gewählt — dann gilt die Liga aus
+        # der letzten Sitzung (§4.51). Danach trägt ``previous`` die laufende
+        # Auswahl, und der gemerkte Wert hat nichts mehr zu suchen: Ein
+        # Rebuild mitten in der Sitzung (neue Liga-Antwort, Kontowechsel)
+        # darf die aktuelle Auswahl nicht auf den Startwert zurückreißen.
+        previous = self._league_combo.currentText() or self._load_last_league()
         if live_leagues is None:
             top, bottom = sorted(self._stash_trees), []
         else:
@@ -1776,6 +1787,21 @@ class MainWindow(QMainWindow):
     # (CONFIGURABLE_COLUMNS, siehe item_table.py).
     DEFAULT_HIDDEN_COLUMNS = frozenset({"Type"})
 
+    # Zuletzt gewählte Liga (§4.51). Peter, 2026-08-24: "Wir sollten uns
+    # merken, welche Liga zuletzt ausgewählt war, und die nach dem Neustart
+    # anzeigen."
+    _LAST_LEAGUE_SETTING_KEY = "league/last"
+
+    def _load_last_league(self) -> str:
+        """Die Liga aus der letzten Sitzung — leer, wenn es keine gibt.
+
+        Bewusst OHNE Prüfung, ob es sie noch gibt: Das entscheidet der
+        Aufbau des Dropdowns von selbst, weil ``findText`` sie dann nicht
+        findet und die Auswahl auf den ersten Eintrag fällt. Eine eigene
+        Prüfung hier wäre dieselbe Logik ein zweites Mal, nur an einer
+        Stelle, die die fertige Liste noch gar nicht kennt."""
+        return str(self._settings().value(self._LAST_LEAGUE_SETTING_KEY, "") or "")
+
     _HIDE_EMPTY_SETTING_KEY = "stash_tree/hide_empty"
 
     def _load_hide_empty(self) -> bool:
@@ -2054,6 +2080,7 @@ class MainWindow(QMainWindow):
         w.status.connect(self._on_status)
         w.busy_changed.connect(self._on_busy_changed)
         w.job_error.connect(self._on_error)
+        w.stash_missing.connect(self._on_stash_missing)
         w.bulk_progress.connect(self._on_bulk_progress)
         w.bulk_finished.connect(self._on_bulk_finished)
         w.offline_changed.connect(self._on_offline_changed)
@@ -2356,6 +2383,7 @@ class MainWindow(QMainWindow):
         if not league or league == self._current_league or league == self._ARCHIVED_HEADER:
             return  # Header-Zeile ist nicht anwählbar, aber sicherheitshalber abgefangen
         self._current_league = league
+        self._settings().setValue(self._LAST_LEAGUE_SETTING_KEY, league)
         self._showing_aggregate = False
         self._current_stash_id = None  # Fach-IDs gelten nur innerhalb einer Liga
         self._current_character_name = None
@@ -2748,6 +2776,10 @@ class MainWindow(QMainWindow):
         sonst würde ein spät eintreffender Hintergrund-Job die Daten der
         MOMENTAN aktiven Liga verfälschen, falls der Nutzer zwischenzeitlich
         die Liga gewechselt hat."""
+        # Ein geglückter Abruf hebt einen früheren 404 auf (§4.50): Legt der
+        # Nutzer eine Karte in ein Map-Stash-Unterfach, gibt es das Fach
+        # plötzlich — dann gehört es zurück in den Rundlauf.
+        self._missing_stashes.get(league, set()).discard(stash_id)
         self._last_loaded.setdefault(league, {})[stash_id] = datetime.now(timezone.utc).isoformat()
         self._items.setdefault(league, {})[stash_id] = items
         if silent:
@@ -4752,6 +4784,26 @@ class MainWindow(QMainWindow):
         self._busy_indicator.setVisible(busy)
         self._worker_busy = busy
 
+    def _on_stash_missing(self, league: str, stash_id: str, message: str) -> None:
+        """Ein Fach, das es bei GGG nicht gibt, aus dem Rundlauf nehmen.
+
+        Ohne diesen Merker wählt ``_pick_auto_refresh_candidate`` es bei
+        JEDEM Takt erneut: Es gilt als nie geladen, also als unendlich alt,
+        also immer als ältester Kandidat — und weil der Abruf scheitert,
+        wird auch nie ein Ladezeitpunkt geschrieben, der das ändern würde.
+        Real beobachtet am 2026-08-24 in Peters Log: neun Abrufe desselben
+        Map-Stash-Unterfachs in fünf Minuten, kein einziger auf ein anderes
+        Fach derselben Liga. Der Rundlauf stand still (§4.50).
+
+        Die Kette des taktenden Modus wird hier freigegeben, weil dieser
+        Weg ``job_error`` gerade NICHT auslöst — ohne die Freigabe stünde
+        der Modus für den Rest der Sitzung."""
+        self._missing_stashes.setdefault(league, set()).add(stash_id)
+        if message:
+            self._status_msg.setText(f"Error: {message}")
+        if self._refresh_mode in self.STEPPING_REFRESH_MODES:
+            self._note_refresh_mode_job_done()
+
     def _on_error(self, message: str) -> None:
         self._status_msg.setText(f"Error: {message}")
         log.error("%s", message)
@@ -5041,8 +5093,10 @@ class MainWindow(QMainWindow):
                     self._stash_mode_round_picks += 1
                     return stash
         item_counts = self._item_counts_for_current_league()
-        non_empty = [s for s in self._leaf_stashes if item_counts.get(s.id)]
-        empty = [s for s in self._leaf_stashes if not item_counts.get(s.id)]
+        fehlend = self._missing_stashes.get(self._current_league, set())
+        vorhanden = [s for s in self._leaf_stashes if s.id not in fehlend]
+        non_empty = [s for s in vorhanden if item_counts.get(s.id)]
+        empty = [s for s in vorhanden if not item_counts.get(s.id)]
         regular = [s for s in non_empty if not self._is_remove_only_tab(s)]
         cycle_pool = regular or non_empty
 
@@ -5064,7 +5118,7 @@ class MainWindow(QMainWindow):
             return (is_empty, age)
 
         self._stash_mode_round_picks += 1
-        return min(cycle_pool or self._leaf_stashes, key=sort_key)
+        return min(cycle_pool or vorhanden or self._leaf_stashes, key=sort_key)
 
     def _drive_refresh_mode(self) -> None:
         """Hält Single-/Stash-Modus am Laufen: ein GLEICHMÄSSIGER Takt,
@@ -5383,9 +5437,15 @@ class MainWindow(QMainWindow):
         — nur falls es sonst keinen anderen Kandidaten gibt, kommen sie doch dran.
         """
         league_loaded = self._last_loaded.get(self._current_league, {})
+        fehlend = self._missing_stashes.get(self._current_league, set())
         now = datetime.now(timezone.utc)
         candidates: list[tuple[datetime, StashTab]] = []
         for stash in self._leaf_stashes:
+            # Ein Fach, das GGG mit 404 beantwortet, gilt als nie geladen und
+            # wäre damit für immer der älteste Kandidat — der Rundlauf käme
+            # an kein anderes Fach mehr heran (§4.50).
+            if stash.id in fehlend:
+                continue
             iso = league_loaded.get(stash.id)
             if iso is None:
                 candidates.append((self._NEVER_LOADED, stash))

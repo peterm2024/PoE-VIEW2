@@ -6,8 +6,24 @@ nach [SemVer](https://semver.org/lang/de/).
 
 ## [Unveröffentlicht]
 
+### Behoben
+
+- Ein Truhenfach, das es bei GGG nicht gibt (Map-Stash-Unterfächer, in
+  die noch nie etwas gelegt wurde), brachte den automatischen Rundlauf
+  zum Stillstand: Es galt als nie geladen und damit dauerhaft als
+  ältester Kandidat, der Abruf scheiterte mit HTTP 404, und beim
+  nächsten Takt war es wieder an der Reihe. Kein anderes Fach der Liga
+  kam noch dran, und das Log füllte sich alle paar Sekunden mit
+  Tracebacks. Solche Fächer fallen jetzt aus dem Rundlauf, mit einer
+  erklärenden Zeile statt eines Fehlers; ein Klick versucht es
+  weiterhin, und sobald das Fach wirklich existiert, ist es wieder
+  dabei.
+
 ### Geändert
 
+- Die zuletzt gewählte Liga kommt nach einem Neustart wieder. Vorher
+  startete das Programm in der Liga mit dem meisten Inhalt — eine gute
+  Vorgabe beim allerersten Start, aber nicht danach.
 - Der Schnitt im XP-Graphen gilt jetzt für einen benannten Zeitraum und
   zeigt ihn auch: Er beginnt beim letzten Levelaufstieg, spätestens nach
   einer Spielpause von mehr als einer halben Stunde, und reicht nie über
@@ -16,6 +32,12 @@ nach [SemVer](https://semver.org/lang/de/).
   Zahl steht, wie lang die Strecke ist ("⌀ 2M · 34 min"). Vorher mittelte
   sie über alles Sichtbare und wurde trotzdem über die volle Breite
   gezeichnet — die Zahl stimmte, ihr Geltungsbereich war erfunden.
+- Das Log schreibt einmal je Sitzung mit, welche Felder GGGs Antwort auf
+  einen Charakter-Abruf enthält und welche davon ungenutzt bleiben. Kostet
+  keinen zusätzlichen Abruf und beantwortet Fragen der Art "liefert die
+  API eigentlich X?" mit Daten statt mit Vermutungen. Taucht ein Feld auf,
+  das wir noch nie gesehen haben — etwa nach einem GGG-Patch —, sagt das
+  Log das gesondert und eine Stufe lauter.
 - Hilfe und README nehmen die GGG-Anmeldeseite vorweg: dass dort
   „PoE-VIEW" ohne die 2 steht (der bei GGG registrierte Client-Name),
   dass der rote Kasten jede App ohne Client-Secret trifft und nichts

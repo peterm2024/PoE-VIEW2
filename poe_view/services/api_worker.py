@@ -204,6 +204,18 @@ LOGIN_EXPIRED = "expired"      # HTTP 401 aus einem laufenden Job
 LOGIN_LOGGED_OUT = "logged_out"  # Nutzer hat selbst abgemeldet
 
 
+def _is_missing_stash(job, exc: Exception) -> bool:
+    """Ein Fach-Abruf, den GGG mit 404 beantwortet.
+
+    Beobachtet am 2026-08-24 an Peters Map-Stash: Das Unterfach steht in
+    der Fächerliste, der Abruf liefert aber ``404`` mit ``{"stash":null}``
+    — solche Unterfächer entstehen serverseitig erst, wenn etwas darin
+    liegt. Das ist eine gültige Antwort, kein Fehler; behandelt wird sie
+    trotzdem, weil sie sich sonst nie erledigt (§4.50)."""
+    return (isinstance(job, FetchStashItemsJob)
+            and isinstance(exc, ApiError) and exc.status_code == 404)
+
+
 class ApiWorker(QThread):
     """Arbeitet die Job-Queue ab, bis ``stop()`` gerufen wird."""
 
@@ -237,6 +249,14 @@ class ApiWorker(QThread):
     icon_loaded = Signal(str, object)          # url, bytes
     rate_limit_changed = Signal(str, object, float)  # policy, rules, wait_s
     job_error = Signal(str)                    # Fehlertext für die Statusbar
+    # Ein Fach, das GGG mit 404 beantwortet: Liga, Fach-Id, Text für die
+    # Statusleiste (leer bei einem stillen Hintergrund-Abruf). Ein eigenes
+    # Signal statt eines Fehlertexts, weil der Empfänger es sich merken
+    # MUSS: Ohne Ausschluss aus dem Rundlauf wählt ``_pick_auto_refresh_
+    # candidate`` dasselbe Fach bei jedem Takt erneut (§4.50). Und bewusst
+    # NICHT zusätzlich ``job_error`` — beide Empfänger geben die Kette des
+    # taktenden Modus frei, zweimal freigeben verschluckt einen Takt.
+    stash_missing = Signal(str, str, str)
     status = Signal(str)                       # Verlaufstext ("Lade …"), nicht der Busy-Zustand
     busy_changed = Signal(bool)                # True, solange irgendein Job läuft (für den UI-Spinner)
     bulk_progress = Signal(object)             # BulkProgress, siehe _fetch_all_items
@@ -314,6 +334,18 @@ class ApiWorker(QThread):
                     # ständig verdecken. Manuelle Klicks bekommen die Meldung.
                     if not getattr(job, "silent", False):
                         self.job_error.emit(OFFLINE_MESSAGE)
+                elif _is_missing_stash(job, exc):
+                    # Kein Programmfehler, sondern GGGs Antwort auf ein Fach,
+                    # das es serverseitig (noch) nicht gibt — deshalb eine
+                    # Zeile statt eines Tracebacks. Der Empfänger nimmt es
+                    # aus dem Rundlauf, sonst käme es bei jedem Takt wieder.
+                    log.warning("Fach %r (%s) gibt es bei GGG nicht (HTTP 404) — "
+                                "aus dem Rundlauf genommen, siehe ARCHITEKTUR.md §4.50",
+                                job.stash_name, job.stash_id)
+                    self.stash_missing.emit(
+                        job.league, job.stash_id,
+                        "" if job.silent
+                        else f"{job.stash_name}: GGG does not have this tab")
                 else:
                     log.exception("Job %s fehlgeschlagen", type(job).__name__)
                     self.job_error.emit(f"{type(job).__name__}: {exc}")

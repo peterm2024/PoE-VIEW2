@@ -180,6 +180,29 @@ def _get(self, path: str, policy_hint: str) -> httpx.Response:
 - Liga-Namen können Leerzeichen enthalten (`SSF Ruthless`) → Pfadsegmente
   immer per `urllib.parse.quote` encoden.
 
+**Was die Charakter-Antwort sonst noch trägt, steht seit dem 2026-08-24
+im Log.** Anlass war Peters Frage "Bekommen wir eigentlich die aktuelle
+Goldmenge angezeigt?", die sich nicht beantworten ließ: Die Rohantwort
+wird nirgends aufgehoben, `get_character_items()` liest gezielt die
+bekannten Schlüssel heraus, und das Rohdaten-Fenster (§4.9) gibt es nur
+für Truhenfächer. Alles Übrige war damit unsichtbar.
+
+`_log_character_fields()` schreibt deshalb **einmal je Sitzung** eine
+Zeile mit allen Feldern der Antwort und nennt getrennt, welche davon
+ungenutzt bleiben. Nur die Form, keine Werte (`inventory[12]`,
+`metadata{version}`, `level`) — ein voller Charakter wären jedes Mal
+einige hundert Kilobyte Log, die alles andere verdecken. Eine leere
+Antwort verbraucht den einen Schuss nicht, sonst hätte ein
+fehlgeschlagener erster Abruf die Frage für die ganze Sitzung
+unbeantwortbar gemacht.
+
+Das kostet **keinen zusätzlichen Request**: Der Abruf läuft ohnehin alle
+paar Sekunden, solange ein Charakter offen ist. Genau so ist die
+XP/h-Anzeige entstanden (§4.33) — `level` und `experience` lagen längst
+in jeder Antwort und wurden stillschweigend verworfen. Die Zeile ist die
+Verallgemeinerung dieser Lehre: nicht raten, was mitkommt, sondern es
+einmal aufschreiben.
+
 ### 4.3 Rate-Limit-Manager (`api/rate_limiter.py`)
 
 Die zentrale Komponente der Anwendung: Sie verhindert HTTP 429 und die
@@ -5598,6 +5621,64 @@ Adresse** (die Regel aus FALLSTRICKE #3 gilt unverändert weiter).
 Wer PoE-VIEW2 forkt und selbst verteilt, sollte `POE_CONTACT_EMAIL` per
 `.env` auf die eigene Adresse setzen — sonst landen GGG-Rückfragen zur
 fremden Distribution beim ursprünglichen Autor.
+
+### 4.50 Fächer, die es bei GGG nicht gibt (`ApiWorker.stash_missing`)
+
+GGG führt Map-Stash-Unterfächer in der Fächerliste, beantwortet den
+Abruf aber mit `404` und `{"stash":null}`, solange nichts darin liegt.
+Das ist eine gültige Antwort. Zum Problem wurde sie durch die
+Auswahlregel des Rundlaufs: Ein nie geladenes Fach gilt als unendlich
+alt (damit sich eine frische Truhe von selbst füllt), der Abruf
+scheitert, es wird kein Ladezeitpunkt geschrieben — also ist dasselbe
+Fach beim nächsten Takt wieder das älteste. Der Rundlauf kam an kein
+anderes Fach mehr heran (Messung und Vorgeschichte: FALLSTRICKE #75).
+
+Der Worker unterscheidet diesen Fall deshalb von einem Fehler: kein
+`job_error` mit Traceback, sondern `stash_missing(liga, kennung, text)`
+und eine erklärende Zeile im Log. `MainWindow._missing_stashes` hält die
+betroffenen Kennungen **je Liga** (Fach-Kennungen sind ligaweit
+vergeben), beide Rundläufe überspringen sie, und ein geglückter Abruf
+nimmt das Fach wieder auf — legt der Nutzer eine Karte hinein, gibt es
+das Fach plötzlich.
+
+Der Merker ist **sitzungslokal und steht nicht im Cache**: Ob es ein Fach
+gibt, entscheidet GGG, nicht unser letzter Programmlauf. Ein bewusster
+Klick versucht es ohnehin weiter — ausgeschlossen ist nur der
+automatische Rundlauf.
+
+Der Text für die Statusleiste reist **im selben Signal** mit (leer bei
+einem stillen Abruf), statt zusätzlich als `job_error` zu kommen: Beide
+Empfänger geben die Kette des taktenden Modus frei, und zweimal
+freigeben verschluckt einen Takt.
+
+### 4.51 Die Liga der letzten Sitzung (`league/last`)
+
+Peter, 2026-08-24: "Wir sollten uns merken, welche Liga zuletzt
+ausgewählt war, und die nach dem Neustart anzeigen." Vorher entschied
+`_sort_by_content()` den Start — also die Liga mit dem meisten Inhalt.
+Das ist eine brauchbare Vorgabe für den allerersten Start und eine
+schlechte für jeden weiteren: Wer in der aktuellen Liga spielt, deren
+Truhe aber noch dünn ist, landete jedes Mal wieder in Standard.
+
+Der Merker liegt in der `ui-settings.ini` neben den anderen
+Oberflächen-Einstellungen und wird bei jedem Liga-Wechsel geschrieben.
+Gelesen wird er **nur, wenn noch nichts gewählt ist**:
+
+```python
+previous = self._league_combo.currentText() or self._load_last_league()
+```
+
+Das ist die ganze Logik, und die Reihenfolge ist der Punkt. Andersherum
+risse jeder Rebuild mitten in der Sitzung — neue Liga-Antwort,
+Kontowechsel — die Auswahl auf den Startwert zurück. Dass beide Werte
+auseinanderlaufen können, ist kein Sonderfall: Ein zweites Fenster
+(Nur-Lese-Instanz) schreibt in dieselbe Datei.
+
+**Ohne Prüfung, ob es die Liga noch gibt.** Temporäre Ligen enden; der
+gemerkte Name steht dann in keiner Liste mehr, `findText` findet ihn
+nicht, und die Auswahl fällt wie bisher auf den ersten Eintrag. Eine
+eigene Prüfung wäre dieselbe Entscheidung ein zweites Mal, getroffen an
+einer Stelle, die die fertige Liste noch gar nicht kennt.
 
 ## 8. Entwicklungsstand
 
