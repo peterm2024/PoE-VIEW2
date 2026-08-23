@@ -410,21 +410,23 @@ def _demo_leveling(win: MainWindow) -> None:
     Tod. Ohne diesen Vorrat zeigte das Bild eine leere Achse — richtig,
     aber nicht das, was das Feld kann."""
     jetzt = time.monotonic()
-    # (Minuten her, Dauer in s, XP/h) — der letzte Abschnitt ist der, den
-    # die Zahl über dem Graphen nennt.
-    # (Minuten her, Dauer in s, XP/h, Instanz) — gleiche Instanz heißt
-    # eine Map, die zwischendurch verlassen wurde (§4.40).
+    # (Minuten her, Dauer in s, XP/h, Instanz, Stufe) — gleiche Instanz
+    # heißt eine Map, die zwischendurch verlassen wurde (§4.40); die Stufe
+    # begrenzt den Zeitraum der Schnitt-Linie (§4.40.1). Der letzte
+    # Abschnitt ist der, den die Zahl über dem Graphen nennt.
     abschnitte = [
-        (163, 540, 96_000_000, "m1"), (152, 420, 118_000_000, "m2"),
-        (144, 300, 132_000_000, "m3"), (131, 660, 88_000_000, "m4"),
-        (117, 480, 141_000_000, "m5"),
+        (163, 540, 96_000_000, "m1", 91), (152, 420, 118_000_000, "m2", 91),
+        (144, 300, 132_000_000, "m3", 91), (131, 660, 88_000_000, "m4", 91),
+        (117, 480, 141_000_000, "m5", 91),
         # Pause: 40 Minuten ohne Erfahrung, im Bild eine Lücke.
-        (73, 360, 124_000_000, "m6"), (63, 300, -22_000_000, "m7"),   # Tod
-        (53, 540, 109_000_000, "m8"), (42, 420, 151_000_000, "m9"),
-        (30, 300, 128_000_000, "m10"),
+        (73, 360, 124_000_000, "m6", 91), (63, 300, -22_000_000, "m7", 91),  # Tod
+        # Aufstieg auf 92 — ab hier gilt die Schnitt-Linie, davor ist sie
+        # nur noch gestrichelte Bezugslinie.
+        (53, 540, 109_000_000, "m8", 92), (42, 420, 151_000_000, "m9", 92),
+        (30, 300, 128_000_000, "m10", 92),
         # Eine Map mit Verkaufspause: zwei Aufenthalte, EINE Instanz —
         # dahinter erscheint die dunkelgrüne Fläche.
-        (18, 600, 134_000_000, "m11"), (7, 367, 41_000_000, "m11"),
+        (18, 600, 134_000_000, "m11", 92), (7, 367, 41_000_000, "m11", 92),
     ]
     stand = 2_006_431_775
     watch = _XpWatch(since=jetzt - 3 * 3600, since_experience=stand - 300_000_000,
@@ -437,8 +439,8 @@ def _demo_leveling(win: MainWindow) -> None:
     watch.previous_change_experience = stand - round(
         abschnitte[-1][2] * abschnitte[-1][1] / 3600)
     watch.history = [XpPoint(at=jetzt - minuten * 60, seconds=dauer, rate=rate,
-                             instance=instanz)
-                     for minuten, dauer, rate, instanz in abschnitte]
+                             instance=instanz, level=stufe)
+                     for minuten, dauer, rate, instanz, stufe in abschnitte]
     win._xp_watch["Demo Ranger"] = watch
 
 

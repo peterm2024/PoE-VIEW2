@@ -154,10 +154,15 @@ progress and the last three hours of experience.
   spent there. Gaps are real — no experience was made in them. Leaving a
   map and coming back puts both visits on one dark block showing the
   rate for the map as a whole, so the cost of the trip outside is
-  visible. A dashed line marks the overall rate; an area that cost
-  experience on balance hangs below the line in red. The graph survives
-  a restart: measured sections are stored per account and drawn again
-  next time, so closing the program does not empty it.
+  visible. An area that cost experience on balance hangs below the line
+  in red. A line across the graph marks your average rate and says which
+  stretch it covers: it begins at your last level-up, or after a break of
+  more than half an hour, whichever came later, and is drawn solid and
+  green over exactly that stretch — dashed before it, where it is only a
+  yardstick for the older bars. How long the stretch is stands next to
+  the number. The graph survives a restart: measured sections are stored
+  per account and drawn again next time, so closing the program does not
+  empty it.
 - **Watched stack sizes**: right-click any item and pick *Watch stack
   size* to put it in a table filling the right-hand side of the levelling
   panel. It adds up every
@@ -205,6 +210,8 @@ progress and the last three hours of experience.
   glance: green while the API answers, red during an outage, grey before
   anything has been requested. It returns to green on its own as soon as
   a request succeeds.
+- **The league you were in comes back**: PoE-VIEW2 starts in the league
+  you last selected, not in whichever one holds the most items.
 - **Separate cache per account**: every GGG account keeps its own local
   data, so switching accounts never mixes up stash trees, items, or
   characters. Nothing is deleted in the process — each account keeps its
