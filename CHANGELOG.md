@@ -6,6 +6,26 @@ nach [SemVer](https://semver.org/lang/de/).
 
 ## [Unveröffentlicht]
 
+### Geändert
+
+- Der Schnitt im XP-Graphen gilt jetzt für einen benannten Zeitraum und
+  zeigt ihn auch: Er beginnt beim letzten Levelaufstieg, spätestens nach
+  einer Spielpause von mehr als einer halben Stunde, und reicht nie über
+  die drei Stunden des Graphen hinaus. Über dieser Strecke ist die Linie
+  dick und durchgezogen, davor bleibt sie dünn gestrichelt; neben der
+  Zahl steht, wie lang die Strecke ist ("⌀ 2M · 34 min"). Vorher mittelte
+  sie über alles Sichtbare und wurde trotzdem über die volle Breite
+  gezeichnet — die Zahl stimmte, ihr Geltungsbereich war erfunden.
+- Hilfe und README nehmen die GGG-Anmeldeseite vorweg: dass dort
+  „PoE-VIEW" ohne die 2 steht (der bei GGG registrierte Client-Name),
+  dass der rote Kasten jede App ohne Client-Secret trifft und nichts
+  über die eigene Anmeldung aussagt, und dass alle dort aufgezählten
+  Rechte reine Leserechte sind.
+- Die README sagt gleich zu Anfang, woher die 2 im Namen kommt:
+  PoE-VIEW war ein LabVIEW-Programm, dieses hier ist die Neufassung in
+  Python, und die GGG-Registrierung stammt noch vom Vorgänger — daher
+  der ältere Name auf der Anmeldeseite.
+
 ## [0.11.1] - 2026-08-22
 
 ### Behoben

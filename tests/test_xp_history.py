@@ -25,6 +25,7 @@ class P(NamedTuple):
     seconds: float
     rate: float
     instance: str = ""
+    level: int = 0
 
 
 def _hin_und_zurueck(punkte, *, mono_save=1000.0, wall_save=50_000.0,
@@ -64,6 +65,25 @@ def test_dauer_rate_und_instanz_bleiben_unveraendert():
     assert punkt["seconds"] == pytest.approx(305.5)
     assert punkt["rate"] == pytest.approx(1.23e8)
     assert punkt["instance"] == "4711"
+
+
+def test_die_stufe_faehrt_mit():
+    """Der Graph laesst den Schnitt beim letzten Levelaufstieg enden
+    (``xp_graph.average_window``). Ohne die Stufe am gespeicherten Punkt
+    zoege er ihn nach einem Neustart darueber hinweg."""
+    zurueck = _hin_und_zurueck([P(at=990.0, seconds=300.0, rate=1.0, level=34)])
+    assert zurueck["Held"][0]["level"] == 34
+
+
+def test_eine_zeile_ohne_stufe_gilt_als_unbekannt():
+    """Nicht als Stufe 1: 0 heisst "weiss ich nicht" und trennt im Graphen
+    nie — eine erfundene Stufe wuerde an falscher Stelle trennen."""
+    payload = {"version": xp_history.VERSION, "saved_at": 1000.0,
+               "characters": {"Held": [{"at": 1000.0, "seconds": 300.0,
+                                        "rate": 1.0}]}}
+    zurueck = xp_history.from_payload(payload, now_mono=1000.0, now_wall=1000.0,
+                                      span_s=SPAN)
+    assert zurueck["Held"][0]["level"] == 0
 
 
 # ------------------------------ Kürzen ------------------------------------ #

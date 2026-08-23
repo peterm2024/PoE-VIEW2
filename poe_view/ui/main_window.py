@@ -3802,7 +3802,8 @@ class MainWindow(QMainWindow):
         if rate is None or watch.interval_seconds is None:
             return
         watch.history.append(XpPoint(at=now, seconds=watch.interval_seconds, rate=rate,
-                                     instance=watch.interval_instance))
+                                     instance=watch.interval_instance,
+                                     level=watch.level))
         cutoff = now - GRAPH_SPAN_S
         while watch.history and watch.history[0].at <= cutoff:
             watch.history.pop(0)

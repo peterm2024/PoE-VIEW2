@@ -92,6 +92,15 @@ TOPICS: tuple[tuple[str, str], ...] = (
 Path of Exile sign-in page. PoE-VIEW2 never sees your password: it
 receives only an access token, which is kept in the Windows Credential
 Manager.</p>
+<p>Two things on that page look more alarming than they are. It asks you
+to authorize <b>PoE-VIEW</b>, without the "2" — that is this tool: the
+first PoE-VIEW was a LabVIEW program, this one is the rewrite in Python,
+and the registration with GGG came along from the older one. And a red
+box tells you GGG cannot verify that the request came from PoE-VIEW:
+every application without a client secret gets it, because a desktop
+program has nowhere to keep a secret, and it says nothing about your
+login going wrong. The permissions the page lists are all read-only; the
+API offers this tool no way to change anything on your account.</p>
 <p>Pick a league in the second toolbar row, then click a stash tab or a
 character on the left. Tabs are fetched when you first open them, not
 all at once — that keeps the tool inside the API rate limit.</p>
@@ -300,9 +309,13 @@ on balance. Dying does that from act 5 onwards.</li>
 <li>A <b>dark green block behind several bars</b> means they are the
 same map: you left it and came back. Its height is the rate for the map
 as a whole, so you can see what the trip outside cost.</li>
-<li>The <b>dashed line</b> is your overall rate across everything
-visible — a quick check whether the last map was above or below your
-own average.</li>
+<li>The <b>average line</b> is your rate over the stretch you are
+currently in: since your last level-up, or since a break of more than
+half an hour, whichever came later, and never more than the three hours
+on screen. That stretch is drawn as a <b>solid green line</b>, its
+length is written next to the number, and outside it the line thins to a
+dashed one — there it is only a yardstick for the older bars, not a
+measurement.</li>
 </ul>
 <p><b>Closing the program does not empty the graph.</b> Finished sections
 are stored per account and drawn again next time, as long as they still

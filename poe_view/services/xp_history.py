@@ -38,7 +38,12 @@ log = logging.getLogger(__name__)
 # Erhöhen, sobald sich der Aufbau einer Zeile ändert. Ein alter Stand
 # wird dann verworfen statt falsch gedeutet — der Verlauf ist Komfort,
 # kein Datenbestand, für den sich eine Migration lohnte.
-VERSION = 1
+#
+# 2 (2026-08-23): ``level`` je Zeile, damit der Schnitt im Graphen beim
+# letzten Levelaufstieg enden kann (``xp_graph.average_window``). Ein
+# Stand ohne die Stufe würde den Zeitraum über einen Aufstieg hinweg
+# ziehen — lieber einmal ohne Verlauf starten.
+VERSION = 2
 
 # Zeitstempel, die weiter als das in der Zukunft liegen, gelten als
 # kaputt (Sommerzeit, gestellte Uhr, kopierte Datei von einem anderen
@@ -58,6 +63,7 @@ class _Point(Protocol):
     seconds: float
     rate: float
     instance: str
+    level: int
 
 
 def path_for(account_name: str) -> Path:
@@ -78,7 +84,8 @@ def to_payload(histories: dict[str, Sequence[_Point]], *,
         zeilen = [{"at": now_wall - (now_mono - p.at),
                    "seconds": p.seconds,
                    "rate": p.rate,
-                   "instance": p.instance}
+                   "instance": p.instance,
+                   "level": p.level}
                   for p in points]
         if zeilen:
             characters[name] = zeilen
@@ -124,10 +131,12 @@ def _restore_row(row: object, now_mono: float, now_wall: float,
     if alter >= span_s or alter < -_FUTURE_TOLERANCE_S:
         return None
     instance = row.get("instance", "")
+    level = row.get("level", 0)
     return {"at": now_mono - alter,
             "seconds": seconds,
             "rate": rate,
-            "instance": instance if isinstance(instance, str) else ""}
+            "instance": instance if isinstance(instance, str) else "",
+            "level": level if isinstance(level, int) else 0}
 
 
 def save(histories: dict[str, Sequence[_Point]], path: Path, *,

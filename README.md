@@ -19,6 +19,12 @@ this only removes the locally stored token; it does not revoke the
 authorization on GGG's side. To fully revoke it, do that from your GGG
 account settings.
 
+The "2" in the name is history: the first PoE-VIEW was a LabVIEW
+program, and this one is the rewrite in Python — the second tool of that
+name. Its registration with GGG came along from the older one, which is
+why the sign-in page still asks you to authorize "PoE-VIEW" without the
+2.
+
 ## Screenshots
 
 *All screenshots show synthetic demo data, not a real account.*
@@ -246,6 +252,24 @@ clicking "Log in" opens the GGG sign-in flow in your browser.
 Windows SmartScreen warns about an "unknown publisher" for unsigned
 applications. This affects any application without code signing and
 can be confirmed via "More info" and "Run anyway".
+
+The GGG sign-in page carries a warning of its own, and two things on it
+look more alarming than they are. It asks you to authorize
+**PoE-VIEW**, without the "2" — that is this tool, under the client name
+it inherited from its LabVIEW predecessor (see the top of this page).
+Below the permission list sits a red box saying GGG cannot verify that
+the request came from PoE-VIEW. Every application without a client
+secret gets that box: a desktop program cannot keep a secret, since it
+would ship inside the `.exe` where anyone could read it, so GGG has no
+way to prove the request came from this program rather than from
+something that copied the client ID. It says nothing about your
+particular login going wrong; PKCE and a state parameter are what
+protect the login itself in transit.
+
+The permissions the page lists are all read-only: your account name,
+your profile, your leagues, your characters including their inventories
+and passive trees, and your stashes. The API offers this tool no way to
+change anything on your account.
 
 ## Tech stack
 

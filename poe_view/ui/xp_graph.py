@@ -24,6 +24,12 @@ Veröffentlichung:
   Erfahrung gemacht — Pause, Stadt, Truhen sortieren. Eine durchgezogene
   Linie müsste dort etwas behaupten.
 
+Die gestrichelte Linie auf dem Schnitt hat seit dem 2026-08-23 einen
+begrenzten Zeitraum (`average_window`): Sie mittelte zuvor über alles
+Sichtbare und wurde trotzdem über die volle Breite gezeichnet — die Zahl
+stimmte, die Aussage über ihren Geltungsbereich nicht. Über der Strecke,
+für die sie wirklich gerechnet ist, ist sie jetzt dick und durchgezogen.
+
 Die Rechnung (`graph_layout`) steht bewusst als reine Funktion neben dem
 Widget: Sie lässt sich ohne Fenster und ohne Bildvergleich prüfen, und
 Fehler in einer Zeichenroutine findet man sonst nur mit dem Auge.
@@ -49,6 +55,23 @@ _GROUP_COLOR = blend(QColor(DASH_OK), QColor("#000000"), 0.55)
 # Die gestrichelte Gesamtrate. Bewusst nicht grün: Sie ist eine
 # Bezugslinie, kein weiterer Messwert.
 _AVERAGE_COLOR = "#c9c9c9"
+
+# Über dem Zeitraum, für den der Schnitt WIRKLICH gerechnet ist, wird
+# dieselbe Linie dick und durchgezogen (Peters Vorgabe, 2026-08-23).
+# Dunkelgrün, aber heller als die Map-Flächen — gemessen (CIEDE2000)
+# gegen alles, worauf sie zu liegen kommt: Hintergrund ΔE 32,5,
+# Gruppenfläche 11,9, Balken 21,4. Ein Schritt dunkler (Faktor 0,45)
+# verschwände auf der Gruppenfläche (ΔE 6,0).
+_AVERAGE_SPAN_COLOR = blend(QColor(DASH_OK), QColor("#000000"), 0.35)
+_AVERAGE_SPAN_W = 3
+
+# Ab welcher Lücke gilt das Spielen als unterbrochen? GGG veröffentlicht
+# die Erfahrung im laufenden Betrieb mit Abständen von anderthalb bis
+# SIEBZEHN Minuten (gemessen, §4.35) — jede Schwelle in dieser
+# Größenordnung würde mitten im Spielen trennen. Dreißig Minuten lassen
+# davon fast das Doppelte Luft und erkennen trotzdem jede Pause, die
+# diesen Namen verdient.
+AVERAGE_PAUSE_S = 30 * 60.0
 
 # Peters Vorgabe: drei Stunden. Ein Spielabend passt damit größtenteils
 # ins Bild, und ein Balken einer Fünf-Minuten-Map ist bei üblichen
@@ -76,12 +99,17 @@ class XpPoint(NamedTuple):
 
     ``instance`` ist die Kennung der Gebiets-Instanz aus der Client.txt.
     Gleiche Kennung = derselbe Map-Durchgang, auch wenn man
-    zwischendurch draußen war."""
+    zwischendurch draußen war.
+
+    ``level`` ist die Stufe, die der Charakter bei dieser
+    Veröffentlichung hatte — sie begrenzt den Zeitraum des Schnitts
+    (``average_window``). 0 heißt "unbekannt" und trennt nie."""
 
     at: float
     seconds: float
     rate: float
     instance: str = ""
+    level: int = 0
 
     @property
     def gain(self) -> float:
@@ -100,7 +128,12 @@ class Layout:
 
     ``groups`` sind die Flächen hinter den Balken: je ein Rechteck über
     alle Abschnitte EINER Map, auf Höhe ihrer gemeinsamen Rate.
-    ``average_y`` ist die Höhe der gestrichelten Linie über allem."""
+    ``average_y`` ist die Höhe der Schnitt-Linie.
+
+    ``average_x`` ist der linke Rand des Zeitraums, über den der Schnitt
+    gerechnet ist (``average_window``), ``average_span_s`` seine Länge in
+    Sekunden. Beides braucht die Zeichnung, um den Zeitraum kenntlich zu
+    machen, statt ihn nur zu behaupten."""
 
     bars: list[tuple[float, float, float, float, float]]
     zero_y: float
@@ -109,6 +142,8 @@ class Layout:
     groups: list[tuple[float, float, float, float]] = field(default_factory=list)
     average_y: float | None = None
     average: float = 0.0
+    average_x: float = 0.0
+    average_span_s: float = 0.0
 
 
 def combined_rate(points: Sequence[XpPoint]) -> float:
@@ -150,6 +185,62 @@ def visible_points(points: Sequence[XpPoint], now: float,
     hinauswandert, wird beschnitten statt verworfen — sonst verschwände
     eine lange Map schlagartig, statt langsam hinauszulaufen."""
     return [p for p in points if p.at > now - span_s]
+
+
+def average_window(points: Sequence[XpPoint], now: float,
+                   span_s: float = GRAPH_SPAN_S,
+                   pause_s: float = AVERAGE_PAUSE_S) -> list[XpPoint]:
+    """Die Abschnitte, über die der Schnitt gerechnet wird.
+
+    Peter, 2026-08-23, vor dieser zweiten Fassung: "Wir müssen auf alle
+    Fälle irgendwie kenntlich machen, für welchen Bereich die gelten.
+    Auch sollten wir überlegen, für welchen Zeitraum wir die maximal
+    berechnen, wahrscheinlich am sinnvollsten der Zeitpunkt seit dem
+    letzten Level zusammen mit der aktuellen Sessionlänge (hier aber
+    maximal 3 h)."
+
+    Der Zeitraum beginnt also beim JÜNGSTEN dieser drei Ereignisse:
+
+    - drei Stunden zurück (die Breite des Graphen),
+    - der letzte Levelaufstieg,
+    - das Ende der letzten Pause von mehr als ``pause_s``.
+
+    Vorher hatte die Linie kein Ende: Sie mittelte über alles Sichtbare
+    und wurde über die volle Breite gezeichnet, auch wenn sie — wie in
+    Peters Bild vom 2026-08-23 — aus zwei Balken der letzten zehn
+    Minuten stammte. Die Zahl war richtig, die Aussage über ihren
+    Geltungsbereich falsch.
+
+    **Der Abschnitt MIT dem Levelaufstieg zählt noch dazu.** Der Aufstieg
+    fällt mitten in eine Zone, die Veröffentlichung danach trägt schon
+    die neue Stufe. Ihn auszuschließen hieße, direkt nach einem Aufstieg
+    gar keinen Schnitt zu haben; ihn mitzunehmen kostet den Teil der Zone
+    vor dem Aufstieg — das ist die kleinere Ungenauigkeit."""
+    shown = visible_points(points, now, span_s)
+    if not shown:
+        return []
+    level = shown[-1].level
+    fenster = [shown[-1]]
+    for punkt in reversed(shown[:-1]):
+        if punkt.level != level:
+            break
+        # Die Lücke geht vom Ende des älteren Abschnitts bis zum ANFANG
+        # des jüngeren — nicht bis zu dessen Veröffentlichung, sonst
+        # zählte die Zeit in der Zone selbst als Pause mit.
+        if fenster[0].at - max(fenster[0].seconds, 0.0) - punkt.at > pause_s:
+            break
+        fenster.insert(0, punkt)
+    return fenster
+
+
+def span_label(seconds: float) -> str:
+    """"34 min" / "1 h 34 min" — die Länge des Zeitraums neben dem
+    Schnitt. Ohne sie müsste man die Länge der Linie gegen eine x-Achse
+    schätzen, die nur ihre beiden Enden beschriftet."""
+    minuten = max(1, round(seconds / 60))
+    if minuten < 60:
+        return f"{minuten} min"
+    return f"{minuten // 60} h {minuten % 60:02d} min"
 
 
 def graph_layout(points: Sequence[XpPoint], now: float, width: float, height: float,
@@ -196,9 +287,16 @@ def graph_layout(points: Sequence[XpPoint], now: float, width: float, height: fl
         h = max(abs(rate) / spread * height, _MIN_BAR_H)
         groups.append((x, zero_y - h if rate >= 0 else zero_y, max(end - x, _MIN_BAR_W), h))
 
-    average = combined_rate(shown)
+    fenster = average_window(shown, now, span_s)
+    average = combined_rate(fenster)
+    # Der Zeitraum beginnt beim ANFANG des ersten Abschnitts, nicht bei
+    # seiner Veröffentlichung: Gezeichnet werden soll die Strecke, die der
+    # Schnitt abdeckt, und der erste Balken gehört ganz dazu.
+    beginn = fenster[0].at - max(fenster[0].seconds, 0.0) if fenster else now
+    average_x = max(0.0, min(width, width - (now - beginn) / span_s * width))
     return Layout(bars, zero_y, peak, trough, groups,
-                  zero_y - average / spread * height, average)
+                  zero_y - average / spread * height, average,
+                  average_x, max(0.0, now - beginn))
 
 
 def axis_label(rate: float) -> str:
@@ -275,11 +373,23 @@ class XpGraph(QWidget):
             # und beantwortet damit die Frage, die ein einzelner Balken
             # nicht kann: liege ich über oder unter meinem Schnitt?
             if layout.average_y is not None and layout.average > 0:
-                stift = QPen(QColor(_AVERAGE_COLOR))
-                stift.setStyle(Qt.PenStyle.DashLine)
-                painter.setPen(stift)
-                painter.drawLine(0, round(layout.average_y),
-                                 width, round(layout.average_y))
+                y = round(layout.average_y)
+                beginn = round(layout.average_x)
+                # Links vom Zeitraum bleibt es bei der dünnen gestrichelten
+                # Linie: Dort GILT der Schnitt nicht, dort ist er nur noch
+                # Vergleichsmaß für die älteren Balken.
+                if beginn > 0:
+                    stift = QPen(QColor(_AVERAGE_COLOR))
+                    stift.setStyle(Qt.PenStyle.DashLine)
+                    painter.setPen(stift)
+                    painter.drawLine(0, y, beginn, y)
+                # Über seinem Zeitraum dick und durchgezogen — das ist die
+                # Strecke, für die die Zahl gerechnet ist.
+                spanne = QPen(QColor(_AVERAGE_SPAN_COLOR))
+                spanne.setWidth(_AVERAGE_SPAN_W)
+                painter.setPen(spanne)
+                painter.drawLine(beginn, y, width, y)
+                painter.setPen(QColor(_AVERAGE_COLOR))
                 # Beschriftung AN der Linie, nicht in der Ecke: Dort
                 # stand sie zuerst und verschwand prompt auf einem hohen
                 # Balken, weil ein gedämpftes Grau auf Grün nichts mehr
@@ -288,7 +398,8 @@ class XpGraph(QWidget):
                 painter.drawText(QRectF(2, layout.average_y - metrics.height(),
                                         width - 4, metrics.height()),
                                  Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
-                                 f"⌀ {axis_label(layout.average)}")
+                                 f"⌀ {axis_label(layout.average)}"
+                                 f" · {span_label(layout.average_span_s)}")
 
             painter.setPen(faint)
             if layout.peak > 0:

@@ -4366,7 +4366,9 @@ hat." Stattdessen eine **dunkelgrüne Fläche hinter den Balken**, über
 beide Aufenthalte hinweg, auf Höhe der gemeinsamen Rate (116,4 Mio./h) —
 die Lücke bleibt dabei sichtbar und zeigt genau, was der Ausflug gekostet
 hat. Dazu eine **gestrichelte Linie** auf der Gesamtrate über alles
-Sichtbare; sie steht ruhig, während die Abschnitte springen.
+Sichtbare; sie steht ruhig, während die Abschnitte springen. Über
+*alles* Sichtbare rechnete sie bis zum 2026-08-23 — seither über einen
+begrenzten Zeitraum, siehe §4.40.1.
 
 Die gemeinsame Rate ist Erfahrung durch GESPIELTE Zeit, nicht das Mittel
 der beiden Raten: (145,6 + 22,1) / 2 wären 83,9 Mio./h, richtig sind
@@ -4386,6 +4388,63 @@ Verschiebung wie beim Zeitstempel, und die Stelle, an der man sich
 vertut. Es ist eine DEBUG-Zeile: Fehlt sie, bleibt die Kennung leer und
 nichts wird gruppiert. Lieber nicht gruppieren als falsch gruppieren.
 
+#### 4.40.1 Der Zeitraum, für den der Schnitt gilt (2026-08-23)
+
+Peter, mit einem Bild seines Leveling-Feldes: "Wenn ich mir den
+XP-Bereich anschaue, sollten wir die durchschnittlich 2M XP/h unbedingt
+ändern. Wir müssen auf alle Fälle irgendwie kenntlich machen, für
+welchen Bereich die gelten."
+
+Auf dem Bild standen zwei Balken ganz rechts, zusammen keine zehn
+Minuten — und quer über die volle Breite die gestrichelte Linie mit
+"⌀ 2M". **Die Zahl war richtig, die Aussage über ihren Geltungsbereich
+falsch.** Der Schnitt rechnete über alles Sichtbare, die Achse darunter
+sagte "3 h ago → now", und beides zusammen behauptete drei Stunden, die
+nie gemessen wurden. Ein Fehler ohne Rechenfehler: Jeder Wert stimmte,
+die Zeichnung log.
+
+**Der Zeitraum** (`average_window`) beginnt seither beim JÜNGSTEN dieser
+drei Ereignisse — Peters Vorgabe, "der Zeitpunkt seit dem letzten Level
+zusammen mit der aktuellen Sessionlänge (hier aber maximal 3 h)":
+
+1. drei Stunden zurück, die Breite des Graphen,
+2. der letzte Levelaufstieg,
+3. das Ende der letzten Pause von mehr als 30 Minuten.
+
+Die **30 Minuten** sind nicht gegriffen: GGG veröffentlicht die
+Erfahrung im laufenden Betrieb mit Abständen von anderthalb bis
+siebzehn Minuten (gemessen, §4.35). Jede Schwelle in dieser
+Größenordnung würde mitten im Spielen trennen — derselbe Grund, aus dem
+`_XpWatch` für die Rate ganz ohne Pausenerkennung auskommt. Dreißig
+Minuten lassen fast das Doppelte Luft und erkennen trotzdem jede Pause,
+die den Namen verdient.
+
+**Der Abschnitt MIT dem Levelaufstieg zählt noch dazu.** Der Aufstieg
+fällt mitten in eine Zone, die Veröffentlichung danach trägt schon die
+neue Stufe. Ihn auszuschließen hieße, direkt nach einem Aufstieg gar
+keinen Schnitt zu haben; ihn mitzunehmen kostet den Teil der Zone vor
+dem Aufstieg. Die kleinere Ungenauigkeit gewinnt.
+
+**Gezeichnet** wird der Zeitraum, statt ihn zu behaupten (Peters
+Vorgabe): Über seiner Strecke ist die Linie dick (3 px) und
+durchgezogen, davor bleibt sie dünn und gestrichelt — dort GILT der
+Schnitt nicht, dort ist er nur noch Vergleichsmaß für die älteren
+Balken. Dazu steht die Länge der Strecke neben der Zahl
+("⌀ 2M · 34 min"), weil die x-Achse nur ihre beiden Enden beschriftet
+und man die Länge sonst schätzen müsste.
+
+Das Dunkelgrün ist gemessen, nicht gewählt (CIEDE2000 gegen alles,
+worauf die Linie zu liegen kommt): Hintergrund ΔE 32,5, Map-Fläche 11,9,
+Balken 21,4. Ein Schritt dunkler (Mischfaktor 0,45 statt 0,35)
+verschwände auf der Map-Fläche — ΔE 6,0.
+
+**Was dafür an Daten dazukam:** `XpPoint.level`, die Stufe zum Zeitpunkt
+der Veröffentlichung. Ohne sie ließe sich der letzte Aufstieg im Verlauf
+nicht finden. Stufe 0 heißt "unbekannt" und trennt nie — lieber gar
+nicht trennen als an einer erfundenen Stelle. Der gespeicherte Verlauf
+(§4.44) steht deshalb auf `VERSION = 2`; ein Stand ohne Stufe wird
+verworfen statt über einen Aufstieg hinweggerechnet.
+
 Die Geometrie steht als reine Funktion (`graph_layout`) neben dem
 Widget. Fehler in einer Zeichenroutine findet man sonst nur mit dem
 Auge, und das skaliert schlecht auf Fälle wie "Abschnitt von zwei
@@ -4395,7 +4454,10 @@ kurzen Abschnitte tragen die höchsten Raten).
 Getestet: `tests/test_xp_graph.py` (rechter Rand ist das Jetzt, Breite
 folgt der Dauer, Lücken bleiben Lücken, Ausscheiden nach drei Stunden,
 Verlust unter der Null-Linie, Mindestmaße, leere Achse,
-Achsenbeschriftung gröber als die Zahl daneben),
+Achsenbeschriftung gröber als die Zahl daneben; für §4.40.1: der
+Aufstieg und die Pause beenden den Zeitraum, siebzehn Minuten Lücke
+dagegen nicht, unbekannte Stufen trennen nie, die Strecke beginnt am
+Anfang ihres ersten Abschnitts und läuft nicht aus dem Bild),
 `tests/test_main_window_helpers.py` (Peters Ablauf Hideout → Map →
 Hideout liefert jetzt eine Rate; die drei Gegenproben zu den
 Bedingungen oben; Verlauf wächst je Abschnitt, vergisst nach drei
@@ -4770,9 +4832,15 @@ ignoriert; der Verlauf ist Komfort und darf die laufende Messung nicht
 stören. Ein unlesbarer oder versionsfremder Stand ist kein Fehlerfall,
 sondern einfach kein Verlauf.
 
-Das Modul kennt `XpPoint` nicht, sondern nur ein Protokoll mit vier
+Das Modul kennt `XpPoint` nicht, sondern nur ein Protokoll mit seinen
 Feldern — die Dienstschicht soll die Oberfläche nicht importieren, und
 zu speichern sind ohnehin nur Zahlen.
+
+**`VERSION = 2` seit dem 2026-08-23**: Jede Zeile trägt seither die
+Stufe mit, ohne die der Schnitt im Graphen nicht beim letzten
+Levelaufstieg enden kann (§4.40.1). Ein Stand ohne sie wird verworfen —
+er würde den Zeitraum über einen Aufstieg hinwegziehen, und der Verlauf
+ist Komfort, kein Datenbestand, für den sich eine Migration lohnte.
 
 Getestet: `tests/test_xp_history.py` (Alter übersteht den Neustart,
 Programmpause zählt mit, Kürzen auf das Fenster, Punkte aus der Zukunft,

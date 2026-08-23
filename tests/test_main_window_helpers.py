@@ -8373,6 +8373,29 @@ def test_a_map_visited_twice_keeps_one_instance_id_in_the_history(
     win.worker.wait(5000)
 
 
+def test_a_history_point_carries_the_level_it_was_earned_at(qapp, monkeypatch) -> None:
+    """Ohne die Stufe am Punkt koennte der Graph den Schnitt nicht beim
+    letzten Levelaufstieg enden lassen (``xp_graph.average_window``) —
+    Peter, 2026-08-23. Der Abschnitt MIT dem Aufstieg traegt bereits die
+    neue Stufe: GGG veroeffentlicht sie zusammen mit der Erfahrung."""
+    fake_now = [1000.0]
+    monkeypatch.setattr("poe_view.ui.main_window.time.monotonic", lambda: fake_now[0])
+
+    win = MainWindow()
+    win._on_character_snapshot("WitchOfPeter", 33, 0)             # Basis
+    fake_now[0] += 600.0
+    win._on_character_snapshot("WitchOfPeter", 33, 1_000_000)     # erste Aenderung
+    fake_now[0] += 600.0
+    win._on_character_snapshot("WitchOfPeter", 33, 3_000_000)     # erster Abschnitt
+    fake_now[0] += 600.0
+    win._on_character_snapshot("WitchOfPeter", 34, 6_000_000)     # Aufstieg
+
+    assert [p.level for p in win._xp_watch["WitchOfPeter"].history] == [33, 34]
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
 def test_a_publication_outside_a_zone_carries_no_instance(qapp, monkeypatch) -> None:
     """Faellt der Nenner auf das volle Intervall zurueck (Haendler, keine
     Zonen-Beobachtung), gehoert der Abschnitt zu keiner Map — und darf

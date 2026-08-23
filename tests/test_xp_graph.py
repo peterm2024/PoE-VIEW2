@@ -10,9 +10,11 @@ dem Auge zu finden.
 
 import pytest
 
-from poe_view.ui.xp_graph import (GRAPH_SPAN_S, XpGraph, XpPoint, axis_label,
+from poe_view.ui.xp_graph import (AVERAGE_PAUSE_S, GRAPH_SPAN_S, XpGraph,
+                                  XpPoint, average_window, axis_label,
                                   combined_rate, graph_layout,
-                                  group_by_instance, visible_points)
+                                  group_by_instance, span_label,
+                                  visible_points)
 
 WIDTH = 300.0
 HEIGHT = 100.0
@@ -196,13 +198,144 @@ def test_a_single_section_gets_no_area_behind_it() -> None:
     assert layout.groups == []
 
 
-def test_the_dashed_line_is_the_rate_over_everything_visible() -> None:
+def test_the_average_line_is_the_rate_over_its_own_stretch() -> None:
     """Sie steht ruhig, waehrend die einzelnen Abschnitte springen — und
     beantwortet damit, was ein einzelner Balken nicht kann: liege ich
-    ueber oder unter meinem Schnitt?"""
+    ueber oder unter meinem Schnitt?
+
+    Hier deckt der Zeitraum beide Abschnitte ab (dieselbe Stufe, 56 s
+    Pause), der Wert ist also derselbe wie ueber alles Sichtbare. Wo er
+    das NICHT ist, steht weiter unten."""
     layout = graph_layout(_VERKAUFSPAUSE, 0.0, WIDTH, HEIGHT)
 
     assert layout.average == pytest.approx(combined_rate(_VERKAUFSPAUSE))
     assert layout.average_y is not None
     # Zwischen den beiden Balken, wie die Rate selbst.
     assert layout.bars[0][1] < layout.average_y < layout.bars[1][1]
+
+
+# --- Der Zeitraum, fuer den der Schnitt gilt (Peter, 2026-08-23) ------- #
+#
+# "Wir muessen auf alle Faelle irgendwie kenntlich machen, fuer welchen
+# Bereich die gelten. Auch sollten wir ueberlegen, fuer welchen Zeitraum
+# wir die maximal berechnen, wahrscheinlich am sinnvollsten der Zeitpunkt
+# seit dem letzten Level zusammen mit der aktuellen Sessionlaenge (hier
+# aber maximal 3h)."
+
+
+def _stufe(minuten_her: float, dauer_s: float, rate: float, level: int) -> XpPoint:
+    """Wie ``_point``, nur mit Stufe — die begrenzt den Zeitraum."""
+    return XpPoint(at=-minuten_her * 60.0, seconds=dauer_s, rate=rate, level=level)
+
+
+def test_the_stretch_stops_at_the_last_level_up() -> None:
+    """Der Schnitt beantwortet "wie schnell komme ich auf DIESER Stufe
+    voran". Was auf der vorigen verdient wurde, gehoert nicht hinein."""
+    punkte = [_stufe(60, 600, 1_000_000, 33),
+              _stufe(40, 600, 2_000_000, 33),
+              _stufe(5, 600, 3_000_000, 34)]
+
+    assert average_window(punkte, 0.0) == [punkte[-1]]
+
+
+def test_sections_before_the_level_up_do_not_pull_the_average() -> None:
+    """Die Gegenprobe zur Geometrie: Der WERT muss sich mit dem Zeitraum
+    aendern, sonst waere die kuerzere Linie nur Kosmetik."""
+    punkte = [_stufe(60, 600, 1_000_000, 33),
+              _stufe(40, 600, 2_000_000, 33),
+              _stufe(5, 600, 3_000_000, 34)]
+    layout = graph_layout(punkte, 0.0, WIDTH, HEIGHT)
+
+    assert layout.average == pytest.approx(3_000_000)
+    assert layout.average != pytest.approx(combined_rate(punkte))
+
+
+def test_a_break_longer_than_half_an_hour_ends_the_stretch() -> None:
+    """Zwei Stunden nichts getan ist keine Fortsetzung derselben Runde,
+    auch wenn dieselbe Stufe noch steht (spaetes Spiel, in dem eine Stufe
+    laenger dauert als ein Abend)."""
+    punkte = [_stufe(120, 600, 1_000_000, 90),
+              _stufe(5, 600, 3_000_000, 90)]
+
+    assert average_window(punkte, 0.0) == [punkte[-1]]
+
+
+def test_a_seventeen_minute_gap_is_still_playing() -> None:
+    """Die gemessene Obergrenze im laufenden Betrieb (§4.35). Eine
+    Schwelle, die hier schon trennt, wuerde mitten im Spielen trennen —
+    genau der Fehler, den ``_XpWatch`` fuer die Rate vermeidet."""
+    punkte = [_stufe(40, 600, 1_000_000, 90),
+              _stufe(13, 600, 3_000_000, 90)]  # beginnt bei -23 min
+
+    assert average_window(punkte, 0.0) == punkte
+    assert AVERAGE_PAUSE_S > 17 * 60
+
+
+def test_unknown_levels_never_cut_the_stretch() -> None:
+    """Stufe 0 heisst "nicht bekannt" — etwa bei einem Verlauf aus einer
+    Fassung, die sie noch nicht mitgeschrieben hat. Lieber gar nicht
+    trennen als an einer erfundenen Stelle."""
+    punkte = [_point(40, 600, 1_000_000), _point(13, 600, 3_000_000)]
+
+    assert average_window(punkte, 0.0) == punkte
+
+
+def test_the_stretch_never_reaches_beyond_the_graph() -> None:
+    """Drei Stunden sind die aeussere Grenze: Was nicht gezeichnet wird,
+    darf auch nicht mitgerechnet werden."""
+    punkte = [_stufe(240, 600, 9_000_000, 90), _stufe(5, 600, 3_000_000, 90)]
+    layout = graph_layout(punkte, 0.0, WIDTH, HEIGHT)
+
+    assert average_window(punkte, 0.0) == [punkte[-1]]
+    assert layout.average_span_s <= GRAPH_SPAN_S
+
+
+def test_the_solid_stretch_starts_where_its_first_section_starts() -> None:
+    """Gezeichnet wird die Strecke, die der Schnitt abdeckt — sie beginnt
+    beim Betreten der Zone, nicht bei ihrer Veroeffentlichung."""
+    punkte = [_stufe(60, 600, 1_000_000, 33), _stufe(5, 600, 3_000_000, 34)]
+    layout = graph_layout(punkte, 0.0, WIDTH, HEIGHT)
+
+    assert layout.average_span_s == pytest.approx(15 * 60)      # 5 min + 10 min Dauer
+    assert layout.average_x == pytest.approx(WIDTH - 15 * 60 / GRAPH_SPAN_S * WIDTH)
+    assert layout.average_x == pytest.approx(layout.bars[-1][0])
+
+
+def test_the_stretch_cannot_run_out_of_the_picture() -> None:
+    """Ein Abschnitt, der links angeschnitten ist, zieht die Linie nicht
+    aus dem Bild hinaus."""
+    layout = graph_layout([_stufe(175, 900, 1_000_000, 33)], 0.0, WIDTH, HEIGHT)
+
+    assert layout.average_x == 0.0
+
+
+def test_an_uninterrupted_stretch_covers_the_full_width() -> None:
+    """Ohne Aufstieg und ohne Pause gibt es nichts abzugrenzen — dann
+    sieht die Linie aus wie vorher, nur eben zu Recht."""
+    # Neun Abschnitte im Abstand von zehn Minuten, ueber das ganze
+    # Fenster verteilt und alle auf derselben Stufe.
+    punkte = [_stufe(175 - 20 * i, 600, 1_000_000, 90) for i in range(9)]
+    layout = graph_layout(punkte, 0.0, WIDTH, HEIGHT)
+
+    assert average_window(punkte, 0.0) == punkte
+    assert layout.average_x == 0.0
+
+
+def test_span_label_reads_as_a_length_of_time() -> None:
+    """Neben dem Schnitt steht, wie lang seine Strecke ist. Unter einer
+    Minute waere "0 min" irrefuehrend — es ist ja etwas gemessen worden."""
+    assert span_label(34 * 60) == "34 min"
+    assert span_label(90 * 60) == "1 h 30 min"
+    assert span_label(30) == "1 min"
+
+
+def test_the_widget_paints_a_cut_stretch(qapp) -> None:
+    """Beide Zweige der Zeichnung einmal ausfuehren: gestrichelt vor dem
+    Zeitraum, dick und gruen darueber."""
+    graph = XpGraph()
+    graph.resize(300, 120)
+    graph.set_points([_stufe(60, 600, 1_000_000, 33),
+                      _stufe(5, 600, 3_000_000, 34)], 0.0)
+    graph.render(graph.grab())
+
+    assert graph._points[-1].level == 34
