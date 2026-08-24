@@ -9512,3 +9512,124 @@ def test_login_dialoge_haengen_am_hauptfenster(qapp) -> None:
     win._close_login_prompts()
     win.worker.stop()
     win.worker.wait(5000)
+
+
+# ------------- Die Mod-Sammlung im Fenster (§4.52) --------------------- #
+#
+# Peter, 2026-08-24: "hat etwas von einer Briefmarkensammlung: Einfach mal
+# jedes Objekt in der Hand gehalten zu haben und von PoE-VIEW
+# kategorisiert und eingetragen."
+
+
+def _ring(**felder):
+    felder.setdefault("typeLine", "Gold Ring")
+    felder.setdefault("frameType", 2)          # Rare
+    return Item.model_validate(felder)
+
+
+def test_a_loaded_tab_lands_in_the_mod_collection(qapp) -> None:
+    """Gesammelt wird beilaeufig: Was ohnehin hereinkommt, wird
+    eingetragen. Ein eigener Abruf dafuer waere Rate-Limit-Budget fuer
+    etwas, das schon da ist."""
+    win = MainWindow()
+    win._current_league = "Standard"
+
+    win._on_stash_items("Standard", "t1", "Currency",
+                        [_ring(explicitMods=["+96 to maximum Life"])], True)
+
+    assert win._mod_collection.get("explicitMods", "+96 to maximum Life") is not None
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_the_best_roll_you_have_seen_gets_a_star(qapp) -> None:
+    win = MainWindow()
+    for wert in (41, 96):
+        win._mod_collection.observe("explicitMods", f"+{wert} to maximum Life", rarity=2)
+    win._mod_collection.clear_new()
+
+    marke = win._mod_mark_for(_ring())
+    assert marke("explicitMods", "+96 to maximum Life") == win.MOD_MARK_BEST
+    assert marke("explicitMods", "+41 to maximum Life") == win.MOD_MARK_NONE
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_a_mod_you_have_never_seen_gets_the_find_mark(qapp) -> None:
+    win = MainWindow()
+    win._mod_collection.observe("explicitMods", "+96 to maximum Life", rarity=2)
+
+    marke = win._mod_mark_for(_ring())
+    assert marke("explicitMods", "+96 to maximum Life") == win.MOD_MARK_NEW
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_the_mark_compares_within_the_rarity_of_the_item(qapp) -> None:
+    """Ein Rare gegen die festen Werte eines Uniques zu messen ergaebe
+    einen Stern, der nichts bedeutet."""
+    win = MainWindow()
+    for wert in (4, 100):
+        win._mod_collection.observe("explicitMods", f"{wert}% increased Attack Speed",
+                                    rarity=3)      # Unique
+    win._mod_collection.clear_new()
+
+    unique = win._mod_mark_for(_ring(frameType=3))
+    rare = win._mod_mark_for(_ring(frameType=2))
+
+    assert unique("explicitMods", "100% increased Attack Speed") == win.MOD_MARK_BEST
+    assert rare("explicitMods", "100% increased Attack Speed") == win.MOD_MARK_NONE
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_the_starting_stock_is_read_in_slices(qapp) -> None:
+    """59.249 Items auf einmal kosten gemessen 1,3 Sekunden, und die
+    stuende das Fenster still. Nach der letzten Scheibe ist ausserdem
+    nichts mehr "neu" — der Grundstock ist kein Fund."""
+    win = MainWindow()
+    win._account_name = "TestAccount#1234"
+    win._mod_seed_queue = [_ring(explicitMods=[f"+{i} to maximum Life"])
+                           for i in range(win._MOD_SEED_SLICE + 5)]
+
+    win._seed_mod_collection_slice()
+    assert len(win._mod_seed_queue) == 5, "erste Scheibe abgearbeitet, Rest bleibt liegen"
+
+    win._seed_mod_collection_slice()
+    assert win._mod_seed_queue == []
+    assert len(win._mod_collection) == 1          # alle Zeilen, eine Identitaet
+    assert win._mod_collection.is_new("explicitMods", "+1 to maximum Life") is False
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_a_star_from_the_old_stock_is_hollow(qapp) -> None:
+    """Der Bestwert steht, aber er stuetzt sich auf den Altbestand: In der
+    Liga dieses Items gibt es noch zu wenige Beobachtungen. Die Grundlage
+    gehoert zur Aussage, deshalb ein eigenes Zeichen statt einer Fussnote."""
+    from poe_view.services.mod_collection import MIN_LEAGUE_OBSERVATIONS
+
+    win = MainWindow()
+    for wert in (41, 96):
+        win._mod_collection.observe("explicitMods", f"+{wert} to maximum Life", rarity=2)
+    win._mod_collection.clear_new()
+
+    duenn = win._mod_mark_for(_ring(league="Allflame"))
+    assert duenn("explicitMods", "+96 to maximum Life") == win.MOD_MARK_BEST_LEGACY
+
+    for wert in range(60, 60 + MIN_LEAGUE_OBSERVATIONS):
+        win._mod_collection.observe("explicitMods", f"+{wert} to maximum Life",
+                                    rarity=2, league="Allflame")
+    win._mod_collection.clear_new()
+    dicht = win._mod_mark_for(_ring(league="Allflame"))
+    hoechster = 60 + MIN_LEAGUE_OBSERVATIONS - 1
+    assert dicht("explicitMods", f"+{hoechster} to maximum Life") == win.MOD_MARK_BEST
+
+    win.worker.stop()
+    win.worker.wait(5000)
+

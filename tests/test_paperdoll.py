@@ -262,3 +262,27 @@ def test_the_paperdoll_is_written_in_english_like_the_rest_of_the_ui(qapp) -> No
     assert "(Body Armour)" in joined  # Platzhalter eines leeren Slots
 
     dialog.deleteLater()
+
+
+def test_the_equipment_view_shows_the_collection_marks(qapp) -> None:
+    """Die Ausruestung ist der Ort, an dem die Frage "ist das ein guter
+    Roll?" am haeufigsten aufkommt — sie darf die Marken der Mod-Sammlung
+    (§4.52) nicht als einziges Detail-Panel weglassen."""
+    from poe_view.api.models import Character, Item
+    from poe_view.ui.paperdoll import PaperdollDialog
+
+    char = Character.model_validate({"name": "WitchOfPeter", "class": "Witch",
+                                     "level": 90, "league": "Standard"})
+    item = Item.model_validate({"typeLine": "Gold Ring", "frameType": 2,
+                                "inventoryId": "Ring",
+                                "explicitMods": ["+96 to maximum Life"]})
+    gesehen: list[str] = []
+
+    dialog = PaperdollDialog(char, [item], lambda i: None,
+                             mark_for=lambda i: (
+                                 lambda kind, line: gesehen.append(line) or "★ "))
+    dialog._show_detail(item)
+
+    assert gesehen == ["+96 to maximum Life"]
+    dialog.close()
+

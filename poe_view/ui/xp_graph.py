@@ -233,6 +233,25 @@ def average_window(points: Sequence[XpPoint], now: float,
     return fenster
 
 
+def label_top(average_y: float, line_h: float, plot_h: float) -> float:
+    """Wo die Beschriftung der Schnitt-Linie hingehört (obere Kante).
+
+    Normalerweise ÜBER die Linie. Liegt die aber weit oben, fiele der Text
+    aus dem Bild — Peter, 2026-08-24, mit einem Bild seines Leveling-
+    Felds: "ich kann die XP/h hier nicht lesen". Bei ihm lag der Schnitt
+    dicht unter der Spitze, der Text landete oberhalb des Widgets und
+    obendrein in der Spitzen-Beschriftung.
+
+    Dann also UNTER die Linie, aber nie in die erste Zeile: Dort steht die
+    Spitze (``axis_label(peak)``), und zwei Beschriftungen übereinander
+    sind schlechter als eine verschobene. Und nie unter den unteren Rand,
+    sonst verschwände sie in der Zeitachse."""
+    oben = average_y - line_h
+    if oben >= line_h:
+        return oben
+    return max(line_h, min(average_y, plot_h - line_h))
+
+
 def span_label(seconds: float) -> str:
     """"34 min" / "1 h 34 min" — die Länge des Zeitraums neben dem
     Schnitt. Ohne sie müsste man die Länge der Linie gegen eine x-Achse
@@ -395,7 +414,8 @@ class XpGraph(QWidget):
                 # Balken, weil ein gedämpftes Grau auf Grün nichts mehr
                 # hergibt. An der Linie ist sie ohnehin besser aufgehoben
                 # — sie erklärt genau diese eine Linie.
-                painter.drawText(QRectF(2, layout.average_y - metrics.height(),
+                painter.drawText(QRectF(2, label_top(layout.average_y,
+                                                     metrics.height(), plot_h),
                                         width - 4, metrics.height()),
                                  Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
                                  f"⌀ {axis_label(layout.average)}"

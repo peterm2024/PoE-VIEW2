@@ -4456,6 +4456,15 @@ Balken. Dazu steht die Länge der Strecke neben der Zahl
 ("⌀ 2M · 34 min"), weil die x-Achse nur ihre beiden Enden beschriftet
 und man die Länge sonst schätzen müsste.
 
+**Wo die Beschriftung steht, ist eine eigene Entscheidung** (Peter,
+2026-08-24, mit einem Bild: "ich kann die XP/h hier nicht lesen"). Sie
+stand über der Linie — bei einem Schnitt dicht unter der Spitze landete
+sie dadurch oberhalb des Widgets und obendrein in der Spitzen-
+Beschriftung. `label_top()` weicht seither unter die Linie aus, hält aber
+die erste Zeile frei (dort steht die Spitze) und bleibt im Bild. Als
+reine Funktion neben dem Widget, weil sich eine Platzierung sonst nur
+mit dem Auge prüfen lässt.
+
 Das Dunkelgrün ist gemessen, nicht gewählt (CIEDE2000 gegen alles,
 worauf die Linie zu liegen kommt): Hintergrund ΔE 32,5, Map-Fläche 11,9,
 Balken 21,4. Ein Schritt dunkler (Mischfaktor 0,45 statt 0,35)
@@ -5679,6 +5688,148 @@ gemerkte Name steht dann in keiner Liste mehr, `findText` findet ihn
 nicht, und die Auswahl fällt wie bisher auf den ersten Eintrag. Eine
 eigene Prüfung wäre dieselbe Entscheidung ein zweites Mal, getroffen an
 einer Stelle, die die fertige Liste noch gar nicht kennt.
+
+### 4.52 Die Mod-Sammlung (`services/mod_collection.py`)
+
+Peter, 2026-08-24: "Ich finde die Idee mit der eigenen Datenbank am
+besten, hat etwas von einer Briefmarkensammlung: Einfach mal jedes Objekt
+in der Hand gehalten zu haben und von PoE-VIEW kategorisiert und
+eingetragen. Kann ja auch Spaß machen ;-)"
+
+Vorgeschichte ist die Frage nach Affixen statt Mod-Zeilen. Die
+GGG-Konto-API liefert Mod-Zeilen als fertigen Text: kein Affix-Name, kein
+Tier, keine Wertspanne. **Nachgemessen am 2026-08-24 an Peters Cache:
+kein einziges `extended`/`magnitudes`-Feld** — diese Angaben gibt es in
+der Public-Stash- und der Trade-API, nicht in unserer. Eine fremde
+Mod-Datenbank (RePoE o. ä.) wäre der übliche Ausweg; sie muss zur
+laufenden Liga passen und bringt fremde Daten ins Repo.
+
+**Was diese Sammlung stattdessen tut: aufschreiben, was durch die eigenen
+Hände ging.** Kein Tier, keine wahre Spanne — sondern "so oft gesehen, so
+hoch und so niedrig gerollt, auf Items dieser Stufen". Das ist ehrlich,
+braucht niemanden sonst, veraltet bei keinem Patch und ist ab dem
+zehnten Item nützlich statt ab dem zehntausendsten.
+
+**Ein Primitiv trägt alles:** die Zeile ohne ihre Zahlen.
+`+96 to maximum Life` → `# to maximum Life`. Das Vorzeichen gehört zur
+Zahl und verschwindet mit ihr, sonst wären `+40%` und `-60%` zwei Mods
+und die Spanne zeigte den negativen Roll nie. Dieselbe Umformung trägt
+später die Gruppierung mehrzeiliger Affixe: Zwei Zeilen, die immer
+gemeinsam auftreten, sind mit hoher Wahrscheinlichkeit ein Affix.
+
+**Vier Messungen an Peters echtem Bestand haben den Entwurf geformt:**
+
+1. **Die Sammlung ist klein.** 200.954 Mod-Zeilen aus 59.249 Items ergeben
+   6.125 Identitäten, 1,5 MB JSON. Ein Datenbank-Server wäre Aufwand ohne
+   Gegenwert. Knapp ein Viertel kam genau einmal vor.
+2. **Ein Topf für alle Raritäten wäre wertlos.** `#% increased Attack
+   Speed` reichte darin von 3 bis 100. Getrennt: Rare 3–27 (die echte
+   Affix-Spanne über alle Tiers), Unique 4–100 (feste Werte, die kein
+   Affix rollt). Die Spannen liegen deshalb **je Rarität** im Eintrag, und
+   der Vergleich bleibt innerhalb einer Rarität.
+3. **Maps bekommen einen eigenen Topf**, obwohl die API sie als Magic
+   oder Rare führt: Ihre Mods rollen aus einer anderen Tabelle und oft in
+   die andere Richtung ("-60% to Fire Resistance" ist dort eine Strafe).
+   Erkannt über `models.map_tier()` — dieselbe Messung, die schon der
+   Suchindex braucht, deshalb dorthin gezogen statt abgeschrieben.
+4. **Das Erstbefüllen kostet 1,3 Sekunden.** Zu viel für einen Rutsch beim
+   Start, also in Scheiben von 4000 Items über den Ereignis-Zyklus.
+
+**Die Datei ist unersetzlich**, und das steuert die Schreibregeln: Ein
+verkauftes Item lebt nur noch dort weiter. Die Sammlung wächst deshalb
+nur — würde der neue Stand weniger Einträge haben als der alte, wird gar
+nicht geschrieben. Eine unlesbare Datei wird nie überschrieben, sie
+könnte reparierbar sein. Je Konto eine Datei, atomar geschrieben,
+höchstens einmal pro Minute (1,5 MB nach jedem geladenen Fach wären
+dieselbe Verschwendung, wegen der der Daten-Cache seinen `cache_writer`
+hat).
+
+**Angezeigt wird sie am Item, mit Zeichen** (Peters Wahl): `★` für den
+besten Roll, den du in der Liga und Rarität dieses Items gesehen hast,
+`☆` für denselben Bestwert auf dünnerem Boden (die Liga des Items hat
+noch zu wenige Beobachtungen, verglichen wurde gegen den Altbestand),
+`✦` für einen Mod, der zum ersten Mal in der Sammlung auftaucht. Beide **vorangestellt
+und höchstens zwei Zeichen lang** — das ist keine Geschmacksfrage: Das
+Detail-Panel bricht lange Zeilen um, zählt sein Höhenbudget aber in
+Zeilen. Ein angehängtes "deine 41–96" würde die längsten Mod-Zeilen
+umbrechen lassen und das Panel still über seine feste Höhe schieben, der
+Fehler aus §4.39. Unmarkierte Mod-Zeilen bekommen zwei geschützte
+Leerzeichen, damit die Spalte ausgerichtet bleibt.
+
+#### 4.52.1 Ligen: warum eine Datei je Liga die falsche Antwort wäre
+
+Peter, 2026-08-24: "Wir sollten berücksichtigen, dass sich die Werte der
+Mods im Laufe der verschiedenen Ligen geändert haben. Evtl. sollten wir
+die Modsammlung auf die jeweilige Liga beziehen, d.h. für jede Liga ein
+eigenes File."
+
+Der Einwand stimmt, die naheliegende Lösung nicht. **Das Liga-Feld sagt,
+wo ein Item LIEGT — nicht, in welcher Liga es GEROLLT wurde.** Standard
+und Solo Self-Found sammeln seit Jahren die Items jeder abgelaufenen Liga
+ein; ein Ring aus Kalandra liegt heute in Standard. Gemessen an Peters
+Bestand:
+
+| Liga | Items | Art |
+|---|---|---|
+| Solo Self-Found | 31.929 | dauerhaft |
+| Standard | 22.896 | dauerhaft |
+| SSF Ruthless | 3.365 | dauerhaft |
+| Allflame + SSF-Varianten | 1.053 | temporär |
+
+**98 % liegen in dauerhaften Ligen.** Eine Datei je Liga hätte sie in drei
+Töpfe geschaufelt, die genauso gemischt sind wie vorher. Dazu ein
+statistischer Preis: Die Liga als volle Achse verdoppelt die Zellen
+(7.815 → 16.304), jede also dünner besetzt — und dünne Zellen liefern
+schlechte Spannen.
+
+Deshalb: **ein Topf je temporärer Liga, ein gemeinsamer für alle
+dauerhaften** (`LEGACY_LEAGUE`). Temporäre Ligen sind sauber — dort wurde
+alles in dieser Liga gerollt, nach ihrer Tabelle. Der Altbestand bleibt
+dicht besetzt, wo Dichte möglich ist, und heißt, was er ist.
+
+Der Topf kommt vom **Item**, nicht aus der Auswahl im Fenster: Ein Ring in
+Standard gehört in den Altbestand, auch während man die laufende Liga
+betrachtet. Eine unbekannte Liga gilt als temporär — die richtige
+Richtung zum Irren, denn eine neue dauerhafte Liga stünde dann für sich,
+statt stillschweigend in den Altbestand zu rutschen.
+
+**Die Bewertung nimmt die eigene Liga erst ab
+`MIN_LEAGUE_OBSERVATIONS` (5) Sichtungen** und sagt in der Anzeige,
+worauf sie sich stützt (`★` eigene Liga, `☆` Altbestand). Die Zahl ist
+eine Setzung, keine Messung: Unter einer Handvoll Rolls ist eine Spanne
+mehr Zufall als Aussage. Eine Bewertung, deren Grundlage man nicht kennt,
+ist keine — deshalb reist die Grundlage in `rating_with_basis()` mit dem
+Wert mit, statt in einer Fußnote zu stehen.
+
+**Was auch das nicht löst:** Wann ein Item im Altbestand gerollt wurde,
+weiß niemand. Ein Legacy-Roll von vor drei Jahren steht dort neben einem
+von gestern. Die Sammlung kann das nicht auflösen, und sie behauptet es
+auch nicht — sie sagt "so habe ich es gesehen", und im Altbestand heißt
+das: irgendwann.
+
+**Warum es den Merker `is_new` überhaupt braucht:** Die Anzeige sieht ein
+Item immer erst, NACHDEM es eingetragen wurde — zum Anzeigezeitpunkt ist
+also nichts mehr neu. Die Sammlung merkt sich deshalb, was seit dem
+letzten `clear_new()` zum ersten Mal auftauchte. Nach der Erstbefüllung
+wird einmal aufgeräumt: 6.125 Funde auf einmal sind kein Fund.
+
+**Geplant, noch nicht gebaut:** ein Feld zum Einfügen des Strg+C-Textes
+aus dem Spiel. Mit eingeschalteten "Advanced mod descriptions" trägt der
+genau das, was der API fehlt — Affix-Name, Tier und echte Wertspanne in
+geschweiften Klammern. Ein eingefügtes Item lehrt die Sammlung nicht nur
+über sich selbst, sondern über die ZEILE: Sie gilt danach für jedes
+andere Item mit derselben Zeile. Damit baut sich die Sammlung ihre eigene
+Tier-Tabelle auf, aus dem eigenen Client, ohne fremde Daten. Was von dort
+kommt, ist gemessen; was aus API-Zeilen kommt, ist beobachtet — beides
+muss in der Anzeige unterscheidbar bleiben.
+
+Getestet: `tests/test_mod_collection.py` (Identität, Spannen je Zahl und
+je Rarität, Map-Topf, Bewertung samt der Fälle ohne Vergleich, Neufunde,
+Runde durch die Datei, kaputte Zeilen, Schrumpfschutz, unlesbare Datei),
+`tests/test_item_detail.py` (nur Mod-Zeilen bekommen eine Marke; das Feld
+einer Zeile überlebt den Weg durchs Panel),
+`tests/test_main_window_helpers.py` (geladene Fächer landen in der
+Sammlung, Stern nur innerhalb der Rarität, Erstbefüllung in Scheiben).
 
 ## 8. Entwicklungsstand
 

@@ -13,7 +13,7 @@ import pytest
 from poe_view.ui.xp_graph import (AVERAGE_PAUSE_S, GRAPH_SPAN_S, XpGraph,
                                   XpPoint, average_window, axis_label,
                                   combined_rate, graph_layout,
-                                  group_by_instance, span_label,
+                                  group_by_instance, label_top, span_label,
                                   visible_points)
 
 WIDTH = 300.0
@@ -339,3 +339,44 @@ def test_the_widget_paints_a_cut_stretch(qapp) -> None:
     graph.render(graph.grab())
 
     assert graph._points[-1].level == 34
+
+
+# --- Die Beschriftung braucht Platz (Peter, 2026-08-24) ---------------- #
+#
+# Mit einem Bild seines Leveling-Felds: "ich kann die XP/h hier nicht
+# lesen". Der Schnitt lag dicht unter der Spitze, der Text landete
+# oberhalb des Widgets und obendrein in der Spitzen-Beschriftung.
+
+ZEILE, HOEHE = 12.0, 100.0
+
+
+def test_the_label_sits_above_its_line() -> None:
+    """Der Normalfall bleibt, wie er war."""
+    assert label_top(50.0, ZEILE, HOEHE) == 38.0
+
+
+def test_a_line_near_the_top_pushes_the_label_below_it() -> None:
+    """Sonst faellt der Text aus dem Bild — genau Peters Fall."""
+    assert label_top(2.0, ZEILE, HOEHE) >= 0.0
+
+
+def test_the_label_never_lands_in_the_first_row() -> None:
+    """Dort steht die Spitze. Zwei Beschriftungen uebereinander sind
+    schlechter als eine verschobene."""
+    for average_y in (0.0, 1.0, 5.0, 11.0, 12.0):
+        assert label_top(average_y, ZEILE, HOEHE) >= ZEILE
+
+
+def test_the_label_stays_inside_the_plot() -> None:
+    """Unter dem unteren Rand verschwaende sie in der Zeitachse.
+
+    Der Fall braucht einen FLACHEN Graphen: Nur dann reicht "eine Zeile
+    unter die Linie" ueber den Rand hinaus. Bei voller Hoehe greift schon
+    der Normalfall (ueber der Linie), und die Begrenzung waere nie
+    befragt — mit HOEHE als Plot-Hoehe pruefte dieser Test nichts."""
+    flach = 25.0
+    oben = label_top(20.0, ZEILE, flach)
+
+    assert oben + ZEILE <= flach
+    assert oben >= ZEILE          # und trotzdem nicht in der ersten Zeile
+

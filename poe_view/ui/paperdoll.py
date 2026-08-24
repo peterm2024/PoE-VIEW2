@@ -180,10 +180,15 @@ class _SlotButton(QToolButton):
 class PaperdollDialog(QDialog):
     def __init__(self, char: Character, items: list[Item],
                 pixmap_for: Callable[[Item], QPixmap | None],
-                parent: QWidget | None = None) -> None:
+                parent: QWidget | None = None,
+                mark_for: Callable[[Item], Callable[[str, str], str]] | None = None) -> None:
         super().__init__(parent)
         self.setWindowTitle(f"{char.name} — {char.class_} {char.level}")
         self._pixmap_for = pixmap_for
+        # Die Marken der Mod-Sammlung (§4.52). Als Fabrik je Item, weil der
+        # Vergleich die Rarität braucht — und optional, damit die Paperdoll
+        # ohne Sammlung prüfbar bleibt.
+        self._mark_for = mark_for
 
         by_slot: dict[str, list[Item]] = {}
         for item in items:
@@ -258,4 +263,7 @@ class PaperdollDialog(QDialog):
         outer.addWidget(splitter)
 
     def _show_detail(self, item: Item) -> None:
-        self.detail.show_item(item, self._pixmap_for(item))
+        if self._mark_for is None:
+            self.detail.show_item(item, self._pixmap_for(item))
+        else:
+            self.detail.show_item(item, self._pixmap_for(item), self._mark_for(item))

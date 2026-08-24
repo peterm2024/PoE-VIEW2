@@ -74,8 +74,8 @@ from PySide6.QtCore import (QAbstractTableModel, QModelIndex,
 from PySide6.QtGui import (QBrush, QColor, QFont, QGuiApplication, QPalette,
                            QPixmap)
 
-from poe_view.api.models import (Item, gem_level, gem_quality, req_attribute,
-                                 req_level)
+from poe_view.api.models import (Item, gem_level, gem_quality, map_tier,
+                                 req_attribute, req_level)
 from poe_view.api.ninja import PriceIndex
 from poe_view.ui.theme import (OTHER_TYPE, RARITY_COLORS, ROW_CHANGED_COLOR,
                                ROW_GEM_LEVELED_COLOR, blend, dimmed_text)
@@ -160,24 +160,18 @@ def _first_number(text: str) -> float | None:
 # nicht versehentlich alles von 80 bis 89.
 _SEARCH_FIELDS = ("ilvl", "tier")
 
-# Woher die Map-Tier kommt. **Gemessen, nicht angenommen:** Über alle
-# 59.042 Items in Peters Bestand trägt KEIN EINZIGES eine Property namens
-# "Map Tier" — 13.417 tragen die Tier stattdessen im ``typeLine``, als
-# "Map (Tier 6)". Die erste Fassung dieser Funktion las die Property und
-# fand deshalb auf echten Daten nichts; aufgefallen ist das nur, weil die
-# Gegenprobe am echten Cache lief. Gegen die eigenen Demo-Daten, in denen
-# ich die Property selbst erfunden hatte, sah alles richtig aus.
-_TIER_IN_NAME_RE = re.compile(r"\(tier (\d+)\)", re.IGNORECASE)
-
-
 def _field_tokens(item: Item) -> str:
-    """"ilvl:84 tier:6" — die durchsuchbaren Marken eines Items."""
+    """"ilvl:84 tier:6" — die durchsuchbaren Marken eines Items.
+
+    Die Tier kommt aus ``models.map_tier()``: Sie steht im ``typeLine``
+    und NICHT in einer Property, und diese Messung soll an einer Stelle
+    stehen statt an zweien (siehe dort)."""
     tokens = []
     if item.ilvl:
         tokens.append(f"ilvl:{item.ilvl}")
-    tier = _TIER_IN_NAME_RE.search(item.typeLine or "")
-    if tier:
-        tokens.append(f"tier:{tier.group(1)}")
+    tier = map_tier(item)
+    if tier is not None:
+        tokens.append(f"tier:{tier}")
     return " ".join(tokens)
 
 

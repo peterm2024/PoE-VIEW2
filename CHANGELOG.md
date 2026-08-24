@@ -6,6 +6,30 @@ nach [SemVer](https://semver.org/lang/de/).
 
 ## [Unveröffentlicht]
 
+### Neu
+
+- **Mod-Sammlung**: Jede Mod-Zeile, die durch die Truhe geht, wird
+  aufgeschrieben — wie oft gesehen, wie hoch und wie niedrig gerollt, auf
+  welchen Item-Stufen, getrennt nach Rarität. Im Detail-Panel steht
+  seither ★ vor dem besten Roll, den du von diesem Mod je gesehen hast,
+  und ✦ vor einem, der zum ersten Mal auftaucht. Die Sammlung füllt sich
+  beim ersten Start aus dem vorhandenen Cache (bei einem gewachsenen
+  Bestand rund 6000 verschiedene Mods) und wächst danach nebenbei weiter,
+  ohne einen einzigen zusätzlichen Abruf. Sie sagt, was DU gesehen hast —
+  nicht, was das Spiel erlaubt. Weil sich Mod-Werte von Liga zu Liga
+  ändern, bekommt jede temporäre Liga ihren eigenen Topf; Standard und die
+  übrigen dauerhaften Ligen teilen sich einen, denn dort liegen Items aus
+  jeder je gespielten Liga nebeneinander. Reicht die eigene Liga noch
+  nicht für einen Vergleich, wird gegen diesen Altbestand gemessen — und
+  der Stern ist dann hohl (☆) statt gefüllt.
+
+### Behoben
+
+- Die Beschriftung des Schnitts im XP-Graphen war unlesbar, wenn der
+  Schnitt dicht unter der Spitze lag: Sie stand dann halb außerhalb des
+  Bildes und in der Achsenbeschriftung. Jetzt weicht sie unter die Linie
+  aus.
+
 ## [0.11.2] - 2026-08-24
 
 ### Behoben

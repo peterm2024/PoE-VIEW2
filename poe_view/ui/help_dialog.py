@@ -310,6 +310,16 @@ on balance. Dying does that from act 5 onwards.</li>
 <li>A <b>dark green block behind several bars</b> means they are the
 same map: you left it and came back. Its height is the rate for the map
 as a whole, so you can see what the trip outside cost.</li>
+<li>Marks in front of a mod line come from your <b>mod collection</b>:
+<b>★</b> means this is the best roll of that mod you have ever seen on an
+item of this rarity <i>and league</i>; <b>☆</b> is the same, but measured
+against your permanent stash because the item's own league has too few
+sightings yet; <b>✦</b> means the mod is new to your collection. The
+collection fills itself from everything that passes through your stash —
+it says what YOU have seen, not what the game allows. Temporary leagues
+are kept apart, since mod values change between them; Standard and the
+other permanent leagues share one pot, because they hold items rolled in
+every league there ever was.</li>
 <li>The <b>average line</b> is your rate over the stretch you are
 currently in: since your last level-up, or since a break of more than
 half an hour, whichever came later, and never more than the three hours

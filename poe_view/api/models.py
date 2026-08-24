@@ -393,6 +393,28 @@ EXTRA_MOD_FIELDS = ("utilityMods", "craftedMods", "fracturedMods",
                     "logbookMods", "ultimatumMods")
 
 
+# Woher die Map-Tier kommt. **Gemessen, nicht angenommen:** Über alle
+# 59.042 Items in Peters Bestand trägt KEIN EINZIGES eine Property namens
+# "Map Tier" — 13.417 tragen die Tier stattdessen im ``typeLine``, als
+# "Map (Tier 6)". Die erste Fassung im Suchindex las die Property und fand
+# deshalb auf echten Daten nichts; aufgefallen ist das nur, weil die
+# Gegenprobe am echten Cache lief. Gegen die eigenen Demo-Daten, in denen
+# die Property erfunden war, sah alles richtig aus.
+_MAP_TIER_RE = re.compile(r"\(tier (\d+)\)", re.IGNORECASE)
+
+
+def map_tier(item: "Item") -> int | None:
+    """Die Map-Tier eines Items, oder ``None`` — dann ist es keine Map.
+
+    Steht hier und nicht in einer der beiden Anzeigen, die sie brauchen:
+    Der Suchindex baut daraus seine ``tier:6``-Marke, die Mod-Sammlung
+    unterscheidet damit Map-Mods von Ausrüstungs-Affixen (§4.52). Zweimal
+    dieselbe Messung abzuschreiben ist zweimal die Gelegenheit, sie
+    falsch abzuschreiben."""
+    treffer = _MAP_TIER_RE.search(item.typeLine or "")
+    return int(treffer.group(1)) if treffer else None
+
+
 def extra_mod_lines(item: "Item", field: str) -> list[str]:
     """Eine der Listen aus ``ENCHANT_MOD_FIELD``/``EXTRA_MOD_FIELDS`` als
     Klartext. Das Färbungs-Markup muss hier eigens weg — die aufbereiteten
@@ -404,13 +426,22 @@ def extra_mod_lines(item: "Item", field: str) -> list[str]:
     return [strip_display_markup(str(entry)) for entry in value if entry]
 
 
+def all_extra_mod_pairs(item: "Item") -> list[tuple[str, str]]:
+    """Alle Zusatz-Mods AUSSER der Verzauberung, als ``(Feld, Zeile)``.
+
+    Das Feld muss mitreisen, seit die Mod-Sammlung (§4.52) danach fragt:
+    Dieselbe Zeile bedeutet als Flaschen-Mod etwas anderes als als
+    Affix. Wer nur den Text hat, kann sie nicht mehr auseinanderhalten."""
+    return [(field, line) for field in EXTRA_MOD_FIELDS
+            for line in extra_mod_lines(item, field)]
+
+
 def all_extra_mod_lines(item: "Item") -> list[str]:
     """Alle Zusatz-Mods AUSSER der Verzauberung, in der Reihenfolge von
     ``EXTRA_MOD_FIELDS``. Die Verzauberung bleibt bewusst außen vor: Sie
     gehört im Spiel über die impliziten Mods, die übrigen zu den
     expliziten."""
-    return [line for field in EXTRA_MOD_FIELDS
-            for line in extra_mod_lines(item, field)]
+    return [line for _, line in all_extra_mod_pairs(item)]
 
 
 # Waffen tragen ihre Item-Klasse als ERSTE Property (ohne Werte) — das ist

@@ -264,3 +264,45 @@ def test_the_panel_is_tall_enough_for_its_own_budget(qapp) -> None:
                + panel.layout().spacing())
 
     assert panel._full_height() >= (_MAX_UNITS + 1) * zeile + raender
+
+
+# ---------------- Marken der Mod-Sammlung (§4.52) ---------------------- #
+
+def test_only_mod_lines_get_a_mark() -> None:
+    """Die Marke gehoert an die Mods, nicht an Eigenschaften oder
+    Anforderungen — dort gibt es nichts zu sammeln."""
+    from poe_view.api.models import Item
+    from poe_view.ui.item_detail import _item_blocks
+
+    item = Item.model_validate({
+        "typeLine": "Gold Ring", "frameType": 2, "ilvl": 84,
+        "implicitMods": ["+20% to Fire Resistance"],
+        "explicitMods": ["+96 to maximum Life"],
+    })
+
+    bloecke = _item_blocks(item, lambda kind, line: "* ")
+    flach = [zeile for block in bloecke for zeile in block]
+
+    assert "* +96 to maximum Life" in flach
+    assert "* +20% to Fire Resistance" in flach
+    assert not any(zeile.startswith("* iLvl") for zeile in flach)
+    assert not any(zeile.startswith("* Rare") for zeile in flach)
+
+
+def test_the_mark_knows_which_list_a_line_came_from() -> None:
+    """Dieselbe Zeile bedeutet als Flaschen-Mod etwas anderes als als
+    Affix. Ohne das Feld koennte die Sammlung sie nicht auseinanderhalten
+    — und ohne ``all_extra_mod_pairs`` waere es beim Weg durchs Panel
+    verloren gegangen."""
+    from poe_view.api.models import Item
+    from poe_view.ui.item_detail import _item_blocks
+
+    flasche = Item.model_validate({
+        "typeLine": "Quicksilver Flask", "frameType": 1,
+        "utilityMods": ["25% increased Movement Speed"],
+    })
+    gesehen: list[str] = []
+    _item_blocks(flasche, lambda kind, line: gesehen.append(kind) or "")
+
+    assert gesehen == ["utilityMods"]
+

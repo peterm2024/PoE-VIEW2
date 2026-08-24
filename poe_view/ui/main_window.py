@@ -31,7 +31,8 @@ from poe_view.api.models import (Character, Item, StashTab,
                                  dominant_category, is_ggg_suffix)
 from poe_view.api.ninja import PriceIndex
 from poe_view.services import (cache_backup, cache_writer, data_cache, gem_xp_log,
-                               icon_cache, poe2_probe, price_cache, xp_history)
+                               icon_cache, mod_collection, poe2_probe,
+                               price_cache, xp_history)
 from poe_view.services.instance_lock import InstanceLock
 from poe_view.services.zone_watcher import ZoneWatcher, resolve_client_log_path
 from poe_view.services.api_worker import (ApiWorker, BootstrapJob,
@@ -707,8 +708,17 @@ class MainWindow(QMainWindow):
         self._account_lock: InstanceLock | None = None
         self._read_only = False
         self._live_leagues: set[str] | None = None  # letzte /account/leagues-Antwort; None = noch unbekannt
+        # Die Mod-Sammlung (§4.52). Bis zum Laden leer — ohne Kontonamen
+        # gibt es keine Datei, und das ist der Zustand vor dem Login.
+        self._mod_collection = mod_collection.ModCollection()
+        # Items, die noch in die Sammlung müssen. Der Cache liefert beim
+        # Start knapp 60.000 auf einmal; sie in einem Rutsch einzulesen
+        # kostet gemessen 1,3 Sekunden, und die stünde das Fenster still.
+        self._mod_seed_queue: list[Item] = []
+        self._mod_saved_at = 0.0
         self._restore_cached_data()
         self._backup_cached_data()
+        self._restore_mod_collection()
 
         self.worker = ApiWorker()
         # BootstrapJob muss als ERSTER Job in der Queue landen — vor jedem
@@ -820,6 +830,128 @@ class MainWindow(QMainWindow):
         log.info("Daten-Cache geladen: %d Charaktere, %d Liga(en), Umfang %d",
                  len(cached.characters), len(cached.stash_trees),
                  self._persisted_scale)
+
+    # Wie viele Items je Scheibe in die Sammlung wandern. 4000 kosten
+    # gemessen rund 0,09 s — kurz genug, dass zwischen zwei Scheiben
+    # Mausklicks und Zeichnen drankommen, groß genug, dass Peters Bestand
+    # in gut einer Sekunde durch ist.
+    _MOD_SEED_SLICE = 4000
+
+    # Höchstens einmal pro Minute schreiben. Die Datei ist rund 1,5 MB
+    # groß; sie nach jedem geladenen Fach neu zu schreiben wäre dieselbe
+    # Verschwendung, wegen der der Daten-Cache seinen ``cache_writer`` hat.
+    _MOD_SAVE_INTERVAL_S = 60.0
+
+    # Die beiden Marken der Mod-Sammlung (§4.52). Ein Zeichen plus
+    # Leerzeichen, VORANGESTELLT — was dahinter stünde, brächte die
+    # längsten Mod-Zeilen zum Umbrechen und das Detail-Panel über seine
+    # feste Höhe (siehe ``item_detail._item_blocks``).
+    MOD_MARK_NEW = "✦ "     # zum ersten Mal in der Sammlung
+    MOD_MARK_BEST = "★ "    # bester Roll — verglichen in der Liga des Items
+    # Derselbe Bestwert, aber gegen den Altbestand gemessen: In der Liga
+    # dieses Items gibt es noch zu wenige Beobachtungen für eine Spanne
+    # (§mod_collection.MIN_LEAGUE_OBSERVATIONS). Ein eigenes Zeichen statt
+    # einer Fußnote, weil die Grundlage zur Aussage gehört — und hohl
+    # statt gefüllt, weil es dieselbe Aussage auf dünnerem Boden ist.
+    MOD_MARK_BEST_LEGACY = "☆ "
+    # Zwei geschützte Leerzeichen für alles Übrige: Ohne sie stünden
+    # markierte und unmarkierte Mod-Zeilen auf zwei verschiedenen Höhen,
+    # und die Spalte liest sich nicht mehr am Stück. Geschützt, weil
+    # gewöhnliche Leerzeichen in HTML zusammenfallen.
+    MOD_MARK_NONE = "  "
+
+    def _mod_mark_for(self, item: Item):
+        """Die Markierungs-Funktion für DIESES Item.
+
+        Als Abschluss über das Item statt als Methode mit drei Argumenten:
+        Der Vergleich braucht Rarität UND Liga, und beide gehören zum
+        Item, nicht zur einzelnen Zeile. Ein Rare gegen die festen Werte
+        eines Uniques zu messen ergäbe eine Zahl, die nichts bedeutet —
+        und ein Roll aus der laufenden Liga gegen einen Altbestand, in dem
+        Items aus fünf Jahren liegen, eine, die etwas anderes bedeutet, als
+        sie zu sagen scheint (§4.52)."""
+        liga, rarity = mod_collection.item_buckets(item)
+
+        def marke(kind: str, line: str) -> str:
+            if self._mod_collection.is_new(kind, line):
+                return self.MOD_MARK_NEW
+            eintrag = self._mod_collection.get(kind, line)
+            if eintrag is None:
+                return self.MOD_MARK_NONE
+            wert, grundlage = eintrag.rating_with_basis(line, rarity, liga)
+            if wert != 1.0:
+                return self.MOD_MARK_NONE
+            return (self.MOD_MARK_BEST if grundlage == liga
+                    else self.MOD_MARK_BEST_LEGACY)
+
+        return marke
+
+    def _restore_mod_collection(self) -> None:
+        """Die Sammlung des aktiven Kontos holen und, falls sie noch leer
+        ist, aus dem Cache füllen (§4.52).
+
+        Die Erstbefüllung läuft in Scheiben über den Ereignis-Zyklus statt
+        in einem Rutsch: 59.249 Items sind gemessen 1,3 Sekunden, und ein
+        Fenster, das beim Start eine Sekunde steht, ist genau die Sorte
+        Ruckler, über die Peter sich ohnehin beschwert."""
+        if not self._account_name:
+            return
+        self._mod_collection = mod_collection.load(
+            mod_collection.path_for(self._account_name))
+        if len(self._mod_collection):
+            log.info("Mod-Sammlung geladen: %s",
+                     mod_collection.summary(self._mod_collection))
+            self._mod_collection.clear_new()
+            return
+        self._mod_seed_queue = list(self._all_cached_items())
+        if self._mod_seed_queue:
+            log.info("Mod-Sammlung ist leer — %d Items aus dem Cache werden "
+                     "in Scheiben nachgetragen.", len(self._mod_seed_queue))
+            QTimer.singleShot(0, self._seed_mod_collection_slice)
+
+    def _all_cached_items(self) -> Iterator[Item]:
+        """Alles, was der Cache an Items hergibt — Fächer wie Charaktere."""
+        for faecher in self._items.values():
+            for liste in faecher.values():
+                yield from liste
+        for liste in self._character_items.values():
+            yield from liste
+
+    def _seed_mod_collection_slice(self) -> None:
+        """Eine Scheibe der Erstbefüllung, dann zurück an den Ereignis-
+        Zyklus. Meldet sich zum Schluss einmal im Log — das ist der
+        Moment, in dem die Sammlung ihren Grundstock hat."""
+        if not self._mod_seed_queue:
+            return
+        scheibe = self._mod_seed_queue[:self._MOD_SEED_SLICE]
+        del self._mod_seed_queue[:len(scheibe)]
+        self._mod_collection.observe_items(scheibe)
+        if self._mod_seed_queue:
+            QTimer.singleShot(0, self._seed_mod_collection_slice)
+        else:
+            log.info("Mod-Sammlung aus dem Cache gefüllt: %s",
+                     mod_collection.summary(self._mod_collection))
+            # Der Grundstock ist kein Fund: 6125 Einträge auf einmal wären
+            # 6125 Sterne im Detail-Panel.
+            self._mod_collection.clear_new()
+            self._save_mod_collection(force=True)
+
+    def _save_mod_collection(self, *, force: bool = False) -> None:
+        """Ablegen, wenn es etwas abzulegen gibt — und nicht öfter als
+        ``_MOD_SAVE_INTERVAL_S``. ``force`` überspringt nur den Takt,
+        nicht die Prüfungen in ``ModCollection.save``."""
+        if not self._account_name or not self._mod_collection.dirty:
+            return
+        jetzt = time.monotonic()
+        if not force and jetzt - self._mod_saved_at < self._MOD_SAVE_INTERVAL_S:
+            return
+        self._mod_saved_at = jetzt
+        try:
+            self._mod_collection.save(mod_collection.path_for(self._account_name))
+        except OSError:
+            # Wie beim XP-Verlauf: Die Sammlung ist Komfort, ein
+            # fehlgeschlagenes Speichern darf die Sitzung nicht stören.
+            log.warning("Mod-Sammlung konnte nicht gespeichert werden.", exc_info=True)
 
     def _backup_cached_data(self) -> None:
         """Sichert den geladenen Cache, bevor diese Sitzung schreiben kann.
@@ -2337,6 +2469,9 @@ class MainWindow(QMainWindow):
         eigenen Cache-Stand des neuen Kontos (falls vorhanden — ein noch
         nie auf diesem Rechner genutztes Konto startet einfach leer, wird
         aber nicht mit dem alten vermischt)."""
+        # Die Sammlung des BISHERIGEN Kontos noch sichern, bevor der Name
+        # wechselt — danach zeigte ``path_for`` auf die falsche Datei.
+        self._save_mod_collection(force=True)
         self._reset_session_data()
         cached = data_cache.load(data_cache.path_for(account_name))
         if cached is not None:
@@ -2348,6 +2483,8 @@ class MainWindow(QMainWindow):
             self._character_items = cached.character_items
             self._character_items_loaded = cached.character_items_loaded
             self._persisted_scale = self._scale_of(cached)
+        self._account_name = account_name    # §4.52 braucht ihn für den Pfad
+        self._restore_mod_collection()
         self._rebuild_league_combo(None)
 
     def _update_online_controls_enabled(self) -> None:
@@ -2780,6 +2917,7 @@ class MainWindow(QMainWindow):
         # Nutzer eine Karte in ein Map-Stash-Unterfach, gibt es das Fach
         # plötzlich — dann gehört es zurück in den Rundlauf.
         self._missing_stashes.get(league, set()).discard(stash_id)
+        self._mod_collection.observe_items(items)          # §4.52
         self._last_loaded.setdefault(league, {})[stash_id] = datetime.now(timezone.utc).isoformat()
         self._items.setdefault(league, {})[stash_id] = items
         if silent:
@@ -3944,6 +4082,7 @@ class MainWindow(QMainWindow):
         ein spät eintreffender Job Daten eines inzwischen abgewählten
         Charakters in die aktuelle Ansicht einsickern lassen (analog
         `_on_stash_items`)."""
+        self._mod_collection.observe_items(items)          # §4.52
         previous_items = self._character_items.get(name)  # vor dem Überschreiben: Diff-Basis
         # Taugt dieser vorige Stand überhaupt als Vergleichsbasis? Beim
         # ersten Abruf eines Charakters in dieser Sitzung stammt er aus der
@@ -3997,6 +4136,7 @@ class MainWindow(QMainWindow):
         if char is None:
             return
         self._paperdoll_dialog = PaperdollDialog(char, items, self.table_model.pixmap_for,
+                                                 mark_for=self._mod_mark_for,
                                                  parent=self)
         self._paperdoll_dialog.show()
 
@@ -4422,7 +4562,8 @@ class MainWindow(QMainWindow):
         source_idx = self.proxy.mapToSource(current)
         item = self.table_model.item_at(source_idx.row())
         if item:
-            self.detail.show_item(item, self.table_model.pixmap_for(item))
+            self.detail.show_item(item, self.table_model.pixmap_for(item),
+                                  self._mod_mark_for(item))
         # Herkunfts-Fach im Baum hervorheben (v. a. bei "*"
         # bzw. Aggregat-Ansichten mit mehreren Quell-Tabs) — highlight_stash
         # nutzt bewusst setCurrentItem statt eines Klick-Signals, damit die
@@ -4999,6 +5140,11 @@ class MainWindow(QMainWindow):
         Header mehr reinkommt, der sie sonst antreiben würde (Rückfrage
         "Policy-Statusleiste aktualisiert sich während der Pause nicht")."""
         self.dashboard.update_state(*self.worker.rate_limiter.snapshot())
+        # Der Sekundentakt ist auch die Gelegenheit, die Mod-Sammlung
+        # abzulegen — hoechstens einmal pro Minute und nur, wenn seither
+        # etwas dazugekommen ist (§4.52). Ein eigener Timer waere Aufwand
+        # fuer nichts.
+        self._save_mod_collection()
         self.tree.refresh_age_colors()
         self._update_bulk_label()  # Countdown im Bulk-Dialog weiterzählen
         # Sicherheitsnetz für Single/Stash: falls die Job-Kette (§_drive_
@@ -5471,6 +5617,7 @@ class MainWindow(QMainWindow):
         # und macht die Absicht sichtbar, statt sie Qts Aufräumen zu
         # überlassen.
         self._close_login_prompts()
+        self._save_mod_collection(force=True)
         self.worker.stop()
         if not self.worker.wait(3000):
             log.warning("ApiWorker reagierte nicht innerhalb von 3s auf stop() — erzwinge Beendigung.")
