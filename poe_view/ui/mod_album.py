@@ -46,6 +46,7 @@ from PySide6.QtWidgets import (QComboBox, QDialog, QHBoxLayout, QHeaderView,
 
 from poe_view.api.models import (ENCHANT_MOD_FIELD, EXTRA_MOD_FIELDS,
                                  FRAME_TYPE_NAMES)
+from poe_view.services import mod_tiers
 from poe_view.services.mod_collection import (LEGACY_LEAGUE, MAP_RARITY,
                                               UNKNOWN_RARITY, ModCollection,
                                               ModRecord, RaritySpan, base_rarity,
@@ -156,6 +157,34 @@ def format_span(span: RaritySpan) -> str:
     return zeile
 
 
+def format_bands(record: ModRecord) -> list[str]:
+    """Die abgeleiteten Tier-Bänder je Basis-Kategorie (§4.52.4).
+
+    Steht bewusst UNTER den Spannen und ausdrücklich beschriftet: Die
+    Spannen darüber sind Beobachtung, die Bänder hier sind Deutung. Wo
+    die Belege nichts hergeben, steht der Grund statt einer geratenen
+    Leiter — ein leeres Feld sähe aus wie ein Fehler."""
+    if not record.tier_evidence:
+        return []
+    zeilen = ["", "Tiers, inferred from item level",
+              "(upper bounds are proven, lower bounds assume tiers meet "
+              "without gaps)"]
+    for kategorie in sorted(record.tier_evidence):
+        belege = record.tier_evidence[kategorie]
+        zeilen.append(f"  {kategorie}  ({len(belege)} data points, "
+                      f"item level {min(il for _, il in belege)}–"
+                      f"{max(il for _, il in belege)})")
+        baender = mod_tiers.bands(belege)
+        if not baender:
+            zeilen.append(f"      {mod_tiers.why_silent(belege)}")
+            continue
+        for band in baender:
+            lo = "…" if band.low is None else _fmt_num(band.low)
+            spanne = f"{lo}–{_fmt_num(band.high)}"
+            zeilen.append(f"      {spanne:<12s}  from item level {band.from_ilvl}")
+    return zeilen
+
+
 def format_record_detail(record: ModRecord) -> str:
     """Der volle Steckbrief eines Eintrags, für das Detail-Feld."""
     zeilen = [record.example or record.identity,
@@ -166,6 +195,7 @@ def format_record_detail(record: ModRecord) -> str:
             span = record.spans[league][rarity]
             zeilen.append(f"{league_label(league)}  ·  {rarity_label(rarity)}")
             zeilen.append(f"    {format_span(span)}")
+    zeilen.extend(format_bands(record))
     return "\n".join(zeilen)
 
 
@@ -185,6 +215,22 @@ def matching_spans(record: ModRecord, league: str | None,
                 continue
             ergebnis.append(span)
     return ergebnis
+
+
+def matching_count(record: ModRecord, league: str | None,
+                   rarity_ok: RarityPredicate | None) -> int:
+    """Wie viele Sichtungen liegen in den gerade ausgewählten Töpfen?
+
+    Die Spalte "Seen" zeigte zuvor ``record.count``, also die Summe über
+    ALLE Töpfe — direkt neben einer Range-Spalte, die nur die
+    ausgewählten zeigt. Peter fiel es an einem Screenshot auf: Chaos-Res
+    mit Range "13" und daneben "897 gesehen", obwohl in dem gefilterten
+    Topf 33 Sichtungen lagen. Zwei Spalten nebeneinander, die von
+    verschiedenen Populationen reden, sind schlimmer als eine fehlende.
+
+    Ohne Filter ist die Summe wieder genau ``record.count`` — jede
+    Beobachtung zählt in genau eine Spanne."""
+    return sum(span.count for span in matching_spans(record, league, rarity_ok))
 
 
 def combined_range_text(record: ModRecord, league: str | None,
@@ -229,8 +275,10 @@ class ModAlbumModel(QAbstractTableModel):
         self._range_league = league
         self._range_rarities = rarities
         if self._records:
+            # Range UND Seen hängen an der Auswahl, also beide Spalten neu
+            # zeichnen lassen.
             top = self.index(0, RANGE_COL)
-            bottom = self.index(len(self._records) - 1, RANGE_COL)
+            bottom = self.index(len(self._records) - 1, COUNT_COL)
             self.dataChanged.emit(top, bottom, [Qt.ItemDataRole.DisplayRole])
 
     def rowCount(self, parent=QModelIndex()) -> int:  # noqa: N802
@@ -256,7 +304,9 @@ class ModAlbumModel(QAbstractTableModel):
         if col == RANGE_COL:
             return combined_range_text(record, self._range_league, self._range_rarities)
         if col == COUNT_COL:
-            return record.count
+            # Dieselbe Auswahl wie die Range-Spalte daneben — siehe
+            # ``matching_count``.
+            return matching_count(record, self._range_league, self._range_rarities)
         if col == EXAMPLE_COL:
             return record.example
         return None

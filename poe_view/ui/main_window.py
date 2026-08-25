@@ -712,6 +712,9 @@ class MainWindow(QMainWindow):
         # Die Mod-Sammlung (§4.52). Bis zum Laden leer — ohne Kontonamen
         # gibt es keine Datei, und das ist der Zustand vor dem Login.
         self._mod_collection = mod_collection.ModCollection()
+        # "full" = alles einlesen, "tiers" = nur Tier-Belege nachtragen
+        # (§_restore_mod_collection).
+        self._mod_seed_mode = "full"
         # Items, die noch in die Sammlung müssen. Der Cache liefert beim
         # Start knapp 60.000 auf einmal; sie in einem Rutsch einzulesen
         # kostet gemessen 1,3 Sekunden, und die stünde das Fenster still.
@@ -868,8 +871,21 @@ class MainWindow(QMainWindow):
             log.info("Mod-Sammlung geladen: %s",
                      mod_collection.summary(self._mod_collection))
             self._mod_collection.clear_new()
+            # Ein Stand aus der Zeit vor den Tier-Belegen (§4.52.4) kennt
+            # sie nicht. Nachtragen statt neu einlesen: Neu einlesen
+            # zaehlte jede Sichtung ein zweites Mal, und das liesse sich
+            # nie wieder herausrechnen.
+            if not self._mod_collection.has_tier_evidence():
+                self._mod_seed_queue = list(self._all_cached_items())
+                self._mod_seed_mode = "tiers"
+                if self._mod_seed_queue:
+                    log.info("Mod-Sammlung ohne Tier-Belege — %d Items aus dem "
+                             "Cache werden dafuer nachgelesen.",
+                             len(self._mod_seed_queue))
+                    QTimer.singleShot(0, self._seed_mod_collection_slice)
             return
         self._mod_seed_queue = list(self._all_cached_items())
+        self._mod_seed_mode = "full"
         if self._mod_seed_queue:
             log.info("Mod-Sammlung ist leer — %d Items aus dem Cache werden "
                      "in Scheiben nachgetragen.", len(self._mod_seed_queue))
@@ -891,11 +907,17 @@ class MainWindow(QMainWindow):
             return
         scheibe = self._mod_seed_queue[:self._MOD_SEED_SLICE]
         del self._mod_seed_queue[:len(scheibe)]
-        self._mod_collection.observe_items(scheibe)
+        nur_tiers = getattr(self, "_mod_seed_mode", "full") == "tiers"
+        if nur_tiers:
+            self._mod_collection.backfill_tiers(scheibe)
+        else:
+            self._mod_collection.observe_items(scheibe)
         if self._mod_seed_queue:
             QTimer.singleShot(0, self._seed_mod_collection_slice)
         else:
-            log.info("Mod-Sammlung aus dem Cache gefüllt: %s",
+            log.info("Mod-Sammlung %s: %s",
+                     "um Tier-Belege ergänzt" if nur_tiers
+                     else "aus dem Cache gefüllt",
                      mod_collection.summary(self._mod_collection))
             # Der Grundstock ist kein Fund: 6125 Einträge auf einmal wären
             # 6125 Sterne im Detail-Panel.

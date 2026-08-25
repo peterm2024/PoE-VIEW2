@@ -332,7 +332,14 @@ narrowed it down). Rarity includes a <b>Corrupted</b> group of its own:
 a corrupted item's mods are counted apart from an uncorrupted one's, even
 at the same rarity, since some corruption outcomes roll from an entirely
 different table. Click a mod to see every rarity and league it has ever
-shown up on, in full.</li>
+shown up on, in full — and, where the evidence allows it, the
+<b>tier bands</b> worked out from item level: a tier cannot appear below
+the level that unlocks it, so the lowest level a value ever showed up on
+marks where the boundaries are. Upper bounds are proven, lower bounds
+assume tiers meet without gaps. If a mod shows a reason instead of bands,
+that is usually because every sighting came from high-level maps, where
+nearly all tiers are already unlocked — levelling through the campaign is
+what tells them apart.</li>
 <li>The <b>average line</b> is your rate over the stretch you are
 currently in: since your last level-up, or since a break of more than
 half an hour, whichever came later, and never more than the three hours

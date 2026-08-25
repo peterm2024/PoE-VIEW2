@@ -6047,6 +6047,110 @@ Einträge), `tests/test_main_window_helpers.py` (der Werkzeugleisten-Knopf
 öffnet das Fenster mit der tatsächlichen Sammlung des laufenden
 Fensters).
 
+#### 4.52.4 Tier-Bänder aus dem Item-Level (`services/mod_tiers.py`)
+
+Peter, 2026-08-25: "Ich weiß, dass Items mit einem Tier versehen sind;
+wir kennen das Item-Level; wir wissen, dass ab einem bestimmten
+Item-Level der nächste Tier freigeschaltet wird und dadurch der Range
+erhöht wird; anhand der Gauss-Verteilung sollten wir die verschiedenen
+Ranges eigentlich auseinanderkennen können."
+
+**Der Gedanke stimmt, die Statistik geht anders aus — und das ist der
+Kern dieses Abschnitts.**
+
+**Warum Gauß nicht greift.** PoE-Tiers grenzen lückenlos aneinander. In
+Peters Daten ist das Sechserraster direkt sichtbar: Plateaus bei 11, 17,
+23, 29, 35, 41, 45. Zwischen 11 und 12 liegt kein Tal, sondern eine
+Kante. Innerhalb eines Tiers ist der Roll gleichverteilt, nicht
+glockenförmig. Ein Gauß-Mixture sucht getrennte Hügel — hier gibt es
+keine. Im reinen Werte-Histogramm bliebe nur ein schwaches Signal übrig:
+Die Dichte fällt an jeder Grenze etwas ab, weil hohe Tiers auf weniger
+Items vorkommen.
+
+**Das Item-Level ist kein statistisches Signal, sondern ein Beweis.** Ein
+Tier KANN unterhalb seiner Freischaltung nicht auftreten. Die belastbare
+Größe ist deshalb die untere Einhüllende: "das niedrigste iLvl, auf dem
+ich je einen Wert ≥ t gesehen habe". Sie ist von Natur aus monoton, und
+fehlende Daten machen sie nur zu vorsichtig, nie falsch.
+
+**Gespeichert wird die Pareto-Front, nicht das Histogramm**
+(`mod_collection.add_evidence`). Ein Beleg zählt nur, wenn kein anderer
+gleichzeitig einen höheren Wert UND ein niedrigeres iLvl hat. Das ist
+genau die Treppe, und ihre Länge hängt an der Zahl der Tiers, nicht an
+der Zahl der Beobachtungen: 1323 Sichtungen von `#% to Cold Resistance`
+schrumpfen auf 15 Punkte. Über Peters ganzen Bestand gemessen: 9.185
+Punkte in 5.005 Töpfen (p50 = 1, p99 = 9), rund 0,08 MB — ein volles
+Werte-Histogramm wäre das 2,8-fache. Mit Basis-Kategorie als Achse:
+14.974 Punkte, 0,13 MB. Die Datei wächst dadurch von 1,75 auf 1,90 MB.
+
+**Die Basis-Kategorie ist eine eigene Achse, die Liga nicht.** Ein Ring
+rollt eine andere Tier-Tabelle als eine Rüstung, bei identischem
+Mod-Text; ohne diese Trennung verschmiert die Leiter. Die Liga dagegen
+spielt für die Tier-Schwellen keine Rolle und würde die Belege nur
+ausdünnen — sie fehlt in `tier_evidence` deshalb bewusst, obwohl `spans`
+sie führt.
+
+**Belegt werden nur gerollte Affixe** (`mod_collection.tierable`):
+unkorrumpierte Magic-/Rare-Items mit bekanntem Item-Level. Normal hat
+keine Affixe, Unique feste Werte, Maps eine eigene Tabelle, und
+Korrumpiertes bringt Vaal-Ergebnisse mit eigenen Wertebereichen mit. Der
+Corrupted-Aufschlag (§4.52.2) erledigt den letzten Fall schon von selbst,
+weil er die Rarität aus dem Bereich `(1, 2)` heraushebt.
+
+**Wie gut die Ableitung ist — gemessen gegen künstliche Daten mit
+bekannter Wahrheit:**
+
+| Item-Level der Belege | Beobachtungen | Güte (F1) |
+|---|---|---|
+| gleichverteilt 1–84 | 2000 | **1,00** |
+| gleichverteilt 1–84 | 250 | 0,46 |
+| wie in Peters Bestand | 2000 | 0,75 |
+| nur 75–85 (Endgame) | beliebig | **0,25** |
+
+**Die Methode ist also in Ordnung; was ihr fehlt, ist Streuung im
+Item-Level — nicht Masse.** In Peters Bestand liegen 83,6 % der
+Magic-/Rare-Items bei iLvl 70+ und nur 7,0 % unter iLvl 60. Ab iLvl 75
+sind alle Tiers bis auf das letzte verfügbar; die Einhüllende hat dort
+nichts mehr zu trennen, und weitere zehntausend Maps ändern daran
+nichts. Scharf werden die Bänder erst, wenn eine Liga wieder von unten
+hochgespielt wird.
+
+**Deshalb schweigt `bands()` lieber.** Das Kriterium ist das tiefste
+Belegs-iLvl — der stärkste der getesteten Prädiktoren (gegen
+Front-Länge, iLvl-Spanne und Zahl der Beobachtungen): Reichen die Belege
+unter iLvl 19, liegt die Güte im Mittel bei 0,81; fangen sie erst bei
+iLvl 57 an, nur noch bei 0,24. An Peters Bestand tragen 189 von 2.144
+Töpfen mit Belegen (8,8 %) überhaupt Bänder. Wo nicht, nennt
+`why_silent()` den Grund — ein leeres Feld sähe aus wie ein Fehler, und
+der häufigste Grund ist kein Mangel der Sammlung, sondern eine
+Eigenschaft der Items.
+
+**Warum das ein eigenes Modul ist.** `mod_collection` sammelt Belege und
+verspricht ausdrücklich, nichts zu behaupten ("Beobachtung, keine
+Wahrheit"). Bänder abzuleiten IST eine Behauptung. Die Trennung hält
+sichtbar, welche Zahl woher kommt — und dieselbe Grenze steht in der
+Anzeige: Obergrenzen sind belegt, Untergrenzen erschlossen (aus der
+Annahme, dass Tiers lückenlos aneinandergrenzen). Eine Tier-NUMMER wird
+bewusst nicht vergeben: Solange unbekannt ist, wie viele Tiers über dem
+höchsten gesehenen liegen, wäre "T3" eine Erfindung.
+
+**Der Nachtrag für vorhandene Sammlungen** (`backfill_tiers`) trägt die
+Belege aus dem Cache nach, **ohne einen einzigen Zählstand anzufassen**.
+Einfach neu einzulesen wäre der naheliegende Weg und der falsche: Jede
+Sichtung zählte doppelt, und die Sammlung ist der einzige Ort, an dem ein
+verkauftes Item noch existiert — eine verdoppelte Zählung ließe sich nie
+wieder herausrechnen. Kostet gemessene 0,33 s für 59.253 Items.
+
+Getestet: `tests/test_mod_tiers.py` (Pareto-Logik in beide Richtungen,
+die Kappung, die echte Front aus Peters Bestand reproduziert die
+bekannte Resistenzleiter, Bänder grenzen lückenlos aneinander — und vor
+allem: Endgame-Belege ergeben KEINE Bänder, und das Schweigen begründet
+sich selbst), `tests/test_mod_collection.py` (nur gerollte Affixe zählen
+als Beleg, der Nachtrag lässt jeden Zählstand unberührt und legt keine
+Einträge an, Runde durch die Datei, ein Stand nach Aufbau 2 lädt weiter),
+`tests/test_mod_album.py` (Bänder im Steckbrief, der Grund beim
+Schweigen, die Kennzeichnung von Beleg gegen Annahme).
+
 ## 8. Entwicklungsstand
 
 Die ursprünglich geplanten Meilensteine (Grundgerüst, Authentifizierung,

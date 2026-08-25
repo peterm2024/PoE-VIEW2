@@ -41,7 +41,7 @@ from typing import Iterable, Sequence
 
 from poe_view import config
 from poe_view.api.models import (ENCHANT_MOD_FIELD, EXTRA_MOD_FIELDS,
-                                 extra_mod_lines, map_tier)
+                                 extra_mod_lines, item_category, map_tier)
 from poe_view.services.atomic_json import write_json
 from poe_view.services.csv_export import sanitize_filename
 
@@ -56,7 +56,13 @@ log = logging.getLogger(__name__)
 # 2 (2026-08-24): Spannen liegen je Ligen-Topf statt nur je Rarität
 # (§4.52.1). Ein Stand nach Aufbau 1 wird als Altbestand übernommen —
 # genau das ist er ja: ununterscheidbar gemischt.
-VERSION = 2
+#
+# 3 (2026-08-25): ``tier_evidence`` je Eintrag — die Pareto-Front der
+# Paare (Wert hoch, iLvl niedrig), aus der sich Tier-Grenzen ableiten
+# lassen (§4.52.4, ``services/mod_tiers.py``). Ein Stand nach Aufbau 2
+# hat sie nicht; sie wird beim nächsten Start aus dem Cache nachgetragen,
+# ohne die Zählstände anzufassen (``backfill_tiers``).
+VERSION = 3
 
 # Die Felder der API, deren Inhalt gesammelt wird — die Art eines
 # Eintrags IST der Feldname. Getrennt gehalten statt in einen Topf
@@ -97,6 +103,40 @@ def mod_values(line: str) -> list[float]:
     Damage`` ist die erste Zahl das Minimum des Schadens und die zweite
     sein Maximum. Zwei getrennte Spannen also, nicht eine gemeinsame."""
     return [float(treffer) for treffer in _NUMBER.findall(line)]
+
+
+# So viele Punkte darf eine Front höchstens behalten. Sie ist durch die
+# Zahl der Tiers von Natur aus kurz (gemessen an Peters Bestand: p50=1,
+# p99=9, längste 27), aber ein Mod mit vielen Zahlenwerten und breitem
+# iLvl-Bereich könnte sie theoretisch aufblähen. Die Kappung wirft die
+# Punkte mit dem HÖCHSTEN iLvl weg — die tragen am wenigsten bei, denn
+# die Auflösung kommt von unten (§4.52.4).
+_MAX_EVIDENCE = 40
+
+
+def add_evidence(front: list[tuple[float, int]], wert: float,
+                 ilvl: int) -> list[tuple[float, int]]:
+    """Einen Beleg in die Pareto-Front einarbeiten.
+
+    Die Front hält genau die Paare, für die es keinen anderen Beleg mit
+    gleichzeitig **höherem oder gleichem Wert UND niedrigerem oder
+    gleichem iLvl** gibt. Das ist die Treppe "was war auf welchem Item-
+    Level höchstens drin" — und ihre Länge hängt an der Zahl der Tiers,
+    nicht an der Zahl der Beobachtungen. 1323 Sichtungen von ``#% to Cold
+    Resistance`` schrumpfen so auf 15 Punkte.
+
+    Jeder Punkt ist ein BELEG, keine Schätzung: "diesen Wert habe ich auf
+    diesem Item-Level gesehen". Fehlende Daten können die Treppe nur zu
+    vorsichtig machen, nie falsch."""
+    for w, il in front:
+        if w >= wert and il <= ilvl:
+            return front                      # schon dominiert
+    neu = [(w, il) for w, il in front if not (wert >= w and ilvl <= il)]
+    neu.append((wert, ilvl))
+    neu.sort()
+    if len(neu) > _MAX_EVIDENCE:
+        neu = neu[:_MAX_EVIDENCE]
+    return neu
 
 
 def _as_number(wert: float) -> float | int:
@@ -287,6 +327,29 @@ def collection_bucket(item) -> int:
     return rarity + CORRUPTED_OFFSET if getattr(item, "corrupted", False) else rarity
 
 
+def tierable(rarity: int, ilvl: int) -> bool:
+    """Taugt eine Beobachtung aus diesem Topf für die Tier-Ableitung?
+
+    Nur **gerollte Affixe auf unkorrumpierten Magic-/Rare-Items**, und
+    nur mit bekanntem Item-Level. Alles andere trägt nichts bei oder
+    verfälscht:
+
+    * Normal (0) hat keine Affixe, Unique (3) feste Werte statt Rolls.
+    * Maps rollen aus einer eigenen Tabelle (§MAP_RARITY).
+    * Korrumpiertes bringt Vaal-Ergebnisse mit eigenen Wertebereichen
+      mit — in Peters Bestand steht deshalb ein `-40` in derselben
+      Zeile, die sonst bei +6 anfängt.
+    * Ohne Item-Level gibt es keine Achse, an der sich etwas auflösen
+      ließe.
+
+    **Korrumpiertes braucht keine eigene Abfrage**, obwohl es der erste
+    Entwurf hatte: Der Aufschlag (``CORRUPTED_OFFSET``) hebt die Rarität
+    auf 1001/1002, und die stehen nicht in ``(1, 2)``. Die zusätzliche
+    Prüfung war toter Code — aufgefallen, weil ihre Gegenprobe überlebte
+    (sie herauszunehmen änderte nichts)."""
+    return ilvl > 0 and rarity in (1, 2)
+
+
 def item_buckets(item) -> tuple[str, int]:
     """Ligen- und Raritäts-Topf eines Items, wie die Sammlung sie braucht.
 
@@ -312,10 +375,20 @@ class ModRecord:
     # zusammengesetzten Schlüssels, damit die Datei lesbar bleibt und der
     # Altbestand als eigener Block sichtbar ist.
     spans: dict[str, dict[int, RaritySpan]] = field(default_factory=dict)
+    # Belege für die Tier-Ableitung, je Basis-Kategorie: die Pareto-Front
+    # der Paare (Wert, iLvl) — siehe ``add_evidence`` und §4.52.4.
+    #
+    # **Eine eigene Achse, nicht Liga × Rarität.** Ein Ring rollt eine
+    # andere Tier-Tabelle als eine Rüstung, bei identischem Text; ohne
+    # diese Trennung verschmiert die Leiter. Die Liga dagegen spielt für
+    # die Tier-Schwellen keine Rolle und würde die Belege nur ausdünnen —
+    # sie fehlt hier deshalb bewusst, obwohl ``spans`` sie führt.
+    tier_evidence: dict[str, list[tuple[float, int]]] = field(default_factory=dict)
 
     def observe(self, line: str, *, ilvl: int = 0,
                 rarity: int = UNKNOWN_RARITY,
-                league: str = LEGACY_LEAGUE) -> None:
+                league: str = LEGACY_LEAGUE,
+                category: str = "") -> None:
         """Eine weitere Sichtung einarbeiten."""
         self.count += 1
         if not self.example:
@@ -324,7 +397,28 @@ class ModRecord:
         spanne = je_liga.get(rarity)
         if spanne is None:
             spanne = je_liga[rarity] = RaritySpan()
-        spanne.observe(mod_values(line), ilvl)
+        werte = mod_values(line)
+        spanne.observe(werte, ilvl)
+        self.observe_tier_evidence(werte, ilvl=ilvl, rarity=rarity,
+                                   category=category)
+
+    def observe_tier_evidence(self, values: Sequence[float], *, ilvl: int,
+                              rarity: int, category: str) -> bool:
+        """Nur den Tier-Beleg einarbeiten, ohne irgendeinen Zählstand.
+
+        Getrennt von ``observe``, weil ein Stand nach Aufbau 2 die Belege
+        nachtragen muss, OHNE dass die Sichtungen ein zweites Mal
+        gezählt werden (``ModCollection.backfill_tiers``).
+
+        Gibt zurück, ob der Beleg überhaupt taugte."""
+        if not tierable(rarity, ilvl) or not category or len(values) != 1:
+            return False
+        vorher = self.tier_evidence.get(category, [])
+        nachher = add_evidence(vorher, values[0], ilvl)
+        if nachher is vorher:
+            return False
+        self.tier_evidence[category] = nachher
+        return True
 
     @property
     def leagues(self) -> list[str]:
@@ -390,6 +484,9 @@ class ModRecord:
             "spans": {liga: {str(rarity): spanne.to_row()
                              for rarity, spanne in sorted(je_liga.items())}
                       for liga, je_liga in sorted(self.spans.items())},
+            "tiers": {kat: [[_as_number(w), il] for w, il in front]
+                      for kat, front in sorted(self.tier_evidence.items())
+                      if front},
         }
 
     @classmethod
@@ -413,6 +510,18 @@ class ModRecord:
                         continue
                     ergebnis[rarity] = RaritySpan.from_row(spanne)
             return ergebnis
+
+        tiers = row.get("tiers")
+        if isinstance(tiers, dict):
+            for kat, front in tiers.items():
+                if not isinstance(kat, str) or not isinstance(front, list):
+                    continue
+                punkte = [(float(p[0]), int(p[1])) for p in front
+                          if isinstance(p, list) and len(p) == 2
+                          and isinstance(p[0], (int, float))
+                          and isinstance(p[1], (int, float))]
+                if punkte:
+                    eintrag.tier_evidence[kat] = sorted(punkte)
 
         spans = row.get("spans")
         if isinstance(spans, dict):
@@ -447,7 +556,8 @@ class ModCollection:
 
     def observe(self, kind: str, line: str, *, ilvl: int = 0,
                 rarity: int = UNKNOWN_RARITY,
-                league: str = LEGACY_LEAGUE) -> ModRecord | None:
+                league: str = LEGACY_LEAGUE,
+                category: str = "") -> ModRecord | None:
         """Eine einzelne Mod-Zeile aufnehmen. Gibt den Eintrag zurück,
         oder ``None`` bei einer unbekannten Art bzw. leerem Text."""
         if kind not in MOD_KINDS or not line:
@@ -460,9 +570,48 @@ class ModCollection:
         if eintrag is None:
             eintrag = self._records[schluessel] = ModRecord(identity, kind)
             self._new.add(schluessel)
-        eintrag.observe(line, ilvl=ilvl, rarity=rarity, league=league)
+        eintrag.observe(line, ilvl=ilvl, rarity=rarity, league=league,
+                        category=category)
         self._dirty = True
         return eintrag
+
+    def backfill_tiers(self, items: Iterable) -> int:
+        """Tier-Belege nachtragen, ohne einen einzigen Zählstand anzufassen.
+
+        Ein Stand nach Aufbau 2 kennt die Belege nicht (§VERSION). Ihn
+        einfach neu einzulesen wäre der naheliegende Weg und der falsche:
+        Jede Sichtung zählte dann doppelt, und die Sammlung ist der
+        einzige Ort, an dem ein verkauftes Item noch existiert — eine
+        verdoppelte Zählung liesse sich nie wieder herausrechnen.
+
+        Gibt die Zahl der Belege zurück, die wirklich etwas geändert
+        haben."""
+        getroffen = 0
+        for item in items:
+            ilvl = int(getattr(item, "ilvl", 0) or 0)
+            _liga, rarity = item_buckets(item)
+            if not tierable(rarity, ilvl):
+                continue
+            category = item_category(item) or ""
+            if not category:
+                continue
+            for kind, zeilen in (("explicitMods", item.explicit_mods),
+                                 ("implicitMods", item.implicit_mods)):
+                for line in zeilen:
+                    eintrag = self._records.get((kind, mod_identity(line)))
+                    if eintrag is None:
+                        continue
+                    if eintrag.observe_tier_evidence(
+                            mod_values(line), ilvl=ilvl, rarity=rarity,
+                            category=category):
+                        getroffen += 1
+                        self._dirty = True
+        return getroffen
+
+    def has_tier_evidence(self) -> bool:
+        """Trägt die Sammlung überhaupt schon Tier-Belege? Die Frage
+        entscheidet, ob ein Nachtrag nötig ist."""
+        return any(r.tier_evidence for r in self._records.values())
 
     def observe_item(self, item) -> int:
         """Alle Mod-Zeilen eines Items aufnehmen; gibt deren Anzahl zurück.
@@ -474,12 +623,13 @@ class ModCollection:
         stünde je nach Herkunft zweimal in der Sammlung."""
         ilvl = int(getattr(item, "ilvl", 0) or 0)
         liga, rarity = item_buckets(item)
+        category = item_category(item) or ""
         gezaehlt = 0
         for kind, zeilen in (("explicitMods", item.explicit_mods),
                              ("implicitMods", item.implicit_mods)):
             for line in zeilen:
                 if self.observe(kind, line, ilvl=ilvl, rarity=rarity,
-                                league=liga) is not None:
+                                league=liga, category=category) is not None:
                     gezaehlt += 1
         for kind in (ENCHANT_MOD_FIELD, *EXTRA_MOD_FIELDS):
             for line in extra_mod_lines(item, kind):

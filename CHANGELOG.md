@@ -43,6 +43,17 @@ nach [SemVer](https://semver.org/lang/de/).
   Tabelle (nur für neu hinzukommende Beobachtungen, Altbestand bleibt
   gemischt).
 
+- **Vermutete Tier-Bänder** im Steckbrief des Albums, abgeleitet aus dem
+  Item-Level: Ein Tier kann unterhalb seiner Freischaltung nicht
+  auftreten, also verrät das niedrigste Item-Level, auf dem ein Wert je
+  auftauchte, wo die Grenzen liegen. Obergrenzen sind belegt,
+  Untergrenzen erschlossen — beides steht so im Fenster. Wo die Belege
+  nichts hergeben, steht der Grund statt einer geratenen Leiter; bei
+  einem reinen Endgame-Bestand ist das der Normalfall, weil ab
+  Item-Level 75 fast alle Tiers verfügbar sind und sich nichts mehr
+  trennen lässt. Scharf werden die Bänder, wenn man eine Liga von unten
+  hochspielt.
+
 ### Behoben
 
 - Die Beschriftung des Schnitts im XP-Graphen war unlesbar, wenn der

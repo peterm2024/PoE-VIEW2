@@ -18,6 +18,7 @@ import pytest
 from poe_view.api.models import Item
 from poe_view.services import mod_collection as mc
 from poe_view.services.mod_collection import (CORRUPTED_OFFSET, LEGACY_LEAGUE,
+                                              tierable,
                                               MAP_RARITY, MIN_LEAGUE_OBSERVATIONS,
                                               UNKNOWN_RARITY, ModCollection,
                                               ModRecord, base_rarity,
@@ -563,4 +564,142 @@ def test_an_unknown_pot_reports_no_sightings() -> None:
     assert wert is None
     assert grundlage == LEGACY_LEAGUE
     assert sichtungen == 0
+
+
+# ---------------------- Belege fuer die Tier-Ableitung ------------------- #
+#
+# Peter, 2026-08-25: "wir kennen das Item-Level; ... dadurch den Tier im
+# Laufe der Zeit feststellen koennen." Die Sammlung SAMMELT die Belege;
+# gedeutet werden sie erst in ``services/mod_tiers.py``.
+
+
+def test_only_rolled_affixes_count_as_tier_evidence() -> None:
+    """Normal hat keine Affixe, Unique feste Werte, Korrumpiertes bringt
+    eigene Wertebereiche mit — nichts davon sagt etwas ueber Tiers."""
+    assert tierable(1, 50) is True          # Magic
+    assert tierable(2, 50) is True          # Rare
+    assert tierable(0, 50) is False         # Normal
+    assert tierable(3, 50) is False         # Unique
+    assert tierable(MAP_RARITY, 50) is False
+    assert tierable(UNKNOWN_RARITY, 50) is False
+    assert tierable(2 + CORRUPTED_OFFSET, 50) is False
+
+
+def test_an_item_without_a_level_gives_no_tier_evidence() -> None:
+    """Ohne Item-Level gibt es keine Achse, an der sich etwas aufloesen
+    liesse."""
+    assert tierable(2, 0) is False
+
+
+def test_observing_an_item_records_tier_evidence() -> None:
+    sammlung = ModCollection()
+    sammlung.observe_item(_item(frameType=RARE, ilvl=42, baseType="Gold Ring",
+                                typeLine="Gold Ring",
+                                explicitMods=["+27% to Cold Resistance"]))
+
+    eintrag = sammlung.get("explicitMods", "+27% to Cold Resistance")
+    assert eintrag.tier_evidence
+    front = next(iter(eintrag.tier_evidence.values()))
+    assert front == [(27.0, 42)]
+
+
+def test_a_unique_contributes_a_span_but_no_tier_evidence() -> None:
+    """Die Sichtung zaehlt weiter — nur fuer die Tier-Frage taugt sie
+    nicht."""
+    sammlung = ModCollection()
+    sammlung.observe_item(_item(frameType=UNIQUE, ilvl=80, baseType="Gold Ring",
+                                typeLine="Gold Ring",
+                                explicitMods=["+27% to Cold Resistance"]))
+
+    eintrag = sammlung.get("explicitMods", "+27% to Cold Resistance")
+    assert eintrag.count == 1
+    assert eintrag.tier_evidence == {}
+
+
+def test_multi_number_mods_give_no_tier_evidence() -> None:
+    """"Adds # to #" haette zwei Achsen; die Front ist auf eine ausgelegt."""
+    sammlung = ModCollection()
+    sammlung.observe_item(_item(frameType=RARE, ilvl=42, baseType="Gold Ring",
+                                typeLine="Gold Ring",
+                                explicitMods=["Adds 2 to 6 Fire Damage"]))
+
+    eintrag = sammlung.get("explicitMods", "Adds 2 to 6 Fire Damage")
+    assert eintrag.count == 1
+    assert eintrag.tier_evidence == {}
+
+
+def test_backfilling_tiers_does_not_touch_any_count() -> None:
+    """Der Kern des Nachtrags. Die Sammlung ist der einzige Ort, an dem
+    ein verkauftes Item noch existiert — eine verdoppelte Zaehlung liesse
+    sich nie wieder herausrechnen. Deshalb NICHT neu einlesen."""
+    item = _item(frameType=RARE, ilvl=42, baseType="Gold Ring",
+                 typeLine="Gold Ring", explicitMods=["+27% to Cold Resistance"])
+    sammlung = ModCollection()
+    sammlung.observe_item(item)
+    eintrag = sammlung.get("explicitMods", "+27% to Cold Resistance")
+    vorher_count = eintrag.count
+    vorher_spanne = eintrag.span(RARE).count
+
+    sammlung.backfill_tiers([item, item, item])
+
+    assert eintrag.count == vorher_count
+    assert eintrag.span(RARE).count == vorher_spanne
+
+
+def test_backfilling_adds_the_evidence_a_v2_file_lacks() -> None:
+    """Ein Stand ohne Belege bekommt sie nachtraeglich — sonst blieben
+    Baender fuer immer leer, weil neu eingelesen nie wird."""
+    item = _item(frameType=RARE, ilvl=42, baseType="Gold Ring",
+                 typeLine="Gold Ring", explicitMods=["+27% to Cold Resistance"])
+    sammlung = ModCollection()
+    sammlung.observe_item(item)
+    eintrag = sammlung.get("explicitMods", "+27% to Cold Resistance")
+    eintrag.tier_evidence.clear()           # wie ein Stand nach Aufbau 2
+
+    assert sammlung.has_tier_evidence() is False
+    assert sammlung.backfill_tiers([item]) == 1
+    assert sammlung.has_tier_evidence() is True
+
+
+def test_backfilling_ignores_lines_the_collection_does_not_know() -> None:
+    """Der Nachtrag darf keine neuen Eintraege anlegen — er ergaenzt nur."""
+    sammlung = ModCollection()
+    fremd = _item(frameType=RARE, ilvl=42, baseType="Gold Ring",
+                  typeLine="Gold Ring", explicitMods=["+27% to Cold Resistance"])
+
+    assert sammlung.backfill_tiers([fremd]) == 0
+    assert len(sammlung) == 0
+
+
+def test_tier_evidence_survives_a_round_trip(tmp_path) -> None:
+    sammlung = ModCollection()
+    sammlung.observe_item(_item(frameType=RARE, ilvl=42, baseType="Gold Ring",
+                                typeLine="Gold Ring",
+                                explicitMods=["+27% to Cold Resistance"]))
+    ziel = tmp_path / "sammlung.json"
+    sammlung.save(ziel)
+
+    zurueck = mc.load(ziel)
+
+    eintrag = zurueck.get("explicitMods", "+27% to Cold Resistance")
+    assert eintrag.tier_evidence == {"Ring": [(27.0, 42)]}
+
+
+def test_a_v2_file_without_tiers_still_loads(tmp_path) -> None:
+    """Ein alter Stand darf nicht verlorengehen, nur weil ihm ein Feld
+    fehlt — dieselbe Regel wie beim Ligen-Umbau."""
+    ziel = tmp_path / "alt.json"
+    ziel.write_text(json.dumps({
+        "version": 2,
+        "mods": [{"identity": "# to maximum Life", "kind": "explicitMods",
+                  "count": 7, "example": "+96 to maximum Life",
+                  "spans": {"": {"2": {"count": 7, "lows": [41], "highs": [96],
+                                       "ilvl_low": 10, "ilvl_high": 80}}}}],
+    }), encoding="utf-8")
+
+    zurueck = mc.load(ziel)
+
+    eintrag = zurueck.get("explicitMods", "+96 to maximum Life")
+    assert eintrag.count == 7
+    assert eintrag.tier_evidence == {}
 

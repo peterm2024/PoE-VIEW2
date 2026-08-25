@@ -5,10 +5,12 @@ Netzzugriff, kein Worker nötig."""
 
 from poe_view.services.mod_collection import (CORRUPTED_OFFSET, LEGACY_LEAGUE,
                                               ModCollection)
-from poe_view.ui.mod_album import (COLUMNS, EXAMPLE_COL, IDENTITY_COL,
-                                   KIND_COL, RANGE_COL, ModAlbumDialog,
-                                   combined_range_text, format_record_detail,
-                                   kind_label, league_label, rarity_label)
+from poe_view.services import mod_tiers
+from poe_view.ui.mod_album import (COLUMNS, COUNT_COL, EXAMPLE_COL,
+                                   IDENTITY_COL, KIND_COL, RANGE_COL,
+                                   ModAlbumDialog, combined_range_text,
+                                   format_record_detail, kind_label,
+                                   league_label, matching_count, rarity_label)
 
 
 def _sammlung() -> ModCollection:
@@ -403,4 +405,101 @@ def test_a_negative_range_reads_unambiguously() -> None:
     assert _spread_text([(-47.0, -14.0)]) == "-47 to -14"
     assert "–" not in _spread_text([(-47.0, -14.0)])
     assert _spread_text([(-47.0, 14.0)]) == "-47–14"
+
+
+# ------------------- Seen zeigt dieselbe Auswahl wie Range --------------- #
+
+def test_seen_follows_the_same_selection_as_range(qapp) -> None:
+    """Peter fiel es an einem Screenshot auf: Chaos-Res zeigte Range "13"
+    und daneben 897 Sichtungen — die Range kam aus dem gefilterten Topf,
+    die Zahl aus allen zusammen. Zwei Spalten nebeneinander, die von
+    verschiedenen Populationen reden."""
+    sammlung = ModCollection()
+    for _ in range(5):
+        sammlung.observe("explicitMods", "+13 to maximum Life", rarity=2,
+                         league="Allflame")
+    for _ in range(90):
+        sammlung.observe("explicitMods", "+26 to maximum Life", rarity=2)
+    sammlung.clear_new()
+    dialog = ModAlbumDialog(sammlung)
+
+    ohne = dialog._proxy.index(0, COUNT_COL)
+    assert dialog._proxy.data(ohne) == 95          # alle Toepfe zusammen
+
+    dialog._league_combo.setCurrentIndex(dialog._league_combo.findData("Allflame"))
+
+    mit = dialog._proxy.index(0, COUNT_COL)
+    assert dialog._proxy.data(mit) == 5            # nur der gewaehlte Topf
+    assert dialog._proxy.data(dialog._proxy.index(0, RANGE_COL)) == "13"
+
+
+def test_the_unfiltered_count_still_equals_the_records_own_total(qapp) -> None:
+    """Jede Beobachtung zaehlt in genau eine Spanne — ungefiltert muss die
+    Summe deshalb wieder der Gesamtzahl entsprechen. Faellt das
+    auseinander, geht beim Einsortieren etwas verloren."""
+    sammlung = _sammlung()
+    for record in sammlung.records():
+        assert matching_count(record, None, None) == record.count
+
+
+# --------------------------- Tier-Baender im Album ----------------------- #
+
+def _mit_belegen(front) -> "ModCollection":
+    """Eine Sammlung, deren Eintrag genau diese Belege traegt."""
+    sammlung = ModCollection()
+    sammlung.observe("explicitMods", "+27% to Cold Resistance", rarity=2)
+    sammlung.clear_new()
+    record = sammlung.get("explicitMods", "+27% to Cold Resistance")
+    record.tier_evidence["Ring"] = list(front)
+    return sammlung
+
+
+def test_the_detail_shows_inferred_bands() -> None:
+    sammlung = _mit_belegen([(6, 5), (12, 14), (18, 26), (24, 38), (30, 50)])
+    record = sammlung.get("explicitMods", "+27% to Cold Resistance")
+
+    text = format_record_detail(record)
+
+    assert "Tiers" in text
+    assert "Ring" in text
+    assert "item level" in text
+
+
+def test_the_detail_says_why_it_stays_silent() -> None:
+    """Der haeufigste Fall bei einem Endgame-Bestand — und er ist kein
+    Mangel der Sammlung, sondern eine Eigenschaft der Items."""
+    sammlung = _mit_belegen([(40, 75), (44, 78), (46, 80), (48, 84), (50, 85)])
+    record = sammlung.get("explicitMods", "+27% to Cold Resistance")
+
+    text = format_record_detail(record)
+
+    assert "Tiers" in text
+    # Auf den GRUND pruefen, nicht auf "75" — die Zahl steht auch in der
+    # Kopfzeile des Abschnitts ("item level 75-85"), der Test waere ohne
+    # den Grund gruen geblieben.
+    assert mod_tiers.why_silent([(40, 75), (44, 78), (46, 80),
+                                 (48, 84), (50, 85)]) in text
+    # Keine geratene Leiter: keine Zeile der Form "12–17  from item level 3".
+    band_zeilen = [z for z in text.splitlines()
+                   if "from item level" in z and "–" in z.split("from")[0]]
+    assert band_zeilen == []
+
+
+def test_a_record_without_evidence_shows_no_tier_section() -> None:
+    """Kein leerer Abschnitt, wo es nichts zu sagen gibt."""
+    record = _sammlung().get("explicitMods", "+96 to maximum Life")
+
+    assert "Tiers" not in format_record_detail(record)
+
+
+def test_the_band_section_marks_what_is_proven_and_what_is_assumed() -> None:
+    """Die Grenze zwischen Beleg und Annahme muss im Fenster stehen, nicht
+    nur im Quelltext — sonst liest sich die Leiter wie Spielwissen."""
+    sammlung = _mit_belegen([(6, 5), (12, 14), (18, 26), (24, 38), (30, 50)])
+    record = sammlung.get("explicitMods", "+27% to Cold Resistance")
+
+    text = format_record_detail(record)
+
+    assert "proven" in text
+    assert "assume" in text
 
