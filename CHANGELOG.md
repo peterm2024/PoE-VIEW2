@@ -10,18 +10,25 @@ nach [SemVer](https://semver.org/lang/de/).
 
 - **Mod-Sammlung**: Jede Mod-Zeile, die durch die Truhe geht, wird
   aufgeschrieben — wie oft gesehen, wie hoch und wie niedrig gerollt, auf
-  welchen Item-Stufen, getrennt nach Rarität. Im Detail-Panel steht
-  seither ★ vor dem besten Roll, den du von diesem Mod je gesehen hast,
-  und ✦ vor einem, der zum ersten Mal auftaucht. Die Sammlung füllt sich
-  beim ersten Start aus dem vorhandenen Cache (bei einem gewachsenen
-  Bestand rund 6000 verschiedene Mods) und wächst danach nebenbei weiter,
-  ohne einen einzigen zusätzlichen Abruf. Sie sagt, was DU gesehen hast —
-  nicht, was das Spiel erlaubt. Weil sich Mod-Werte von Liga zu Liga
-  ändern, bekommt jede temporäre Liga ihren eigenen Topf; Standard und die
-  übrigen dauerhaften Ligen teilen sich einen, denn dort liegen Items aus
-  jeder je gespielten Liga nebeneinander. Reicht die eigene Liga noch
-  nicht für einen Vergleich, wird gegen diesen Altbestand gemessen — und
-  der Stern ist dann hohl (☆) statt gefüllt.
+  welchen Item-Stufen, getrennt nach Rarität. Die Sammlung füllt sich beim
+  ersten Start aus dem vorhandenen Cache (bei einem gewachsenen Bestand
+  rund 6000 verschiedene Mods) und wächst danach nebenbei weiter, ohne
+  einen einzigen zusätzlichen Abruf. Sie sagt, was DU gesehen hast — nicht,
+  was das Spiel erlaubt. Weil sich Mod-Werte von Liga zu Liga ändern,
+  bekommt jede temporäre Liga ihren eigenen Topf; Standard und die übrigen
+  dauerhaften Ligen teilen sich einen, denn dort liegen Items aus jeder je
+  gespielten Liga nebeneinander.
+
+- **Ein Balken vor jeder Mod-Zeile** zeigt, wo dieser Roll zwischen dem
+  schlechtesten und dem besten liegt, den du von diesem Mod je gesehen
+  hast. Voll heißt "der beste, den ich kenne", leer "der schlechteste" —
+  und beide Enden sind genau: Ein Roll knapp unter dem Rekord füllt den
+  Balken nicht ganz. Gedämpft bedeutet, dass für den Vergleich der
+  Altbestand herhalten musste, weil die Liga des Items noch zu wenige
+  Sichtungen hat. Kein Balken heißt, dass es nichts zu vergleichen gibt:
+  Der Mod hat bisher nur einen einzigen Wert gezeigt oder weniger als fünf
+  Sichtungen. ✦ steht weiterhin vor einem Mod, der zum ersten Mal
+  auftaucht.
 
 ### Behoben
 

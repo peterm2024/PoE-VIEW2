@@ -1264,3 +1264,90 @@ Gegenprobe: ein 404 anderswo bleibt ein Fehler mit Traceback),
 Rundlauf und der läuft weiter, der Merker gilt nur in seiner Liga, ein
 geglückter Abruf hebt ihn auf, die Kette wird freigegeben).
 
+
+## 76. `QPalette.Window` sagt #1e1e1e, gemalt wird #2d2d2d
+
+**Ausgangslage:** Für die Balkenspalte vor den Mod-Zeilen (§4.52.2)
+mussten zwei Farben gegen den Hintergrund des Detail-Panels gerechnet
+werden — die Spur des Balkens soll sichtbar, aber leise sein. Die Farbe
+des Grundes kam aus der Palette:
+
+```python
+QFrame().palette().color(QPalette.ColorRole.Window)   # -> #1e1e1e
+```
+
+Damit gerechnet ergab `#3a3a3a` eine Spur mit CIEDE2000 8,9 gegen den
+Grund — leise, aber da.
+
+**Im echten Panel war sie unsichtbar.** Ein gegriffenes Bild des Widgets
+zeigte, warum:
+
+```python
+QColor(ItemDetail().grab().toImage().pixel(150, 60)).name()   # -> #2d2d2d
+```
+
+Der Rahmen (`QFrame.Shape.StyledPanel`) malt nicht die Farbe, die die
+Palette für die Rolle `Window` nennt. Gegen den echten Grund hatte die
+Spur nur noch ΔE 4,2 — rechnerisch ein Sechstel dessen, was gewollt war,
+und praktisch nichts.
+
+**Der Fix**: Gegen `#2d2d2d` gerechnet, Spur auf `#4a4a4a` (ΔE 9,5,
+Kontrast 1,55). Die Konstante `mod_bar.PANEL_BG` trägt die gemessene
+Farbe und sagt im Kommentar, dass sie gemessen und nicht der Palette
+entnommen ist.
+
+**Lehre:** Eine Palette ist eine Absichtserklärung, kein Protokoll. Was
+ein Widget wirklich malt, weiß man erst, wenn man es greift und ein Pixel
+liest — und für Farbrechnungen ist genau das der Bezugswert. Das ist
+dieselbe Regel wie in #55 und #71, nur für Farbe statt für Größe: nicht
+die Umgebung fragen, sondern das Ergebnis messen.
+
+## 77. Der Balken stand eine Zeile zu hoch — Qt schneidet Leerraum am Blockanfang weg
+
+**Ausgangslage:** Die Balkenspalte (§4.52.2) ist ein gefärbtes `<span>`,
+das nur aus geschützten Leerzeichen besteht, der Mod-Zeile
+vorangestellt. Im gegriffenen Bild des echten Panels stand bei der
+**ersten Mod-Zeile jedes Blocks** der Balken eine Zeile zu hoch — über
+der Trennlinie —, und der Text daneben war überhaupt nicht eingerückt.
+Bei allen folgenden Zeilen stimmte es.
+
+Der Unterschied zwischen "erste Zeile" und "folgende": Die erste steht
+nach einem `<hr>`, also am Anfang eines neuen Blocks; die folgenden nach
+einem `<br>`, also mitten im Block. **Qt schneidet führenden Leerraum am
+Blockanfang weg**, und ein Span aus lauter U+00A0 ist für diese Regel
+genau das. Die Färbung landete dadurch im Block davor.
+
+Gemessen wurde es nicht am Bild, sondern am geparsten Dokument — dort
+steht es unmissverständlich:
+
+```
+--- Block 0: 'iLvl 60'
+     Fragment 'iLvl 60'   bg=NoBrush
+--- Block 2: '​ …30% increased Global Critical Strike Chance'
+     Fragment '   …'   bg=SolidPattern #6fae5c
+```
+
+**Was nicht geholfen hat:** `&nbsp;`-Entities statt roher Zeichen (bei
+einer ungefärbten Lücke half es, beim gefärbten Span nicht), `<hr/>`
+statt `<hr>`, die Zeile in ein zusätzliches `<span>` wickeln.
+
+**Der Fix**: Ein Zeichen ohne Breite vor der Spalte
+(`mod_bar.BLOCK_START = "​"`). Damit steht der Leerraum nicht mehr
+am Blockanfang, sondern in der Mitte, und Qt lässt ihn stehen. Gemessen
+von 8 bis 14 pt: Breite 0,00 px in jeder Größe, die Ausrichtung ändert
+sich also nicht.
+
+**Lehre, doppelt:**
+
+- Rich-Text-Layout hat Regeln, die man nicht sieht, solange man Höhen
+  zählt. Die Höhe war in beiden Fassungen identisch (drei Zeilen), nur
+  der Inhalt saß woanders — eine Prüfung auf `heightForWidth` hätte den
+  Fehler nie gefunden.
+- Für so etwas ist das geparste `QTextDocument` der bessere Prüfstand als
+  ein Bild: Es beantwortet "in welchem Block liegt die Färbung" ohne
+  Schrift, ohne Palette und damit auch offscreen im Test.
+
+Getestet: `tests/test_mod_bar.py` (der Balken liegt im Block seiner
+Mod-Zeile und nicht im davor; Gegenprobe: ohne das Zeichen fällt der
+Test).
+

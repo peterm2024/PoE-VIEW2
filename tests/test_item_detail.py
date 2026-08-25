@@ -63,8 +63,10 @@ def test_requirement_line_absent_when_nothing_known(qapp) -> None:
 # --- Gliederung in Bloecke (Peter, 2026-08-12: "etwas uebersichtlicher") --- #
 
 def _blocks(item: Item) -> list[list[str]]:
+    """Nur die Texte — die Marke prueft ``_blocks_mit_marke`` weiter
+    unten, hier geht es um die Gliederung."""
     from poe_view.ui.item_detail import _item_blocks
-    return [b for b in _item_blocks(item) if b]
+    return [[zeile.text for zeile in b] for b in _item_blocks(item) if b]
 
 
 def test_the_implicit_mod_is_its_own_block() -> None:
@@ -282,11 +284,11 @@ def test_only_mod_lines_get_a_mark() -> None:
 
     bloecke = _item_blocks(item, lambda kind, line: "* ")
     flach = [zeile for block in bloecke for zeile in block]
+    markiert = {zeile.text for zeile in flach if zeile.mark}
 
-    assert "* +96 to maximum Life" in flach
-    assert "* +20% to Fire Resistance" in flach
-    assert not any(zeile.startswith("* iLvl") for zeile in flach)
-    assert not any(zeile.startswith("* Rare") for zeile in flach)
+    assert markiert == {"+96 to maximum Life", "+20% to Fire Resistance"}
+    assert not any(zeile.mark for zeile in flach if zeile.text.startswith("iLvl"))
+    assert not any(zeile.mark for zeile in flach if zeile.text.startswith("Rare"))
 
 
 def test_the_mark_knows_which_list_a_line_came_from() -> None:
@@ -305,4 +307,39 @@ def test_the_mark_knows_which_list_a_line_came_from() -> None:
     _item_blocks(flasche, lambda kind, line: gesehen.append(kind) or "")
 
     assert gesehen == ["utilityMods"]
+
+
+def test_the_mark_stays_html_while_the_mod_text_is_escaped() -> None:
+    """Die Grenze, um die es bei ``Line`` geht. Die Balkenspalte MUSS als
+    Markup durchkommen, sonst stuenden ``<span ...>`` als Text im Panel;
+    der Mod-Text darf es NICHT, denn er kommt von GGGs Server."""
+    from poe_view.ui.item_detail import Line, _blocks_to_html
+
+    html = _blocks_to_html([[Line("+96 to <b>maximum</b> Life",
+                                  '<span style="color:#fff">|</span>')]])
+
+    assert '<span style="color:#fff">|</span>' in html
+    assert "&lt;b&gt;maximum&lt;/b&gt;" in html
+    assert "<b>" not in html
+
+
+def test_a_bare_string_is_a_line_without_a_mark() -> None:
+    """Damit die Tests des Hoehenbudgets mit ``[["Mod 1"]]`` lesbar
+    bleiben — und ein blanker String nirgends unescaped durchrutscht."""
+    from poe_view.ui.item_detail import _blocks_to_html
+
+    assert "&lt;b&gt;" in _blocks_to_html([["<b>"]])
+
+
+def test_the_preferred_width_leaves_room_for_the_bar_column(qapp) -> None:
+    """Die Spalte steht VOR der Mod-Zeile. Wuerde sie nicht aufgeschlagen,
+    knabberte sie die 68 Zeichen an, fuer die das Panel bemessen ist."""
+    from poe_view.ui import mod_bar
+
+    detail = ItemDetail()
+    metrics = detail._props.fontMetrics()
+    spalte = metrics.horizontalAdvance(mod_bar.CELL * (mod_bar.BAR_CELLS + 2))
+
+    assert spalte > 0
+    assert detail.preferred_width() >= metrics.averageCharWidth() * 68 + 64 + spalte
 

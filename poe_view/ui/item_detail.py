@@ -19,8 +19,9 @@ Zeilenbudget unten.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from html import escape
-from typing import Callable
+from typing import Callable, Sequence
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QPixmap
@@ -28,6 +29,7 @@ from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout
 
 from poe_view.api.models import (ENCHANT_MOD_FIELD, Item, all_extra_mod_pairs,
                                  extra_mod_lines, req_attribute, req_level)
+from poe_view.ui import mod_bar
 from poe_view.ui.theme import RARITY_COLORS
 
 
@@ -36,6 +38,31 @@ def _no_mark(kind: str, line: str) -> str:
     Vorgabewert zweier Signaturen beim Definieren gebraucht wird — nicht
     erst beim Aufruf."""
     return ""
+
+
+@dataclass(frozen=True)
+class Line:
+    """Eine Zeile des Panels, in ihren zwei sehr verschiedenen Hälften.
+
+    ``text`` ist roher Text und wird beim Zusammensetzen **escaped** —
+    Item- und Mod-Texte kommen von GGGs Server, nicht von uns.
+
+    ``mark`` ist dagegen **fertiges HTML und wird NICHT escaped**. Genau
+    deshalb steht es in einem eigenen Feld und nicht vorne im Text: Die
+    Balkenspalte der Mod-Sammlung (``ui/mod_bar.py``) besteht aus
+    gefärbten ``<span>``-Elementen, und wären Marke und Text ein String,
+    müsste hier jemand entscheiden, welcher Teil escaped wird. Diese
+    Entscheidung ist der Weg, auf dem fremder Text irgendwann als Markup
+    durchrutscht."""
+
+    text: str
+    mark: str = ""
+
+
+def _as_line(zeile: "Line | str") -> Line:
+    """Ein blanker String ist eine Zeile ohne Marke. Das halten die Tests
+    des Höhenbudgets lesbar, die mit ``[["Mod 1", "Mod 2"]]`` arbeiten."""
+    return zeile if isinstance(zeile, Line) else Line(zeile)
 
 
 # Das Höhenbudget des Panels, gezählt in ZEILENHÖHEN — und zwar für
@@ -136,11 +163,17 @@ class ItemDetail(QFrame):
         ohne Umbruch hineinpasst — die Grundlage für die Position des
         Splitters darunter. ``averageCharWidth`` statt einer gemessenen
         Beispielzeile: Der Wert hängt sonst daran, welchen Satz man
-        zufällig als Vorlage nimmt."""
+        zufällig als Vorlage nimmt.
+
+        Die Balkenspalte kommt dazu, statt vom Text abgezogen zu werden:
+        Sie steht VOR der Mod-Zeile, also braucht dieselbe Zeile jetzt
+        entsprechend mehr Platz. Ohne diesen Summanden würde die Spalte
+        die 68 Zeichen anknabbern, für die das Panel bemessen ist."""
         metrics = self._props.fontMetrics()
         margins = self.layout().contentsMargins()
         return (self._icon.width() + self.layout().spacing()
                 + _TYPICAL_LINE_CHARS * metrics.averageCharWidth()
+                + metrics.horizontalAdvance(mod_bar.CELL * (mod_bar.BAR_CELLS + 2))
                 + margins.left() + margins.right())
 
     def show_item(self, item: Item, pixmap: QPixmap | None,
@@ -162,21 +195,25 @@ class ItemDetail(QFrame):
             self._icon.clear()
 
 
-def _item_blocks(item: Item, mark: Callable[[str, str], str] = _no_mark) -> list[list[str]]:
+def _item_blocks(item: Item,
+                 mark: Callable[[str, str], str] = _no_mark) -> list[list[Line]]:
     """Die Textblöcke eines Items in der Reihenfolge des Spiels. Reine
     Datenaufbereitung ohne Qt — dadurch ohne Fenster testbar.
 
     Leere Blöcke bleiben drin und werden erst beim Zusammensetzen
     verworfen; das hält die Reihenfolge hier lesbar.
 
-    ``mark`` stellt jeder Mod-Zeile ein Zeichen voran (Mod-Sammlung,
-    §4.52). **Vorangestellt und höchstens zwei Zeichen lang**, und das
-    ist keine Geschmacksfrage: Das Panel bricht lange Zeilen um
-    (``setWordWrap``), sein Höhenbudget zählt aber Zeilen, nicht
-    umgebrochene Zeilen. Ein angehängter Text wie "deine 41–96" würde
-    genau die längsten Mod-Zeilen umbrechen lassen und das Panel still
-    über seine feste Höhe schieben — derselbe Fehler, der die Anzeige
-    schon zweimal gekostet hat (§_blocks_to_html)."""
+    ``mark`` liefert zu jeder Mod-Zeile die Balkenspalte der
+    Mod-Sammlung (``ui/mod_bar.py``, §4.52.2) als fertiges HTML.
+    **Vorangestellt und von fester Breite**, und das ist keine
+    Geschmacksfrage: Das Panel bricht lange Zeilen um (``setWordWrap``),
+    sein Höhenbudget zählt aber Zeilen, nicht umgebrochene Zeilen. Ein
+    angehängter Text wie "deine 41–96" würde genau die längsten
+    Mod-Zeilen umbrechen lassen und das Panel still über seine feste Höhe
+    schieben — derselbe Fehler, der die Anzeige schon zweimal gekostet
+    hat (§_blocks_to_html). Die feste Breite ist der zweite Teil davon:
+    Eine Spalte, die je nach Inhalt schmaler wird, verschöbe den
+    Textanfang von Zeile zu Zeile."""
     kind = [item.rarity + (f" · {item.typeLine}" if item.name else "")]
 
     properties = [prop.display_text for prop in item.properties if prop.display_value]
@@ -194,21 +231,21 @@ def _item_blocks(item: Item, mark: Callable[[str, str], str] = _no_mark) -> list
     # Verzauberung über den impliziten Mods, die übrigen Zusatzlisten bei
     # den expliziten — dieselbe Aufteilung wie im Item-Textexport
     # (§4.38), damit Anzeige und Zwischenablage nicht auseinanderlaufen.
-    def markiert(feld: str, zeilen) -> list[str]:
-        return [mark(feld, zeile) + zeile for zeile in zeilen]
+    def markiert(feld: str, zeilen) -> list[Line]:
+        return [Line(zeile, mark(feld, zeile)) for zeile in zeilen]
 
     return [
-        kind,
-        properties,
-        [" · ".join(requirements)] if requirements else [],
+        [Line(zeile) for zeile in kind],
+        [Line(zeile) for zeile in properties],
+        [Line(" · ".join(requirements))] if requirements else [],
         markiert(ENCHANT_MOD_FIELD, extra_mod_lines(item, ENCHANT_MOD_FIELD)),
         markiert("implicitMods", item.implicit_mods),
         markiert("explicitMods", item.explicit_mods)
-        + [mark(feld, zeile) + zeile for feld, zeile in all_extra_mod_pairs(item)],
+        + [Line(zeile, mark(feld, zeile)) for feld, zeile in all_extra_mod_pairs(item)],
     ]
 
 
-def _blocks_to_html(blocks: list[list[str]]) -> str:
+def _blocks_to_html(blocks: Sequence[Sequence[Line | str]]) -> str:
     """Blöcke zu HTML, getrennt durch ``<hr>``. Kürzt auf ``_MAX_UNITS``
     und sagt es dann auch — stilles Abschneiden war der eigentliche
     Mangel der Fassung davor, und danach noch einmal der Grund, warum
@@ -232,7 +269,8 @@ def _blocks_to_html(blocks: list[list[str]]) -> str:
             weggelassen += len(block)
             continue
         genommen = block[:frei]
-        kept.append([escape(line) for line in genommen])
+        kept.append([zeile.mark + escape(zeile.text)
+                     for zeile in map(_as_line, genommen)])
         weggelassen += len(block) - len(genommen)
         budget -= trenner + len(genommen)
     html = "<hr>".join("<br>".join(block) for block in kept)

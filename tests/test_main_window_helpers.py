@@ -18,7 +18,7 @@ from poe_view.services import price_cache
 from poe_view.services.api_worker import (FetchPricesJob, FetchStashListJob,
                                           LOGIN_EXPIRED, LOGIN_NO_TOKEN)
 from poe_view.services.poe2_probe import Probe, ProbeCall
-from poe_view.ui import external_tools
+from poe_view.ui import external_tools, mod_bar
 from poe_view.ui.item_table import CONFIGURABLE_COLUMNS
 from poe_view.ui.main_window import MainWindow, _stable_item_dump, _XpWatch
 
@@ -9543,15 +9543,24 @@ def test_a_loaded_tab_lands_in_the_mod_collection(qapp) -> None:
     win.worker.wait(5000)
 
 
-def test_the_best_roll_you_have_seen_gets_a_star(qapp) -> None:
-    win = MainWindow()
-    for wert in (41, 96):
-        win._mod_collection.observe("explicitMods", f"+{wert} to maximum Life", rarity=2)
+def _lebens_rolls(win, werte, **kwargs) -> None:
+    for wert in werte:
+        win._mod_collection.observe("explicitMods", f"+{wert} to maximum Life",
+                                    rarity=2, **kwargs)
     win._mod_collection.clear_new()
 
+
+def test_the_best_roll_you_have_seen_fills_the_bar(qapp) -> None:
+    """Was vorher der Stern war: ein voller Balken. Und der Schlechteste
+    bekommt einen leeren — nicht gar keinen, denn "0 %" ist eine Aussage,
+    "kein Vergleich" eine andere."""
+    win = MainWindow()
+    _lebens_rolls(win, range(41, 97))
+
     marke = win._mod_mark_for(_ring())
-    assert marke("explicitMods", "+96 to maximum Life") == win.MOD_MARK_BEST
-    assert marke("explicitMods", "+41 to maximum Life") == win.MOD_MARK_NONE
+    assert marke("explicitMods", "+96 to maximum Life") == mod_bar.bar_html(1.0)
+    assert marke("explicitMods", "+41 to maximum Life") == mod_bar.bar_html(0.0)
+    assert marke("explicitMods", "+96 to maximum Life") != mod_bar.blank_html()
 
     win.worker.stop()
     win.worker.wait(5000)
@@ -9562,17 +9571,35 @@ def test_a_mod_you_have_never_seen_gets_the_find_mark(qapp) -> None:
     win._mod_collection.observe("explicitMods", "+96 to maximum Life", rarity=2)
 
     marke = win._mod_mark_for(_ring())
-    assert marke("explicitMods", "+96 to maximum Life") == win.MOD_MARK_NEW
+    assert marke("explicitMods", "+96 to maximum Life") == mod_bar.new_html()
 
     win.worker.stop()
     win.worker.wait(5000)
 
 
-def test_the_mark_compares_within_the_rarity_of_the_item(qapp) -> None:
-    """Ein Rare gegen die festen Werte eines Uniques zu messen ergaebe
-    einen Stern, der nichts bedeutet."""
+def test_too_few_sightings_get_no_bar_at_all(qapp) -> None:
+    """Zwei Rolls sehen als Skala aus wie zweihundert. Unter
+    ``MIN_BAR_OBSERVATIONS`` bleibt die Spalte deshalb leer — die Luecke
+    ist genauso breit, damit der Text nicht wandert."""
     win = MainWindow()
-    for wert in (4, 100):
+    _lebens_rolls(win, (41, 96))
+
+    marke = win._mod_mark_for(_ring())
+    assert marke("explicitMods", "+96 to maximum Life") == mod_bar.blank_html()
+
+    _lebens_rolls(win, range(50, 50 + mod_bar.MIN_BAR_OBSERVATIONS))
+    marke = win._mod_mark_for(_ring())
+    assert marke("explicitMods", "+96 to maximum Life") == mod_bar.bar_html(1.0)
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_the_bar_compares_within_the_rarity_of_the_item(qapp) -> None:
+    """Ein Rare gegen die festen Werte eines Uniques zu messen ergaebe
+    einen Balken, der nichts bedeutet."""
+    win = MainWindow()
+    for wert in range(4, 101):
         win._mod_collection.observe("explicitMods", f"{wert}% increased Attack Speed",
                                     rarity=3)      # Unique
     win._mod_collection.clear_new()
@@ -9580,8 +9607,8 @@ def test_the_mark_compares_within_the_rarity_of_the_item(qapp) -> None:
     unique = win._mod_mark_for(_ring(frameType=3))
     rare = win._mod_mark_for(_ring(frameType=2))
 
-    assert unique("explicitMods", "100% increased Attack Speed") == win.MOD_MARK_BEST
-    assert rare("explicitMods", "100% increased Attack Speed") == win.MOD_MARK_NONE
+    assert unique("explicitMods", "100% increased Attack Speed") == mod_bar.bar_html(1.0)
+    assert rare("explicitMods", "100% increased Attack Speed") == mod_bar.blank_html()
 
     win.worker.stop()
     win.worker.wait(5000)
@@ -9608,27 +9635,27 @@ def test_the_starting_stock_is_read_in_slices(qapp) -> None:
     win.worker.wait(5000)
 
 
-def test_a_star_from_the_old_stock_is_hollow(qapp) -> None:
+def test_a_bar_from_the_old_stock_is_dimmed(qapp) -> None:
     """Der Bestwert steht, aber er stuetzt sich auf den Altbestand: In der
     Liga dieses Items gibt es noch zu wenige Beobachtungen. Die Grundlage
-    gehoert zur Aussage, deshalb ein eigenes Zeichen statt einer Fussnote."""
+    gehoert zur Aussage, deshalb ein eigener Farbton statt einer
+    Fussnote."""
     from poe_view.services.mod_collection import MIN_LEAGUE_OBSERVATIONS
 
     win = MainWindow()
-    for wert in (41, 96):
-        win._mod_collection.observe("explicitMods", f"+{wert} to maximum Life", rarity=2)
-    win._mod_collection.clear_new()
+    _lebens_rolls(win, range(41, 97))
 
     duenn = win._mod_mark_for(_ring(league="Allflame"))
-    assert duenn("explicitMods", "+96 to maximum Life") == win.MOD_MARK_BEST_LEGACY
+    assert duenn("explicitMods", "+96 to maximum Life") == mod_bar.bar_html(1.0,
+                                                                           own_pot=False)
 
-    for wert in range(60, 60 + MIN_LEAGUE_OBSERVATIONS):
-        win._mod_collection.observe("explicitMods", f"+{wert} to maximum Life",
-                                    rarity=2, league="Allflame")
-    win._mod_collection.clear_new()
+    _lebens_rolls(win, range(60, 60 + max(MIN_LEAGUE_OBSERVATIONS,
+                                          mod_bar.MIN_BAR_OBSERVATIONS)),
+                  league="Allflame")
     dicht = win._mod_mark_for(_ring(league="Allflame"))
-    hoechster = 60 + MIN_LEAGUE_OBSERVATIONS - 1
-    assert dicht("explicitMods", f"+{hoechster} to maximum Life") == win.MOD_MARK_BEST
+    hoechster = 60 + max(MIN_LEAGUE_OBSERVATIONS, mod_bar.MIN_BAR_OBSERVATIONS) - 1
+    assert dicht("explicitMods", f"+{hoechster} to maximum Life") == mod_bar.bar_html(
+        1.0, own_pot=True)
 
     win.worker.stop()
     win.worker.wait(5000)

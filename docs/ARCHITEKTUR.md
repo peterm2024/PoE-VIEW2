@@ -5744,17 +5744,16 @@ höchstens einmal pro Minute (1,5 MB nach jedem geladenen Fach wären
 dieselbe Verschwendung, wegen der der Daten-Cache seinen `cache_writer`
 hat).
 
-**Angezeigt wird sie am Item, mit Zeichen** (Peters Wahl): `★` für den
-besten Roll, den du in der Liga und Rarität dieses Items gesehen hast,
-`☆` für denselben Bestwert auf dünnerem Boden (die Liga des Items hat
-noch zu wenige Beobachtungen, verglichen wurde gegen den Altbestand),
-`✦` für einen Mod, der zum ersten Mal in der Sammlung auftaucht. Beide **vorangestellt
-und höchstens zwei Zeichen lang** — das ist keine Geschmacksfrage: Das
-Detail-Panel bricht lange Zeilen um, zählt sein Höhenbudget aber in
-Zeilen. Ein angehängtes "deine 41–96" würde die längsten Mod-Zeilen
-umbrechen lassen und das Panel still über seine feste Höhe schieben, der
-Fehler aus §4.39. Unmarkierte Mod-Zeilen bekommen zwei geschützte
-Leerzeichen, damit die Spalte ausgerichtet bleibt.
+**Angezeigt wird sie am Item, als Balkenspalte vor der Mod-Zeile** —
+siehe §4.52.2. Die erste Fassung nutzte dafür Zeichen (`★` für den besten
+Roll, `☆` für denselben Bestwert gegen den Altbestand gemessen, `✦` für
+einen Erstfund); der Balken sagt dasselbe und dazu alles zwischen den
+Extremen. Was aus der Zeichen-Fassung geblieben ist, ist die harte Regel
+dahinter: **vorangestellt und von fester Breite.** Das ist keine
+Geschmacksfrage — das Detail-Panel bricht lange Zeilen um, zählt sein
+Höhenbudget aber in Zeilen. Ein angehängtes "deine 41–96" würde die
+längsten Mod-Zeilen umbrechen lassen und das Panel still über seine feste
+Höhe schieben, der Fehler aus §4.39.
 
 #### 4.52.1 Ligen: warum eine Datei je Liga die falsche Antwort wäre
 
@@ -5795,7 +5794,8 @@ statt stillschweigend in den Altbestand zu rutschen.
 
 **Die Bewertung nimmt die eigene Liga erst ab
 `MIN_LEAGUE_OBSERVATIONS` (5) Sichtungen** und sagt in der Anzeige,
-worauf sie sich stützt (`★` eigene Liga, `☆` Altbestand). Die Zahl ist
+worauf sie sich stützt (voller Farbton: eigener Topf, gedämpft:
+Altbestand — §4.52.2). Die Zahl ist
 eine Setzung, keine Messung: Unter einer Handvoll Rolls ist eine Spanne
 mehr Zufall als Aussage. Eine Bewertung, deren Grundlage man nicht kennt,
 ist keine — deshalb reist die Grundlage in `rating_with_basis()` mit dem
@@ -5829,7 +5829,90 @@ Runde durch die Datei, kaputte Zeilen, Schrumpfschutz, unlesbare Datei),
 `tests/test_item_detail.py` (nur Mod-Zeilen bekommen eine Marke; das Feld
 einer Zeile überlebt den Weg durchs Panel),
 `tests/test_main_window_helpers.py` (geladene Fächer landen in der
-Sammlung, Stern nur innerhalb der Rarität, Erstbefüllung in Scheiben).
+Sammlung, Balken nur innerhalb der Rarität, Erstbefüllung in Scheiben).
+
+#### 4.52.2 Der Balken vor der Mod-Zeile (`ui/mod_bar.py`)
+
+Peter, 2026-08-24: "Können wir hinter die Mods eine Progressbar machen,
+die anzeigt, wo der Mod im Vergleich zu anderen liegt? In etwa so:
+|||||||I|| oder so ähnlich?" — und, nachdem die Zeichen-Variante an ihre
+Grenzen kam: "Oder wir nehmen keine Balkenzeichen sondern definieren hier
+eine extra Spalte mit einem Rechteck und das wird prozentual gefüllt."
+
+Der Balken ist die Verallgemeinerung des Sterns: Er zeigt nicht nur den
+Bestwert, sondern die Lage des Rolls in dem, was die Sammlung kennt.
+`RaritySpan.rating()` liefert diese Zahl längst; sichtbar war bisher nur
+ihr oberes Ende.
+
+**Was ihn überhaupt trägt** (gemessen an Peters Bestand, 202.182
+Mod-Zeilen):
+
+| | Anteil |
+|---|---|
+| Balken | 75,8 % |
+| kein Vergleich (nur ein Wert je gesehen) | 23,6 % |
+| Zeile der Sammlung unbekannt | 0,6 % |
+
+Der Median-Balken steht auf **218 Sichtungen**; nur 3,2 % auf unter zehn.
+Unter `MIN_BAR_OBSERVATIONS` (5) wird gar keiner gezeichnet — das kostet
+0,8 % der Zeilen und nimmt die heraus, bei denen zwei Rolls wie eine
+Skala aussähen. Eigene Zahl, nicht `MIN_LEAGUE_OBSERVATIONS`: Jene
+entscheidet, welcher Topf den Vergleich trägt, diese, ob ein Vergleich
+überhaupt gezeigt wird.
+
+**Warum ein gezeichnetes Rechteck und kein Balken aus Zeichen.** Peters
+erster Vorschlag war `|||||||I||`; die Messung hat ihn widerlegt, und
+zwar an der Stelle, an der man es nicht erwartet — nicht am Balken,
+sondern an den 23,6 % Zeilen OHNE Balken. Die brauchen eine Lücke von
+exakt der Balkenbreite, sonst rutscht ihr Text nach links. Alle Zeichen
+des Block- und Rahmen-Bereichs (U+2500…U+259F) sind gleich breit, in
+jeder Schriftgröße; **kein Leerzeichen der Schrift hält dazu ein festes
+Verhältnis** — gemessen über 8 bis 14 pt schwankt NBSP zwischen 2,25 und
+3,0 Blockbreiten. Ein Rechteck aus gefärbten geschützten Leerzeichen hat
+das Problem nicht: Die Spalte besteht IMMER aus derselben Zahl Zellen,
+gefärbt wird nur, was gefüllt ist. Die Lücke ist dieselbe Spalte,
+ungefärbt.
+
+**Aufbau der Spalte:** 14 Zellen plus zwei Zellen Abstand, bei 9 pt
+gemessene 42 px breit und damit rund 7 % Auflösung. Der Erstfund behält
+sein `✦` (plus zehn Zellen Auffüllung, die die Spaltenbreite auf ±1 px
+trifft) — ein goldener Vollbalken war die naheliegende Alternative und
+wurde verworfen, weil er sich als "Maximum" liest, und das ist beim
+Erstfund gerade die falsche Aussage. **Die Ränder sind geklemmt:** ganz
+voll nur bei genau 1.0, ganz leer nur bei genau 0.0. Ohne das sähe ein
+Roll bei 0,97 aus wie der beste je gesehene — und genau diese Aussage ist
+die einzige, die der Balken hart trifft.
+
+**Farben, gerechnet gegen den gemessenen Panel-Grund `#2d2d2d`:** Spur
+`#4a4a4a` (Kontrast 1,55, ΔE 9,5 — sichtbar, aber leise), Füllung
+`DASH_OK` für den eigenen Topf und ein um 25 % zum Grund gemischter Ton
+für den Altbestand (ΔE 10,3 zwischen beiden). Das ist die Unterscheidung,
+die vorher `★` und `☆` trugen.
+
+**Der Preis:** Die Spalte steht vor der Mod-Zeile, also braucht dieselbe
+Zeile mehr Platz. `ItemDetail.preferred_width()` schlägt sie auf, damit
+die 68 Zeichen erhalten bleiben, für die das Panel bemessen ist; bei
+gleicher Panelbreite deckt es 93,0 % der Items ohne Abschneiden ab statt
+94,2 %.
+
+**Zwei Fallen lagen auf dem Weg**, beide nur im echten Fenster sichtbar:
+Der Panel-Grund ist `#2d2d2d`, obwohl `QPalette.Window` `#1e1e1e` meldet
+(FALLSTRICKE #76), und Qt schneidet führenden Leerraum am Blockanfang
+weg, wodurch die erste Mod-Zeile nach einer Trennlinie ihren Balken in
+den Block DAVOR bekam (FALLSTRICKE #77).
+
+**Die Marke ist HTML und wird nicht escaped**, der Mod-Text schon.
+Deshalb trägt `item_detail.Line` beide Hälften in getrennten Feldern:
+Wären sie ein String, müsste beim Zusammensetzen jemand entscheiden,
+welcher Teil escaped wird — und das ist der Weg, auf dem fremder Text
+irgendwann als Markup durchrutscht.
+
+Getestet: `tests/test_mod_bar.py` (Füllstand samt beider Klemmungen,
+gleiche Zellenzahl in allen Fällen, Farben je Topf, die Schwelle, kein
+Balken ohne Zahl, und dass der Balken im Block SEINER Mod-Zeile landet —
+geprüft am geparsten `QTextDocument`, weil die Frage nicht an der Schrift
+hängt), `tests/test_item_detail.py` (die Escaping-Grenze in beide
+Richtungen, Panelbreite).
 
 ## 8. Entwicklungsstand
 

@@ -45,7 +45,7 @@ from poe_view.services.api_worker import (ApiWorker, BootstrapJob,
                                           LOGIN_NO_TOKEN, LoginJob,
                                           LogoutJob, Poe2ProbeJob)
 from poe_view.services.csv_export import export_items, sanitize_filename
-from poe_view.ui import external_tools
+from poe_view.ui import external_tools, mod_bar
 from poe_view.ui.help_dialog import HelpDialog
 from poe_view.ui.login_prompts import SessionExpiredDialog, WelcomeDialog
 from poe_view.ui.character_list import CharacterList
@@ -842,49 +842,14 @@ class MainWindow(QMainWindow):
     # Verschwendung, wegen der der Daten-Cache seinen ``cache_writer`` hat.
     _MOD_SAVE_INTERVAL_S = 60.0
 
-    # Die beiden Marken der Mod-Sammlung (§4.52). Ein Zeichen plus
-    # Leerzeichen, VORANGESTELLT — was dahinter stünde, brächte die
-    # längsten Mod-Zeilen zum Umbrechen und das Detail-Panel über seine
-    # feste Höhe (siehe ``item_detail._item_blocks``).
-    MOD_MARK_NEW = "✦ "     # zum ersten Mal in der Sammlung
-    MOD_MARK_BEST = "★ "    # bester Roll — verglichen in der Liga des Items
-    # Derselbe Bestwert, aber gegen den Altbestand gemessen: In der Liga
-    # dieses Items gibt es noch zu wenige Beobachtungen für eine Spanne
-    # (§mod_collection.MIN_LEAGUE_OBSERVATIONS). Ein eigenes Zeichen statt
-    # einer Fußnote, weil die Grundlage zur Aussage gehört — und hohl
-    # statt gefüllt, weil es dieselbe Aussage auf dünnerem Boden ist.
-    MOD_MARK_BEST_LEGACY = "☆ "
-    # Zwei geschützte Leerzeichen für alles Übrige: Ohne sie stünden
-    # markierte und unmarkierte Mod-Zeilen auf zwei verschiedenen Höhen,
-    # und die Spalte liest sich nicht mehr am Stück. Geschützt, weil
-    # gewöhnliche Leerzeichen in HTML zusammenfallen.
-    MOD_MARK_NONE = "  "
-
     def _mod_mark_for(self, item: Item):
-        """Die Markierungs-Funktion für DIESES Item.
+        """Die Balkenspalte für DIESES Item (§4.52.2).
 
-        Als Abschluss über das Item statt als Methode mit drei Argumenten:
-        Der Vergleich braucht Rarität UND Liga, und beide gehören zum
-        Item, nicht zur einzelnen Zeile. Ein Rare gegen die festen Werte
-        eines Uniques zu messen ergäbe eine Zahl, die nichts bedeutet —
-        und ein Roll aus der laufenden Liga gegen einen Altbestand, in dem
-        Items aus fünf Jahren liegen, eine, die etwas anderes bedeutet, als
-        sie zu sagen scheint (§4.52)."""
-        liga, rarity = mod_collection.item_buckets(item)
-
-        def marke(kind: str, line: str) -> str:
-            if self._mod_collection.is_new(kind, line):
-                return self.MOD_MARK_NEW
-            eintrag = self._mod_collection.get(kind, line)
-            if eintrag is None:
-                return self.MOD_MARK_NONE
-            wert, grundlage = eintrag.rating_with_basis(line, rarity, liga)
-            if wert != 1.0:
-                return self.MOD_MARK_NONE
-            return (self.MOD_MARK_BEST if grundlage == liga
-                    else self.MOD_MARK_BEST_LEGACY)
-
-        return marke
+        Nur noch die Verdrahtung — gebaut wird sie in ``ui/mod_bar.py``.
+        Sie stand hier, solange sie aus zwei Zeichen bestand; mit dem
+        gezeichneten Balken kamen Farben, Zellenzahl und die Klemmung der
+        Ränder dazu, und das ist eine eigene Sache mit eigenen Tests."""
+        return mod_bar.mark_for(self._mod_collection, item)
 
     def _restore_mod_collection(self) -> None:
         """Die Sammlung des aktiven Kontos holen und, falls sie noch leer

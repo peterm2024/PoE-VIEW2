@@ -20,6 +20,7 @@ from poe_view.services import mod_collection as mc
 from poe_view.services.mod_collection import (LEGACY_LEAGUE, MAP_RARITY,
                                               MIN_LEAGUE_OBSERVATIONS,
                                               UNKNOWN_RARITY, ModCollection,
+                                              ModRecord,
                                               item_buckets, league_bucket,
                                               mod_identity, mod_values)
 
@@ -446,4 +447,46 @@ def test_the_first_version_of_the_file_becomes_the_old_stock(tmp_path) -> None:
 
     assert eintrag.count == 7
     assert eintrag.span(RARE, LEGACY_LEAGUE).spread == [(41.0, 96.0)]
+
+
+def test_the_rating_says_how_many_sightings_carry_it() -> None:
+    """Ein Stern sagte "bester Roll, den ich kenne". Ein gefuellter Balken
+    sieht dagegen nach einer Skala aus — wie belastbar die ist, kann nur
+    entscheiden, wer die Zahl der Sichtungen kennt (§4.52.2)."""
+    eintrag = ModRecord("+# to maximum Life", "explicitMods")
+    for wert in (41, 60, 96):
+        eintrag.observe(f"+{wert} to maximum Life", rarity=2)
+
+    wert, grundlage, sichtungen = eintrag.rating_detail("+96 to maximum Life", 2)
+
+    assert wert == 1.0
+    assert grundlage == LEGACY_LEAGUE
+    assert sichtungen == 3
+
+
+def test_the_sighting_count_belongs_to_the_pot_that_was_used() -> None:
+    """Faellt der Vergleich auf den Altbestand zurueck, ist die Zahl die
+    des Altbestands — nicht die der duennen Liga, die gerade verworfen
+    wurde. Sonst haette der Aufrufer eine Zahl, die zu einer anderen
+    Spanne gehoert."""
+    eintrag = ModRecord("+# to maximum Life", "explicitMods")
+    for wert in range(41, 97):
+        eintrag.observe(f"+{wert} to maximum Life", rarity=2)
+    eintrag.observe("+50 to maximum Life", rarity=2, league="Allflame")
+
+    _, grundlage, sichtungen = eintrag.rating_detail("+96 to maximum Life", 2, "Allflame")
+
+    assert grundlage == LEGACY_LEAGUE
+    assert sichtungen == 56
+
+
+def test_an_unknown_pot_reports_no_sightings() -> None:
+    eintrag = ModRecord("+# to maximum Life", "explicitMods")
+    eintrag.observe("+96 to maximum Life", rarity=2)
+
+    wert, grundlage, sichtungen = eintrag.rating_detail("+96 to maximum Life", 3)
+
+    assert wert is None
+    assert grundlage == LEGACY_LEAGUE
+    assert sichtungen == 0
 

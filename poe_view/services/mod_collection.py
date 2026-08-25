@@ -318,13 +318,31 @@ class ModRecord:
         dann wird gegen den Altbestand verglichen. Welcher Topf es war,
         gehört zur Antwort — eine Bewertung, deren Grundlage man nicht
         kennt, ist keine."""
+        wert, grundlage, _ = self.rating_detail(line, rarity, league)
+        return wert, grundlage
+
+    def rating_detail(self, line: str, rarity: int = UNKNOWN_RARITY,
+                      league: str = LEGACY_LEAGUE
+                      ) -> tuple[float | None, str, int]:
+        """Dasselbe wie ``rating_with_basis``, zusätzlich mit der Zahl der
+        Sichtungen, auf denen die Bewertung steht.
+
+        Die Zahl gehört dazu, seit die Anzeige einen BALKEN daraus macht
+        (§4.52.2): Ein Stern sagte "bester Roll, den ich kenne", ein
+        gefüllter Balken sieht dagegen nach einer Skala aus. Wie belastbar
+        die ist, hängt daran, wie oft die Zeile schon durch Peters Hände
+        ging — und das kann nur der Aufrufer entscheiden, weil dieselbe
+        Spanne für eine Randnotiz reicht und für eine Skala nicht."""
         eigene = self.span(rarity, league)
         if (league != LEGACY_LEAGUE and eigene is not None
                 and eigene.count >= MIN_LEAGUE_OBSERVATIONS):
             wert = eigene.rating(mod_values(line))
             if wert is not None:
-                return wert, league
-        return self.rating(line, rarity, LEGACY_LEAGUE), LEGACY_LEAGUE
+                return wert, league, eigene.count
+        alt = self.span(rarity, LEGACY_LEAGUE)
+        if alt is None:
+            return None, LEGACY_LEAGUE, 0
+        return alt.rating(mod_values(line)), LEGACY_LEAGUE, alt.count
 
     def to_row(self) -> dict:
         return {
