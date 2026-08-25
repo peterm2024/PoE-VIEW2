@@ -17,10 +17,11 @@ import pytest
 
 from poe_view.api.models import Item
 from poe_view.services import mod_collection as mc
-from poe_view.services.mod_collection import (LEGACY_LEAGUE, MAP_RARITY,
-                                              MIN_LEAGUE_OBSERVATIONS,
+from poe_view.services.mod_collection import (CORRUPTED_OFFSET, LEGACY_LEAGUE,
+                                              MAP_RARITY, MIN_LEAGUE_OBSERVATIONS,
                                               UNKNOWN_RARITY, ModCollection,
-                                              ModRecord,
+                                              ModRecord, base_rarity,
+                                              collection_bucket, is_corrupted_bucket,
                                               item_buckets, league_bucket,
                                               mod_identity, mod_values)
 
@@ -127,6 +128,79 @@ def test_maps_get_their_own_bucket() -> None:
     eintrag = sammlung.get("explicitMods", "+1% to Fire Resistance")
     assert eintrag.span(MAP_RARITY).spread == [(-60.0, -60.0)]
     assert eintrag.span(RARE).spread == [(40.0, 40.0)]
+
+
+# ------------------------ Corrupted-Aufschlag --------------------------- #
+#
+# Peter, 2026-08-25: "...auch zwischen Unique, Corrupted, (Normal/Magic/
+# Rare)..." — die Album-Anzeige soll danach filtern koennen.
+
+
+def test_a_corrupted_item_gets_a_different_bucket_than_the_same_rarity() -> None:
+    """Der eigentliche Punkt: Ein corrupted Rare landet NICHT im selben
+    Topf wie ein gewoehnliches Rare — manche Corruption-Ergebnisse haben
+    eine eigene Wertetabelle (z.B. grosse negative Resistenzen als
+    Strafe), die sonst die gewoehnliche Spanne verzerrt haetten."""
+    normal = _item(frameType=RARE, corrupted=False)
+    korrumpiert = _item(frameType=RARE, corrupted=True)
+
+    assert collection_bucket(normal) != collection_bucket(korrumpiert)
+
+
+def test_corrupted_rare_and_corrupted_unique_stay_apart() -> None:
+    """Der Aufschlag darf die Rarity-Trennung nicht wieder aufheben, die
+    §4.52.1 ueberhaupt erst erzwungen hat."""
+    rare = _item(frameType=RARE, corrupted=True)
+    unique = _item(frameType=UNIQUE, corrupted=True)
+
+    assert collection_bucket(rare) != collection_bucket(unique)
+
+
+def test_maps_do_not_get_the_corrupted_offset() -> None:
+    """Maps haben schon ihren eigenen Topf, und Kartenkorruption fuegt
+    keine neuen Implicit-Zeilen mit eigener Tabelle hinzu wie bei
+    Ausruestung — der Grund fuer den Aufschlag greift dort nicht."""
+    karte = _item(typeLine="Toxic Grove Map (Tier 6)", frameType=RARE, corrupted=True)
+
+    assert collection_bucket(karte) == MAP_RARITY
+
+
+def test_base_rarity_undoes_the_offset() -> None:
+    korrumpiert = collection_bucket(_item(frameType=RARE, corrupted=True))
+
+    assert is_corrupted_bucket(korrumpiert) is True
+    assert base_rarity(korrumpiert) == RARE
+    assert is_corrupted_bucket(RARE) is False
+    assert base_rarity(RARE) == RARE
+
+
+def test_base_rarity_handles_the_boundary_at_normal() -> None:
+    """frameType 0 ("Normal") plus Aufschlag trifft genau
+    ``CORRUPTED_OFFSET`` selbst — ein ``>`` statt ``>=`` haette genau
+    diesen einen Fall uebersehen."""
+    korrumpiert = collection_bucket(_item(frameType=0, corrupted=True))
+
+    assert korrumpiert == CORRUPTED_OFFSET
+    assert is_corrupted_bucket(korrumpiert) is True
+    assert base_rarity(korrumpiert) == 0
+
+
+def test_an_uncorrupted_item_keeps_the_plain_rarity() -> None:
+    assert collection_bucket(_item(frameType=RARE, corrupted=False)) == RARE
+
+
+def test_corrupted_items_get_their_own_spans() -> None:
+    korrupt = _item(frameType=RARE, corrupted=True,
+                    explicitMods=["-60% to Cold Resistance"])
+    normal = _item(frameType=RARE, corrupted=False,
+                   explicitMods=["+40% to Cold Resistance"])
+    sammlung = ModCollection()
+    sammlung.observe_item(korrupt)
+    sammlung.observe_item(normal)
+
+    eintrag = sammlung.get("explicitMods", "+1% to Cold Resistance")
+    assert eintrag.span(RARE).spread == [(40.0, 40.0)]
+    assert eintrag.span(RARE + CORRUPTED_OFFSET).spread == [(-60.0, -60.0)]
 
 
 def test_an_item_without_a_rarity_is_not_counted_as_white() -> None:

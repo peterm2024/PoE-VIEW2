@@ -325,8 +325,14 @@ not what the game allows. Temporary leagues are kept apart, since mod
 values change between them; Standard and the other permanent leagues
 share one pot, because they hold items rolled in every league there ever
 was. The <b>Mods</b> toolbar button opens the whole collection as a
-searchable list — filter by text or by kind, click a mod to see every
-rarity and league it has ever shown up on.</li>
+searchable list — filter by text, kind, league or rarity, and see the
+<b>Range</b> column for the lowest and highest value ever seen for
+whichever of those you have selected (everything, if you have not
+narrowed it down). Rarity includes a <b>Corrupted</b> group of its own:
+a corrupted item's mods are counted apart from an uncorrupted one's, even
+at the same rarity, since some corruption outcomes roll from an entirely
+different table. Click a mod to see every rarity and league it has ever
+shown up on, in full.</li>
 <li>The <b>average line</b> is your rate over the stretch you are
 currently in: since your last level-up, or since a break of more than
 half an hour, whichever came later, and never more than the three hours

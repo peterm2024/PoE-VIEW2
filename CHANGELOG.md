@@ -31,10 +31,17 @@ nach [SemVer](https://semver.org/lang/de/).
   auftaucht.
 
 - **Ein Album zum Durchblättern der Mod-Sammlung** (neuer
-  Werkzeugleisten-Knopf "📚 Mods"): durchsuchbar nach Text und nach Art
-  (Explicit, Implicit, Enchant, Flask, …), mit dem vollen Steckbrief eines
+  Werkzeugleisten-Knopf "📚 Mods"): durchsuchbar nach Text, Art (Explicit,
+  Implicit, Enchant, Flask, …), Liga und Rarität, mit einer eigenen
+  Range-Spalte (kleinster bis größter je gesehener Wert über die gerade
+  ausgewählten Ligen/Raritäten) und dem vollen Steckbrief eines
   markierten Eintrags — jede Liga und Rarität, in der er je auftauchte,
-  mit Sichtungszahl, Wertspanne und Item-Stufen.
+  mit Sichtungszahl, Wertspanne und Item-Stufen. Die Rarität lässt sich
+  zusätzlich auf "Corrupted" eingrenzen: Ein corrupted Item zählt jetzt
+  in einem eigenen Topf, getrennt von einem gewöhnlichen derselben
+  Rarität — manche Corruption-Ergebnisse rollen aus einer ganz anderen
+  Tabelle (nur für neu hinzukommende Beobachtungen, Altbestand bleibt
+  gemischt).
 
 ### Behoben
 

@@ -232,11 +232,46 @@ def league_bucket(league: str | None) -> str:
     return league
 
 
+# Aufschlag für Corrupted-Items, addiert auf die echte Rarität statt
+# eines eigenen Topfs wie bei ``MAP_RARITY``: Ein corrupted Rare bleibt
+# damit von einem corrupted Unique getrennt (der eigentliche Grund für
+# die Rarity-Bucketierung, §4.52.1) — UND von einem gewöhnlichen Rare.
+# Manche Corruption-Ergebnisse sind eigene Implicit-Zeilen mit eigener
+# Wertetabelle (etwa eine grosse negative Resistenz als Strafe), die
+# sonst die Spanne des gewöhnlichen Topfs verzerrt hätten.
+#
+# Peter, 2026-08-25: "...auch zwischen Unique, Corrupted, (Normal/Magic/
+# Rare)..." — wählbar in der Album-Anzeige (``ui/mod_album.py``).
+#
+# **Nur NEUE Beobachtungen werden getrennt.** Ein Wert, der VOR dieser
+# Änderung im gewöhnlichen Topf gelandet ist, bleibt dort für immer stehen
+# — ``RaritySpan`` kennt nur "je gesehen", kein Rückgängig. Die Trennung
+# wirkt nur nach vorn, wie schon bei der Liga-Trennung (§4.52.1: "Ein
+# Stand nach Aufbau 1 wird als Altbestand übernommen").
+#
+# Maps bekommen den Aufschlag NICHT: Sie haben bereits ihren eigenen Topf
+# (``MAP_RARITY``), und Kartenkorruption fügt keine neuen Implicit-Zeilen
+# mit eigener Tabelle hinzu wie bei Ausrüstung — der Mechanismus, der den
+# Aufschlag hier überhaupt rechtfertigt, greift dort nicht.
+CORRUPTED_OFFSET = 1000
+
+
+def is_corrupted_bucket(rarity: int) -> bool:
+    """War die Rarität dieses Topfs mit dem Corrupted-Aufschlag codiert?"""
+    return rarity >= CORRUPTED_OFFSET
+
+
+def base_rarity(rarity: int) -> int:
+    """Die zugrunde liegende Rarität ohne den Corrupted-Aufschlag."""
+    return rarity - CORRUPTED_OFFSET if is_corrupted_bucket(rarity) else rarity
+
+
 def collection_bucket(item) -> int:
     """In welchen Topf gehören die Mods dieses Items?
 
     Die Rarität aus ``frameType``, außer bei Maps — die kommen in ihren
-    eigenen (siehe ``MAP_RARITY``)."""
+    eigenen (siehe ``MAP_RARITY``). Corrupted-Items bekommen zusätzlich
+    den ``CORRUPTED_OFFSET`` aufaddiert (siehe dort)."""
     if map_tier(item) is not None:
         return MAP_RARITY
     # ``frameType`` ist im Modell mit 0 vorbelegt, und 0 heisst "Normal".
@@ -245,9 +280,11 @@ def collection_bucket(item) -> int:
     # wirklich in der Antwort stand.
     gesetzt = getattr(item, "model_fields_set", ())
     if "frameType" not in gesetzt:
-        return UNKNOWN_RARITY
-    rarity = getattr(item, "frameType", None)
-    return int(rarity) if isinstance(rarity, int) else UNKNOWN_RARITY
+        rarity = UNKNOWN_RARITY
+    else:
+        wert = getattr(item, "frameType", None)
+        rarity = int(wert) if isinstance(wert, int) else UNKNOWN_RARITY
+    return rarity + CORRUPTED_OFFSET if getattr(item, "corrupted", False) else rarity
 
 
 def item_buckets(item) -> tuple[str, int]:

@@ -5928,19 +5928,105 @@ Stufe.
 **Aufbau**, bewusst schlicht gehalten — ein Fenster für einen
 Nachschlage-Blick, kein eigenes Datenmodell mit eigenen Regeln:
 
-- Eine sortierbare Tabelle (Mod, Art, Häufigkeit, Beispieltext) über
-  `ModCollection.records()`, ungefiltert 6.125 Zeilen bei Peters Bestand.
+- Eine sortierbare Tabelle (Mod, Art, **Range**, Häufigkeit,
+  Beispieltext) über `ModCollection.records()`, ungefiltert 6.125 Zeilen
+  bei Peters Bestand.
 - Eine Textsuche gegen die Identität (`QSortFilterProxyModel`,
-  `setFilterFixedString`) und ein Art-Filter (Explicit/Implicit/Enchant/…)
-  daneben — beide Bedingungen müssen gelten, sonst ließe sich mit dem
-  Art-Filter die Textsuche aushebeln. Das Art-Menü listet nur Arten, die
-  die Sammlung tatsächlich enthält; ein Eintrag ohne Treffer wäre eine
+  `setFilterFixedString`) und drei unabhängige Filter daneben — Art
+  (Explicit/Implicit/Enchant/…), Liga und Rarität. Alle geltenden
+  Bedingungen müssen gleichzeitig zutreffen, sonst ließe sich mit einem
+  Filter ein anderer aushebeln. Jedes Menü listet nur Werte, die die
+  Sammlung tatsächlich enthält; ein Eintrag ohne Treffer wäre eine
   Sackgasse.
 - Ein Klick auf eine Zeile füllt ein Textfeld mit dem vollen Steckbrief:
   jede (Liga, Rarität), in der der Mod je auftauchte, mit Sichtungszahl,
   Wertspanne und Item-Stufen-Bereich — genau die Daten, die
   `RaritySpan`/`ModRecord` ohnehin schon führen, hier nur ausgeschrieben
   statt auf eine einzelne Zahl verdichtet wie am Item.
+
+**Die Range-Spalte, Peters Nachtrag vom 25.08.: "Mir fehlt in der Mod
+Collection die Spalte mit Range (minimum to maximum)."** Zeigt den
+Wertebereich über GENAU die Töpfe, die Liga- und Raritäts-Filter gerade
+durchlassen — bei "All leagues"/"All rarities" also über die ganze
+Sammlung. Das ist eine bewusste Wahl gegen die naheliegende Alternative,
+für jede Zeile "den einen richtigen" Topf zu erraten: Das würde exakt die
+Frage vortäuschen zu beantworten, die die Liga-/Raritäts-Bucketierung
+(§4.52.1) überhaupt aufgeworfen hat. Am echten Bestand sichtbar: `# to
+maximum Life` zeigt ungefiltert `-148–500` (genau der historische
+Ausreißer, der §4.52.1 zur Rarity-Trennung geführt hat), gefiltert auf
+"Normal / Magic / Rare" `-148–203`, auf "Unique" `4–500` — die Spalte
+zeigt ehrlich, was gerade eingeschlossen ist, statt eine homogene
+Population zu unterstellen, die es ohne Filter nicht gibt.
+
+**Liga- und Raritäts-Filter sind gleichzeitig Zeilen- UND
+Range-Spalten-Filter** — mit derselben Auswahl gefüttert, aus demselben
+Grund: Eine Zeile ohne passenden Topf für die eine Achse hätte für die
+andere ohnehin nichts zu zeigen. Der Liga-Filter listet jede in der
+Sammlung vorkommende Liga; `None` ist der Sentinel für "keine
+Einschränkung" und bewusst NICHT der leere String — der ist
+`LEGACY_LEAGUE` selbst, eine echte, einzeln wählbare Liga (der
+Altbestand). Beide zu verwechseln hätte den Altbestand unwählbar gemacht.
+
+**Rarität wird in Gruppen gefiltert, nicht einzeln** — Peters eigene
+Gliederung ("Unique, Corrupted, (Normal/Magic/Rare), evtl. noch
+andere"): Normal/Magic/Rare in einer Gruppe, Unique separat, Corrupted
+als eigene Gruppe über alle Basis-Raritäten hinweg, dazu Map und ein
+Sammeltopf für Gem/Currency/Card/Relic. Die Gruppen sind als PRÄDIKATE
+definiert (`Callable[[int], bool]`), nicht als feste Zahlen-Tupel —
+"Corrupted" lässt sich nicht als endliche Liste schreiben, weil der
+Aufschlag (siehe unten) auf jeder Basis-Rarität gilt.
+
+Als Combo-Box-Daten stehen die Rarity-Gruppen unter ihrem NAMEN, nicht
+dem Prädikat selbst — `QComboBox.findData` verglich zwei identische
+Python-Tupel an anderer Stelle gemessen nicht als gleich (FALLSTRICKE
+#78), ein String-Schlüssel hat das Problem nicht (dieselbe Lösung wie
+beim Art-Filter).
+
+**Corrupted ist kein weiterer Wert einer bestehenden Achse, sondern ein
+Aufschlag auf die Rarität selbst** (`mod_collection.CORRUPTED_OFFSET =
+1000`, addiert in `collection_bucket()`, wenn `item.corrupted`). Ein
+corrupted Rare bekommt damit einen anderen Topf als ein gewöhnliches Rare
+UND als ein corrupted Unique — beides nötig, denn manche
+Corruption-Ergebnisse sind eigene Implicit-Zeilen mit eigener
+Wertetabelle (etwa eine große negative Resistenz als Strafe), die sonst
+die Spanne des gewöhnlichen Topfs verzerrt hätten, während die
+Rarity-Trennung aus §4.52.1 (Rare ≠ Unique) erhalten bleiben muss.
+
+Diese Bauweise wurde bewusst gegen zwei Alternativen gewählt:
+
+- **Ein eigener Topf, der `frameType` ganz ersetzt** (wie bei `MAP_RARITY`)
+  wäre die einfachere Lösung gewesen, hätte aber genau die Rare/Unique-
+  Vermischung wieder eingeführt, die §4.52.1 beheben sollte — ein
+  corrupted Rare und ein corrupted Unique landeten dann im selben Topf.
+- **Eine dritte Verschachtelungsebene** (`spans[league][rarity][corrupted]`)
+  wäre am saubersten benannt, hätte aber die Datenstruktur, das
+  Dateiformat und jede Stelle betroffen, die `rarity` als einzelnen int
+  entgegennimmt (`ModRecord.span()`, `rating()`, `rating_detail()`,
+  `mod_bar.py`). Der Aufschlag braucht dagegen NICHTS davon zu ändern:
+  `ModRecord.spans` bleibt `dict[str, dict[int, RaritySpan]]`, nur der
+  Zahlenraum der inneren Schlüssel wird breiter. Maps bekommen den
+  Aufschlag NICHT — Kartenkorruption fügt keine neuen Implicit-Zeilen mit
+  eigener Tabelle hinzu wie bei Ausrüstung, der Grund für den Aufschlag
+  greift dort nicht.
+
+**Der Balken am Item (§4.52.2) trennt automatisch mit**, ohne dass
+`mod_bar.py` etwas davon weiß: Er bekommt seine Rarität über
+`item_buckets()`/`collection_bucket()` und vergleicht ohnehin nur
+innerhalb desselben Zahlenwerts — ein corrupted Item landet jetzt einfach
+in einem anderen Zahlenwert und wird nur noch gegen andere corrupted
+Items derselben Basis-Rarität verglichen. Nebenwirkung: Manche Mod-Zeilen
+rutschen dadurch unter `MIN_BAR_OBSERVATIONS` und zeigen vorübergehend
+keinen Balken mehr, bis genug corrupted Sichtungen zusammengekommen sind
+— derselbe Tausch von Abdeckung gegen Richtigkeit wie beim Map-Topf.
+
+**Nur NEUE Beobachtungen werden getrennt.** Ein Wert, der vor dieser
+Änderung im gewöhnlichen Topf gelandet ist (corrupted oder nicht, beides
+ununterscheidbar gemischt), bleibt dort für immer stehen — `RaritySpan`
+kennt nur "je gesehen", kein Rückgängig. Dieselbe Regel wie bei der
+Liga-Trennung: Gemessen an Peters Bestand haben 4.622 von 59.253 Items
+(rund 7,8 %) `corrupted=true`; ihre bereits gespeicherten Beiträge zu den
+alten, ungetrennten Töpfen bleiben, wo sie sind, und nur der weitere
+Zuwachs trennt sich sauber.
 
 **Ein Schnappschuss, keine Live-Ansicht.** Jeder Klick auf den
 Werkzeugleisten-Knopf öffnet eine neue Instanz mit dem aktuellen Stand
@@ -5949,11 +6035,17 @@ Abonnement auf künftige Beobachtungen. Ein Fenster zum Durchblättern, das
 sich unter der Maus neu sortiert, wäre schlechter als eines, das beim
 nächsten Öffnen einfach frisch befüllt ist.
 
-Getestet: `tests/test_mod_album.py` (Anzeigenamen inklusive der beiden
-Sonder-Raritäten, der Steckbrief-Text, Text- und Art-Filter einzeln und
-kombiniert, das Art-Menü ohne leere Einträge), `tests/test_main_window_
-helpers.py` (der Werkzeugleisten-Knopf öffnet das Fenster mit der
-tatsächlichen Sammlung des laufenden Fensters).
+Getestet: `tests/test_mod_collection.py` (Corrupted-Aufschlag trennt von
+gewöhnlicher UND von Unique-Rarität, trifft Maps nicht, die
+Grenzwert-Falle bei `frameType 0` — ein `>` statt `>=` hätte genau diesen
+einen Fall übersehen), `tests/test_mod_album.py` (Anzeigenamen inklusive
+der beiden Sonder-Raritäten und "Corrupted X", der Steckbrief-Text, alle
+vier Filter einzeln und kombiniert, die Corrupted-Gruppe über
+Basis-Raritäten hinweg, die Range-Spalte inklusive mehrzahliger Mods,
+negativer Spannen und der Liga-Sentinel-Falle, jedes Menü ohne leere
+Einträge), `tests/test_main_window_helpers.py` (der Werkzeugleisten-Knopf
+öffnet das Fenster mit der tatsächlichen Sammlung des laufenden
+Fensters).
 
 ## 8. Entwicklungsstand
 

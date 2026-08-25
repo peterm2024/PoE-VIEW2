@@ -1351,3 +1351,49 @@ Getestet: `tests/test_mod_bar.py` (der Balken liegt im Block seiner
 Mod-Zeile und nicht im davor; Gegenprobe: ohne das Zeichen fällt der
 Test).
 
+
+## 78. `QComboBox.findData()` fand ein Tupel nicht, das nachweislich dort stand
+
+**Ausgangslage:** Für den Raritäts-Filter im Mod-Album (§4.52.3) trug
+jeder Eintrag der Combo-Box ein Tupel von `frameType`-Werten als
+`itemData`, z. B. `(0, 1, 2)` für "Normal / Magic / Rare". Ein Test rief
+anschließend `combo.findData((0, 1, 2))` auf, um genau diesen Eintrag
+wiederzufinden — und bekam `-1`.
+
+Nachgemessen an genau dieser Combo-Box:
+
+```python
+for i in range(combo.count()):
+    print(i, combo.itemText(i), combo.itemData(i))
+# 0 All rarities None
+# 1 Normal / Magic / Rare (0, 1, 2)
+print(combo.findData((0, 1, 2)))
+# -1
+```
+
+Der Eintrag steht nachweislich drin, `itemData(1)` liefert ihn korrekt
+als Python-Tupel zurück — nur `findData()` mit demselben Wert findet ihn
+nicht. Ein isolierter Nachbau mit zwei Zeilen (leere Combo-Box, zwei
+`addItem`-Aufrufe, sofort `findData`) fand denselben Wert dagegen
+anstandslos. Der Unterschied zwischen beiden Fällen ließ sich nicht
+weiter eingrenzen — vermutlich ein Artefakt der QVariant-Umwandlung
+zusammengesetzter Python-Objekte, aber das ist eine Vermutung, keine
+Messung.
+
+**Der Fix**: Nicht das Tupel selbst als `itemData` tragen, sondern einen
+eindeutigen STRING-Schlüssel (den Anzeigenamen), und das Tupel separat in
+einem Python-`dict` nachschlagen — dieselbe Lösung, die der Art-Filter
+(Kind-Combo) schon vorher benutzte, ohne dass dort je ein Problem
+auffiel. Strings und einfache Skalare (`int`, `bool`, `""`) hat
+`findData()` in dieser Codebasis nie enttäuscht; erst ein zusammengesetztes
+Objekt wie ein Tupel wurde zur Falle.
+
+**Lehre:** `QComboBox`-Daten, die später über `findData()` wiedergefunden
+werden müssen, tragen einen einfachen Skalar — nie ein zusammengesetztes
+Python-Objekt, selbst wenn `itemData()` es korrekt zurückgibt. Ein
+zusammengesetzter Wert gehört in eine separate Lookup-Tabelle, nicht in
+die Combo-Box selbst.
+
+Getestet: `tests/test_mod_album.py` (jeder Raritäts-Filter wird über
+seinen String-Namen gefunden, nicht über sein Tupel).
+
