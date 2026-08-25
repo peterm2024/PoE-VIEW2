@@ -763,6 +763,24 @@ def test_paperdoll_opens_immediately_for_a_cached_character(qapp) -> None:
     win.worker.wait(5000)
 
 
+# --- Mod-Album: Werkzeugleiste (§4.52, Stufe 3) ---
+
+def test_the_toolbar_opens_the_mod_album(qapp) -> None:
+    """Das Fenster bekommt die Sammlung des Fensters, nicht eine leere —
+    sonst zeigte ein Klick nach dem Erstbefuellen erstmal nichts."""
+    win = MainWindow()
+    win._mod_collection.observe("explicitMods", "+96 to maximum Life", rarity=2)
+    win._mod_collection.clear_new()
+
+    win._open_mod_album()
+
+    assert win._mod_album_dialog.isVisible()
+    assert win._mod_album_dialog._model.rowCount() == 1
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
 def test_paperdoll_waits_for_the_fetch_when_not_cached(qapp, monkeypatch) -> None:
     win = MainWindow()
     char = make_char("WitchOfPeter", "Standard")

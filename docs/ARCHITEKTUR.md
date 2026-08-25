@@ -5914,6 +5914,47 @@ geprüft am geparsten `QTextDocument`, weil die Frage nicht an der Schrift
 hängt), `tests/test_item_detail.py` (die Escaping-Grenze in beide
 Richtungen, Panelbreite).
 
+#### 4.52.3 Das Album: durch die Sammlung blättern (`ui/mod_album.py`)
+
+Peter, 2026-08-24, derselbe Satz, der die ganze Sammlung angestoßen hat:
+"Ich finde die Idee mit der eigenen Datenbank am besten, hat etwas von
+einer Briefmarkensammlung: Einfach mal jedes Objekt in der Hand gehalten
+zu haben und von PoE-VIEW kategorisiert und eingetragen." Die ersten
+beiden Stufen beantworten "wie gut ist DIESER Roll" — am Item, im
+Moment. Eine Sammlung ist aber erst eine Sammlung, wenn man auch OHNE ein
+Item in der Hand durchblättern kann, was man hat. Das ist die dritte
+Stufe.
+
+**Aufbau**, bewusst schlicht gehalten — ein Fenster für einen
+Nachschlage-Blick, kein eigenes Datenmodell mit eigenen Regeln:
+
+- Eine sortierbare Tabelle (Mod, Art, Häufigkeit, Beispieltext) über
+  `ModCollection.records()`, ungefiltert 6.125 Zeilen bei Peters Bestand.
+- Eine Textsuche gegen die Identität (`QSortFilterProxyModel`,
+  `setFilterFixedString`) und ein Art-Filter (Explicit/Implicit/Enchant/…)
+  daneben — beide Bedingungen müssen gelten, sonst ließe sich mit dem
+  Art-Filter die Textsuche aushebeln. Das Art-Menü listet nur Arten, die
+  die Sammlung tatsächlich enthält; ein Eintrag ohne Treffer wäre eine
+  Sackgasse.
+- Ein Klick auf eine Zeile füllt ein Textfeld mit dem vollen Steckbrief:
+  jede (Liga, Rarität), in der der Mod je auftauchte, mit Sichtungszahl,
+  Wertspanne und Item-Stufen-Bereich — genau die Daten, die
+  `RaritySpan`/`ModRecord` ohnehin schon führen, hier nur ausgeschrieben
+  statt auf eine einzelne Zahl verdichtet wie am Item.
+
+**Ein Schnappschuss, keine Live-Ansicht.** Jeder Klick auf den
+Werkzeugleisten-Knopf öffnet eine neue Instanz mit dem aktuellen Stand
+der Sammlung (dieselbe Bauweise wie die Paperdoll, §4.7) — kein
+Abonnement auf künftige Beobachtungen. Ein Fenster zum Durchblättern, das
+sich unter der Maus neu sortiert, wäre schlechter als eines, das beim
+nächsten Öffnen einfach frisch befüllt ist.
+
+Getestet: `tests/test_mod_album.py` (Anzeigenamen inklusive der beiden
+Sonder-Raritäten, der Steckbrief-Text, Text- und Art-Filter einzeln und
+kombiniert, das Art-Menü ohne leere Einträge), `tests/test_main_window_
+helpers.py` (der Werkzeugleisten-Knopf öffnet das Fenster mit der
+tatsächlichen Sammlung des laufenden Fensters).
+
 ## 8. Entwicklungsstand
 
 Die ursprünglich geplanten Meilensteine (Grundgerüst, Authentifizierung,

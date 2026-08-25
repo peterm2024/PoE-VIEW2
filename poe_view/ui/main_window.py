@@ -53,6 +53,7 @@ from poe_view.ui.item_detail import ItemDetail
 from poe_view.ui.favourites import favourite_rows
 from poe_view.ui.gem_progress import gem_progress_of
 from poe_view.ui.leveling_panel import LevelingPanel
+from poe_view.ui.mod_album import ModAlbumDialog
 from poe_view.ui.xp_graph import GRAPH_SPAN_S, XpPoint
 from poe_view.ui.item_table import (COLUMNS, CONFIGURABLE_COLUMNS, ICON_COL,
                                     MODS_COL, POSITION_COL, TAB_COL,
@@ -1161,6 +1162,13 @@ class MainWindow(QMainWindow):
         self._settings_action.setToolTip("Configure the item right-click menu")
         self._settings_action.triggered.connect(self._open_settings_dialog)
         toolbar.addAction(self._settings_action)
+
+        self._mod_album_action = QAction("📚 Mods", self)
+        self._mod_album_action.setToolTip(
+            "Browse your mod collection: every mod line ever seen, "
+            "searchable, with the full range per rarity and league")
+        self._mod_album_action.triggered.connect(self._open_mod_album)
+        toolbar.addAction(self._mod_album_action)
 
         self._help_action = QAction("❓ Help", self)
         self._help_action.setToolTip("What the columns, filters and modes mean")
@@ -4868,6 +4876,14 @@ class MainWindow(QMainWindow):
         self._help_dialog.show()
         self._help_dialog.raise_()
         self._help_dialog.activateWindow()
+
+    def _open_mod_album(self) -> None:
+        """Ein Schnappschuss beim Öffnen, keine Live-Ansicht (§4.52,
+        Stufe 3 — ``ui/mod_album.py``). Eine neue Instanz bei jedem Klick,
+        wie bei der Paperdoll: Das Fenster soll den aktuellen Stand
+        zeigen, nicht den vom letzten Öffnen."""
+        self._mod_album_dialog = ModAlbumDialog(self._mod_collection, self)
+        self._mod_album_dialog.show()
 
     def _open_settings_dialog(self) -> None:
         dialog = SettingsDialog(self._load_tool_entries(), self._load_column_config(),

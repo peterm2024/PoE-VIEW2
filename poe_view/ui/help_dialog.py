@@ -324,7 +324,9 @@ everything that passes through your stash — it says what YOU have seen,
 not what the game allows. Temporary leagues are kept apart, since mod
 values change between them; Standard and the other permanent leagues
 share one pot, because they hold items rolled in every league there ever
-was.</li>
+was. The <b>Mods</b> toolbar button opens the whole collection as a
+searchable list — filter by text or by kind, click a mod to see every
+rarity and league it has ever shown up on.</li>
 <li>The <b>average line</b> is your rate over the stretch you are
 currently in: since your last level-up, or since a break of more than
 half an hour, whichever came later, and never more than the three hours

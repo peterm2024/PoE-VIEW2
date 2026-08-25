@@ -30,6 +30,12 @@ nach [SemVer](https://semver.org/lang/de/).
   Sichtungen. ✦ steht weiterhin vor einem Mod, der zum ersten Mal
   auftaucht.
 
+- **Ein Album zum Durchblättern der Mod-Sammlung** (neuer
+  Werkzeugleisten-Knopf "📚 Mods"): durchsuchbar nach Text und nach Art
+  (Explicit, Implicit, Enchant, Flask, …), mit dem vollen Steckbrief eines
+  markierten Eintrags — jede Liga und Rarität, in der er je auftauchte,
+  mit Sichtungszahl, Wertspanne und Item-Stufen.
+
 ### Behoben
 
 - Die Beschriftung des Schnitts im XP-Graphen war unlesbar, wenn der
