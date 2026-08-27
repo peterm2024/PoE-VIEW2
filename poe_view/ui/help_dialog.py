@@ -324,10 +324,15 @@ everything that passes through your stash — it says what YOU have seen,
 not what the game allows. Temporary leagues are kept apart, since mod
 values change between them; Standard and the other permanent leagues
 share one pot, because they hold items rolled in every league there ever
-was. The <b>Mods</b> toolbar button opens the whole collection as a
-searchable list — filter by text, kind, league or rarity, and see the
-<b>Range</b> column for the lowest and highest value ever seen for
-whichever of those you have selected (everything, if you have not
+was. The <b>Mods</b> toolbar button opens the whole collection as an
+<b>album of cards</b> — every mod a card with its range and how often it
+was seen, a <b>golden frame</b> around the ones seen exactly once (the
+singles of the collection) and a <b>✦</b> on this session's new finds.
+Sort the cards by name, newest finds, most seen or singles first; the
+<b>Show table</b> button flips to a sortable list of the same mods.
+Search and the filters (text, kind, league, rarity) work in both views,
+and the <b>Range</b> column shows the lowest and highest value ever seen
+for whichever of those you have selected (everything, if you have not
 narrowed it down). Rarity includes a <b>Corrupted</b> group of its own:
 a corrupted item's mods are counted apart from an uncorrupted one's, even
 at the same rarity, since some corruption outcomes roll from an entirely
@@ -335,7 +340,11 @@ different table. Click a mod to see every rarity and league it has ever
 shown up on, in full — and, where the evidence allows it, the
 <b>tier bands</b> worked out from item level: a tier cannot appear below
 the level that unlocks it, so the lowest level a value ever showed up on
-marks where the boundaries are. Upper bounds are proven, lower bounds
+marks where the boundaries are. Each band gets a table row of its own —
+how often seen, value span, item levels — and the bands are labelled as
+<b>% of the seen span</b> rather than tier numbers, since numbers would
+invite comparison with the game's ladder while it is still incomplete.
+Upper bounds are proven, lower bounds
 assume tiers meet without gaps. If a mod shows a reason instead of bands,
 that is usually because every sighting came from high-level maps, where
 nearly all tiers are already unlocked — levelling through the campaign is

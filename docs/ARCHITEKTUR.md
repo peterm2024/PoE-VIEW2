@@ -6073,21 +6073,22 @@ Größe ist deshalb die untere Einhüllende: "das niedrigste iLvl, auf dem
 ich je einen Wert ≥ t gesehen habe". Sie ist von Natur aus monoton, und
 fehlende Daten machen sie nur zu vorsichtig, nie falsch.
 
-**Gespeichert wird die Pareto-Front, nicht das Histogramm**
-(`mod_collection.add_evidence`). Ein Beleg zählt nur, wenn kein anderer
-gleichzeitig einen höheren Wert UND ein niedrigeres iLvl hat. Das ist
-genau die Treppe, und ihre Länge hängt an der Zahl der Tiers, nicht an
-der Zahl der Beobachtungen: 1323 Sichtungen von `#% to Cold Resistance`
-schrumpfen auf 15 Punkte. Über Peters ganzen Bestand gemessen: 9.185
-Punkte in 5.005 Töpfen (p50 = 1, p99 = 9), rund 0,08 MB — ein volles
-Werte-Histogramm wäre das 2,8-fache. Mit Basis-Kategorie als Achse:
-14.974 Punkte, 0,13 MB. Die Datei wächst dadurch von 1,75 auf 1,90 MB.
+**Gerechnet wird mit der Pareto-Front** (`mod_collection.add_evidence`).
+Ein Beleg zählt nur, wenn kein anderer gleichzeitig einen höheren Wert
+UND ein niedrigeres iLvl hat. Das ist genau die Treppe, und ihre Länge
+hängt an der Zahl der Tiers, nicht an der Zahl der Beobachtungen: 1323
+Sichtungen von `#% to Cold Resistance` schrumpfen auf 15 Punkte.
+GESPEICHERT wurde die Front nur in Aufbau 3/4; seit Aufbau 5 liegt
+stattdessen das Werte-Kontenbuch in der Datei (§4.52.6), aus dem
+`ModRecord.tier_front` sie bei Bedarf ableitet — für die Front zählt je
+Wert ohnehin nur sein niedrigstes iLvl, die Ableitung verliert also
+nichts.
 
 **Die Basis-Kategorie ist eine eigene Achse, die Liga nicht.** Ein Ring
 rollt eine andere Tier-Tabelle als eine Rüstung, bei identischem
 Mod-Text; ohne diese Trennung verschmiert die Leiter. Die Liga dagegen
 spielt für die Tier-Schwellen keine Rolle und würde die Belege nur
-ausdünnen — sie fehlt in `tier_evidence` deshalb bewusst, obwohl `spans`
+ausdünnen — sie fehlt im Kontenbuch deshalb bewusst, obwohl `spans`
 sie führt.
 
 **Belegt werden nur gerollte Affixe** (`mod_collection.tierable`):
@@ -6150,6 +6151,108 @@ als Beleg, der Nachtrag lässt jeden Zählstand unberührt und legt keine
 Einträge an, Runde durch die Datei, ein Stand nach Aufbau 2 lädt weiter),
 `tests/test_mod_album.py` (Bänder im Steckbrief, der Grund beim
 Schweigen, die Kennzeichnung von Beleg gegen Annahme).
+
+#### 4.52.5 Die Kartenansicht: das Album als Album (`ui/mod_album.py`)
+
+Peter, 2026-08-27, mit einem Screenshot der Tabelle: "das fühlt sich
+irgendwie nicht wie ein Sammel-Album an." Die Diagnose dahinter: Ein
+Briefmarkenalbum hat Seiten, Prunkstücke und sichtbare Lücken — die
+Tabelle hatte nichts davon, sie war ehrlich eine Datenbank-Ansicht.
+Zwei der drei Zutaten waren ohne neue Datenquelle zu haben und sind
+diese Stufe; die dritte (Lücken = "was es im Spiel gibt, aber du nie
+gesehen hast") bräuchte eine externe Mod-Liste und bleibt ein eigenes
+Vorhaben.
+
+**Karten statt Zeilen.** Eine `QListView` im IconMode mit einem
+`QStyledItemDelegate` (`ModCardDelegate`) zeichnet jede Mod-Identität
+als Karte: Name (zwei Zeilen, Volltext im Tooltip — die längste
+Identität in Peters Bestand hat 381 Zeichen), Range in Grün, Art und
+Sichtungszahl gedämpft in der Fußzeile. Bewusst KEINE 6.125
+Karten-Widgets: Die Listenansicht zeichnet nur Sichtbares
+(`LayoutMode.Batched`, `uniformItemSizes`), und weil sie auf DEMSELBEN
+Proxy-Modell sitzt wie die Tabelle, wirken Suche und alle Filter in
+beiden Ansichten identisch, ohne eine Zeile doppelter Filterlogik.
+Beide Ansichten teilen sich zudem EIN `QItemSelectionModel` — wer in
+der Tabelle eine Zeile wählt und umschaltet, steht auf derselben Karte.
+
+**Trophäen als Sortier-Linsen, nicht als eigene Seiten.** "Newest
+finds", "Most seen" und "Seen once first" sind Sortierungen derselben
+Karten (`ALBUM_SORTS`): Einzelstücke tragen zusätzlich einen goldenen
+Rand (`DASH_WARN` — die App hat genau ein Bernstein, und es bedeutet
+"besonders"), Sitzungs-Funde ein ✦ (dasselbe Zeichen wie am Item,
+§4.52.2). In der Tabelle sortiert weiter der Spaltenkopf; beim
+Umschalten dorthin wird die Sortier-Rolle auf `DisplayRole`
+zurückgesetzt, sonst deutete eine übrig gebliebene `FIRST_SEEN_ROLE`
+jeden Kopf-Klick auf der Mod-Spalte still um.
+
+**"Zuletzt eingetragen" braucht ein Datum: `first_seen`** (Aufbau 4 der
+Datei, §`VERSION`). Nur der ERSTE Kontakt setzt es; ein alter Stand lädt
+mit 0 = Grundstock, denn der Cache weiß nicht, WANN ein Item erstmals
+durch die Truhe ging, und ein nachträglich erfundenes Datum wäre eine
+Behauptung. Der Grundstock schreibt das Feld gar nicht erst in die Datei
+(6.000+ bedeutungslose Nullen). Im Steckbrief steht das Datum als
+"entered the collection on …", im Grundstock-Fall gar nichts.
+
+**Der Sammlungs-Puls statt eines grauen Platzhalters.** Solange keine
+Karte gewählt ist, zeigt das Detail-Feld den Stand der Sammlung
+(`collection_greeting`): Gesamtzahl, Einzelstücke, Funde dieser Sitzung,
+jüngster Fund mit Datum. Ein Album schlägt man auf und sieht zuerst,
+wie es um die Sammlung steht.
+
+**Farben gerechnet, nicht begutachtet** (gegen den GEMESSENEN Grund
+`#2d2d2d` aus FALLSTRICKE #76, den die Ansicht per Stylesheet erzwingt,
+statt `QPalette.Base` zu vertrauen): Karte `#3c3c3c` (ΔE 4,8 zum Grund)
+mit Rand `#555555` (ΔE 9,7 zur Karte), Name `#e8e6e3` (WCAG 9,4),
+Nebentext `#b0b0b0` (5,4), Range `#8fbf7f` (5,5 — `DASH_OK` selbst läge
+mit 4,4 knapp unter 4,5), Einzelstück-Rand `DASH_WARN` (ΔE 52,8).
+
+Getestet: `tests/test_mod_album.py` (Rollen, Sortier-Linsen, geteilte
+Auswahl, Rücksetzen der Sortier-Rolle, Zeichnen ohne Fehler, Puls-Text,
+Datum nur wo bekannt) und `tests/test_mod_collection.py` (Datum nur beim
+ersten Kontakt, Runde durch die Datei, Grundstock schreibt kein Feld,
+`new_keys` als Schnappschuss).
+
+#### 4.52.6 Das Werte-Kontenbuch und die Band-Tabelle
+
+Peter, 2026-08-27, zur Tier-Anzeige im Album: Er wollte je Tier eine
+Zeile der Form `Count | Min | Max | iLvl-Min | iLvl-Max`. Aus einer
+Pareto-Front lassen sich aber keine Zählungen je Band gewinnen — sie
+hält von jedem Wert nur den besten Beleg. Aufbau 5 der Datei ersetzt
+die gespeicherte Front deshalb durch das **Kontenbuch**
+(`ModRecord.tier_ledger`): je Basis-Kategorie und WERT die Zahl der
+Sichtungen samt iLvl-Spanne (`wert → [n, il_min, il_max]`). Die Front
+ist daraus jederzeit ableitbar (`tier_front`), die Umkehrung nicht —
+darum ersetzt das Buch die Front, statt daneben zu liegen. Gemessen an
+Peters Cache: 32.258 Wert-Zeilen, ~0,7 MB, größtes Konto 76 Werte
+(`# to maximum Life`); die Kappung `_MAX_LEDGER_VALUES = 512` ist reine
+Vorsicht.
+
+**Der Sprung von Aufbau 3/4 auf 5 nutzt den vorhandenen Nachtrag.** Ein
+alter `tiers`-Block wird beim Laden verworfen — ohne Zählungen wäre er
+im Kontenbuch eine Zeile mit erfundenem `n`. Danach ist
+`has_tier_evidence()` falsch, und derselbe Mechanismus, der beim Sprung
+auf Aufbau 3 die Belege aus dem Cache nachtrug (`backfill_tiers`,
+§4.52.4), baut beim nächsten Start das volle Buch auf, ohne einen
+Album-Zählstand anzufassen.
+
+**Die Bänder heißen Prozent, nicht T-Nummern** (`mod_album.band_table`).
+Peters eigene Begründung: "Wenn wir Zahlen benutzen ist das mit Ingame
+verwechselbar und gerade am Anfang stimmt das noch nicht." Jedes Band
+trägt seinen Anteil an der gesehenen Wertspanne (`0–14 %`, `21–100 %`);
+sobald genug Daten das echte Tier-System hergeben, wird umbenannt. In
+der Tabelle steht je Band: Sichtungen, Wert-Spanne, iLvl-Spanne — jeder
+Wert des Kontos gehört zum ERSTEN Band, dessen Obergrenze er nicht
+übersteigt, damit auch halbzahlige Werte zwischen zwei ganzzahligen
+Grenzen nicht durchfallen. Das Detail-Feld ist seither eine feste
+Schrift (`QFontDatabase.systemFont(FixedFont)`), sonst stünden die
+Spalten nur ungefähr untereinander.
+
+Getestet: `tests/test_mod_collection.py` (Kontenbuch akkumuliert je
+Wert, Front aus dem Buch nimmt je Wert das niedrigste iLvl, alter
+`tiers`-Block wird verworfen und der Nachtrag springt an) und
+`tests/test_mod_album.py` (Zählungen je Band, Prozent-Beschriftung ohne
+ein einziges "T", kein Wert fällt zwischen zwei Bänder, Tabelle im
+Steckbrief).
 
 ## 8. Entwicklungsstand
 

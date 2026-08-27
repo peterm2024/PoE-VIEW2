@@ -35,6 +35,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable, Sequence
@@ -62,7 +63,25 @@ log = logging.getLogger(__name__)
 # lassen (§4.52.4, ``services/mod_tiers.py``). Ein Stand nach Aufbau 2
 # hat sie nicht; sie wird beim nächsten Start aus dem Cache nachgetragen,
 # ohne die Zählstände anzufassen (``backfill_tiers``).
-VERSION = 3
+#
+# 4 (2026-08-27): ``first_seen`` je Eintrag — Wanduhrzeit des ERSTEN
+# Auftauchens, damit das Album "zuletzt eingetragen" sortieren kann
+# (§4.52.5). 0 heißt Grundstock: Der Eintrag war schon da, bevor das
+# Datum mitgeschrieben wurde, und ein nachträglich erfundenes wäre eine
+# Behauptung. Nicht nachtragbar — der Cache weiß nicht, WANN ein Item
+# zum ersten Mal durch die Truhe ging.
+#
+# 5 (2026-08-28): ``tier_ledger`` statt der bloßen Pareto-Front — je
+# Basis-Kategorie und WERT die Sichtungen samt iLvl-Spanne. Peter wollte
+# je Tier-Band eine Zeile "Count | Min | Max | iLvl-Min | iLvl-Max",
+# und Zählungen je Band lassen sich aus einer Front nicht gewinnen. Die
+# Front ist umgekehrt aus dem Kontenbuch jederzeit ableitbar
+# (``tier_front``), deshalb ersetzt es sie, statt daneben zu liegen.
+# Ein alter ``tiers``-Block wird beim Laden verworfen; der Nachtrag aus
+# dem Cache (``backfill_tiers``) läuft dann beim nächsten Start von
+# selbst wieder an, wie beim Sprung von Aufbau 2 auf 3. Gemessen an
+# Peters Cache: 32.258 Wert-Zeilen, ~0,7 MB.
+VERSION = 5
 
 # Die Felder der API, deren Inhalt gesammelt wird — die Art eines
 # Eintrags IST der Feldname. Getrennt gehalten statt in einen Topf
@@ -112,6 +131,12 @@ def mod_values(line: str) -> list[float]:
 # Punkte mit dem HÖCHSTEN iLvl weg — die tragen am wenigsten bei, denn
 # die Auflösung kommt von unten (§4.52.4).
 _MAX_EVIDENCE = 40
+
+# Obergrenze für das Tier-Kontenbuch: so viele VERSCHIEDENE Werte darf
+# eine Kategorie führen. Gemessen an Peters Cache liegt das Maximum bei
+# 76 (``# to maximum Life``); die Grenze ist reine Vorsicht gegen einen
+# Mod, der irgendwann mit Nachkommastellen in jeder Schattierung rollt.
+_MAX_LEDGER_VALUES = 512
 
 
 def add_evidence(front: list[tuple[float, int]], wert: float,
@@ -371,19 +396,25 @@ class ModRecord:
     kind: str
     count: int = 0
     example: str = ""
+    # Wanduhrzeit des ersten Auftauchens (§VERSION, Aufbau 4). 0 heißt
+    # Grundstock — der Eintrag ist älter als die Aufzeichnung des Datums.
+    first_seen: float = 0.0
     # Spannen je Ligen-Topf und darin je Rarität. Zwei Ebenen statt eines
     # zusammengesetzten Schlüssels, damit die Datei lesbar bleibt und der
     # Altbestand als eigener Block sichtbar ist.
     spans: dict[str, dict[int, RaritySpan]] = field(default_factory=dict)
-    # Belege für die Tier-Ableitung, je Basis-Kategorie: die Pareto-Front
-    # der Paare (Wert, iLvl) — siehe ``add_evidence`` und §4.52.4.
+    # Das Kontenbuch für die Tier-Ableitung, je Basis-Kategorie: je WERT
+    # die Zahl der Sichtungen und die iLvl-Spanne, ``wert -> [n, il_min,
+    # il_max]``. Daraus kommt beides: die Pareto-Front für die Bänder
+    # (``tier_front``) UND die Zeile je Band im Album ("Count | Min |
+    # Max | iLvl" — Peters Tabelle, 2026-08-27).
     #
     # **Eine eigene Achse, nicht Liga × Rarität.** Ein Ring rollt eine
     # andere Tier-Tabelle als eine Rüstung, bei identischem Text; ohne
     # diese Trennung verschmiert die Leiter. Die Liga dagegen spielt für
     # die Tier-Schwellen keine Rolle und würde die Belege nur ausdünnen —
     # sie fehlt hier deshalb bewusst, obwohl ``spans`` sie führt.
-    tier_evidence: dict[str, list[tuple[float, int]]] = field(default_factory=dict)
+    tier_ledger: dict[str, dict[float, list[int]]] = field(default_factory=dict)
 
     def observe(self, line: str, *, ilvl: int = 0,
                 rarity: int = UNKNOWN_RARITY,
@@ -404,21 +435,40 @@ class ModRecord:
 
     def observe_tier_evidence(self, values: Sequence[float], *, ilvl: int,
                               rarity: int, category: str) -> bool:
-        """Nur den Tier-Beleg einarbeiten, ohne irgendeinen Zählstand.
+        """Nur das Tier-Kontenbuch führen, ohne die Album-Zählstände.
 
-        Getrennt von ``observe``, weil ein Stand nach Aufbau 2 die Belege
-        nachtragen muss, OHNE dass die Sichtungen ein zweites Mal
-        gezählt werden (``ModCollection.backfill_tiers``).
+        Getrennt von ``observe``, weil ein alter Stand die Belege
+        nachtragen muss, OHNE dass die Sichtungen ein zweites Mal in die
+        Spannen gezählt werden (``ModCollection.backfill_tiers``).
 
         Gibt zurück, ob der Beleg überhaupt taugte."""
         if not tierable(rarity, ilvl) or not category or len(values) != 1:
             return False
-        vorher = self.tier_evidence.get(category, [])
-        nachher = add_evidence(vorher, values[0], ilvl)
-        if nachher is vorher:
-            return False
-        self.tier_evidence[category] = nachher
+        konto = self.tier_ledger.setdefault(category, {})
+        zeile = konto.get(values[0])
+        if zeile is None:
+            if len(konto) >= _MAX_LEDGER_VALUES:
+                # Reine Vorsicht — gemessen sind es höchstens 76
+                # verschiedene Werte je Topf. Bestehende Werte zählen
+                # weiter, nur neue kämen nicht mehr dazu.
+                return False
+            konto[values[0]] = [1, ilvl, ilvl]
+            return True
+        zeile[0] += 1
+        zeile[1] = min(zeile[1], ilvl)
+        zeile[2] = max(zeile[2], ilvl)
         return True
+
+    def tier_front(self, category: str) -> list[tuple[float, int]]:
+        """Die Pareto-Front (Wert hoch, iLvl niedrig) aus dem Kontenbuch —
+        die Eingabe für ``mod_tiers.bands``. Für die Front zählt je Wert
+        nur sein NIEDRIGSTES iLvl, deshalb verliert die Ableitung nichts
+        gegenüber dem früheren direkten Mitschreiben (Aufbau 3/4)."""
+        front: list[tuple[float, int]] = []
+        for wert, (_, il_min, _il_max) in sorted(
+                self.tier_ledger.get(category, {}).items()):
+            front = add_evidence(front, wert, il_min)
+        return front
 
     @property
     def leagues(self) -> list[str]:
@@ -481,12 +531,16 @@ class ModRecord:
             "kind": self.kind,
             "count": self.count,
             "example": self.example,
+            # Nur wenn bekannt — 6000+ Grundstock-Einträge mit einer
+            # bedeutungslosen 0 würden die Datei nur verlängern.
+            **({"first_seen": self.first_seen} if self.first_seen > 0 else {}),
             "spans": {liga: {str(rarity): spanne.to_row()
                              for rarity, spanne in sorted(je_liga.items())}
                       for liga, je_liga in sorted(self.spans.items())},
-            "tiers": {kat: [[_as_number(w), il] for w, il in front]
-                      for kat, front in sorted(self.tier_evidence.items())
-                      if front},
+            "ledger": {kat: [[_as_number(wert), *zeile]
+                             for wert, zeile in sorted(konto.items())]
+                       for kat, konto in sorted(self.tier_ledger.items())
+                       if konto},
         }
 
     @classmethod
@@ -500,6 +554,9 @@ class ModRecord:
         eintrag = cls(identity=identity, kind=kind,
                       count=int(row.get("count") or 0),
                       example=str(row.get("example") or ""))
+        first_seen = row.get("first_seen")
+        if isinstance(first_seen, (int, float)) and first_seen > 0:
+            eintrag.first_seen = float(first_seen)
         def raritaeten_lesen(quelle: object) -> dict[int, RaritySpan]:
             ergebnis: dict[int, RaritySpan] = {}
             if isinstance(quelle, dict):
@@ -511,17 +568,23 @@ class ModRecord:
                     ergebnis[rarity] = RaritySpan.from_row(spanne)
             return ergebnis
 
-        tiers = row.get("tiers")
-        if isinstance(tiers, dict):
-            for kat, front in tiers.items():
-                if not isinstance(kat, str) or not isinstance(front, list):
+        # Ein ``tiers``-Block aus Aufbau 3/4 (die bloße Front) wird
+        # bewusst NICHT übernommen: Ohne Zählungen wäre er im Kontenbuch
+        # eine Zeile mit erfundenem ``n`` — der Nachtrag aus dem Cache
+        # baut stattdessen beim nächsten Start das volle Buch auf.
+        ledger = row.get("ledger")
+        if isinstance(ledger, dict):
+            for kat, zeilen in ledger.items():
+                if not isinstance(kat, str) or not isinstance(zeilen, list):
                     continue
-                punkte = [(float(p[0]), int(p[1])) for p in front
-                          if isinstance(p, list) and len(p) == 2
-                          and isinstance(p[0], (int, float))
-                          and isinstance(p[1], (int, float))]
-                if punkte:
-                    eintrag.tier_evidence[kat] = sorted(punkte)
+                konto = {}
+                for zeile in zeilen:
+                    if (isinstance(zeile, list) and len(zeile) == 4
+                            and all(isinstance(x, (int, float)) for x in zeile)):
+                        konto[float(zeile[0])] = [int(zeile[1]),
+                                                  int(zeile[2]), int(zeile[3])]
+                if konto:
+                    eintrag.tier_ledger[kat] = konto
 
         spans = row.get("spans")
         if isinstance(spans, dict):
@@ -569,6 +632,7 @@ class ModCollection:
         eintrag = self._records.get(schluessel)
         if eintrag is None:
             eintrag = self._records[schluessel] = ModRecord(identity, kind)
+            eintrag.first_seen = time.time()
             self._new.add(schluessel)
         eintrag.observe(line, ilvl=ilvl, rarity=rarity, league=league,
                         category=category)
@@ -610,8 +674,11 @@ class ModCollection:
 
     def has_tier_evidence(self) -> bool:
         """Trägt die Sammlung überhaupt schon Tier-Belege? Die Frage
-        entscheidet, ob ein Nachtrag nötig ist."""
-        return any(r.tier_evidence for r in self._records.values())
+        entscheidet, ob ein Nachtrag nötig ist — auch beim Sprung von
+        Aufbau 3/4 auf 5: Der alte ``tiers``-Block wird beim Laden
+        verworfen, das Kontenbuch ist dann leer, und der Nachtrag läuft
+        beim nächsten Start von selbst wieder an."""
+        return any(r.tier_ledger for r in self._records.values())
 
     def observe_item(self, item) -> int:
         """Alle Mod-Zeilen eines Items aufnehmen; gibt deren Anzahl zurück.
@@ -659,6 +726,12 @@ class ModCollection:
         Funde auf einmal sind kein Fund. Ab hier zählt nur noch, was
         wirklich frisch hereinkommt."""
         self._new.clear()
+
+    def new_keys(self) -> frozenset[tuple[str, str]]:
+        """Die Funde dieser Sitzung als Schnappschuss — fürs Album, das
+        beim Öffnen den Stand einfriert (§ui/mod_album.py) und deshalb
+        nicht bei jeder Karte die lebende Sammlung fragen soll."""
+        return frozenset(self._new)
 
     def records(self) -> list[ModRecord]:
         return list(self._records.values())

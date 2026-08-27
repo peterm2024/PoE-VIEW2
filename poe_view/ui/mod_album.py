@@ -37,12 +37,18 @@ Kommentar bei ``CORRUPTED_OFFSET``).
 
 from __future__ import annotations
 
+import time
+from html import escape as html_escape
 from typing import Callable
 
-from PySide6.QtCore import QAbstractTableModel, QModelIndex, QSortFilterProxyModel, Qt
+from PySide6.QtCore import (QAbstractTableModel, QModelIndex, QRect, QSize,
+                            QSortFilterProxyModel, Qt)
+from PySide6.QtGui import QColor, QFontDatabase, QPainter, QPen
 from PySide6.QtWidgets import (QComboBox, QDialog, QHBoxLayout, QHeaderView,
-                               QLabel, QLineEdit, QPlainTextEdit, QSplitter,
-                               QTableView, QVBoxLayout, QWidget)
+                               QLabel, QLineEdit, QListView, QPushButton,
+                               QSplitter, QStackedWidget, QStyle,
+                               QStyledItemDelegate, QStyleOptionViewItem,
+                               QTableView, QTextEdit, QVBoxLayout, QWidget)
 
 from poe_view.api.models import (ENCHANT_MOD_FIELD, EXTRA_MOD_FIELDS,
                                  FRAME_TYPE_NAMES)
@@ -51,6 +57,7 @@ from poe_view.services.mod_collection import (LEGACY_LEAGUE, MAP_RARITY,
                                               UNKNOWN_RARITY, ModCollection,
                                               ModRecord, RaritySpan, base_rarity,
                                               is_corrupted_bucket)
+from poe_view.ui.theme import DASH_WARN, ROW_CHANGED_COLOR
 
 # Anzeigenamen der Mod-Arten. Eigene Tabelle statt einer aus
 # ``csv_export.py`` übernommenen — die dortige ist auf Spaltenüberschriften
@@ -157,39 +164,106 @@ def format_span(span: RaritySpan) -> str:
     return zeile
 
 
+def band_table(konto: dict[float, list[int]],
+               baender: list[mod_tiers.Band]) -> list[str]:
+    """Peters Tabelle (2026-08-27): je Band eine Zeile mit Sichtungen,
+    Wert-Spanne und iLvl-Spanne aus dem Kontenbuch.
+
+    **Die Bänder heißen Prozent, nicht T-Nummern** — Peters eigene
+    Begründung: Nummern wären mit den Ingame-Tiers verwechselbar, und
+    gerade am Anfang stimmen sie noch nicht. Prozent der gesehenen
+    Spanne trägt keine solche Behauptung; sobald genug Daten das echte
+    Tier-System hergeben, wird umbenannt.
+
+    Jeder Wert des Kontos gehört zum ERSTEN Band, dessen Obergrenze er
+    nicht übersteigt — so fällt auch ein halbzahliger Wert zwischen zwei
+    ganzzahligen Grenzen nicht durch."""
+    werte = sorted(konto)
+    achse_lo, achse_hi = werte[0], baender[-1].high
+    spannweite = (achse_hi - achse_lo) or 1.0
+
+    def pct(wert: float) -> int:
+        return round((wert - achse_lo) / spannweite * 100)
+
+    zeilen = [f"{'Band':<11}{'Seen':>5}  {'Values':<14}Item levels"]
+    zeiger = 0
+    for band in baender:
+        lo_eff = achse_lo if band.low is None else band.low
+        drin: list[tuple[float, list[int]]] = []
+        while zeiger < len(werte) and werte[zeiger] <= band.high:
+            drin.append((werte[zeiger], konto[werte[zeiger]]))
+            zeiger += 1
+        if not drin:
+            continue
+        n = sum(zeile[0] for _, zeile in drin)
+        il_lo = min(zeile[1] for _, zeile in drin)
+        il_hi = max(zeile[2] for _, zeile in drin)
+        label = f"{pct(lo_eff)}–{pct(band.high)} %"
+        werte_text = _spread_text([(drin[0][0], drin[-1][0])])
+        il_text = f"{il_lo}–{il_hi}" if il_hi != il_lo else _fmt_num(il_lo)
+        zeilen.append(f"{label:<11}{n:>5}  {werte_text:<14}{il_text}")
+    return zeilen
+
+
 def format_bands(record: ModRecord) -> list[str]:
-    """Die abgeleiteten Tier-Bänder je Basis-Kategorie (§4.52.4).
+    """Die abgeleiteten Tier-Bänder je Basis-Kategorie (§4.52.4), als
+    Tabelle aus dem Kontenbuch (§4.52.6).
 
     Steht bewusst UNTER den Spannen und ausdrücklich beschriftet: Die
     Spannen darüber sind Beobachtung, die Bänder hier sind Deutung. Wo
     die Belege nichts hergeben, steht der Grund statt einer geratenen
     Leiter — ein leeres Feld sähe aus wie ein Fehler."""
-    if not record.tier_evidence:
+    if not record.tier_ledger:
         return []
     zeilen = ["", "Tiers, inferred from item level",
-              "(upper bounds are proven, lower bounds assume tiers meet "
-              "without gaps)"]
-    for kategorie in sorted(record.tier_evidence):
-        belege = record.tier_evidence[kategorie]
-        zeilen.append(f"  {kategorie}  ({len(belege)} data points, "
-                      f"item level {min(il for _, il in belege)}–"
-                      f"{max(il for _, il in belege)})")
-        baender = mod_tiers.bands(belege)
+              "(bands as % of the seen span — tier numbers would clash "
+              "with the game's",
+              "ladder while it is incomplete; upper bounds are proven, "
+              "lower bounds",
+              "assume tiers meet without gaps)"]
+    for kategorie in sorted(record.tier_ledger):
+        konto = record.tier_ledger[kategorie]
+        sichtungen = sum(zeile[0] for zeile in konto.values())
+        einheit = "sighting" if sichtungen == 1 else "sightings"
+        zeilen.append(f"  {kategorie}  ({sichtungen} {einheit}, "
+                      f"item level {min(z[1] for z in konto.values())}–"
+                      f"{max(z[2] for z in konto.values())})")
+        front = record.tier_front(kategorie)
+        baender = mod_tiers.bands(front)
         if not baender:
-            zeilen.append(f"      {mod_tiers.why_silent(belege)}")
+            zeilen.append(f"      {mod_tiers.why_silent(front)}")
             continue
-        for band in baender:
-            lo = "…" if band.low is None else _fmt_num(band.low)
-            spanne = f"{lo}–{_fmt_num(band.high)}"
-            zeilen.append(f"      {spanne:<12s}  from item level {band.from_ilvl}")
+        zeilen.extend(f"      {zeile}" for zeile in band_table(konto, baender))
     return zeilen
+
+
+def record_detail_html(record: ModRecord, mono_family: str) -> str:
+    """Der Steckbrief fürs Anzeige-Feld: Fließtext in der normalen
+    Schrift, NUR die Band-Tabelle in einer festen (§band_table) — das
+    ganze Feld gesperrt zu setzen machte es kaum noch lesbar (Peter,
+    2026-08-28). Quelle bleibt ``format_record_detail``; hier wird nur
+    aufgeteilt und escaped."""
+    zeilen = format_record_detail(record).splitlines()
+    try:
+        start = zeilen.index("Tiers, inferred from item level")
+    except ValueError:
+        start = len(zeilen)
+    kopf = "<br>".join(html_escape(z) for z in zeilen[:start])
+    if start >= len(zeilen):
+        return kopf
+    tabelle = html_escape("\n".join(zeilen[start:]))
+    return (f"{kopf}<pre style=\"font-family:'{mono_family}',Consolas,"
+            f"monospace; margin:0;\">{tabelle}</pre>")
 
 
 def format_record_detail(record: ModRecord) -> str:
     """Der volle Steckbrief eines Eintrags, für das Detail-Feld."""
     zeilen = [record.example or record.identity,
-             f"{kind_label(record.kind)}  ·  seen {record.count}× in total",
-             ""]
+             f"{kind_label(record.kind)}  ·  seen {record.count}× in total"]
+    datum = first_seen_text(record)
+    if datum:
+        zeilen.append(datum)
+    zeilen.append("")
     for league in record.leagues:
         for rarity in sorted(record.spans[league]):
             span = record.spans[league][rarity]
@@ -251,14 +325,99 @@ def combined_range_text(record: ModRecord, league: str | None,
 IDENTITY_COL, KIND_COL, RANGE_COL, COUNT_COL, EXAMPLE_COL = range(5)
 COLUMNS = ("Mod", "Kind", "Range", "Seen", "Example")
 
+# Zusatz-Rollen für die Kartenansicht. Die Karte zeigt Spalteninhalte
+# (Name, Range, Seen) plus zwei Dinge, die keine Spalte sind: das
+# Erst-gesehen-Datum (zum Sortieren) und "neu in dieser Sitzung".
+RECORD_ROLE = Qt.ItemDataRole.UserRole
+FIRST_SEEN_ROLE = Qt.ItemDataRole.UserRole + 1
+NEW_ROLE = Qt.ItemDataRole.UserRole + 2
+
+# Die Sortier-Linsen der Kartenansicht — das ist der Trophäen-Teil des
+# Albums: "Neuzugänge", "Arbeitspferde", "Einzelstücke" sind keine
+# eigenen Seiten, sondern Sortierungen derselben Karten. Reihenfolge =
+# Menü-Reihenfolge; der Schlüssel ist der Anzeigename (String statt
+# Tupel als ``itemData`` — FALLSTRICKE #78).
+ALBUM_SORTS: tuple[tuple[str, int, int, Qt.SortOrder], ...] = (
+    ("A–Z", IDENTITY_COL, Qt.ItemDataRole.DisplayRole,
+     Qt.SortOrder.AscendingOrder),
+    ("Newest finds", IDENTITY_COL, FIRST_SEEN_ROLE,
+     Qt.SortOrder.DescendingOrder),
+    ("Most seen", COUNT_COL, Qt.ItemDataRole.DisplayRole,
+     Qt.SortOrder.DescendingOrder),
+    ("Seen once first", COUNT_COL, Qt.ItemDataRole.DisplayRole,
+     Qt.SortOrder.AscendingOrder),
+)
+ALBUM_SORTS_BY_NAME = {name: (col, role, order)
+                       for name, col, role, order in ALBUM_SORTS}
+
+# Farben der Kartenansicht, alle gerechnet statt begutachtet (Skript im
+# Scratchpad, 2026-08-27; Grundton ist der GEMESSENE Panel-Hintergrund
+# #2d2d2d aus FALLSTRICKE #76, nicht QPalette.Window):
+#   Karte #3c3c3c auf Grund #2d2d2d: CIEDE2000 4,8 — plus Rand #555555
+#     mit dE 9,7 zur Karte, damit die Trennung nicht an der Fläche
+#     allein hängt.
+#   Name #e8e6e3 auf Karte: WCAG 9,4. Nebentext #b0b0b0: 5,4.
+#   Range #8fbf7f: 5,5 — DASH_OK selbst läge mit 4,4 knapp UNTER 4,5.
+#   Einzelstück-Rand DASH_WARN auf Karte: dE 52,8; als Text 5,3.
+ALBUM_BG = "#2d2d2d"
+CARD_BG = "#3c3c3c"
+CARD_BORDER = "#555555"
+CARD_BORDER_SINGLE = DASH_WARN
+CARD_BORDER_SELECTED = ROW_CHANGED_COLOR
+CARD_TEXT = "#e8e6e3"
+CARD_TEXT_DIM = "#b0b0b0"
+CARD_TEXT_RANGE = "#8fbf7f"
+CARD_TEXT_NEW = DASH_WARN
+CARD_PAD = 8
+CARD_RADIUS = 6
+NEW_MARK = "✦"
+
+
+def first_seen_text(record: ModRecord) -> str:
+    """"entered the collection on 2026-08-27" — oder leer für den
+    Grundstock: Ein Eintrag mit ``first_seen == 0`` ist älter als die
+    Aufzeichnung des Datums, und ein erfundenes Datum wäre schlimmer als
+    keines."""
+    if record.first_seen <= 0:
+        return ""
+    tag = time.strftime("%Y-%m-%d", time.localtime(record.first_seen))
+    return f"entered the collection on {tag}"
+
+
+def collection_greeting(records: list[ModRecord],
+                        new_keys: frozenset[tuple[str, str]]) -> str:
+    """Der Sammlungs-Puls, solange keine Karte gewählt ist.
+
+    Ein Album schlägt man auf und sieht zuerst den Stand der Sammlung —
+    nicht einen grauen Platzhalter. Steht im Platzhaltertext des
+    Detail-Felds, weil dort ohnehin Platz ist, bis etwas gewählt wird."""
+    total = len(records)
+    einzel = sum(1 for r in records if r.count == 1)
+    neu = sum(1 for r in records if (r.kind, r.identity) in new_keys)
+    zeilen = [f"Your collection: {total} mods — {einzel} of them seen "
+              f"exactly once, {neu} new this session."]
+    juengste = [r for r in records if r.first_seen > 0]
+    if juengste:
+        letzter = max(juengste, key=lambda r: r.first_seen)
+        tag = time.strftime("%Y-%m-%d", time.localtime(letzter.first_seen))
+        zeilen.append(f"Latest find: {letzter.identity} ({tag})")
+    zeilen.append("")
+    zeilen.append("Select a mod to see every rarity and league it has "
+                  "been seen on.")
+    return "\n".join(zeilen)
+
 
 class ModAlbumModel(QAbstractTableModel):
     """Reine Anzeige einer bereits fertigen Liste — die Sammlung selbst
     bleibt dumm gegenüber Qt (§mod_collection.py)."""
 
-    def __init__(self, records: list[ModRecord]) -> None:
+    def __init__(self, records: list[ModRecord],
+                 new_keys: frozenset[tuple[str, str]] = frozenset()) -> None:
         super().__init__()
         self._records = records
+        # Schnappschuss der Sitzungs-Funde (``ModCollection.new_keys``) —
+        # wie die Karteiliste selbst: Stand vom Öffnen, keine Live-Sicht.
+        self._new_keys = new_keys
         # Steuert nur die RANGE_COL-Spalte, siehe ``combined_range_text``.
         # Getrennt vom Proxy-Filter gehalten, obwohl beide von denselben
         # Combo-Boxen gefuettert werden: Der Proxy entscheidet, welche
@@ -293,9 +452,20 @@ class ModAlbumModel(QAbstractTableModel):
         return None
 
     def data(self, index: QModelIndex, role):
+        record = self._records[index.row()]
+        if role == RECORD_ROLE:
+            return record
+        if role == FIRST_SEEN_ROLE:
+            return record.first_seen
+        if role == NEW_ROLE:
+            return (record.kind, record.identity) in self._new_keys
+        if role == Qt.ItemDataRole.ToolTipRole and index.column() == IDENTITY_COL:
+            # In der Tabelle wegen 381-Zeichen-Identitäten nützlich, in
+            # der Kartenansicht notwendig: Dort wird ein langer Name nach
+            # zwei Zeilen abgeschnitten.
+            return record.identity
         if role != Qt.ItemDataRole.DisplayRole:
             return None
-        record = self._records[index.row()]
         col = index.column()
         if col == IDENTITY_COL:
             return record.identity
@@ -357,6 +527,97 @@ class ModAlbumProxy(QSortFilterProxyModel):
         return super().filterAcceptsRow(row, parent)
 
 
+class ModCardDelegate(QStyledItemDelegate):
+    """Eine Mod-Identität als Sammelkarte (§4.52.5).
+
+    Warum ein Delegate auf einer ``QListView`` im IconMode statt echter
+    Karten-Widgets: 6125 Karten als Widgets wären 6125 lebende Objekte;
+    die Listenansicht zeichnet nur, was sichtbar ist, und Suche/Filter
+    laufen unverändert über dasselbe Proxy-Modell wie die Tabelle.
+
+    Aufbau einer Karte:
+        Name (bis zwei Zeilen, dann abgeschnitten — Volltext im Tooltip)
+        Range (grün — dieselbe Auswahl-Logik wie die Range-Spalte)
+        Art unten links, Sichtungen unten rechts (gedämpft)
+    Goldener Rand: nur einmal gesehen — das Einzelstück der Sammlung.
+    ✦ oben rechts: neu in dieser Sitzung (dasselbe Zeichen wie am Item,
+    §mod_bar.NEW_MARK)."""
+
+    def sizeHint(self, option: QStyleOptionViewItem,
+                 index: QModelIndex) -> QSize:  # noqa: N802
+        fm = option.fontMetrics
+        # Breite aus der Schrift, nicht in Pixeln geraten: Platz für eine
+        # mittellange Identität je Zeile. Höhe: zwei Namenszeilen, Range,
+        # Fußzeile.
+        breite = fm.horizontalAdvance("#% increased Global Critical Strike Chance")
+        return QSize(breite + 2 * CARD_PAD, fm.height() * 4 + 2 * CARD_PAD + 6)
+
+    def paint(self, painter: QPainter, option: QStyleOptionViewItem,
+              index: QModelIndex) -> None:
+        record = index.data(RECORD_ROLE)
+        if record is None:
+            return
+        neu = bool(index.data(NEW_ROLE))
+        range_text = index.siblingAtColumn(RANGE_COL).data(Qt.ItemDataRole.DisplayRole) or ""
+        gesehen = index.siblingAtColumn(COUNT_COL).data(Qt.ItemDataRole.DisplayRole) or 0
+
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        karte = option.rect.adjusted(1, 1, -1, -1)
+
+        gewaehlt = bool(option.state & QStyle.StateFlag.State_Selected)
+        if gewaehlt:
+            rand, randbreite = QColor(CARD_BORDER_SELECTED), 2
+        elif record.count == 1:
+            rand, randbreite = QColor(CARD_BORDER_SINGLE), 2
+        else:
+            rand, randbreite = QColor(CARD_BORDER), 1
+        painter.setPen(QPen(rand, randbreite))
+        painter.setBrush(QColor(CARD_BG))
+        painter.drawRoundedRect(karte, CARD_RADIUS, CARD_RADIUS)
+
+        fm = option.fontMetrics
+        innen = karte.adjusted(CARD_PAD, CARD_PAD, -CARD_PAD, -CARD_PAD)
+
+        # ✦ zuerst, damit der Name weiß, wie viel Breite ihm bleibt.
+        name_rechts = innen.right()
+        if neu:
+            stern_breite = fm.horizontalAdvance(NEW_MARK)
+            painter.setPen(QColor(CARD_TEXT_NEW))
+            painter.drawText(QRect(innen.right() - stern_breite, innen.top(),
+                                   stern_breite, fm.height()),
+                             Qt.AlignmentFlag.AlignRight, NEW_MARK)
+            name_rechts -= stern_breite + 4
+
+        name_rect = QRect(innen.left(), innen.top(),
+                          name_rechts - innen.left(), fm.height() * 2)
+        painter.setPen(QColor(CARD_TEXT))
+        painter.setClipRect(name_rect)
+        painter.drawText(name_rect,
+                         Qt.TextFlag.TextWordWrap | Qt.AlignmentFlag.AlignTop,
+                         record.identity)
+        painter.setClipping(False)
+
+        range_rect = QRect(innen.left(), name_rect.bottom() + 2,
+                           innen.width(), fm.height())
+        painter.setPen(QColor(CARD_TEXT_RANGE))
+        painter.drawText(range_rect, Qt.AlignmentFlag.AlignLeft,
+                         fm.elidedText(range_text, Qt.TextElideMode.ElideRight,
+                                       range_rect.width()))
+
+        fuss = QRect(innen.left(), innen.bottom() - fm.height() + 1,
+                     innen.width(), fm.height())
+        painter.setPen(QColor(CARD_TEXT_DIM))
+        zaehler = f"{gesehen}×"
+        zaehler_breite = fm.horizontalAdvance(zaehler)
+        painter.drawText(fuss, Qt.AlignmentFlag.AlignRight, zaehler)
+        painter.drawText(fuss, Qt.AlignmentFlag.AlignLeft,
+                         fm.elidedText(kind_label(record.kind),
+                                       Qt.TextElideMode.ElideRight,
+                                       fuss.width() - zaehler_breite - 8))
+        painter.restore()
+
+
 class ModAlbumDialog(QDialog):
     def __init__(self, collection: ModCollection, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -364,9 +625,10 @@ class ModAlbumDialog(QDialog):
         self.resize(900, 560)
 
         records = sorted(collection.records(), key=lambda r: r.identity)
-        self._model = ModAlbumModel(records)
+        self._model = ModAlbumModel(records, collection.new_keys())
         self._proxy = ModAlbumProxy()
         self._proxy.setSourceModel(self._model)
+        self._greeting = collection_greeting(records, collection.new_keys())
 
         self._search = QLineEdit()
         self._search.setPlaceholderText("Search…")
@@ -402,11 +664,26 @@ class ModAlbumDialog(QDialog):
 
         self._count_label = QLabel()
 
+        # Die Sortier-Linsen der Kartenansicht (§ALBUM_SORTS). In der
+        # Tabelle sortiert der Spaltenkopf; dort ist die Box gesperrt,
+        # statt versteckt — sonst spränge die Zeile beim Umschalten.
+        self._sort_combo = QComboBox()
+        for name, *_ in ALBUM_SORTS:
+            self._sort_combo.addItem(name, name)
+        self._sort_combo.currentIndexChanged.connect(self._on_album_sort_changed)
+
+        # Benannt nach dem, wohin der Klick führt, nicht nach dem, was
+        # gerade zu sehen ist — wie ein Abspielen/Pause-Knopf.
+        self._view_button = QPushButton("☰ Show table")
+        self._view_button.clicked.connect(self._toggle_view)
+
         top_row = QHBoxLayout()
         top_row.addWidget(self._search, stretch=1)
         top_row.addWidget(self._kind_combo)
         top_row.addWidget(self._league_combo)
         top_row.addWidget(self._rarity_combo)
+        top_row.addWidget(self._sort_combo)
+        top_row.addWidget(self._view_button)
         top_row.addWidget(self._count_label)
 
         self._table = QTableView()
@@ -427,15 +704,51 @@ class ModAlbumDialog(QDialog):
         header.resizeSection(RANGE_COL, 150)
         header.resizeSection(COUNT_COL, 50)
         header.setSectionResizeMode(EXAMPLE_COL, QHeaderView.ResizeMode.Stretch)
+
+        # Die Kartenansicht: dieselben Zeilen desselben Proxys, nur als
+        # Raster gezeichnet (§ModCardDelegate). ``Batched`` legt die 6125
+        # Karten häppchenweise aus, statt das Öffnen aufzuhalten.
+        self._cards = QListView()
+        self._cards.setModel(self._proxy)
+        self._cards.setViewMode(QListView.ViewMode.IconMode)
+        self._cards.setFlow(QListView.Flow.LeftToRight)
+        self._cards.setWrapping(True)
+        self._cards.setResizeMode(QListView.ResizeMode.Adjust)
+        self._cards.setLayoutMode(QListView.LayoutMode.Batched)
+        self._cards.setUniformItemSizes(True)
+        self._cards.setSpacing(6)
+        self._cards.setMovement(QListView.Movement.Static)
+        self._cards.setSelectionMode(QListView.SelectionMode.SingleSelection)
+        self._cards.setEditTriggers(QListView.EditTrigger.NoEditTriggers)
+        self._cards.setItemDelegate(ModCardDelegate(self._cards))
+        # Fester Grund statt Palette: Die Kartenfarben sind gegen
+        # #2d2d2d gerechnet (§ALBUM_BG), nicht gegen QPalette.Base.
+        self._cards.setStyleSheet(
+            f"QListView {{ background-color: {ALBUM_BG}; border: none; }}")
+        # EIN Auswahlzustand für beide Ansichten: Wer in der Tabelle eine
+        # Zeile wählt und umschaltet, steht auf derselben Karte.
+        self._cards.setSelectionModel(self._table.selectionModel())
         self._table.selectionModel().currentRowChanged.connect(self._on_row_changed)
 
-        self._detail = QPlainTextEdit()
+        # Ein QTextEdit statt QPlainTextEdit, weil der Steckbrief ZWEI
+        # Schriften braucht: Fließtext proportional, NUR die Band-Tabelle
+        # fest (§band_table). Der erste Wurf setzte das ganze Feld auf
+        # die feste Schrift — Peters Rückmeldung: "dadurch ist dieses
+        # Feld kaum noch lesbar."
+        self._detail = QTextEdit()
         self._detail.setReadOnly(True)
-        self._detail.setPlaceholderText("Select a mod to see every rarity and league "
-                                        "it has been seen on.")
+        self._mono_family = QFontDatabase.systemFont(
+            QFontDatabase.SystemFont.FixedFont).family()
+        self._detail.setPlaceholderText(self._greeting)
+
+        # Karten zuerst — sie SIND das Album; die Tabelle bleibt einen
+        # Klick entfernt das Werkzeug für ernsthaftes Suchen.
+        self._stack = QStackedWidget()
+        self._stack.addWidget(self._cards)
+        self._stack.addWidget(self._table)
 
         splitter = QSplitter(Qt.Orientation.Vertical)
-        splitter.addWidget(self._table)
+        splitter.addWidget(self._stack)
         splitter.addWidget(self._detail)
         splitter.setStretchFactor(0, 3)
         splitter.setStretchFactor(1, 2)
@@ -445,6 +758,34 @@ class ModAlbumDialog(QDialog):
         layout.addWidget(splitter, stretch=1)
 
         self._update_count_label()
+        self._on_album_sort_changed()
+
+    def _toggle_view(self) -> None:
+        zur_tabelle = self._stack.currentWidget() is self._cards
+        if zur_tabelle:
+            self._stack.setCurrentWidget(self._table)
+            self._view_button.setText("🃏 Show cards")
+            self._sort_combo.setEnabled(False)
+            # Die Tabelle sortiert über den Spaltenkopf und erwartet die
+            # Anzeige-Rolle — eine übrig gebliebene FIRST_SEEN_ROLE würde
+            # jeden Kopf-Klick auf der Mod-Spalte still umdeuten.
+            self._proxy.setSortRole(Qt.ItemDataRole.DisplayRole)
+            kopf = self._table.horizontalHeader()
+            self._table.sortByColumn(kopf.sortIndicatorSection(),
+                                     kopf.sortIndicatorOrder())
+        else:
+            self._stack.setCurrentWidget(self._cards)
+            self._view_button.setText("☰ Show table")
+            self._sort_combo.setEnabled(True)
+            self._on_album_sort_changed()
+
+    def _on_album_sort_changed(self) -> None:
+        eintrag = ALBUM_SORTS_BY_NAME.get(self._sort_combo.currentData() or "")
+        if eintrag is None or self._stack.currentWidget() is not self._cards:
+            return
+        spalte, rolle, richtung = eintrag
+        self._proxy.setSortRole(rolle)
+        self._proxy.sort(spalte, richtung)
 
     def _on_kind_changed(self) -> None:
         self._proxy.set_kind_filter(self._kind_combo.currentData() or "")
@@ -467,4 +808,7 @@ class ModAlbumDialog(QDialog):
             self._detail.setPlainText("")
             return
         record = self._model.record_at(self._proxy.mapToSource(current).row())
-        self._detail.setPlainText(format_record_detail(record) if record else "")
+        if record is None:
+            self._detail.setPlainText("")
+            return
+        self._detail.setHtml(record_detail_html(record, self._mono_family))

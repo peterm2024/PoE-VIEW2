@@ -30,6 +30,27 @@ nach [SemVer](https://semver.org/lang/de/).
   Sichtungen. ✦ steht weiterhin vor einem Mod, der zum ersten Mal
   auftaucht.
 
+- **Tier-Bänder als Tabelle mit Zählungen**: Der Steckbrief eines Mods
+  zeigt je abgeleitetem Band eine Zeile — wie oft gesehen, Wert-Spanne,
+  Item-Stufen. Die Bänder heißen vorerst Prozent der gesehenen Spanne
+  (z. B. "0–14 %") statt Tier-Nummern: Nummern wären mit den
+  Ingame-Tiers verwechselbar, solange die Leiter unvollständig ist.
+  Dafür führt die Sammlung jetzt je Mod-Wert Buch (Sichtungen und
+  Item-Stufen je Wert statt nur der besten Belege); der Umbau trägt
+  sich beim nächsten Start selbst aus dem Cache nach, ohne einen
+  Zählstand anzufassen (Datei wächst um ~0,7 MB).
+
+- **Das Album öffnet jetzt als Kartenansicht**: jede Mod-Identität eine
+  Sammelkarte mit Name, Range und Sichtungszahl. Ein goldener Rand
+  markiert Einzelstücke (nur einmal je gesehen), ✦ die Funde dieser
+  Sitzung. Sortierbar nach Name, Neuzugängen, Häufigkeit oder
+  "Einzelstücke zuerst" — Neuzugänge tragen dafür ab jetzt ihr
+  Eintragsdatum (der Altbestand bleibt undatiert, ein erfundenes Datum
+  wäre schlimmer als keines). Solange nichts gewählt ist, zeigt das
+  Detail-Feld den Stand der Sammlung: Gesamtzahl, Einzelstücke, Funde
+  der Sitzung, jüngster Fund. "Show table" schaltet zur bisherigen
+  sortierbaren Tabelle um; Suche und Filter wirken in beiden Ansichten.
+
 - **Ein Album zum Durchblättern der Mod-Sammlung** (neuer
   Werkzeugleisten-Knopf "📚 Mods"): durchsuchbar nach Text, Art (Explicit,
   Implicit, Enchant, Flask, …), Liga und Rarität, mit einer eigenen

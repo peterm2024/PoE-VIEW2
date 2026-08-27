@@ -445,12 +445,14 @@ def test_the_unfiltered_count_still_equals_the_records_own_total(qapp) -> None:
 # --------------------------- Tier-Baender im Album ----------------------- #
 
 def _mit_belegen(front) -> "ModCollection":
-    """Eine Sammlung, deren Eintrag genau diese Belege traegt."""
+    """Eine Sammlung, deren Eintrag genau diese Belege traegt — als
+    Kontenbuch mit je einer Sichtung pro Punkt (Aufbau 5)."""
     sammlung = ModCollection()
     sammlung.observe("explicitMods", "+27% to Cold Resistance", rarity=2)
     sammlung.clear_new()
     record = sammlung.get("explicitMods", "+27% to Cold Resistance")
-    record.tier_evidence["Ring"] = list(front)
+    record.tier_ledger["Ring"] = {float(wert): [1, il, il]
+                                  for wert, il in front}
     return sammlung
 
 
@@ -503,3 +505,247 @@ def test_the_band_section_marks_what_is_proven_and_what_is_assumed() -> None:
     assert "proven" in text
     assert "assume" in text
 
+
+
+# ---------------------------- Kartenansicht ----------------------------- #
+# §4.52.5 — das Album-Gefuehl: Karten, Sortier-Linsen, Sammlungs-Puls.
+
+def _sammlung_mit_neuzugang() -> ModCollection:
+    """Grundstock aus zwei Mods, danach EIN frischer Fund (Einzelstueck)."""
+    sammlung = ModCollection()
+    for wert in (41, 96):
+        sammlung.observe("explicitMods", f"+{wert} to maximum Life", rarity=2)
+    sammlung.observe("implicitMods", "+20% to Fire Resistance", rarity=2)
+    sammlung.observe("implicitMods", "+25% to Fire Resistance", rarity=2)
+    sammlung.clear_new()
+    sammlung.observe("explicitMods", "+30% to Cold Resistance", rarity=2)
+    return sammlung
+
+
+def test_the_model_knows_which_records_are_new(qapp) -> None:
+    from poe_view.ui.mod_album import NEW_ROLE, RECORD_ROLE
+
+    dialog = ModAlbumDialog(_sammlung_mit_neuzugang())
+    model = dialog._model
+
+    je_identitaet = {model.data(model.index(r, 0), RECORD_ROLE).identity:
+                     model.data(model.index(r, 0), NEW_ROLE)
+                     for r in range(model.rowCount())}
+
+    assert je_identitaet["#% to Cold Resistance"] is True
+    assert je_identitaet["# to maximum Life"] is False
+
+
+def test_the_identity_column_carries_its_full_text_as_tooltip(qapp) -> None:
+    """Die laengste Identitaet in Peters Bestand ist 381 Zeichen lang —
+    auf einer Karte stehen davon zwei Zeilen, der Rest braucht den
+    Tooltip."""
+    dialog = ModAlbumDialog(_sammlung())
+    model = dialog._model
+    idx = model.index(0, IDENTITY_COL)
+
+    from PySide6.QtCore import Qt
+    assert model.data(idx, Qt.ItemDataRole.ToolTipRole) == model.data(
+        idx, Qt.ItemDataRole.DisplayRole)
+
+
+def test_newest_finds_sorts_the_fresh_record_first(qapp) -> None:
+    dialog = ModAlbumDialog(_sammlung_mit_neuzugang())
+    index = dialog._sort_combo.findData("Newest finds")
+    assert index >= 0
+
+    dialog._sort_combo.setCurrentIndex(index)
+
+    oberste = dialog._proxy.index(0, IDENTITY_COL).data()
+    assert oberste == "#% to Cold Resistance"
+
+
+def test_seen_once_first_sorts_the_singles_to_the_top(qapp) -> None:
+    dialog = ModAlbumDialog(_sammlung_mit_neuzugang())
+    index = dialog._sort_combo.findData("Seen once first")
+
+    dialog._sort_combo.setCurrentIndex(index)
+
+    erster = dialog._proxy.index(0, COUNT_COL).data()
+    letzter = dialog._proxy.index(dialog._proxy.rowCount() - 1, COUNT_COL).data()
+    assert erster == 1
+    assert letzter == 2
+
+
+def test_the_album_opens_on_the_cards(qapp) -> None:
+    """Die Karten SIND das Album — die Tabelle bleibt das Werkzeug einen
+    Klick dahinter."""
+    dialog = ModAlbumDialog(_sammlung())
+
+    assert dialog._stack.currentWidget() is dialog._cards
+    assert dialog._sort_combo.isEnabled()
+
+
+def test_switching_to_the_table_restores_header_sorting(qapp) -> None:
+    """Eine uebrig gebliebene Sortier-Rolle wuerde jeden Kopf-Klick auf
+    der Mod-Spalte still umdeuten (FIRST_SEEN statt Text)."""
+    from PySide6.QtCore import Qt
+    dialog = ModAlbumDialog(_sammlung_mit_neuzugang())
+    dialog._sort_combo.setCurrentIndex(dialog._sort_combo.findData("Newest finds"))
+
+    dialog._toggle_view()
+
+    assert dialog._stack.currentWidget() is dialog._table
+    assert not dialog._sort_combo.isEnabled()
+    assert dialog._proxy.sortRole() == Qt.ItemDataRole.DisplayRole
+
+
+def test_both_views_share_one_selection(qapp) -> None:
+    dialog = ModAlbumDialog(_sammlung())
+
+    assert dialog._cards.selectionModel() is dialog._table.selectionModel()
+
+
+def test_the_cards_render_without_errors(qapp) -> None:
+    """Rauchtest fuers Zeichnen: neu + Einzelstueck + Auswahl in einem
+    Bild. KEINE Pixel-Aussage — Farben werden am echten Fenster gemessen,
+    nicht offscreen (CLAUDE.md)."""
+    from PySide6.QtGui import QPixmap
+    dialog = ModAlbumDialog(_sammlung_mit_neuzugang())
+    dialog.resize(700, 400)
+    dialog.show()
+    dialog._cards.setCurrentIndex(dialog._proxy.index(0, 0))
+
+    bild = QPixmap(dialog._cards.viewport().size())
+    dialog._cards.viewport().render(bild)
+
+    assert not bild.isNull()
+
+
+def test_the_greeting_counts_singles_and_news() -> None:
+    from poe_view.ui.mod_album import collection_greeting
+    sammlung = _sammlung_mit_neuzugang()
+
+    text = collection_greeting(sammlung.records(), sammlung.new_keys())
+
+    assert "3 mods" in text
+    # Nur Cold Res ist ein Einzelstueck — Fire Res wurde zweimal gesehen.
+    assert "1 of them seen exactly once" in text
+    assert "1 new this session" in text
+    assert "Latest find:" in text
+
+
+def test_the_detail_names_the_entry_date_only_when_known() -> None:
+    from poe_view.services.mod_collection import ModRecord
+    from poe_view.ui.mod_album import first_seen_text
+    sammlung = _sammlung_mit_neuzugang()
+
+    frisch = sammlung.get("explicitMods", "+30% to Cold Resistance")
+    grundstock = ModRecord(identity="# to Armour", kind="explicitMods")
+
+    assert "entered the collection on 20" in format_record_detail(frisch)
+    assert first_seen_text(grundstock) == ""
+    assert "entered the collection" not in format_record_detail(grundstock)
+
+
+# --------------------------- Die Band-Tabelle ---------------------------- #
+# Peters Wunsch (2026-08-27): je Tier eine Zeile "Count | Min | Max |
+# iLvl-Min | iLvl-Max" — und die Baender heissen vorerst PROZENT der
+# gesehenen Spanne, nicht T-Nummern: "Wenn wir Zahlen benutzen ist das
+# mit Ingame verwechselbar und gerade am Anfang stimmt das noch nicht."
+
+def _konto_mit_zwei_baendern() -> dict:
+    """Werte 6-8 auf niedrigen Stufen, 18-20 auf hohen. TIER_JUMP misst
+    den Abstand im ITEM-LEVEL der Einhuellenden: Innerhalb einer Gruppe
+    bleiben die iLvl-Schritte darunter (5->7, 26->28), dazwischen liegt
+    der Sprung (7->26) — genau zwei Baender."""
+    return {6.0: [4, 5, 20], 8.0: [7, 7, 30], 18.0: [2, 26, 60],
+            20.0: [1, 28, 33]}
+
+
+def test_the_band_table_counts_per_band() -> None:
+    from poe_view.services.mod_collection import ModRecord
+    from poe_view.ui.mod_album import band_table
+    eintrag = ModRecord(identity="#% to Cold Resistance", kind="explicitMods")
+    eintrag.tier_ledger["Ring"] = _konto_mit_zwei_baendern()
+    baender = mod_tiers.bands(eintrag.tier_front("Ring"))
+
+    zeilen = band_table(eintrag.tier_ledger["Ring"], baender)
+
+    # Kopfzeile + eine Zeile je Band
+    assert len(zeilen) == 1 + len(baender)
+    assert "Seen" in zeilen[0] and "Values" in zeilen[0]
+    # Band 1: 4+7 Sichtungen der Werte 6-8 auf Stufen 5-30
+    assert "11" in zeilen[1] and "6–8" in zeilen[1] and "5–30" in zeilen[1]
+    # Band 2: 2+1 Sichtungen der Werte 18-20 auf Stufen 26-60
+    assert "3" in zeilen[2] and "18–20" in zeilen[2] and "26–60" in zeilen[2]
+
+
+def test_the_bands_are_labelled_in_percent_not_tiers() -> None:
+    """Die unterste Bandgrenze ist 0 %, die oberste 100 % — und nirgends
+    steht ein "T", das nach Spielwissen aussieht."""
+    from poe_view.services.mod_collection import ModRecord
+    from poe_view.ui.mod_album import band_table
+    eintrag = ModRecord(identity="#% to Cold Resistance", kind="explicitMods")
+    eintrag.tier_ledger["Ring"] = _konto_mit_zwei_baendern()
+    baender = mod_tiers.bands(eintrag.tier_front("Ring"))
+
+    zeilen = band_table(eintrag.tier_ledger["Ring"], baender)
+
+    assert zeilen[1].startswith("0–")
+    assert "100 %" in zeilen[-1]
+    assert not any(z.lstrip().startswith("T") for z in zeilen[1:])
+
+
+def test_every_ledger_value_lands_in_exactly_one_band() -> None:
+    """Auch ein halbzahliger Wert zwischen zwei ganzzahligen Grenzen darf
+    nicht durchfallen — die Summe der Band-Zaehler ist die Zahl aller
+    Sichtungen."""
+    from poe_view.services.mod_collection import ModRecord
+    from poe_view.ui.mod_album import band_table
+    konto = _konto_mit_zwei_baendern()
+    konto[11.5] = [9, 12, 12]      # zwischen Band 1 (bis 8) und Band 2 (ab 9)
+    eintrag = ModRecord(identity="#% to Cold Resistance", kind="explicitMods")
+    eintrag.tier_ledger["Ring"] = konto
+    baender = mod_tiers.bands(eintrag.tier_front("Ring"))
+
+    zeilen = band_table(konto, baender)
+
+    # Aufbau einer Zeile: "0–14 %   11  6–8   5–30" — das dritte Token
+    # ist der Zaehler (das zweite ist das %-Zeichen des Labels).
+    gezaehlt = sum(int(z.split()[2]) for z in zeilen[1:])
+    assert gezaehlt == sum(z[0] for z in konto.values())
+
+
+def test_the_detail_shows_the_band_table_with_sightings() -> None:
+    sammlung = _mit_belegen([(6, 5), (12, 14), (18, 26), (24, 38), (30, 50)])
+    record = sammlung.get("explicitMods", "+27% to Cold Resistance")
+
+    text = format_record_detail(record)
+
+    assert "sightings" in text
+    assert "%" in text
+    assert "Seen" in text
+
+
+def test_only_the_band_table_is_monospace() -> None:
+    """Peter, 2026-08-28: "Durch die gesperrte Schrift im Info-Feld ist
+    dieses Feld kaum noch lesbar. Falls wir eine Tabelle hier machen
+    darf nur diese Tabelle in gesperrter Schrift sein." Der Fliesstext
+    bleibt also draussen vor dem <pre>-Block, die Tabelle drin."""
+    from poe_view.ui.mod_album import record_detail_html
+    sammlung = _mit_belegen([(6, 5), (12, 14), (18, 26), (24, 38), (30, 50)])
+    record = sammlung.get("explicitMods", "+27% to Cold Resistance")
+
+    html = record_detail_html(record, "TestMono")
+
+    kopf, _, tabelle = html.partition("<pre")
+    assert "seen 1× in total" in kopf          # Fliesstext: proportional
+    assert "TestMono" in tabelle               # Tabelle: feste Schrift
+    assert "Tiers, inferred" in tabelle
+    assert "Seen" in tabelle
+
+
+def test_a_record_without_bands_needs_no_pre_block() -> None:
+    from poe_view.ui.mod_album import record_detail_html
+    record = _sammlung().get("explicitMods", "+96 to maximum Life")
+
+    html = record_detail_html(record, "TestMono")
+
+    assert "<pre" not in html
+    assert "seen 2× in total" in html
