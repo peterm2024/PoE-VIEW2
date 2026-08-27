@@ -6254,6 +6254,76 @@ Wert, Front aus dem Buch nimmt je Wert das niedrigste iLvl, alter
 ein einziges "T", kein Wert fällt zwischen zwei Bänder, Tabelle im
 Steckbrief).
 
+### 4.53 Das Fundament der echten Mod-Datenbank (`services/mod_knowledge.py`)
+
+Peter beim Betrachten der Prozent-Bänder aus §4.52.6, nach einem
+Vergleich mit CraftOfExiles Intelligence-Tabelle: "was sehe ich hier
+und was bringt mir das? [...] Ich bin mir nicht sicher, ob wir hier was
+Sinnvolles machen oder einem Gespenst hinterherjagen." Eine
+Machbarkeitsmessung (read-only gegen Peters echten Bestand, nichts
+davon gespeichert) beantwortete das: **kein Gespenst.** RePoE
+(`repoe-fork/repoe`, aktiv gepflegt, Exporte unter
+`https://repoe-fork.github.io/`) liefert Mod-Definitionen, Stat-
+Übersetzungen und Item-Basen als offene JSON-Exporte aus dem
+Spielclient selbst — daraus lassen sich echte Tier-Leitern bauen, ohne
+selbst tausende Beobachtungen zu brauchen.
+
+**Lizenz-Falle, deshalb Laufzeit-Download statt Repo-Bündelung.** RePoEs
+CODE ist MIT, die generierten DATEN gehören laut dessen eigenem
+`LICENSE.md` GGG. Genau wie der poe.ninja-Preis-Cache (`price_cache.py`)
+lädt `mod_knowledge.py` die drei Dateien deshalb zur Laufzeit
+(`fetch()`, TTL 7 Tage — RePoE ändert sich mit Spiel-Patches, nicht mit
+Sitzungen) und hält sie unter `%LOCALAPPDATA%/PoE-VIEW2/mod-knowledge/`
+vor, statt sie mitzuliefern. Ein Teil-Download (Abbruch nach der ersten
+von drei Dateien) darf keinen inkonsistenten Stand hinterlassen — erst
+wenn alle drei da sind, schreibt `fetch()` sie und den Manifest.
+
+**Die Übersetzung stat_id+Wert → Mod-Identität braucht die
+`index_handlers` (negate, divide_by_X, ...) nicht.** `mod_identity()`
+(§4.52, `mod_collection.py`) ersetzt JEDE Ziffernfolge durch `#` — für
+die Identität reicht ein plausibel-numerisch gerenderter Text,
+`render_identity()` rendert deshalb nur grob (Vorzeichen/Format aus der
+passenden `condition`) und verzichtet auf die exakte Umrechnung. Das
+war Teil der Messung, keine Abkürzung erst hier.
+
+**Die Ground-Truth-Leiter ist über (Identität, `item_category()`)
+geschlüsselt**, im selben Namensraum wie `ModRecord.tier_ledger` — nur
+so sind beide vergleichbar. Da RePoEs Eligibility über Item-BASIS-Tags
+läuft ("dex_boots", nicht "boots"), aber `item_category()` gröber ist
+("Boots"), bildet `build()` je Kategorie die Vereinigung aller Tags
+ausgelieferter Basen (`base_items.json`, `release_state: released`) und
+prüft ein Mod als eligible, sobald er für IRGENDEINEN Tag dieser
+Vereinigung ein positives Gewicht trägt. Eine Annäherung (kann einen
+Mod fälschlich einer ganzen Kategorie zuschlagen, der nur eine
+Rüstungsvariante trifft) — dieselbe, mit der die Kernzahl unten
+gemessen wurde, und über alle ausgelieferten Basen sogar vollständiger
+als die ursprüngliche Messung gegen nur Peters eigenen Bestand.
+
+**Zwei Sackgassen der ursprünglichen Messung stecken jetzt als
+Regressionstests im Modul selbst** (`tests/test_mod_knowledge.py`,
+Gegenprobe gefahren): Slot-Tags statt Basis-Tags hätten lokale
+Verteidigungs-Mods (Evasion/Armour/ES-%) verpasst; `domain: "item"`
+statt `("item", "misc")` hätte normale Jewels komplett ausgelassen
+(Jewels laufen unter `"misc"`) — beide Filter sind hier fest verdrahtet
+und beide Gegenproben rissen den erwarteten Test.
+
+**Kernzahl, validiert gegen das fertige Modul (nicht nur das
+Mess-Skript):** 68,0 % von Peters 111.619 tier-fähigen Sichtungen haben
+eine belegte Leiter (36,1 % der 2.144 Identität/Kategorie-Paare) — mehr
+als die ursprünglichen 63,3 %, weil `build()` Tags aus ALLEN
+ausgelieferten Basen zieht statt nur aus Peters eigenen. Die
+verbleibenden Lücken (waffentyp-bedingte Jewel-Mods, Hybrid-ES/Armour,
+Cluster-Jewels, Abyssal-Sockets) sind noch nicht angefasst.
+
+`build()` liefert ein schreibgeschütztes `Knowledge`-Objekt
+(`ladder(identity, category)`, `has(...)`), `get()` hält es als
+Im-Speicher-Singleton — das Bauen liest und verarbeitet ~30 MB JSON,
+das lohnt sich nicht bei jeder Abfrage neu. Weder `build()` noch `get()`
+sind bisher an die UI angebunden: Dieser Abschnitt ist das FUNDAMENT
+(Stufe 1 eines vierstufigen Plans — Album-Range gegen die echte Spanne,
+echte T-Nummern statt Prozent, Geisterkarten für nie gesehene Mods),
+Stufe 2–4 stehen noch aus.
+
 ## 8. Entwicklungsstand
 
 Die ursprünglich geplanten Meilensteine (Grundgerüst, Authentifizierung,

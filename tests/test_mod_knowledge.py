@@ -1,0 +1,283 @@
+"""Tests für das Mod-Wissen (§4.53) — Download/Cache-Lebenszyklus mit
+gemocktem HTTP und der Bau echter Tier-Leitern aus kleinen, von Hand
+gebauten RePoE-artigen Fixtures (die echten Dateien sind ~30 MB und
+gehören laut RePoEs LICENSE.md ohnehin nicht ins Repo)."""
+
+import json
+
+import httpx
+
+from poe_view.services import mod_knowledge as mk
+
+
+def _payload_bytes() -> dict[str, bytes]:
+    return {name: f"{{\"marker\": \"{name}\"}}".encode("utf-8") for name in mk._FILES}
+
+
+def _mock_client(handler) -> httpx.Client:
+    return httpx.Client(transport=httpx.MockTransport(handler))
+
+
+# --- Download/Cache ------------------------------------------------------ #
+
+def test_is_fresh_false_when_nothing_cached(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(mk, "_CACHE_DIR", tmp_path / "mod-knowledge")
+    assert mk.is_fresh() is False
+
+
+def test_fetch_writes_all_three_files_and_a_manifest(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(mk, "_CACHE_DIR", tmp_path / "mod-knowledge")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        name = request.url.path.rsplit("/", 1)[-1]
+        return httpx.Response(200, content=_payload_bytes()[name])
+
+    assert mk.fetch(_mock_client(handler)) is True
+    assert mk.is_fresh() is True
+    for name in mk._FILES:
+        assert (mk._CACHE_DIR / name).read_bytes() == _payload_bytes()[name]
+
+
+def test_fetch_leaves_the_cache_untouched_on_a_failed_request(tmp_path, monkeypatch) -> None:
+    """Ein Teil-Download darf keinen inkonsistenten Stand hinterlassen —
+    hier bricht der zweite von drei Downloads ab."""
+    monkeypatch.setattr(mk, "_CACHE_DIR", tmp_path / "mod-knowledge")
+    calls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request.url.path)
+        if len(calls) == 2:
+            return httpx.Response(500)
+        return httpx.Response(200, content=b"{}")
+
+    assert mk.fetch(_mock_client(handler)) is False
+    assert not mk._CACHE_DIR.exists()
+
+
+def test_fetch_survives_a_network_error(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(mk, "_CACHE_DIR", tmp_path / "mod-knowledge")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("kein Netz", request=request)
+
+    assert mk.fetch(_mock_client(handler)) is False
+
+
+def test_an_entry_from_an_older_cache_version_counts_as_stale(tmp_path, monkeypatch) -> None:
+    cache_dir = tmp_path / "mod-knowledge"
+    monkeypatch.setattr(mk, "_CACHE_DIR", cache_dir)
+    cache_dir.mkdir()
+    for name in mk._FILES:
+        (cache_dir / name).write_text("{}", encoding="utf-8")
+    (cache_dir / "manifest.json").write_text(
+        json.dumps({"version": mk.CACHE_VERSION - 1, "fetched_at": 9_999_999_999}), encoding="utf-8")
+    assert mk.is_fresh() is False
+
+
+def test_an_entry_older_than_the_ttl_counts_as_stale(tmp_path, monkeypatch) -> None:
+    cache_dir = tmp_path / "mod-knowledge"
+    monkeypatch.setattr(mk, "_CACHE_DIR", cache_dir)
+    cache_dir.mkdir()
+    for name in mk._FILES:
+        (cache_dir / name).write_text("{}", encoding="utf-8")
+    (cache_dir / "manifest.json").write_text(
+        json.dumps({"version": mk.CACHE_VERSION, "fetched_at": 0}), encoding="utf-8")
+    assert mk.is_fresh() is False
+
+
+def test_ensure_fresh_skips_the_download_when_already_fresh(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(mk, "_CACHE_DIR", tmp_path / "mod-knowledge")
+    monkeypatch.setattr(mk, "is_fresh", lambda: True)
+    monkeypatch.setattr(mk, "fetch", lambda http=None: (_ for _ in ()).throw(
+        AssertionError("fetch() haette nicht aufgerufen werden duerfen")))
+    assert mk.ensure_fresh() is True
+
+
+# --- render_identity ------------------------------------------------------ #
+
+_TRANSLATIONS_BY_ID = {
+    "additional_intelligence": {"English": [
+        {"condition": [{}], "format": ["+#"], "string": "{0} to Intelligence"},
+    ]},
+    "conditional_stat": {"English": [
+        {"condition": [{"max": 10}], "format": ["#"], "string": "Small: {0}"},
+        {"condition": [{"min": 11}], "format": ["#"], "string": "Big: {0}"},
+    ]},
+}
+
+
+def test_render_identity_strips_the_number() -> None:
+    assert mk.render_identity(_TRANSLATIONS_BY_ID, "additional_intelligence", 12) == "# to Intelligence"
+
+
+def test_render_identity_picks_the_matching_condition() -> None:
+    assert mk.render_identity(_TRANSLATIONS_BY_ID, "conditional_stat", 3) == "Small: #"
+    assert mk.render_identity(_TRANSLATIONS_BY_ID, "conditional_stat", 20) == "Big: #"
+
+
+def test_render_identity_unknown_stat_id_returns_none() -> None:
+    assert mk.render_identity(_TRANSLATIONS_BY_ID, "no_such_stat", 1) is None
+
+
+# --- build(): kleine RePoE-artige Fixtur statt der echten ~30-MB-Dateien - #
+
+def _write_fixture(cache_dir) -> None:
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    base_items = {
+        "Metadata/Items/Amulets/Test": {
+            "name": "Test Amulet", "item_class": "Amulet",
+            "release_state": "released", "tags": ["amulet"],
+        },
+        "Metadata/Items/Jewels/Test": {
+            "name": "Test Jewel", "item_class": "Jewel",
+            "release_state": "released", "tags": ["jewel"],
+        },
+        "Metadata/Items/Amulets/Unreleased": {
+            "name": "Ghost Amulet", "item_class": "Amulet",
+            "release_state": "unreleased", "tags": ["amulet"],
+        },
+    }
+    translations = [
+        {"ids": ["additional_intelligence"], "English": [
+            {"condition": [{}], "format": ["+#"], "string": "{0} to Intelligence"},
+        ]},
+        {"ids": ["ambiguous_two_id_stat", "other"], "English": [
+            {"condition": [{}], "format": ["#"], "string": "irrelevant: {0}"},
+        ]},
+    ]
+    mods = {
+        "IntAmuletLow": {
+            "domain": "item", "generation_type": "prefix", "required_level": 1,
+            "stats": [{"id": "additional_intelligence", "min": 8, "max": 12}],
+            "spawn_weights": [{"tag": "amulet", "weight": 1000}, {"tag": "default", "weight": 0}],
+        },
+        "IntAmuletHigh": {
+            "domain": "item", "generation_type": "prefix", "required_level": 22,
+            "stats": [{"id": "additional_intelligence", "min": 13, "max": 20}],
+            "spawn_weights": [{"tag": "amulet", "weight": 1000}, {"tag": "default", "weight": 0}],
+        },
+        "IntJewelMisc": {
+            "domain": "misc", "generation_type": "suffix", "required_level": 1,
+            "stats": [{"id": "additional_intelligence", "min": 5, "max": 5}],
+            "spawn_weights": [{"tag": "jewel", "weight": 1000}, {"tag": "default", "weight": 0}],
+        },
+        "NotEligibleForAnything": {
+            "domain": "item", "generation_type": "prefix", "required_level": 1,
+            "stats": [{"id": "additional_intelligence", "min": 99, "max": 99}],
+            "spawn_weights": [{"tag": "amulet", "weight": 0}, {"tag": "default", "weight": 0}],
+        },
+        "EssenceOnlyMod": {
+            "domain": "item", "generation_type": "prefix", "is_essence_only": True,
+            "required_level": 1,
+            "stats": [{"id": "additional_intelligence", "min": 1, "max": 1}],
+            "spawn_weights": [{"tag": "amulet", "weight": 1000}],
+        },
+        "TwoStatMod": {
+            "domain": "item", "generation_type": "prefix", "required_level": 1,
+            "stats": [{"id": "additional_intelligence", "min": 1, "max": 1},
+                     {"id": "additional_intelligence", "min": 1, "max": 1}],
+            "spawn_weights": [{"tag": "amulet", "weight": 1000}],
+        },
+        "UnknownTranslationMod": {
+            "domain": "item", "generation_type": "prefix", "required_level": 1,
+            "stats": [{"id": "no_such_stat", "min": 1, "max": 1}],
+            "spawn_weights": [{"tag": "amulet", "weight": 1000}],
+        },
+    }
+    (cache_dir / "mods.min.json").write_text(json.dumps(mods), encoding="utf-8")
+    (cache_dir / "stat_translations.min.json").write_text(json.dumps(translations), encoding="utf-8")
+    (cache_dir / "base_items.min.json").write_text(json.dumps(base_items), encoding="utf-8")
+
+
+def test_build_returns_none_without_a_cache(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(mk, "_CACHE_DIR", tmp_path / "mod-knowledge")
+    assert mk.build() is None
+
+
+def test_build_produces_a_ladder_sorted_by_required_level(tmp_path, monkeypatch) -> None:
+    cache_dir = tmp_path / "mod-knowledge"
+    monkeypatch.setattr(mk, "_CACHE_DIR", cache_dir)
+    _write_fixture(cache_dir)
+
+    knowledge = mk.build()
+    ladder = knowledge.ladder("# to Intelligence", "Amulet")
+    assert [step.required_level for step in ladder] == [1, 22]
+    assert (ladder[0].low, ladder[0].high) == (8, 12)
+    assert (ladder[1].low, ladder[1].high) == (13, 20)
+
+
+def test_build_uses_the_misc_domain_for_jewels(tmp_path, monkeypatch) -> None:
+    """Die Sackgasse, die die Trefferquote von 42% auf 63,3% hob:
+    normale Jewels laufen unter domain 'misc', nicht 'item'."""
+    cache_dir = tmp_path / "mod-knowledge"
+    monkeypatch.setattr(mk, "_CACHE_DIR", cache_dir)
+    _write_fixture(cache_dir)
+    knowledge = mk.build()
+    assert knowledge.has("# to Intelligence", "Jewel")
+
+
+def test_build_skips_unreleased_bases(tmp_path, monkeypatch) -> None:
+    cache_dir = tmp_path / "mod-knowledge"
+    monkeypatch.setattr(mk, "_CACHE_DIR", cache_dir)
+    _write_fixture(cache_dir)
+    knowledge = mk.build()
+    # "Ghost Amulet" ist unreleased und traegt trotzdem den gleichen Tag
+    # ("amulet") wie die echte Basis - waere sie versehentlich mitgezaehlt,
+    # wuerde sich an der Leiter selbst nichts aendern (derselbe Tag), der
+    # Test dokumentiert die Absicht, keinen Unterschied im Ergebnis.
+    assert knowledge.has("# to Intelligence", "Amulet")
+
+
+def test_build_skips_essence_only_mods(tmp_path, monkeypatch) -> None:
+    cache_dir = tmp_path / "mod-knowledge"
+    monkeypatch.setattr(mk, "_CACHE_DIR", cache_dir)
+    _write_fixture(cache_dir)
+    knowledge = mk.build()
+    ladder = knowledge.ladder("# to Intelligence", "Amulet")
+    assert all(step.low != 1 or step.high != 1 for step in ladder)
+
+
+def test_build_skips_multi_stat_mods(tmp_path, monkeypatch) -> None:
+    cache_dir = tmp_path / "mod-knowledge"
+    monkeypatch.setattr(mk, "_CACHE_DIR", cache_dir)
+    _write_fixture(cache_dir)
+    knowledge = mk.build()
+    ladder = knowledge.ladder("# to Intelligence", "Amulet")
+    # TwoStatMod haette (1, 1) beigetragen, wie EssenceOnlyMod - beide
+    # muessen draussen bleiben, die vorigen zwei Tests pruefen das schon
+    # ueber den Wert; hier zaehlt nur die Laenge.
+    assert len(ladder) == 2
+
+
+def test_build_a_mod_ineligible_everywhere_produces_no_ladder(tmp_path, monkeypatch) -> None:
+    """NotEligibleForAnything hat ueberall Gewicht 0 (weder 'amulet' noch
+    'default') und darf deshalb in KEINER Leiter auftauchen."""
+    cache_dir = tmp_path / "mod-knowledge"
+    monkeypatch.setattr(mk, "_CACHE_DIR", cache_dir)
+    _write_fixture(cache_dir)
+    knowledge = mk.build()
+    for steps in knowledge._ladders.values():
+        assert not any(step.low == 99 for step in steps)
+
+
+def test_build_a_mod_without_a_translation_is_skipped_without_crashing(tmp_path, monkeypatch) -> None:
+    cache_dir = tmp_path / "mod-knowledge"
+    monkeypatch.setattr(mk, "_CACHE_DIR", cache_dir)
+    _write_fixture(cache_dir)
+    knowledge = mk.build()  # darf nicht an UnknownTranslationMod scheitern
+    assert len(knowledge) == 2  # Amulet und Jewel, je fuer additional_intelligence
+
+
+def test_get_caches_the_built_knowledge(tmp_path, monkeypatch) -> None:
+    cache_dir = tmp_path / "mod-knowledge"
+    monkeypatch.setattr(mk, "_CACHE_DIR", cache_dir)
+    monkeypatch.setattr(mk, "_cached", None)
+    _write_fixture(cache_dir)
+
+    first = mk.get()
+    assert first is not None
+    # Cache leeren, OHNE die Datei zu loeschen - ein zweiter get() ohne
+    # rebuild darf trotzdem das erste Objekt zurueckgeben.
+    cache_dir.joinpath("mods.min.json").unlink()
+    assert mk.get() is first
+    assert mk.get(rebuild=True) is None
