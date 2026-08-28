@@ -352,7 +352,9 @@ Rarity includes a <b>Corrupted</b> group of its own:
 a corrupted item's mods are counted apart from an uncorrupted one's, even
 at the same rarity, since some corruption outcomes roll from an entirely
 different table. Click a mod to see every rarity and league it has ever
-shown up on, in full — and its <b>tiers</b>, one row per tier.
+shown up on — or, with a filter active, just the selected ones, with the
+grand total kept beside the count — and its <b>tiers</b>, one row per
+tier.
 
 <p>Where PoE-VIEW2 knows the real ladder, the table is headed <b>Tiers,
 straight from game data</b>: every tier the game can roll, T1 at the

@@ -123,7 +123,11 @@ nach [SemVer](https://semver.org/lang/de/).
   gerollt wurde — vorher rechneten sie stets über alle Ligen, und eine
   frische Liga sah fälschlich nach voller Sammlung aus. Die aktuelle
   Liga auszuwählen zeigt also die echten Lücken des laufenden Albums;
-  ohne Filter bleibt alles beim alten Gesamtbild. Dafür führt die
+  ohne Filter bleibt alles beim alten Gesamtbild. Auch die Liste der
+  Wertspannen im Steckbrief zeigt nur noch die gewählte Liga und
+  Rarität — die Zeilen der alten Ligen irritieren beim Start einer
+  neuen nur; die Gesamtzahl der Sichtungen steht als Nebensatz
+  daneben. Dafür führt die
   Sammlung ihr Tier-Kontenbuch jetzt je Liga (dieselben Töpfe wie die
   Wertspannen); der Umbau trägt sich beim nächsten Start selbst aus dem
   Cache nach, kein Zählstand geht verloren.

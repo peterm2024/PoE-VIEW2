@@ -1183,6 +1183,47 @@ def test_the_detail_ladder_follows_the_league() -> None:
     assert "1 of 3 tiers" in format_record_detail(record, ladder, "Allflame")
 
 
+def test_the_span_list_follows_both_filters() -> None:
+    """Peter (2026-08-28): Beim Start einer neuen Liga irritieren die
+    Zeilen der alten nur. Die Spannen-Liste zeigt deshalb nur die
+    Toepfe der Auswahl — Liga UND Raritaet, wie die Range-Spalte."""
+    sammlung = _mit_zwei_ligen()
+    record = sammlung.get("explicitMods", "+27% to Cold Resistance")
+
+    alles = format_record_detail(record)
+    nur_liga = format_record_detail(record, league="Allflame")
+    nur_magic = format_record_detail(record, rarity_ok=lambda r: r == 1)
+
+    assert "Permanent leagues" in alles and "Allflame" in alles
+    assert "Permanent leagues" not in nur_liga and "Allflame" in nur_liga
+    assert "Rare" not in nur_magic.split("\n", 2)[2]   # unter der Kopfzeile
+
+
+def test_the_seen_line_names_the_selection_and_keeps_the_total() -> None:
+    from poe_view.ui.mod_album import seen_line
+    sammlung = _mit_zwei_ligen()
+    record = sammlung.get("explicitMods", "+27% to Cold Resistance")
+
+    assert seen_line(record, None, None) == "seen 2× in total"
+    assert seen_line(record, "Allflame", None) == (
+        "seen 1× in Allflame  ·  2× in total")
+    assert seen_line(record, None, lambda r: r == 2) == (
+        "seen 2× in this selection  ·  2× in total")
+
+
+def test_the_dialog_passes_the_rarity_filter_to_the_detail(qapp) -> None:
+    sammlung = _mit_zwei_ligen()
+    dialog = ModAlbumDialog(sammlung, None, None)
+    dialog._table.selectRow(0)
+    assert "in total" in dialog._detail.toPlainText()
+    assert "this selection" not in dialog._detail.toPlainText()
+
+    dialog._rarity_combo.setCurrentIndex(dialog._rarity_combo.findData(
+        "Normal / Magic / Rare"))
+
+    assert "in this selection" in dialog._detail.toPlainText()
+
+
 def test_the_dialog_recomputes_stats_and_detail_on_a_league_change(qapp) -> None:
     """Kopfzeile und offener Steckbrief muessen mitziehen, sonst
     behauptet der Filter etwas, das die Zahlen darunter nicht

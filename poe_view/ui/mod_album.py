@@ -526,7 +526,8 @@ def _html_ladder_section(kategorie: str, konto: dict[float, list[int]],
 
 
 def record_detail_html(record: ModRecord, mono_family: str, knowledge=None,
-                       league: str | None = None) -> str:
+                       league: str | None = None,
+                       rarity_ok: RarityPredicate | None = None) -> str:
     """Der Steckbrief fuers Anzeige-Feld - drei Absaetze, drei Techniken:
 
     1. Der Fliesstext-Kopf (Beispielzeile, Toepfe, Spannen) in der
@@ -541,10 +542,11 @@ def record_detail_html(record: ModRecord, mono_family: str, knowledge=None,
        schlichter als die echten Leitern: Der optische Rangunterschied
        IST die Botschaft (belegt gegen geraten).
 
-    ``league`` gilt fuer Leitern und Baender (§4.53.3); die Spannen-
-    Liste im Kopf bleibt absichtlich vollstaendig — sie IST die
-    Aufschluesselung nach Liga und Raritaet."""
-    zeilen = format_record_detail(record, knowledge, league).splitlines()
+    ``league`` und ``rarity_ok`` sind die Filter des Albums; beide
+    greifen bis in die Spannen-Liste durch (§format_record_detail),
+    die Liga zusaetzlich in Leitern und Baender (§4.53.3)."""
+    zeilen = format_record_detail(record, knowledge, league,
+                                  rarity_ok).splitlines()
     kandidaten = [zeilen.index(kopf) for kopf in (LADDER_HEADING, BANDS_HEADING)
                  if kopf in zeilen]
     start = min(kandidaten) if kandidaten else len(zeilen)
@@ -568,12 +570,36 @@ def record_detail_html(record: ModRecord, mono_family: str, knowledge=None,
     return "".join(teile)
 
 
+def seen_line(record: ModRecord, league: str | None,
+              rarity_ok: RarityPredicate | None) -> str:
+    """Die Sichtungs-Zeile des Steckbriefs: ``seen 1746× in total`` —
+    oder mit aktivem Filter ``seen 212× in SSF R Allflame · 1746× in
+    total``. Die Gesamtzahl bleibt als Nebensatz stehen, damit man
+    nicht vergisst, dass die Auswahl ein Ausschnitt ist."""
+    if league is None and rarity_ok is None:
+        return f"seen {record.count}× in total"
+    if league is not None and rarity_ok is None:
+        wo = league_label(league)
+    else:
+        wo = "this selection"
+    return (f"seen {matching_count(record, league, rarity_ok)}× in {wo}"
+            f"  ·  {record.count}× in total")
+
+
 def format_record_detail(record: ModRecord, knowledge=None,
-                         league: str | None = None) -> str:
+                         league: str | None = None,
+                         rarity_ok: RarityPredicate | None = None) -> str:
     """Der volle Steckbrief eines Eintrags, für das Detail-Feld.
-    ``league`` schränkt nur den Tier-Teil ein (§format_bands)."""
+
+    **Beide Filter greifen bis hierher durch** (Peter, 2026-08-28: "Wenn
+    ich eine Sammlung anfange, dann meistens beim Start einer neuen
+    Liga und da benötige ich keine Infos mehr zur alten Liga, die
+    irritieren hier nur"): Die Spannen-Liste zeigt nur die Töpfe, die
+    zur Auswahl passen — dieselbe Regel wie die Range-Spalte
+    (§matching_spans). Der Tier-Teil folgt der Liga (§format_bands);
+    die Rarität kennt er nicht."""
     zeilen = [record.example or record.identity,
-             f"{kind_label(record.kind)}  ·  seen {record.count}× in total"]
+             f"{kind_label(record.kind)}  ·  {seen_line(record, league, rarity_ok)}"]
     datum = first_seen_text(record)
     if datum:
         zeilen.append(datum)
@@ -583,7 +609,11 @@ def format_record_detail(record: ModRecord, knowledge=None,
     # ueberschattet: Der Tier-Teil zeigte dann still die LETZTE Liga der
     # Spannen-Liste statt der gewaehlten.
     for liga in record.leagues:
+        if league is not None and liga != league:
+            continue
         for rarity in sorted(record.spans[liga]):
+            if rarity_ok is not None and not rarity_ok(rarity):
+                continue
             span = record.spans[liga][rarity]
             zeilen.append(f"{league_label(liga)}  ·  {rarity_label(rarity)}")
             zeilen.append(f"    {format_span(span)}")
@@ -1381,7 +1411,9 @@ class ModAlbumDialog(QDialog):
             return
         self._detail.setHtml(
             record_detail_html(record, self._mono_family, self._knowledge,
-                               self._league_combo.currentData()))
+                               self._league_combo.currentData(),
+                               RARITY_GROUPS_BY_NAME.get(
+                                   self._rarity_combo.currentData() or "")))
 
     def _refresh_detail(self) -> None:
         """Den offenen Steckbrief neu setzen — nötig, wenn sich nicht die

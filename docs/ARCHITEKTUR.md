@@ -6586,10 +6586,21 @@ gegen Liste), eine Versionsprüfung beim Laden braucht es nicht.
 die `_range_league` des Modells, `set_range_filter` zeichnet deshalb
 ALLE Spalten neu), `album_stats` (Kopfzeile, bei
 `_on_pot_filter_changed` neu gesetzt), `record_detail_html`/
-`format_bands` (Steckbrief-Leitern und -Bänder; die Spannen-Liste im
-Kopf bleibt absichtlich vollständig — sie IST die Aufschlüsselung nach
-Liga und Rarität). Der Tier-Zähler der Range-Spalte bleibt beim
-Liga-Filter stehen und weicht nur noch der Rarität (§4.53.1).
+`format_bands` (Steckbrief-Leitern und -Bänder). Der Tier-Zähler der
+Range-Spalte bleibt beim Liga-Filter stehen und weicht nur noch der
+Rarität (§4.53.1).
+
+**Auch die Spannen-Liste im Steckbrief-Kopf folgt den Filtern** — und
+zwar beiden, Liga und Rarität, nach derselben Regel wie die
+Range-Spalte (`matching_spans`). Der erste Wurf ließ sie absichtlich
+vollständig ("sie IST die Aufschlüsselung nach Liga"); Peter sah im
+Screenshot fünf Zeilen Altbestand über der einen Zeile seiner Liga:
+"Wenn ich eine Sammlung anfange, dann meistens beim Start einer neuen
+Liga und da benötige ich keine Infos mehr zur alten Liga, die
+irritieren hier nur." Die Sichtungs-Zeile darüber nennt dann den
+Ausschnitt UND die Gesamtzahl (`seen 212× in SSF R Allflame · 1746×
+in total`, `seen_line`), damit sichtbar bleibt, dass man einen
+Ausschnitt sieht; "All leagues" ist einen Klick entfernt.
 
 **Eine Falle aus dem Umbau:** `format_record_detail` iterierte seine
 Spannen schon immer mit `for league in record.leagues:` — der neue,
