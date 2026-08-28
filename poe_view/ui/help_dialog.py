@@ -333,22 +333,40 @@ Sort the cards by name, newest finds, most seen or singles first; the
 Search and the filters (text, kind, league, rarity) work in both views,
 and the <b>Range</b> column shows the lowest and highest value ever seen
 for whichever of those you have selected (everything, if you have not
-narrowed it down). Rarity includes a <b>Corrupted</b> group of its own:
+narrowed it down), followed by how many of that mod's tiers you have
+already rolled — <b>6/8</b> means two tiers are still missing from your
+collection. That counter needs the game data below, and it steps aside
+as soon as you filter by league or rarity, because the tier record is
+kept across all of them. Rarity includes a <b>Corrupted</b> group of its own:
 a corrupted item's mods are counted apart from an uncorrupted one's, even
 at the same rarity, since some corruption outcomes roll from an entirely
 different table. Click a mod to see every rarity and league it has ever
-shown up on, in full — and, where the evidence allows it, the
+shown up on, in full — and its <b>tiers</b>, one row per tier.
+
+<p>Where PoE-VIEW2 knows the real ladder, the table is headed <b>Tiers,
+straight from game data</b>: every tier the game can roll, T1 at the
+top, with the item level that unlocks it, how often you have seen it and
+your best roll. <b>The tiers you have never rolled are listed too, and
+left empty</b> — those are the gaps in your album, and the line beneath
+counts them up (<i>6 of 8 tiers collected</i>). A roll that belongs to
+no tier at all gets its own <i>beyond the ladder</i> row: crafted,
+essence and influenced mods roll from tables of their own.</p>
+
+<p>For a mod whose ladder is not known, the table falls back to
 <b>tier bands</b> worked out from item level: a tier cannot appear below
 the level that unlocks it, so the lowest level a value ever showed up on
-marks where the boundaries are. Each band gets a table row of its own —
-how often seen, value span, item levels — and the bands are labelled as
+marks where the boundaries are. Those bands are labelled as
 <b>% of the seen span</b> rather than tier numbers, since numbers would
-invite comparison with the game's ladder while it is still incomplete.
-Upper bounds are proven, lower bounds
-assume tiers meet without gaps. If a mod shows a reason instead of bands,
-that is usually because every sighting came from high-level maps, where
-nearly all tiers are already unlocked — levelling through the campaign is
-what tells them apart.</li>
+invite comparison with the real ladder while this is still a guess.
+Upper bounds are proven, lower bounds assume tiers meet without gaps. If
+a mod shows a reason instead of bands, that is usually because every
+sighting came from high-level maps, where nearly all tiers are already
+unlocked — levelling through the campaign is what tells them apart.</p>
+
+<p>The game data behind all this is fetched in the background when the
+program starts and kept locally for a week. Until it arrives — on a
+first start without a connection, say — every mod falls back to the
+estimated bands.</p></li>
 <li>The <b>average line</b> is your rate over the stretch you are
 currently in: since your last level-up, or since a break of more than
 half an hour, whichever came later, and never more than the three hours

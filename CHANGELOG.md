@@ -88,6 +88,20 @@ nach [SemVer](https://semver.org/lang/de/).
   bestehenden Preis-Cache — unabhängig vom Login, unauffällig, ohne
   eigene Anzeige.
 
+- **Echte Tier-Leitern im Album.** Der Steckbrief eines Mods zeigt jetzt
+  jede Stufe, die das Spiel für ihn kennt: T1 oben, mit dem Item-Level,
+  ab dem sie überhaupt fallen kann, wie oft du sie gesehen hast und
+  deinem besten Roll. **Die Stufen, die du noch nie gerollt hast, stehen
+  mit da und bleiben leer** — das sind die Lücken im Album, und darunter
+  steht, wie viele es sind ("6 of 8 tiers collected"). Ein Roll, der zu
+  keiner Stufe gehört, bekommt eine eigene Zeile: Gecraftetes, mit
+  Essenz Gerolltes und Beeinflusstes würfelt aus eigenen Tabellen. Für
+  Mods, deren Leiter (noch) nicht bekannt ist, bleibt es bei den aus dem
+  Item-Level geschätzten Prozent-Bändern, ausdrücklich als solche
+  beschriftet. Die Range-Spalte in Tabelle und Karten zeigt den Zähler
+  gleich mit; sie tritt zurück, sobald nach Liga oder Rarität gefiltert
+  wird, weil der Tier-Stand über alle Ligen hinweg geführt wird.
+
 ### Behoben
 
 - Die Beschriftung des Schnitts im XP-Graphen war unlesbar, wenn der

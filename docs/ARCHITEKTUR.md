@@ -6397,6 +6397,82 @@ VOR dem erlaubten Tag), und mit ihm in der Fixture riss die Gegenprobe.
 Wieder ein Fall der Regel aus FALLSTRICKE: Eine überlebende Gegenprobe
 zeigt auf den Test, nicht auf den Code.
 
+#### 4.53.1 Die echte Leiter im Album (`ui/mod_album.py`)
+
+Stufe 2: Was §4.53 an Wissen bereitstellt, wird hier sichtbar. Der
+Steckbrief zeigt für jede Basis-Kategorie eine Tier-Tabelle, und die
+Range-Spalte bekommt einen Sammel-Zähler.
+
+**Zwei Tabellen, getrennt beschriftet, nie beide für dieselbe
+Kategorie.** Kennt das Mod-Wissen eine Leiter, steht dort
+`LADDER_HEADING` und die echte Leiter; sonst bleibt es bei den
+geschätzten Prozent-Bändern (§4.52.6) unter `BANDS_HEADING`. Ein
+Eintrag kann beides zeigen, wenn er auf mehreren Kategorien vorkommt
+und nur für manche eine Leiter existiert — die echte kommt zuerst, sie
+ist die belastbarere Aussage. Peters Begründung für die Prozente von
+2026-08-27 gilt unverändert dort weiter, wo die Leiter fehlt: An seinem
+Bestand sind das 19 % der Sichtungen.
+
+**Die ungerollten Tiers stehen mit da, leer.** Peter hatte das Album
+ursprünglich angestoßen mit "das fühlt sich irgendwie nicht wie ein
+Sammel-Album an"; die leeren Sprossen (`not seen yet`) und die Zeile
+`6 of 8 tiers collected` sind die Antwort darauf. Eine Tabelle nur aus
+Getroffenem sähe für eine halbe Sammlung genauso aus wie für eine
+volle. Auf Nachfrage hat Peter genau diese Fassung gewählt.
+
+**`beyond the ladder`** fängt die Werte, die in keine Sprosse fallen —
+gecraftete, mit Essenz gerollte und beeinflusste Mods rollen aus
+eigenen Tabellen, die `build()` nicht mitbaut. Als Spanne, nicht als
+Werteliste: Hier stehen zwei verschiedene Sorten nebeneinander (unter
+der untersten und über der obersten Sprosse), und eine Liste zeigte je
+nach Sortierrichtung nur eine davon. Sie zählen nicht als gesammeltes
+Tier.
+
+**T1 ist die LETZTE Sprosse.** PoE zählt von oben; die Leiter selbst
+liegt nach Freischalt-Level aufsteigend vor, `tier_number()` dreht das
+für die Anzeige um.
+
+**Ein Wert kann in mehrere Sprossen fallen**, weil sich manche Tiers in
+ihren Werten überlappen. Er zählt dann für jede: Das Kontenbuch weiß
+nicht, von welchem Item er kam, und eine Zuordnung zu erfinden wäre
+schlechter als beide zu nennen. An Peters Bestand betrifft das 3,8 %
+der Sichtungen. **Das Item-Level hilft dabei NICHT** — nachgemessen:
+Zieht man die iLvl-Spanne des Kontenbuchs als Schranke heran, sinkt die
+Eindeutigkeit von 85,9 % auf 81,8 %. Der Grund ist strukturell: Das
+Kontenbuch hält je Wert nur die Spanne über ALLE Sichtungen, nicht das
+Level der einzelnen. Ein Wert, der einmal auf iLvl 20 und einmal auf 85
+auftrat, bekäme die 20 als Schranke und verlöre die hohen Tiers.
+
+**Die Kategorien stehen nach Sichtungen sortiert, nicht alphabetisch.**
+Feuerresistenz hat in Peters Bestand 24 Kategorien à elf Zeilen;
+alphabetisch stünde eine mit zwei Sichtungen über einer mit
+zweihundert.
+
+**Der Tier-Zähler in der Range-Spalte** (`6–48 · 8/8`) nimmt die
+Kategorie mit den meisten Sichtungen — ein Mod, der überwiegend über
+Ringe geht, soll seinen Ring-Stand zeigen. **Er verschwindet, sobald
+nach Liga oder Rarität gefiltert wird:** Die Range links zeigt dann nur
+die ausgewählten Töpfe, das Kontenbuch dahinter kennt aber weder Liga
+noch Rarität. Zwei Zahlen über verschiedene Populationen in einer Zelle
+wären genau der Fehler, den Peter an der früheren "Seen"-Spalte bemerkt
+hat (§matching_count).
+
+Das `Knowledge`-Objekt wird dem Dialog beim Öffnen MITGEGEBEN, nicht
+dort geholt: Es trifft asynchron ein, und das Album ist ein
+Schnappschuss vom Öffnen wie die Sammlung daneben. Fehlt es (erster
+Start ohne Netz), fällt alles auf die geschätzten Bänder zurück und der
+Zähler bleibt weg — kein Sonderfall im Code, nur ein `None`.
+
+Getestet: `tests/test_mod_album.py` (T1 ist die letzte Sprosse, leere
+Sprossen erscheinen, Zähler zählt Sprossen statt Sichtungen, echte
+Leiter verdrängt die Schätzung, beide Tabellen nebeneinander möglich,
+Kategorie-Reihenfolge, `beyond the ladder`, Zähler nur ohne Topf-Filter,
+Zähler folgt der größten Kategorie, Monospace-Trennung an der ersten
+Überschrift). Sieben Gegenproben gefahren; zwei überlebten zunächst,
+beide Male weil der Test den Fall zu harmlos nachbaute — die
+Kategorie-Sortierung war gar nicht geprüft, weil beide Kategorien in
+verschiedenen Tabellen-Blöcken lagen.
+
 ## 8. Entwicklungsstand
 
 Die ursprünglich geplanten Meilensteine (Grundgerüst, Authentifizierung,

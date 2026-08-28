@@ -4926,7 +4926,13 @@ class MainWindow(QMainWindow):
         Stufe 3 — ``ui/mod_album.py``). Eine neue Instanz bei jedem Klick,
         wie bei der Paperdoll: Das Fenster soll den aktuellen Stand
         zeigen, nicht den vom letzten Öffnen."""
-        self._mod_album_dialog = ModAlbumDialog(self._mod_collection, self)
+        # Das Mod-Wissen (§4.53) wird mitgegeben, nicht im Album selbst
+        # geholt: Es trifft asynchron ein (``FetchModKnowledgeJob``), und
+        # das Album soll den Stand vom Öffnen zeigen — wie die Sammlung
+        # daneben. Ist es noch nicht da, fällt die Tier-Tabelle auf die
+        # geschätzten Bänder zurück.
+        self._mod_album_dialog = ModAlbumDialog(self._mod_collection, self,
+                                               self._mod_knowledge)
         self._mod_album_dialog.show()
 
     def _open_settings_dialog(self) -> None:

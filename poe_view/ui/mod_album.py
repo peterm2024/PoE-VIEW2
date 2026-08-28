@@ -205,49 +205,170 @@ def band_table(konto: dict[float, list[int]],
     return zeilen
 
 
-def format_bands(record: ModRecord) -> list[str]:
-    """Die abgeleiteten Tier-Bänder je Basis-Kategorie (§4.52.4), als
-    Tabelle aus dem Kontenbuch (§4.52.6).
+# Die zwei Überschriften im Steckbrief. Als Konstanten, weil
+# ``record_detail_html`` den Text an der ERSTEN von beiden aufteilt:
+# ab dort läuft die feste Schrift. Zwei Stellen mit demselben Literal
+# wären genau die Art Kopie, die beim nächsten Umformulieren
+# auseinanderläuft.
+# Ohne Apostroph, mit Absicht: Die Konstante wird auch gegen den
+# HTML-escapten Text verglichen (§record_detail_html), und ein
+# Apostroph wird dort zu "&#x27;".
+LADDER_HEADING = "Tiers, straight from game data"
+BANDS_HEADING = "Tiers, inferred from item level"
 
-    Steht bewusst UNTER den Spannen und ausdrücklich beschriftet: Die
-    Spannen darüber sind Beobachtung, die Bänder hier sind Deutung. Wo
-    die Belege nichts hergeben, steht der Grund statt einer geratenen
-    Leiter — ein leeres Feld sähe aus wie ein Fehler."""
-    if not record.tier_ledger:
-        return []
-    zeilen = ["", "Tiers, inferred from item level",
-              "(bands as % of the seen span — tier numbers would clash "
-              "with the game's",
-              "ladder while it is incomplete; upper bounds are proven, "
-              "lower bounds",
-              "assume tiers meet without gaps)"]
-    for kategorie in sorted(record.tier_ledger):
-        konto = record.tier_ledger[kategorie]
-        sichtungen = sum(zeile[0] for zeile in konto.values())
-        einheit = "sighting" if sichtungen == 1 else "sightings"
-        zeilen.append(f"  {kategorie}  ({sichtungen} {einheit}, "
-                      f"item level {min(z[1] for z in konto.values())}–"
-                      f"{max(z[2] for z in konto.values())})")
-        front = record.tier_front(kategorie)
-        baender = mod_tiers.bands(front)
-        if not baender:
-            zeilen.append(f"      {mod_tiers.why_silent(front)}")
-            continue
-        zeilen.extend(f"      {zeile}" for zeile in band_table(konto, baender))
+
+def tier_number(ladder: list, index: int) -> str:
+    """PoE zählt Tiers von OBEN: die zuletzt freigeschaltete Sprosse ist
+    T1. ``index`` ist die Position in der nach Freischalt-Level
+    aufsteigend sortierten Leiter."""
+    return f"T{len(ladder) - index}"
+
+
+def collected_tiers(konto: dict[float, list[int]],
+                    ladder: list) -> tuple[int, int]:
+    """(gesammelt, vorhanden) — wie viele Sprossen der Leiter schon ein
+    Wert aus dem Kontenbuch getroffen hat.
+
+    Das ist die eigentliche Sammel-Aussage: nicht "wie oft gesehen",
+    sondern "wie vollständig". Werte, die in keine Sprosse fallen,
+    zählen bewusst nicht mit — sie gehören keinem Tier an
+    (§ladder_table)."""
+    getroffen = sum(1 for step in ladder
+                   if any(step.low <= wert <= step.high for wert in konto))
+    return getroffen, len(ladder)
+
+
+def ladder_table(konto: dict[float, list[int]], ladder: list) -> list[str]:
+    """Die ECHTE Leiter als Tabelle, von T1 abwärts — mit den Lücken.
+
+    Anders als ``band_table`` (geschätzte Bänder, §4.52.6) steht hier
+    keine Vermutung: Die Sprossen kommen aus den Spieldaten selbst
+    (§4.53). Deshalb dürfen auch die Zeilen dastehen, in denen NICHTS
+    liegt — sie sind der Sammelalbum-Teil, die noch leeren Felder.
+
+    Ein Wert kann in mehrere Sprossen fallen, weil sich manche Tiers in
+    ihren Werten überlappen (Fire Resistance auf Ring: T7 ist 12–17,
+    T6 ist 18–23, aber anderswo überschneiden sie sich). Er zählt dann
+    für jede — das Kontenbuch weiß nicht, von welchem Item er kam, und
+    eine Zuordnung zu erfinden wäre schlechter als beide zu nennen. An
+    Peters Bestand gemessen betrifft das 3,8 % der Sichtungen."""
+    zeilen = [f"{'':<5}{'Values':<12}{'':<16}{'Seen':>7}   Best"]
+    for i, step in enumerate(ladder):
+        drin = {wert: zeile for wert, zeile in konto.items()
+               if step.low <= wert <= step.high}
+        gesehen = sum(zeile[0] for zeile in drin.values())
+        werte = _spread_text([(step.low, step.high)])
+        ab = f"from iLvl {step.required_level}"
+        if gesehen:
+            zeilen.append(f"{tier_number(ladder, i):<5}{werte:<12}{ab:<16}"
+                         f"{gesehen:>6}×   {_fmt_num(max(drin))}")
+        else:
+            zeilen.append(f"{tier_number(ladder, i):<5}{werte:<12}{ab:<16}"
+                         f"{'not seen yet':>13}")
+    ausserhalb = {wert: zeile for wert, zeile in konto.items()
+                 if not any(step.low <= wert <= step.high for step in ladder)}
+    if ausserhalb:
+        # Gecraftete, mit Essenz gerollte und beeinflusste Mods rollen
+        # aus eigenen Tabellen, die hier nicht mitgebaut werden — ihre
+        # Werte liegen deshalb neben der Leiter statt darauf. Sie
+        # verschweigen wäre falsch: Es sind echte Sichtungen, und
+        # gerade die hohen sind die interessanten.
+        n = sum(zeile[0] for zeile in ausserhalb.values())
+        # Als SPANNE, nicht als Werteliste: Hier stehen zwei ganz
+        # verschiedene Dinge nebeneinander — Werte unter der untersten
+        # Sprosse (aus fremden Roll-Tabellen) und solche über der
+        # obersten (gecraftet, Essenz, beeinflusst). Eine Liste zeigte
+        # je nach Sortierung nur eine der beiden Sorten.
+        werte = _spread_text([(min(ausserhalb), max(ausserhalb))])
+        zeilen.append(f"{'':<5}{'beyond the ladder':<28}{n:>6}×   {werte}")
+    getroffen, gesamt = collected_tiers(konto, ladder)
+    zeilen.append("")
+    zeilen.append(f"{'':<5}{getroffen} of {gesamt} tiers collected")
     return zeilen
 
 
-def record_detail_html(record: ModRecord, mono_family: str) -> str:
+def _indent(zeilen: list[str], weite: int) -> list[str]:
+    """Einrücken, aber Leerzeilen leer lassen — sonst bleibt unsichtbarer
+    Leerraum stehen, den ein späterer Textvergleich stolpernd findet."""
+    return [f"{'':<{weite}}{zeile}" if zeile else "" for zeile in zeilen]
+
+
+def format_bands(record: ModRecord, knowledge=None) -> list[str]:
+    """Die Tier-Tabelle je Basis-Kategorie.
+
+    **Zwei Quellen, klar getrennt beschriftet.** Kennt das Mod-Wissen
+    (§4.53) eine echte Leiter für (Identität, Kategorie), steht sie hier
+    — mit T-Nummern, Freischalt-Leveln und den noch leeren Sprossen.
+    Sonst bleibt es bei den aus dem Item-Level GESCHÄTZTEN Prozent-
+    Bändern (§4.52.4/§4.52.6), die keine Tier-Nummer behaupten dürfen.
+    Peters Begründung für die Prozente von 2026-08-27 gilt unverändert
+    dort weiter, wo wir die echte Leiter nicht haben — an seinem Bestand
+    sind das 19 % der Sichtungen.
+
+    Steht bewusst UNTER den Spannen: Die Spannen darüber sind, was
+    dieses Konto gesehen hat; hier geht es um das, was das Spiel
+    hergibt."""
+    if not record.tier_ledger:
+        return []
+    echte: list[str] = []
+    geschaetzte: list[str] = []
+    # Nach Sichtungen absteigend, nicht alphabetisch: Ein verbreiteter
+    # Mod wie Feuerresistenz hat in Peters Bestand 24 Kategorien, und
+    # jede Leiter ist elf Zeilen lang. Alphabetisch stünde "Amulet" oben,
+    # auch wenn die Kategorie zwei Sichtungen hat und "Ring" zweihundert.
+    nach_gewicht = sorted(record.tier_ledger,
+                         key=lambda kat: (-sum(z[0] for z in record.tier_ledger[kat].values()),
+                                         kat))
+    for kategorie in nach_gewicht:
+        konto = record.tier_ledger[kategorie]
+        sichtungen = sum(zeile[0] for zeile in konto.values())
+        einheit = "sighting" if sichtungen == 1 else "sightings"
+        kopf = (f"  {kategorie}  ({sichtungen} {einheit}, "
+                f"item level {min(z[1] for z in konto.values())}–"
+                f"{max(z[2] for z in konto.values())})")
+        ladder = knowledge.ladder(record.identity, kategorie) if knowledge else []
+        if ladder:
+            echte.append(kopf)
+            echte.extend(_indent(ladder_table(konto, ladder), 4))
+            continue
+        geschaetzte.append(kopf)
+        front = record.tier_front(kategorie)
+        baender = mod_tiers.bands(front)
+        if not baender:
+            geschaetzte.append(f"      {mod_tiers.why_silent(front)}")
+            continue
+        geschaetzte.extend(_indent(band_table(konto, baender), 6))
+
+    zeilen: list[str] = []
+    if echte:
+        zeilen += ["", LADDER_HEADING,
+                   "(the ladder the game itself rolls from — T1 is the top "
+                   "tier; empty", "rows are tiers you have not rolled yet)"]
+        zeilen += echte
+    if geschaetzte:
+        zeilen += ["", BANDS_HEADING,
+                   "(no ladder known for this one — bands as % of the seen "
+                   "span. Tier", "numbers would clash with the real ones "
+                   "while this is a guess. Upper", "bounds are proven, lower "
+                   "bounds assume tiers meet without gaps)"]
+        zeilen += geschaetzte
+    return zeilen
+
+
+def record_detail_html(record: ModRecord, mono_family: str, knowledge=None) -> str:
     """Der Steckbrief fürs Anzeige-Feld: Fließtext in der normalen
-    Schrift, NUR die Band-Tabelle in einer festen (§band_table) — das
-    ganze Feld gesperrt zu setzen machte es kaum noch lesbar (Peter,
-    2026-08-28). Quelle bleibt ``format_record_detail``; hier wird nur
-    aufgeteilt und escaped."""
-    zeilen = format_record_detail(record).splitlines()
-    try:
-        start = zeilen.index("Tiers, inferred from item level")
-    except ValueError:
-        start = len(zeilen)
+    Schrift, NUR die Tier-Tabellen in einer festen — das ganze Feld
+    gesperrt zu setzen machte es kaum noch lesbar (Peter, 2026-08-28).
+    Quelle bleibt ``format_record_detail``; hier wird nur aufgeteilt und
+    escaped.
+
+    Geteilt wird an der ERSTEN Tabellen-Überschrift, egal welche der
+    beiden es ist: Ab dort stehen nur noch Tabellen (§format_bands kann
+    beide nacheinander ausgeben, echte Leiter zuerst)."""
+    zeilen = format_record_detail(record, knowledge).splitlines()
+    kandidaten = [zeilen.index(kopf) for kopf in (LADDER_HEADING, BANDS_HEADING)
+                 if kopf in zeilen]
+    start = min(kandidaten) if kandidaten else len(zeilen)
     kopf = "<br>".join(html_escape(z) for z in zeilen[:start])
     if start >= len(zeilen):
         return kopf
@@ -256,7 +377,7 @@ def record_detail_html(record: ModRecord, mono_family: str) -> str:
             f"monospace; margin:0;\">{tabelle}</pre>")
 
 
-def format_record_detail(record: ModRecord) -> str:
+def format_record_detail(record: ModRecord, knowledge=None) -> str:
     """Der volle Steckbrief eines Eintrags, für das Detail-Feld."""
     zeilen = [record.example or record.identity,
              f"{kind_label(record.kind)}  ·  seen {record.count}× in total"]
@@ -269,7 +390,7 @@ def format_record_detail(record: ModRecord) -> str:
             span = record.spans[league][rarity]
             zeilen.append(f"{league_label(league)}  ·  {rarity_label(rarity)}")
             zeilen.append(f"    {format_span(span)}")
-    zeilen.extend(format_bands(record))
+    zeilen.extend(format_bands(record, knowledge))
     return "\n".join(zeilen)
 
 
@@ -320,6 +441,47 @@ def combined_range_text(record: ModRecord, league: str | None,
               max(span.spread[i][1] for span in spans))
              for i in range(n)]
     return _spread_text(spread)
+
+
+def tier_progress(record: ModRecord, knowledge) -> tuple[int, int] | None:
+    """"So viele der möglichen Tiers hast du" — oder ``None``, wenn für
+    diesen Eintrag keine echte Leiter bekannt ist.
+
+    Bei mehreren Basis-Kategorien zählt die mit den MEISTEN Sichtungen:
+    Ein Mod, der überwiegend auf Ringen durch die Hände geht, soll seinen
+    Ring-Stand zeigen und nicht den einer Kategorie, von der zufällig ein
+    Stück herumliegt. Der Steckbrief nennt ohnehin jede Kategorie
+    einzeln."""
+    if knowledge is None or not record.tier_ledger:
+        return None
+    beste: tuple[int, tuple[int, int]] | None = None
+    for kategorie, konto in record.tier_ledger.items():
+        ladder = knowledge.ladder(record.identity, kategorie)
+        if not ladder:
+            continue
+        sichtungen = sum(zeile[0] for zeile in konto.values())
+        if beste is None or sichtungen > beste[0]:
+            beste = (sichtungen, collected_tiers(konto, ladder))
+    return beste[1] if beste else None
+
+
+def range_column_text(record: ModRecord, league: str | None,
+                      rarity_ok: RarityPredicate | None, knowledge=None) -> str:
+    """Die Range-Spalte samt Tier-Zähler: ``6–48 · 8/8``.
+
+    **Der Zähler verschwindet, sobald nach Liga oder Rarität gefiltert
+    wird.** Die Range links davon zeigt dann nur die ausgewählten Töpfe,
+    das Kontenbuch hinter dem Zähler kennt aber weder Liga noch Rarität
+    (es sammelt ausschließlich gerollte Affixe unkorrumpierter Magic-/
+    Rare-Items, §mod_collection.tierable). Beides nebeneinander wären
+    zwei Zahlen über verschiedene Populationen in einer Zelle — genau
+    das, was Peter an der früheren "Seen"-Spalte aufgefallen ist
+    (§matching_count)."""
+    text = combined_range_text(record, league, rarity_ok)
+    if league is not None or rarity_ok is not None:
+        return text
+    stand = tier_progress(record, knowledge)
+    return text if stand is None else f"{text}  ·  {stand[0]}/{stand[1]}"
 
 
 IDENTITY_COL, KIND_COL, RANGE_COL, COUNT_COL, EXAMPLE_COL = range(5)
@@ -412,9 +574,14 @@ class ModAlbumModel(QAbstractTableModel):
     bleibt dumm gegenüber Qt (§mod_collection.py)."""
 
     def __init__(self, records: list[ModRecord],
-                 new_keys: frozenset[tuple[str, str]] = frozenset()) -> None:
+                 new_keys: frozenset[tuple[str, str]] = frozenset(),
+                 knowledge=None) -> None:
         super().__init__()
         self._records = records
+        # Die echten Tier-Leitern (§4.53) oder ``None``, solange kein
+        # Mod-Wissen geladen ist. Nur lesend verwendet: fuer den
+        # Tier-Zaehler in der Range-Spalte und die Leiter im Steckbrief.
+        self._knowledge = knowledge
         # Schnappschuss der Sitzungs-Funde (``ModCollection.new_keys``) —
         # wie die Karteiliste selbst: Stand vom Öffnen, keine Live-Sicht.
         self._new_keys = new_keys
@@ -472,7 +639,8 @@ class ModAlbumModel(QAbstractTableModel):
         if col == KIND_COL:
             return kind_label(record.kind)
         if col == RANGE_COL:
-            return combined_range_text(record, self._range_league, self._range_rarities)
+            return range_column_text(record, self._range_league,
+                                    self._range_rarities, self._knowledge)
         if col == COUNT_COL:
             # Dieselbe Auswahl wie die Range-Spalte daneben — siehe
             # ``matching_count``.
@@ -619,13 +787,18 @@ class ModCardDelegate(QStyledItemDelegate):
 
 
 class ModAlbumDialog(QDialog):
-    def __init__(self, collection: ModCollection, parent: QWidget | None = None) -> None:
+    def __init__(self, collection: ModCollection, parent: QWidget | None = None,
+                 knowledge=None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Mod Collection")
         self.resize(900, 560)
 
+        # ``None``, solange das Mod-Wissen (§4.53) nicht geladen ist —
+        # beim ersten Start ohne Netz der Normalfall. Alles Weitere faellt
+        # dann auf die geschaetzten Baender zurueck, nichts bricht.
+        self._knowledge = knowledge
         records = sorted(collection.records(), key=lambda r: r.identity)
-        self._model = ModAlbumModel(records, collection.new_keys())
+        self._model = ModAlbumModel(records, collection.new_keys(), knowledge)
         self._proxy = ModAlbumProxy()
         self._proxy.setSourceModel(self._model)
         self._greeting = collection_greeting(records, collection.new_keys())
@@ -811,4 +984,5 @@ class ModAlbumDialog(QDialog):
         if record is None:
             self._detail.setPlainText("")
             return
-        self._detail.setHtml(record_detail_html(record, self._mono_family))
+        self._detail.setHtml(
+            record_detail_html(record, self._mono_family, self._knowledge))
