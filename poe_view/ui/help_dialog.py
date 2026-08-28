@@ -343,8 +343,12 @@ for whichever of those you have selected (everything, if you have not
 narrowed it down), followed by how many of that mod's tiers you have
 already rolled — <b>6/8</b> means two tiers are still missing from your
 collection. That counter needs the game data below, and it steps aside
-as soon as you filter by league or rarity, because the tier record is
-kept across all of them. Rarity includes a <b>Corrupted</b> group of its own:
+when you filter by rarity, because the tier record does not tell
+rarities apart. The league filter, on the other hand, reaches all the
+way through: slots, golden frames, the score line, the tier counter and
+the tier tables then count only what you rolled in that league — pick
+your current league to see the real gaps in this season's album.
+Rarity includes a <b>Corrupted</b> group of its own:
 a corrupted item's mods are counted apart from an uncorrupted one's, even
 at the same rarity, since some corruption outcomes roll from an entirely
 different table. Click a mod to see every rarity and league it has ever

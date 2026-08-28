@@ -333,7 +333,8 @@ def _indent(zeilen: list[str], weite: int) -> list[str]:
     return [f"{'':<{weite}}{zeile}" if zeile else "" for zeile in zeilen]
 
 
-def format_bands(record: ModRecord, knowledge=None) -> list[str]:
+def format_bands(record: ModRecord, knowledge=None,
+                 league: str | None = None) -> list[str]:
     """Die Tier-Tabelle je Basis-Kategorie.
 
     **Zwei Quellen, klar getrennt beschriftet.** Kennt das Mod-Wissen
@@ -347,14 +348,18 @@ def format_bands(record: ModRecord, knowledge=None) -> list[str]:
 
     Steht bewusst UNTER den Spannen: Die Spannen darüber sind, was
     dieses Konto gesehen hat; hier geht es um das, was das Spiel
-    hergibt."""
-    if not record.tier_ledger:
+    hergibt.
+
+    ``league`` schränkt auf einen Ligen-Topf ein (``None`` = alle) —
+    dieselbe Auswahl wie der Liga-Filter des Albums (§4.53.3)."""
+    konten = record.ledgers(league)
+    if not konten:
         return []
     echte: list[str] = []
-    for kategorie, konto, ladder in _ladder_sections(record, knowledge):
+    for kategorie, konto, ladder in _ladder_sections(record, knowledge, konten):
         echte.append(_section_head(kategorie, konto))
         echte.extend(_indent(ladder_table(konto, ladder), 4))
-    geschaetzte = _band_lines(record, knowledge)
+    geschaetzte = _band_lines(record, knowledge, konten, league)
 
     zeilen: list[str] = []
     if echte:
@@ -366,13 +371,16 @@ def format_bands(record: ModRecord, knowledge=None) -> list[str]:
     return zeilen
 
 
-def _weighted_categories(record: ModRecord) -> list[str]:
+def _weighted_categories(konten: dict[str, dict[float, list[int]]]) -> list[str]:
     """Nach Sichtungen absteigend, nicht alphabetisch: Ein verbreiteter
     Mod wie Feuerresistenz hat in Peters Bestand 24 Kategorien, und jede
     Leiter ist elf Zeilen lang. Alphabetisch stünde "Amulet" oben, auch
-    wenn die Kategorie zwei Sichtungen hat und "Ring" zweihundert."""
-    return sorted(record.tier_ledger,
-                 key=lambda kat: (-sum(z[0] for z in record.tier_ledger[kat].values()),
+    wenn die Kategorie zwei Sichtungen hat und "Ring" zweihundert.
+
+    Arbeitet auf dem Ergebnis von ``ModRecord.ledgers`` — die Liga-
+    Auswahl ist da schon hineingerechnet."""
+    return sorted(konten,
+                 key=lambda kat: (-sum(z[0] for z in konten[kat].values()),
                                  kat))
 
 
@@ -384,30 +392,35 @@ def _section_head(kategorie: str, konto: dict[float, list[int]]) -> str:
             f"{max(z[2] for z in konto.values())})")
 
 
-def _ladder_sections(record: ModRecord,
-                     knowledge) -> list[tuple[str, dict, list]]:
+def _ladder_sections(record: ModRecord, knowledge,
+                     konten: dict[str, dict[float, list[int]]]
+                     ) -> list[tuple[str, dict, list]]:
     """(Kategorie, Konto, Leiter) für jede Kategorie MIT echter Leiter,
-    nach Sichtungen sortiert — die gemeinsame Quelle beider Renderer."""
+    nach Sichtungen sortiert — die gemeinsame Quelle beider Renderer.
+    ``konten`` kommt vom Aufrufer (``ModRecord.ledgers``), damit die
+    Liga-Auswahl nur EINMAL gerechnet wird."""
     if knowledge is None:
         return []
     ergebnis = []
-    for kategorie in _weighted_categories(record):
+    for kategorie in _weighted_categories(konten):
         ladder = knowledge.ladder(record.identity, kategorie)
         if ladder:
-            ergebnis.append((kategorie, record.tier_ledger[kategorie], ladder))
+            ergebnis.append((kategorie, konten[kategorie], ladder))
     return ergebnis
 
 
-def _band_lines(record: ModRecord, knowledge) -> list[str]:
+def _band_lines(record: ModRecord, knowledge,
+                konten: dict[str, dict[float, list[int]]],
+                league: str | None = None) -> list[str]:
     """Der Prozent-Bänder-Block (Überschrift + Sektionen) als Text —
     nur die Kategorien OHNE echte Leiter, oder leer."""
     sektionen: list[str] = []
-    for kategorie in _weighted_categories(record):
+    for kategorie in _weighted_categories(konten):
         if knowledge is not None and knowledge.ladder(record.identity, kategorie):
             continue
-        konto = record.tier_ledger[kategorie]
+        konto = konten[kategorie]
         sektionen.append(_section_head(kategorie, konto))
-        front = record.tier_front(kategorie)
+        front = record.tier_front(kategorie, league)
         baender = mod_tiers.bands(front)
         if not baender:
             sektionen.append(f"      {mod_tiers.why_silent(front)}")
@@ -512,7 +525,8 @@ def _html_ladder_section(kategorie: str, konto: dict[float, list[int]],
             + "".join(zellen) + "</table>")
 
 
-def record_detail_html(record: ModRecord, mono_family: str, knowledge=None) -> str:
+def record_detail_html(record: ModRecord, mono_family: str, knowledge=None,
+                       league: str | None = None) -> str:
     """Der Steckbrief fuers Anzeige-Feld - drei Absaetze, drei Techniken:
 
     1. Der Fliesstext-Kopf (Beispielzeile, Toepfe, Spannen) in der
@@ -525,14 +539,19 @@ def record_detail_html(record: ModRecord, mono_family: str, knowledge=None) -> s
     3. Die geschaetzten Prozent-Baender weiterhin als ``<pre>`` in
        fester Schrift - sie bleiben eine Texttabelle, ausdruecklich
        schlichter als die echten Leitern: Der optische Rangunterschied
-       IST die Botschaft (belegt gegen geraten)."""
-    zeilen = format_record_detail(record, knowledge).splitlines()
+       IST die Botschaft (belegt gegen geraten).
+
+    ``league`` gilt fuer Leitern und Baender (§4.53.3); die Spannen-
+    Liste im Kopf bleibt absichtlich vollstaendig — sie IST die
+    Aufschluesselung nach Liga und Raritaet."""
+    zeilen = format_record_detail(record, knowledge, league).splitlines()
     kandidaten = [zeilen.index(kopf) for kopf in (LADDER_HEADING, BANDS_HEADING)
                  if kopf in zeilen]
     start = min(kandidaten) if kandidaten else len(zeilen)
     teile = ["<br>".join(html_escape(z) for z in zeilen[:start])]
 
-    sektionen = _ladder_sections(record, knowledge)
+    konten = record.ledgers(league)
+    sektionen = _ladder_sections(record, knowledge, konten)
     if sektionen:
         teile.append(f'<p><b>{html_escape(LADDER_HEADING)}</b><br>'
                      f'<font color="{CARD_TEXT_DIM}">the ladder the game '
@@ -541,7 +560,7 @@ def record_detail_html(record: ModRecord, mono_family: str, knowledge=None) -> s
         teile.extend(_html_ladder_section(kategorie, konto, ladder)
                      for kategorie, konto, ladder in sektionen)
 
-    baender = _band_lines(record, knowledge)
+    baender = _band_lines(record, knowledge, konten, league)
     if baender:
         tabelle = html_escape("\n".join(baender))
         teile.append(f"<pre style=\"font-family:'{mono_family}',Consolas,"
@@ -549,20 +568,26 @@ def record_detail_html(record: ModRecord, mono_family: str, knowledge=None) -> s
     return "".join(teile)
 
 
-def format_record_detail(record: ModRecord, knowledge=None) -> str:
-    """Der volle Steckbrief eines Eintrags, für das Detail-Feld."""
+def format_record_detail(record: ModRecord, knowledge=None,
+                         league: str | None = None) -> str:
+    """Der volle Steckbrief eines Eintrags, für das Detail-Feld.
+    ``league`` schränkt nur den Tier-Teil ein (§format_bands)."""
     zeilen = [record.example or record.identity,
              f"{kind_label(record.kind)}  ·  seen {record.count}× in total"]
     datum = first_seen_text(record)
     if datum:
         zeilen.append(datum)
     zeilen.append("")
-    for league in record.leagues:
-        for rarity in sorted(record.spans[league]):
-            span = record.spans[league][rarity]
-            zeilen.append(f"{league_label(league)}  ·  {rarity_label(rarity)}")
+    # ``liga``, nicht ``league`` — die Schleife lief hier schon, bevor es
+    # den gleichnamigen Parameter gab, und hat ihn beim Umbau prompt
+    # ueberschattet: Der Tier-Teil zeigte dann still die LETZTE Liga der
+    # Spannen-Liste statt der gewaehlten.
+    for liga in record.leagues:
+        for rarity in sorted(record.spans[liga]):
+            span = record.spans[liga][rarity]
+            zeilen.append(f"{league_label(liga)}  ·  {rarity_label(rarity)}")
             zeilen.append(f"    {format_span(span)}")
-    zeilen.extend(format_bands(record, knowledge))
+    zeilen.extend(format_bands(record, knowledge, league))
     return "\n".join(zeilen)
 
 
@@ -615,7 +640,8 @@ def combined_range_text(record: ModRecord, league: str | None,
     return _spread_text(spread)
 
 
-def tier_slots(record: ModRecord, knowledge) -> list[bool] | None:
+def tier_slots(record: ModRecord, knowledge,
+               league: str | None = None) -> list[bool] | None:
     """Die Slot-Maske des Eintrags — oder ``None``, wenn für keinen
     seiner Töpfe eine echte Leiter bekannt ist.
 
@@ -623,11 +649,18 @@ def tier_slots(record: ModRecord, knowledge) -> list[bool] | None:
     Ein Mod, der überwiegend auf Ringen durch die Hände geht, soll seinen
     Ring-Stand zeigen und nicht den einer Kategorie, von der zufällig ein
     Stück herumliegt. Der Steckbrief nennt ohnehin jede Kategorie
-    einzeln."""
-    if knowledge is None or not record.tier_ledger:
+    einzeln.
+
+    ``league`` folgt dem Liga-Filter des Albums (§4.53.3): Mit Filter
+    zählen nur die Sichtungen dieses Ligen-Topfs — auch die Kategorie-
+    Wahl richtet sich dann nach ihm."""
+    if knowledge is None:
+        return None
+    konten = record.ledgers(league)
+    if not konten:
         return None
     beste: tuple[int, list[bool]] | None = None
-    for kategorie, konto in record.tier_ledger.items():
+    for kategorie, konto in konten.items():
         ladder = knowledge.ladder(record.identity, kategorie)
         if not ladder:
             continue
@@ -637,10 +670,11 @@ def tier_slots(record: ModRecord, knowledge) -> list[bool] | None:
     return beste[1] if beste else None
 
 
-def tier_progress(record: ModRecord, knowledge) -> tuple[int, int] | None:
+def tier_progress(record: ModRecord, knowledge,
+                  league: str | None = None) -> tuple[int, int] | None:
     """"So viele der möglichen Tiers hast du" — dieselbe Kategorie-Wahl
     wie ``tier_slots``, nur verdichtet auf (gesammelt, vorhanden)."""
-    maske = tier_slots(record, knowledge)
+    maske = tier_slots(record, knowledge, league)
     return (sum(maske), len(maske)) if maske is not None else None
 
 
@@ -668,18 +702,18 @@ def range_column_text(record: ModRecord, league: str | None,
                       rarity_ok: RarityPredicate | None, knowledge=None) -> str:
     """Die Range-Spalte samt Tier-Zähler: ``6–48 · 8/8``.
 
-    **Der Zähler verschwindet, sobald nach Liga oder Rarität gefiltert
-    wird.** Die Range links davon zeigt dann nur die ausgewählten Töpfe,
-    das Kontenbuch hinter dem Zähler kennt aber weder Liga noch Rarität
-    (es sammelt ausschließlich gerollte Affixe unkorrumpierter Magic-/
-    Rare-Items, §mod_collection.tierable). Beides nebeneinander wären
-    zwei Zahlen über verschiedene Populationen in einer Zelle — genau
-    das, was Peter an der früheren "Seen"-Spalte aufgefallen ist
-    (§matching_count)."""
+    **Der Zähler verschwindet nur noch beim Raritäts-Filter.** Das
+    Kontenbuch hinter ihm kennt keine Rarität (es sammelt ausschließlich
+    gerollte Affixe unkorrumpierter Magic-/Rare-Items,
+    §mod_collection.tierable) — Range und Zähler wären dann zwei Zahlen
+    über verschiedene Populationen in einer Zelle, genau das, was Peter
+    an der früheren "Seen"-Spalte aufgefallen ist (§matching_count).
+    Die LIGA dagegen kennt es seit Aufbau 6 (§4.53.3): Beim Liga-Filter
+    folgen beide Zellenhälften derselben Auswahl, der Zähler bleibt."""
     text = combined_range_text(record, league, rarity_ok)
-    if league is not None or rarity_ok is not None:
+    if rarity_ok is not None:
         return text
-    stand = tier_progress(record, knowledge)
+    stand = tier_progress(record, knowledge, league)
     return text if stand is None else f"{text}  ·  {stand[0]}/{stand[1]}"
 
 
@@ -834,7 +868,8 @@ def collection_greeting(records: list[ModRecord],
     return "\n".join(zeilen)
 
 
-def album_stats(records: list[ModRecord], knowledge) -> str:
+def album_stats(records: list[ModRecord], knowledge,
+                league: str | None = None) -> str:
     """Die Sammel-Kopfzeile des Albums (Design-Runde 2026-08-28):
     Bestand, komplette Sets und der Tier-Fortschritt als Balken.
 
@@ -842,11 +877,15 @@ def album_stats(records: list[ModRecord], knowledge) -> str:
     das Spiel für deine gesehenen Mods kennt, hast du schon gerollt" —
     das ist die Zahl, die beim Spielen tatsächlich wächst. Ohne
     geladenes Mod-Wissen bleibt nur der Bestand stehen; ein Balken ohne
-    Grundgesamtheit wäre erfunden."""
+    Grundgesamtheit wäre erfunden.
+
+    ``league`` folgt der Liga-Combo des Albums (§4.53.3) — die
+    Kopfzeile redet dann über dieselbe Population wie die Karten
+    darunter."""
     teile = [f"{len(records):,} mods collected"]
     got = total = sets = 0
     for record in records:
-        stand = tier_progress(record, knowledge)
+        stand = tier_progress(record, knowledge, league)
         if stand is None:
             continue
         got += stand[0]
@@ -894,11 +933,13 @@ class ModAlbumModel(QAbstractTableModel):
         self._range_league = league
         self._range_rarities = rarities
         if self._records:
-            # Range UND Seen hängen an der Auswahl, also beide Spalten neu
-            # zeichnen lassen.
-            top = self.index(0, RANGE_COL)
-            bottom = self.index(len(self._records) - 1, COUNT_COL)
-            self.dataChanged.emit(top, bottom, [Qt.ItemDataRole.DisplayRole])
+            # Seit die Slot-Leiste der Liga folgt (§4.53.3), hängt nicht
+            # mehr nur Range/Seen an der Auswahl, sondern auch die Karte
+            # selbst (TIER_SLOTS_ROLE liegt auf Spalte 0) — also alle
+            # Spalten und alle Rollen neu zeichnen lassen.
+            top = self.index(0, 0)
+            bottom = self.index(len(self._records) - 1, len(COLUMNS) - 1)
+            self.dataChanged.emit(top, bottom, [])
 
     def rowCount(self, parent=QModelIndex()) -> int:  # noqa: N802
         return 0 if parent.isValid() else len(self._records)
@@ -920,7 +961,9 @@ class ModAlbumModel(QAbstractTableModel):
         if role == NEW_ROLE:
             return (record.kind, record.identity) in self._new_keys
         if role == TIER_SLOTS_ROLE:
-            return tier_slots(record, self._knowledge)
+            # Folgt dem Liga-Filter (§4.53.3): Gold-Rahmen und Slots
+            # zeigen den Stand der ausgewählten Liga, nicht aller.
+            return tier_slots(record, self._knowledge, self._range_league)
         if role == Qt.ItemDataRole.ToolTipRole and index.column() == IDENTITY_COL:
             # In der Tabelle wegen 381-Zeichen-Identitäten nützlich, in
             # der Kartenansicht notwendig: Dort wird ein langer Name nach
@@ -1133,6 +1176,9 @@ class ModAlbumDialog(QDialog):
         # dann auf die geschaetzten Baender zurueck, nichts bricht.
         self._knowledge = knowledge
         records = sorted(collection.records(), key=lambda r: r.identity)
+        # Für die Sammel-Kopfzeile, die beim Liga-Wechsel neu rechnet
+        # (§_on_pot_filter_changed) — dieselbe Liste wie im Modell.
+        self._records = records
         self._model = ModAlbumModel(records, collection.new_keys(), knowledge)
         self._proxy = ModAlbumProxy()
         self._proxy.setSourceModel(self._model)
@@ -1312,6 +1358,12 @@ class ModAlbumDialog(QDialog):
         rarities = RARITY_GROUPS_BY_NAME.get(self._rarity_combo.currentData() or "")
         self._proxy.set_pot_filter(league, rarities)
         self._model.set_range_filter(league, rarities)
+        # Kopfzeile und offener Steckbrief folgen der Liga (§4.53.3) —
+        # sonst behauptete der Filter etwas, das die Zahlen darunter
+        # nicht einlösen.
+        self._stats_label.setText(
+            album_stats(self._records, self._knowledge, league))
+        self._refresh_detail()
         self._update_count_label()
 
     def _update_count_label(self) -> None:
@@ -1328,4 +1380,11 @@ class ModAlbumDialog(QDialog):
             self._detail.setPlainText("")
             return
         self._detail.setHtml(
-            record_detail_html(record, self._mono_family, self._knowledge))
+            record_detail_html(record, self._mono_family, self._knowledge,
+                               self._league_combo.currentData()))
+
+    def _refresh_detail(self) -> None:
+        """Den offenen Steckbrief neu setzen — nötig, wenn sich nicht die
+        Auswahl, sondern die Liga darunter geändert hat."""
+        self._on_row_changed(self._table.selectionModel().currentIndex(),
+                             QModelIndex())

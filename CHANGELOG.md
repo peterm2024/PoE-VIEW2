@@ -99,8 +99,8 @@ nach [SemVer](https://semver.org/lang/de/).
   Mods, deren Leiter (noch) nicht bekannt ist, bleibt es bei den aus dem
   Item-Level geschätzten Prozent-Bändern, ausdrücklich als solche
   beschriftet. Die Range-Spalte in Tabelle und Karten zeigt den Zähler
-  gleich mit; sie tritt zurück, sobald nach Liga oder Rarität gefiltert
-  wird, weil der Tier-Stand über alle Ligen hinweg geführt wird.
+  gleich mit; er tritt zurück, sobald nach Rarität gefiltert wird, weil
+  der Tier-Stand Raritäten nicht unterscheidet.
 
 - **Das Album sieht jetzt nach Sammelalbum aus.** Jede Karte trägt einen
   Farbstreifen und ein Symbol für ihr Thema — Feuer rot, Blitz gelb,
@@ -116,6 +116,17 @@ nach [SemVer](https://semver.org/lang/de/).
   kleiner Balken, nie gerollte Stufen gedämpft. Nebenbei haben Valdos
   Foil-Uniques einen Namen bekommen, wo vorher ein rohes "frameType 10"
   stand.
+
+- **Der Liga-Filter des Albums greift jetzt bis in die Sammlung durch.**
+  Slot-Kästchen, goldene Rahmen, Tier-Zähler, Steckbrief-Leitern und
+  die Kopfzeile zählen mit gewählter Liga nur noch, was in DIESER Liga
+  gerollt wurde — vorher rechneten sie stets über alle Ligen, und eine
+  frische Liga sah fälschlich nach voller Sammlung aus. Die aktuelle
+  Liga auszuwählen zeigt also die echten Lücken des laufenden Albums;
+  ohne Filter bleibt alles beim alten Gesamtbild. Dafür führt die
+  Sammlung ihr Tier-Kontenbuch jetzt je Liga (dieselben Töpfe wie die
+  Wertspannen); der Umbau trägt sich beim nächsten Start selbst aus dem
+  Cache nach, kein Zählstand geht verloren.
 
 ### Behoben
 

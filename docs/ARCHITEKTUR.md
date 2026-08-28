@@ -6450,12 +6450,15 @@ zweihundert.
 
 **Der Tier-Zähler in der Range-Spalte** (`6–48 · 8/8`) nimmt die
 Kategorie mit den meisten Sichtungen — ein Mod, der überwiegend über
-Ringe geht, soll seinen Ring-Stand zeigen. **Er verschwindet, sobald
-nach Liga oder Rarität gefiltert wird:** Die Range links zeigt dann nur
-die ausgewählten Töpfe, das Kontenbuch dahinter kennt aber weder Liga
-noch Rarität. Zwei Zahlen über verschiedene Populationen in einer Zelle
-wären genau der Fehler, den Peter an der früheren "Seen"-Spalte bemerkt
-hat (§matching_count).
+Ringe geht, soll seinen Ring-Stand zeigen. **Er verschwindet nur noch
+beim Raritäts-Filter:** Das Kontenbuch dahinter kennt keine Rarität,
+Range und Zähler wären dann zwei Zahlen über verschiedene Populationen
+in einer Zelle — genau der Fehler, den Peter an der früheren
+"Seen"-Spalte bemerkt hat (§matching_count). Die Liga kennt es seit
+Aufbau 6 (§4.53.3); beim Liga-Filter folgen beide Zellenhälften
+derselben Auswahl, und der Zähler bleibt stehen. (Ursprünglich
+verschwand er bei JEDEM Topf-Filter — das war die richtige Regel für
+ein Kontenbuch ohne Liga-Achse.)
 
 Das `Knowledge`-Objekt wird dem Dialog beim Öffnen MITGEGEBEN, nicht
 dort geholt: Es trifft asynchron ein, und das Album ist ein
@@ -6466,9 +6469,9 @@ Zähler bleibt weg — kein Sonderfall im Code, nur ein `None`.
 Getestet: `tests/test_mod_album.py` (T1 ist die letzte Sprosse, leere
 Sprossen erscheinen, Zähler zählt Sprossen statt Sichtungen, echte
 Leiter verdrängt die Schätzung, beide Tabellen nebeneinander möglich,
-Kategorie-Reihenfolge, `beyond the ladder`, Zähler nur ohne Topf-Filter,
-Zähler folgt der größten Kategorie, Monospace-Trennung an der ersten
-Überschrift). Sieben Gegenproben gefahren; zwei überlebten zunächst,
+Kategorie-Reihenfolge, `beyond the ladder`, Zähler nur ohne
+Raritäts-Filter (§4.53.3), Zähler folgt der größten Kategorie,
+Monospace-Trennung an der ersten Überschrift). Sieben Gegenproben gefahren; zwei überlebten zunächst,
 beide Male weil der Test den Fall zu harmlos nachbaute — die
 Kategorie-Sortierung war gar nicht geprüft, weil beide Kategorien in
 verschiedenen Tabellen-Blöcken lagen.
@@ -6542,6 +6545,73 @@ Statistik, Foil-Label). Sechs Gegenproben, alle rissen den passenden
 Test; Kontrolllauf grün. Smoke über alle 6125 echten Steckbriefe ohne
 Fehler, Optik nativ per `grab()` geprüft (nicht offscreen — dort wäre
 die Palette hell, §FALLSTRICKE #55/#71/#76).
+
+#### 4.53.3 Die Liga-Achse des Kontenbuchs (`services/mod_collection.py`, Aufbau 6)
+
+Peters erster Blick auf das fertige Design, mit Liga-Filter
+"SSF R Allflame" im Screenshot: "Können wir das auf die ausgewählte
+Liga beschränken? Im Screenshot scheinen alle Ligen berücksichtigt zu
+sein." Er hatte recht — Slot-Leisten, Häkchen, Steckbrief-Leitern und
+Sammel-Kopfzeile rechneten über das GESAMTE Kontenbuch, während der
+Filter daneben etwas anderes behauptete. Das Kontenbuch kannte die
+Liga schlicht nicht.
+
+**Die Liga steht jetzt als äußerste Ebene davor:**
+`tier_ledger[liga_topf][kategorie][wert] = [n, il_min, il_max]`, mit
+denselben Ligen-Töpfen wie `spans` (§4.52.1, `league_bucket`:
+temporäre Ligen eigene Töpfe, die dauerhaften teilen sich den
+Altbestand `""`). Die Begründung von Aufbau 5, die Liga spiele für die
+Tier-SCHWELLEN keine Rolle, stimmt weiter — aber die SAMMLUNG hängt an
+ihr: "Welche Tiers habe ich in dieser Liga gerollt" ist genau die
+Frage, die ein Liga-Filter stellt.
+
+**Der Zugriff läuft über `ledgers(league)` und
+`tier_front(category, league)`, nie direkt ins Feld.** `None` heißt
+"alle Ligen": Die Töpfe werden zusammengelegt (Sichtungen addiert,
+iLvl-Spannen vereinigt) und ergeben exakt den Stand von vor der
+Trennung — ohne Filter ändert sich also nichts. Die Antwort ist immer
+eine Kopie; ein Renderer kann das Buch nicht still beschädigen.
+
+**Migration wie bei den Sprüngen davor:** Ein `ledger`-Block aus
+Aufbau 5 (Kategorie direkt außen) wird beim Laden verworfen — ein
+erfundener Liga-Topf wäre eine Behauptung. Der Cache kennt die Liga
+jedes Items, `has_tier_evidence()` meldet danach `False`, und der
+vorhandene `backfill_tiers`-Weg (§_restore_mod_collection, Seed-Modus
+"tiers") baut das Buch beim nächsten Start liga-getrennt neu. Die
+beiden Formate sind strukturell unterscheidbar (zweite Ebene dict
+gegen Liste), eine Versionsprüfung beim Laden braucht es nicht.
+
+**Im Album fließt `league` durch alle Sammel-Anzeigen:** `tier_slots`/
+`tier_progress` (Slot-Leiste, Gold-Rahmen — `TIER_SLOTS_ROLE` nutzt
+die `_range_league` des Modells, `set_range_filter` zeichnet deshalb
+ALLE Spalten neu), `album_stats` (Kopfzeile, bei
+`_on_pot_filter_changed` neu gesetzt), `record_detail_html`/
+`format_bands` (Steckbrief-Leitern und -Bänder; die Spannen-Liste im
+Kopf bleibt absichtlich vollständig — sie IST die Aufschlüsselung nach
+Liga und Rarität). Der Tier-Zähler der Range-Spalte bleibt beim
+Liga-Filter stehen und weicht nur noch der Rarität (§4.53.1).
+
+**Eine Falle aus dem Umbau:** `format_record_detail` iterierte seine
+Spannen schon immer mit `for league in record.leagues:` — der neue,
+gleichnamige Parameter wurde von der Schleife überschattet, und der
+Tier-Teil zeigte still die LETZTE Liga der Spannen-Liste statt der
+gewählten. Aufgefallen am eigenen neuen Test, der plötzlich "1 of 3"
+statt "3 of 3" sah; die Schleifenvariable heißt jetzt `liga`.
+
+Gemessen an Peters Bestand nach dem Neuaufbau: Altbestand 52.297
+Sichtungen, "Allflame" 598, "SSF R Allflame" 58, "SSF R Mirage" 10.
+Die Kopfzeile für "SSF R Allflame" fiel von "217 complete sets · 69 %"
+(alle Ligen) auf ehrliche "1 complete set · tiers 28/208 · 13 %" —
+genau die Lücken, die ein Sammelalbum zeigen soll.
+
+Getestet: `tests/test_mod_collection.py` (Liga-Trennung, Merge,
+Kopie-Semantik, Front je Liga, Backfill sortiert in Töpfe, v5-Block
+wird verworfen, Roundtrip) und `tests/test_mod_album.py` (Kopfzeile,
+Slot-Maske über den Range-Filter, Steckbrief, Dialog zieht Kopfzeile
+und offenen Steckbrief nach, Zähler-Regel). Neun Gegenproben — darunter
+die wieder eingebaute Schatten-Variable und ein v5-Block, der als
+Altbestand "gerettet" wird —, alle rissen; Kontrolllauf grün; Smoke:
+6125 Steckbriefe × 4 Ligasichten ohne Fehler, nichts geschrieben.
 
 ## 8. Entwicklungsstand
 

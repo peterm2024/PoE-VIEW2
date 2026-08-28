@@ -1482,3 +1482,28 @@ Kategorie mit Ausschluss-vor-Erlaubnis, ein Jewel-Mod mit positivem
 Gegenprobe. Die Gegenprobe zur je-Basis-Prüfung überlebte zunächst,
 weil der erste Test das Muster zu harmlos nachbaute — erst die Messung
 an echten Daten lieferte das Muster, mit dem sie reißt.
+
+## 80. Der Steckbrief zeigte still die letzte Liga statt der gewählten — eine Schleife überschattete den neuen Parameter
+
+**Symptom:** Beim Anschluss des Album-Liga-Filters an die
+Steckbrief-Leitern (§ARCHITEKTUR 4.53.3) zeigte `format_record_detail`
+OHNE Liga-Filter plötzlich "1 of 3 tiers collected" statt "3 of 3" —
+aber nur, wenn der Eintrag Belege aus mehr als einer Liga trug. Isoliert
+nachgestellt war dieselbe Funktion korrekt.
+
+**Ursache:** Die Funktion iterierte ihre Wertspannen schon immer mit
+`for league in record.leagues:`. Der neue Parameter hieß ebenfalls
+`league` — nach der Schleife stand darin nicht mehr die Auswahl des
+Aufrufers, sondern die LETZTE Liga der Spannen-Liste, und genau die
+ging an `format_bands` weiter. Kein Fehler, keine Warnung; Python
+überschreibt Funktionsparameter durch Schleifenvariablen kommentarlos.
+
+**Lösung:** Schleifenvariable in `liga` umbenannt, mit Kommentar an Ort
+und Stelle. Der Test `test_the_detail_ladder_follows_the_league` prüft
+seither beide Richtungen (mit und ohne Liga) und riss in der Gegenprobe,
+als die Schatten-Variable probeweise wieder eingebaut wurde.
+
+**Lehre:** Bekommt eine bestehende Funktion einen neuen Parameter,
+zuerst nach gleichnamigen lokalen Namen (insbesondere
+Schleifenvariablen) suchen — die Kollision ist in Python stumm und
+zeigt sich nur an Daten, die zufällig mehr als einen Durchlauf haben.

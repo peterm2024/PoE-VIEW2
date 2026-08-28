@@ -81,7 +81,21 @@ log = logging.getLogger(__name__)
 # dem Cache (``backfill_tiers``) läuft dann beim nächsten Start von
 # selbst wieder an, wie beim Sprung von Aufbau 2 auf 3. Gemessen an
 # Peters Cache: 32.258 Wert-Zeilen, ~0,7 MB.
-VERSION = 5
+#
+# 6 (2026-08-28): Das Kontenbuch bekommt eine LIGA-Ebene davor —
+# ``liga_topf -> kategorie -> wert``, dieselben Töpfe wie ``spans``
+# (§league_bucket). Anlass war Peters Album-Screenshot mit Liga-Filter
+# "SSF R Allflame": Slots, Häkchen und Leitern rechneten über ALLE
+# Ligen, der Filter daneben behauptete das Gegenteil. Die Tier-
+# SCHWELLEN hängen zwar nicht an der Liga (die Begründung von Aufbau 5
+# stimmt weiter), aber die SAMMLUNG tut es — "welche Tiers habe ich in
+# dieser Liga gerollt" ist genau die Frage, die ein Liga-Filter stellt.
+# Ohne Filter merged ``ledgers(None)`` die Töpfe wieder zusammen und
+# liefert exakt den alten Stand. Ein ``ledger``-Block aus Aufbau 5
+# (Kategorie direkt außen) wird beim Laden verworfen — der Cache kennt
+# die Liga jedes Items, also baut ``backfill_tiers`` das Buch beim
+# nächsten Start liga-getrennt neu, wie bei den Sprüngen davor.
+VERSION = 6
 
 # Die Felder der API, deren Inhalt gesammelt wird — die Art eines
 # Eintrags IST der Feldname. Getrennt gehalten statt in einen Topf
@@ -403,18 +417,23 @@ class ModRecord:
     # zusammengesetzten Schlüssels, damit die Datei lesbar bleibt und der
     # Altbestand als eigener Block sichtbar ist.
     spans: dict[str, dict[int, RaritySpan]] = field(default_factory=dict)
-    # Das Kontenbuch für die Tier-Ableitung, je Basis-Kategorie: je WERT
-    # die Zahl der Sichtungen und die iLvl-Spanne, ``wert -> [n, il_min,
-    # il_max]``. Daraus kommt beides: die Pareto-Front für die Bänder
+    # Das Kontenbuch für die Tier-Ableitung, je Ligen-Topf und darin je
+    # Basis-Kategorie: je WERT die Zahl der Sichtungen und die iLvl-
+    # Spanne, ``liga -> kategorie -> wert -> [n, il_min, il_max]``.
+    # Daraus kommt beides: die Pareto-Front für die Bänder
     # (``tier_front``) UND die Zeile je Band im Album ("Count | Min |
     # Max | iLvl" — Peters Tabelle, 2026-08-27).
     #
-    # **Eine eigene Achse, nicht Liga × Rarität.** Ein Ring rollt eine
-    # andere Tier-Tabelle als eine Rüstung, bei identischem Text; ohne
-    # diese Trennung verschmiert die Leiter. Die Liga dagegen spielt für
-    # die Tier-Schwellen keine Rolle und würde die Belege nur ausdünnen —
-    # sie fehlt hier deshalb bewusst, obwohl ``spans`` sie führt.
-    tier_ledger: dict[str, dict[float, list[int]]] = field(default_factory=dict)
+    # Die Kategorie ist eine eigene Achse, keine Verfeinerung der
+    # Rarität: Ein Ring rollt eine andere Tier-Tabelle als eine Rüstung,
+    # bei identischem Text; ohne diese Trennung verschmiert die Leiter.
+    # Die LIGA steht seit Aufbau 6 davor (§VERSION): Die Schwellen
+    # hängen nicht an ihr, wohl aber die Antwort "welche Tiers habe ICH
+    # dort gerollt" — und die stellt das Album mit Liga-Filter. Wer alle
+    # Ligen meint, fragt ``ledgers(None)`` und bekommt die Töpfe
+    # zusammengelegt; nie direkt in dieses Feld greifen.
+    tier_ledger: dict[str, dict[str, dict[float, list[int]]]] = field(
+        default_factory=dict)
 
     def observe(self, line: str, *, ilvl: int = 0,
                 rarity: int = UNKNOWN_RARITY,
@@ -431,10 +450,11 @@ class ModRecord:
         werte = mod_values(line)
         spanne.observe(werte, ilvl)
         self.observe_tier_evidence(werte, ilvl=ilvl, rarity=rarity,
-                                   category=category)
+                                   category=category, league=league)
 
     def observe_tier_evidence(self, values: Sequence[float], *, ilvl: int,
-                              rarity: int, category: str) -> bool:
+                              rarity: int, category: str,
+                              league: str = LEGACY_LEAGUE) -> bool:
         """Nur das Tier-Kontenbuch führen, ohne die Album-Zählstände.
 
         Getrennt von ``observe``, weil ein alter Stand die Belege
@@ -444,7 +464,7 @@ class ModRecord:
         Gibt zurück, ob der Beleg überhaupt taugte."""
         if not tierable(rarity, ilvl) or not category or len(values) != 1:
             return False
-        konto = self.tier_ledger.setdefault(category, {})
+        konto = self.tier_ledger.setdefault(league, {}).setdefault(category, {})
         zeile = konto.get(values[0])
         if zeile is None:
             if len(konto) >= _MAX_LEDGER_VALUES:
@@ -459,14 +479,43 @@ class ModRecord:
         zeile[2] = max(zeile[2], ilvl)
         return True
 
-    def tier_front(self, category: str) -> list[tuple[float, int]]:
+    def ledgers(self, league: str | None = None
+                ) -> dict[str, dict[float, list[int]]]:
+        """Das Kontenbuch, gesehen durch die Liga-Auswahl des Albums:
+        ``kategorie -> wert -> [n, il_min, il_max]``.
+
+        ``None`` heißt "alle Ligen" — die Töpfe werden zusammengelegt
+        (Sichtungen addiert, iLvl-Spannen vereinigt) und ergeben exakt
+        den Stand, den das Kontenbuch vor der Liga-Trennung führte. Ein
+        Liga-Schlüssel liefert nur diesen Topf. Die Antwort ist immer
+        eine frische Kopie; wer sie verändert, verändert nichts."""
+        if league is not None:
+            return {kat: {wert: list(zeile)
+                          for wert, zeile in konto.items()}
+                    for kat, konto in self.tier_ledger.get(league, {}).items()}
+        ergebnis: dict[str, dict[float, list[int]]] = {}
+        for je_liga in self.tier_ledger.values():
+            for kat, konto in je_liga.items():
+                ziel = ergebnis.setdefault(kat, {})
+                for wert, (n, il_min, il_max) in konto.items():
+                    zeile = ziel.get(wert)
+                    if zeile is None:
+                        ziel[wert] = [n, il_min, il_max]
+                    else:
+                        zeile[0] += n
+                        zeile[1] = min(zeile[1], il_min)
+                        zeile[2] = max(zeile[2], il_max)
+        return ergebnis
+
+    def tier_front(self, category: str,
+                   league: str | None = None) -> list[tuple[float, int]]:
         """Die Pareto-Front (Wert hoch, iLvl niedrig) aus dem Kontenbuch —
         die Eingabe für ``mod_tiers.bands``. Für die Front zählt je Wert
         nur sein NIEDRIGSTES iLvl, deshalb verliert die Ableitung nichts
         gegenüber dem früheren direkten Mitschreiben (Aufbau 3/4)."""
         front: list[tuple[float, int]] = []
         for wert, (_, il_min, _il_max) in sorted(
-                self.tier_ledger.get(category, {}).items()):
+                self.ledgers(league).get(category, {}).items()):
             front = add_evidence(front, wert, il_min)
         return front
 
@@ -537,10 +586,12 @@ class ModRecord:
             "spans": {liga: {str(rarity): spanne.to_row()
                              for rarity, spanne in sorted(je_liga.items())}
                       for liga, je_liga in sorted(self.spans.items())},
-            "ledger": {kat: [[_as_number(wert), *zeile]
-                             for wert, zeile in sorted(konto.items())]
-                       for kat, konto in sorted(self.tier_ledger.items())
-                       if konto},
+            "ledger": {liga: {kat: [[_as_number(wert), *zeile]
+                              for wert, zeile in sorted(konto.items())]
+                              for kat, konto in sorted(je_liga.items())
+                              if konto}
+                       for liga, je_liga in sorted(self.tier_ledger.items())
+                       if any(je_liga.values())},
         }
 
     @classmethod
@@ -572,19 +623,29 @@ class ModRecord:
         # bewusst NICHT übernommen: Ohne Zählungen wäre er im Kontenbuch
         # eine Zeile mit erfundenem ``n`` — der Nachtrag aus dem Cache
         # baut stattdessen beim nächsten Start das volle Buch auf.
+        # Ein ``ledger``-Block aus Aufbau 5 (Kategorie direkt außen, der
+        # Wert der zweiten Ebene ist dann eine LISTE statt eines dicts)
+        # fällt aus demselben Grund durch das ``isinstance``-Sieb: Er
+        # kennt die Liga nicht, und ein erfundener Liga-Topf wäre eine
+        # Behauptung — der Nachtrag kennt sie (§VERSION, Aufbau 6).
         ledger = row.get("ledger")
         if isinstance(ledger, dict):
-            for kat, zeilen in ledger.items():
-                if not isinstance(kat, str) or not isinstance(zeilen, list):
+            for liga, je_liga in ledger.items():
+                if not isinstance(liga, str) or not isinstance(je_liga, dict):
                     continue
-                konto = {}
-                for zeile in zeilen:
-                    if (isinstance(zeile, list) and len(zeile) == 4
-                            and all(isinstance(x, (int, float)) for x in zeile)):
-                        konto[float(zeile[0])] = [int(zeile[1]),
-                                                  int(zeile[2]), int(zeile[3])]
-                if konto:
-                    eintrag.tier_ledger[kat] = konto
+                for kat, zeilen in je_liga.items():
+                    if not isinstance(kat, str) or not isinstance(zeilen, list):
+                        continue
+                    konto = {}
+                    for zeile in zeilen:
+                        if (isinstance(zeile, list) and len(zeile) == 4
+                                and all(isinstance(x, (int, float))
+                                        for x in zeile)):
+                            konto[float(zeile[0])] = [int(zeile[1]),
+                                                      int(zeile[2]),
+                                                      int(zeile[3])]
+                    if konto:
+                        eintrag.tier_ledger.setdefault(liga, {})[kat] = konto
 
         spans = row.get("spans")
         if isinstance(spans, dict):
@@ -653,7 +714,7 @@ class ModCollection:
         getroffen = 0
         for item in items:
             ilvl = int(getattr(item, "ilvl", 0) or 0)
-            _liga, rarity = item_buckets(item)
+            liga, rarity = item_buckets(item)
             if not tierable(rarity, ilvl):
                 continue
             category = item_category(item) or ""
@@ -667,7 +728,7 @@ class ModCollection:
                         continue
                     if eintrag.observe_tier_evidence(
                             mod_values(line), ilvl=ilvl, rarity=rarity,
-                            category=category):
+                            category=category, league=liga):
                         getroffen += 1
                         self._dirty = True
         return getroffen

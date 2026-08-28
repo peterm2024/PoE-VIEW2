@@ -598,7 +598,9 @@ def test_observing_an_item_records_tier_evidence() -> None:
                                 explicitMods=["+27% to Cold Resistance"]))
 
     eintrag = sammlung.get("explicitMods", "+27% to Cold Resistance")
-    assert eintrag.tier_ledger == {"Ring": {27.0: [1, 42, 42]}}
+    # Ohne Liga am Item landet der Beleg im Altbestands-Topf "" —
+    # die Liga ist seit Aufbau 6 die aeusserste Ebene (§VERSION).
+    assert eintrag.tier_ledger == {"": {"Ring": {27.0: [1, 42, 42]}}}
     assert eintrag.tier_front("Ring") == [(27.0, 42)]
 
 
@@ -681,7 +683,7 @@ def test_tier_evidence_survives_a_round_trip(tmp_path) -> None:
     zurueck = mc.load(ziel)
 
     eintrag = zurueck.get("explicitMods", "+27% to Cold Resistance")
-    assert eintrag.tier_ledger == {"Ring": {27.0: [1, 42, 42]}}
+    assert eintrag.tier_ledger == {"": {"Ring": {27.0: [1, 42, 42]}}}
 
 
 def test_a_v2_file_without_tiers_still_loads(tmp_path) -> None:
@@ -776,7 +778,7 @@ def test_the_ledger_accumulates_count_and_ilvl_span_per_value() -> None:
                                     explicitMods=["+27% to Cold Resistance"]))
 
     eintrag = sammlung.get("explicitMods", "+27% to Cold Resistance")
-    assert eintrag.tier_ledger["Ring"] == {27.0: [3, 35, 60]}
+    assert eintrag.ledgers()["Ring"] == {27.0: [3, 35, 60]}
 
 
 def test_the_front_takes_the_lowest_level_of_each_value() -> None:
@@ -784,7 +786,7 @@ def test_the_front_takes_the_lowest_level_of_each_value() -> None:
     Ableitung verliert gegenueber dem frueheren direkten Mitschreiben
     der Front nichts."""
     eintrag = ModRecord(identity="#% to Cold Resistance", kind="explicitMods")
-    eintrag.tier_ledger["Ring"] = {12.0: [5, 14, 70], 18.0: [2, 26, 80]}
+    eintrag.tier_ledger[""] = {"Ring": {12.0: [5, 14, 70], 18.0: [2, 26, 80]}}
 
     assert eintrag.tier_front("Ring") == [(12.0, 14), (18.0, 26)]
 
@@ -792,10 +794,10 @@ def test_the_front_takes_the_lowest_level_of_each_value() -> None:
 def test_a_dominated_value_disappears_from_the_front_but_not_the_ledger() -> None:
     """Das Kontenbuch vergisst nichts; nur die Front filtert."""
     eintrag = ModRecord(identity="#% to Cold Resistance", kind="explicitMods")
-    eintrag.tier_ledger["Ring"] = {12.0: [5, 30, 70], 18.0: [2, 26, 80]}
+    eintrag.tier_ledger[""] = {"Ring": {12.0: [5, 30, 70], 18.0: [2, 26, 80]}}
 
     assert eintrag.tier_front("Ring") == [(18.0, 26)]
-    assert len(eintrag.tier_ledger["Ring"]) == 2
+    assert len(eintrag.ledgers()["Ring"]) == 2
 
 
 def test_an_old_tiers_block_is_dropped_on_load(tmp_path) -> None:
@@ -818,3 +820,106 @@ def test_an_old_tiers_block_is_dropped_on_load(tmp_path) -> None:
     assert eintrag.count == 7                    # nichts verloren
     assert eintrag.tier_ledger == {}             # aber kein erfundenes n
     assert zurueck.has_tier_evidence() is False  # der Nachtrag laeuft an
+
+
+# ----------------------- Die Liga-Ebene (Aufbau 6) ---------------------- #
+# Peters Album-Screenshot mit Liga-Filter "SSF R Allflame" zeigte Slots
+# und Haekchen ueber ALLE Ligen — das Kontenbuch kannte die Liga nicht.
+# Seit Aufbau 6 steht sie als aeusserste Ebene davor (§VERSION).
+
+def test_the_ledger_keeps_leagues_apart() -> None:
+    sammlung = ModCollection()
+    for liga, ilvl in (("Allflame", 42), ("", 60)):
+        sammlung.observe_item(_item(frameType=RARE, ilvl=ilvl, league=liga,
+                                    baseType="Gold Ring", typeLine="Gold Ring",
+                                    explicitMods=["+27% to Cold Resistance"]))
+
+    eintrag = sammlung.get("explicitMods", "+27% to Cold Resistance")
+    assert eintrag.tier_ledger == {
+        "Allflame": {"Ring": {27.0: [1, 42, 42]}},
+        "": {"Ring": {27.0: [1, 60, 60]}},
+    }
+    assert eintrag.ledgers("Allflame") == {"Ring": {27.0: [1, 42, 42]}}
+
+
+def test_ledgers_without_a_league_merge_all_pots() -> None:
+    """``None`` heisst "alle Ligen": Sichtungen addiert, iLvl-Spannen
+    vereinigt — exakt der Stand, den das Kontenbuch vor der
+    Liga-Trennung fuehrte."""
+    eintrag = ModRecord(identity="#% to Cold Resistance", kind="explicitMods")
+    eintrag.tier_ledger["Allflame"] = {"Ring": {27.0: [2, 40, 55]}}
+    eintrag.tier_ledger[""] = {"Ring": {27.0: [3, 35, 60], 33.0: [1, 70, 70]}}
+
+    assert eintrag.ledgers() == {
+        "Ring": {27.0: [5, 35, 60], 33.0: [1, 70, 70]}}
+
+
+def test_ledgers_hands_out_copies_not_the_book_itself() -> None:
+    """Wer die Antwort veraendert, veraendert nichts — sonst koennte ein
+    Anzeige-Renderer das Kontenbuch still beschaedigen."""
+    eintrag = ModRecord(identity="#% to Cold Resistance", kind="explicitMods")
+    eintrag.tier_ledger["Allflame"] = {"Ring": {27.0: [2, 40, 55]}}
+
+    eintrag.ledgers("Allflame")["Ring"][27.0][0] = 999
+
+    assert eintrag.tier_ledger["Allflame"]["Ring"][27.0] == [2, 40, 55]
+
+
+def test_the_front_can_follow_a_single_league() -> None:
+    eintrag = ModRecord(identity="#% to Cold Resistance", kind="explicitMods")
+    eintrag.tier_ledger["Allflame"] = {"Ring": {12.0: [1, 30, 30]}}
+    eintrag.tier_ledger[""] = {"Ring": {18.0: [1, 26, 26]}}
+
+    assert eintrag.tier_front("Ring", "Allflame") == [(12.0, 30)]
+    assert eintrag.tier_front("Ring") == [(18.0, 26)]
+
+
+def test_backfilling_sorts_the_evidence_into_league_pots() -> None:
+    """Der Nachtrag kennt die Liga jedes Cache-Items — genau deshalb
+    darf der Sprung auf Aufbau 6 den alten Block einfach verwerfen."""
+    item = _item(frameType=RARE, ilvl=42, league="Allflame",
+                 baseType="Gold Ring", typeLine="Gold Ring",
+                 explicitMods=["+27% to Cold Resistance"])
+    sammlung = ModCollection()
+    sammlung.observe_item(item)
+    eintrag = sammlung.get("explicitMods", "+27% to Cold Resistance")
+    eintrag.tier_ledger.clear()
+
+    assert sammlung.backfill_tiers([item]) == 1
+    assert eintrag.tier_ledger == {"Allflame": {"Ring": {27.0: [1, 42, 42]}}}
+
+
+def test_a_v5_ledger_without_the_league_level_is_dropped_on_load(tmp_path) -> None:
+    """Aufbau 5 fuehrte die Kategorie direkt aussen. Ein erfundener
+    Liga-Topf waere eine Behauptung — verwerfen, der Nachtrag baut das
+    Buch liga-getrennt neu (wie beim tiers-Block aus Aufbau 3/4)."""
+    ziel = tmp_path / "alt.json"
+    ziel.write_text(json.dumps({
+        "version": 5,
+        "mods": [{"identity": "#% to Cold Resistance", "kind": "explicitMods",
+                  "count": 7, "example": "+27% to Cold Resistance",
+                  "spans": {"": {"2": {"count": 7, "lows": [6], "highs": [48],
+                                       "ilvl_low": 5, "ilvl_high": 80}}},
+                  "ledger": {"Ring": [[27, 3, 35, 60]]}}],
+    }), encoding="utf-8")
+
+    zurueck = mc.load(ziel)
+
+    eintrag = zurueck.get("explicitMods", "+27% to Cold Resistance")
+    assert eintrag.count == 7                    # nichts verloren
+    assert eintrag.tier_ledger == {}             # aber kein erfundener Topf
+    assert zurueck.has_tier_evidence() is False  # der Nachtrag laeuft an
+
+
+def test_the_league_level_survives_a_round_trip(tmp_path) -> None:
+    sammlung = ModCollection()
+    sammlung.observe_item(_item(frameType=RARE, ilvl=42, league="Allflame",
+                                baseType="Gold Ring", typeLine="Gold Ring",
+                                explicitMods=["+27% to Cold Resistance"]))
+    ziel = tmp_path / "sammlung.json"
+    sammlung.save(ziel)
+
+    zurueck = mc.load(ziel)
+
+    eintrag = zurueck.get("explicitMods", "+27% to Cold Resistance")
+    assert eintrag.tier_ledger == {"Allflame": {"Ring": {27.0: [1, 42, 42]}}}

@@ -15,7 +15,7 @@ from poe_view.ui.mod_album import (BANDS_HEADING, COLUMNS, COUNT_COL,
                                    league_label, matching_count,
                                    range_column_text, rarity_label,
                                    record_detail_html, tier_number,
-                                   tier_progress)
+                                   tier_progress, tier_slots)
 
 
 def _sammlung() -> ModCollection:
@@ -456,8 +456,8 @@ def _mit_belegen(front) -> "ModCollection":
     sammlung.observe("explicitMods", "+27% to Cold Resistance", rarity=2)
     sammlung.clear_new()
     record = sammlung.get("explicitMods", "+27% to Cold Resistance")
-    record.tier_ledger["Ring"] = {float(wert): [1, il, il]
-                                  for wert, il in front}
+    record.tier_ledger[""] = {"Ring": {float(wert): [1, il, il]
+                                       for wert, il in front}}
     return sammlung
 
 
@@ -667,10 +667,10 @@ def test_the_band_table_counts_per_band() -> None:
     from poe_view.services.mod_collection import ModRecord
     from poe_view.ui.mod_album import band_table
     eintrag = ModRecord(identity="#% to Cold Resistance", kind="explicitMods")
-    eintrag.tier_ledger["Ring"] = _konto_mit_zwei_baendern()
+    eintrag.tier_ledger[""] = {"Ring": _konto_mit_zwei_baendern()}
     baender = mod_tiers.bands(eintrag.tier_front("Ring"))
 
-    zeilen = band_table(eintrag.tier_ledger["Ring"], baender)
+    zeilen = band_table(eintrag.ledgers()["Ring"], baender)
 
     # Kopfzeile + eine Zeile je Band
     assert len(zeilen) == 1 + len(baender)
@@ -687,10 +687,10 @@ def test_the_bands_are_labelled_in_percent_not_tiers() -> None:
     from poe_view.services.mod_collection import ModRecord
     from poe_view.ui.mod_album import band_table
     eintrag = ModRecord(identity="#% to Cold Resistance", kind="explicitMods")
-    eintrag.tier_ledger["Ring"] = _konto_mit_zwei_baendern()
+    eintrag.tier_ledger[""] = {"Ring": _konto_mit_zwei_baendern()}
     baender = mod_tiers.bands(eintrag.tier_front("Ring"))
 
-    zeilen = band_table(eintrag.tier_ledger["Ring"], baender)
+    zeilen = band_table(eintrag.ledgers()["Ring"], baender)
 
     assert zeilen[1].startswith("0–")
     assert "100 %" in zeilen[-1]
@@ -706,7 +706,7 @@ def test_every_ledger_value_lands_in_exactly_one_band() -> None:
     konto = _konto_mit_zwei_baendern()
     konto[11.5] = [9, 12, 12]      # zwischen Band 1 (bis 8) und Band 2 (ab 9)
     eintrag = ModRecord(identity="#% to Cold Resistance", kind="explicitMods")
-    eintrag.tier_ledger["Ring"] = konto
+    eintrag.tier_ledger[""] = {"Ring": konto}
     baender = mod_tiers.bands(eintrag.tier_front("Ring"))
 
     zeilen = band_table(konto, baender)
@@ -774,7 +774,8 @@ def _mit_konto(werte: dict, kategorie: str = "Ring") -> ModCollection:
     sammlung.observe("explicitMods", "+27% to Cold Resistance", rarity=2)
     sammlung.clear_new()
     record = sammlung.get("explicitMods", "+27% to Cold Resistance")
-    record.tier_ledger[kategorie] = {float(w): [n, 50, 60] for w, n in werte.items()}
+    record.tier_ledger[""] = {kategorie: {float(w): [n, 50, 60]
+                                          for w, n in werte.items()}}
     return sammlung
 
 
@@ -864,9 +865,9 @@ def test_a_record_can_show_both_tables_at_once() -> None:
     beide Tabellen stehen da, getrennt beschriftet."""
     sammlung = _mit_konto({7: 3, 20: 5})
     record = sammlung.get("explicitMods", "+27% to Cold Resistance")
-    record.tier_ledger["Amulet"] = {float(w): [1, il, il]
-                                   for w, il in [(6, 5), (12, 14), (18, 26),
-                                                (24, 38), (30, 50)]}
+    record.tier_ledger[""]["Amulet"] = {float(w): [1, il, il]
+                                        for w, il in [(6, 5), (12, 14), (18, 26),
+                                                      (24, 38), (30, 50)]}
 
     text = format_record_detail(record, _leiter((1, 6, 11), (24, 12, 17)))
 
@@ -886,7 +887,7 @@ def test_categories_are_ordered_by_sightings_not_alphabetically() -> None:
     (so gebaut ueberlebte er seine Gegenprobe)."""
     sammlung = _mit_konto({7: 2}, kategorie="Amulet")
     record = sammlung.get("explicitMods", "+27% to Cold Resistance")
-    record.tier_ledger["Ring"] = {7.0: [200, 50, 60]}
+    record.tier_ledger[""]["Ring"] = {7.0: [200, 50, 60]}
 
     text = format_record_detail(
         record, _leiter((1, 6, 11), kategorien=("Ring", "Amulet")))
@@ -939,17 +940,32 @@ def test_the_range_column_appends_the_tier_progress() -> None:
     assert text.endswith("2/3")
 
 
-def test_the_tier_progress_disappears_once_a_pot_filter_is_active() -> None:
-    """Die Range links zeigt dann nur die ausgewaehlten Toepfe, das
-    Kontenbuch dahinter kennt weder Liga noch Raritaet. Zwei Zahlen ueber
-    verschiedene Populationen in einer Zelle - genau das, was Peter an
-    der frueheren Seen-Spalte aufgefallen ist."""
+def test_the_tier_progress_disappears_only_for_the_rarity_filter() -> None:
+    """Das Kontenbuch kennt keine Raritaet — beim Raritaets-Filter
+    waeren Range und Zaehler zwei Zahlen ueber verschiedene Populationen
+    in einer Zelle (Peters Einwand an der frueheren Seen-Spalte). Die
+    LIGA kennt es seit Aufbau 6: Beim Liga-Filter folgen beide
+    Zellenhaelften derselben Auswahl, der Zaehler bleibt stehen."""
     sammlung = _mit_konto({7: 3, 20: 5})
     record = sammlung.get("explicitMods", "+27% to Cold Resistance")
     ladder = _leiter((1, 6, 11), (24, 12, 17), (48, 18, 23))
 
-    assert "/" not in range_column_text(record, LEGACY_LEAGUE, None, ladder)
     assert "/" not in range_column_text(record, None, lambda r: r == 2, ladder)
+    # _mit_konto legt die Belege in den Altbestands-Topf "" — genau der
+    # ist hier als Liga gewaehlt, der Zaehler zaehlt also weiter.
+    assert range_column_text(record, LEGACY_LEAGUE, None, ladder).endswith("2/3")
+
+
+def test_the_tier_progress_follows_the_league_filter() -> None:
+    """Eine Liga ohne eigene Belege zeigt keinen Zaehler — die Slots und
+    Haekchen anderer Ligen duerfen nicht durchscheinen (Peters
+    Screenshot mit Liga-Filter, 2026-08-28)."""
+    sammlung = _mit_konto({7: 3, 20: 5})
+    record = sammlung.get("explicitMods", "+27% to Cold Resistance")
+    ladder = _leiter((1, 6, 11), (24, 12, 17), (48, 18, 23))
+
+    assert "/" not in range_column_text(record, "Allflame", None, ladder)
+    assert tier_slots(record, ladder, "Allflame") is None
 
 
 def test_without_mod_knowledge_the_range_column_is_unchanged() -> None:
@@ -966,7 +982,7 @@ def test_the_tier_progress_follows_the_category_with_the_most_sightings() -> Non
     zufaellig ein Stueck herumliegt."""
     sammlung = _mit_konto({7: 2}, kategorie="Amulet")
     record = sammlung.get("explicitMods", "+27% to Cold Resistance")
-    record.tier_ledger["Ring"] = {7.0: [200, 50, 60], 14.0: [50, 50, 60]}
+    record.tier_ledger[""]["Ring"] = {7.0: [200, 50, 60], 14.0: [50, 50, 60]}
 
     # Beide Kategorien haben hier eine Leiter, damit wirklich die
     # SICHTUNGSZAHL entscheidet und nicht die Verfuegbarkeit.
@@ -974,7 +990,7 @@ def test_the_tier_progress_follows_the_category_with_the_most_sightings() -> Non
                                          kategorien=("Ring", "Amulet")))
     assert stand == (2, 2)          # Ring: Werte 7 und 14 treffen beide Sprossen
     # Amulet allein haette nur eine getroffen.
-    assert collected_tiers(record.tier_ledger["Amulet"],
+    assert collected_tiers(record.ledgers()["Amulet"],
                           _leiter((1, 6, 11), (24, 12, 17),
                                  kategorien=("Amulet",)).ladder(
                                      "#% to Cold Resistance", "Amulet")) == (1, 2)
@@ -1107,3 +1123,79 @@ def test_the_dialog_carries_the_stats_line(qapp) -> None:
     dialog = ModAlbumDialog(sammlung, None, ladder)
 
     assert "complete sets" in dialog._stats_label.text()
+
+
+# --------------------- Liga-Filter und Sammel-Anzeigen ------------------- #
+# Peters Screenshot (2026-08-28, Liga-Filter "SSF R Allflame"): Slots,
+# Haekchen und Kopfzeile rechneten ueber ALLE Ligen. Seit Aufbau 6 des
+# Kontenbuchs folgen sie der gewaehlten Liga (§4.53.3).
+
+def _mit_zwei_ligen() -> ModCollection:
+    """Komplettes Set im Altbestand, nur eine Sprosse in "Allflame".
+
+    Die Liga braucht eine ECHTE Sichtung (Spanne), nicht nur einen
+    leeren Topf: Combo-Eintrag und Proxy-Filter haengen beide an den
+    Spannen — ein leerer Topf stuende zur Wahl, filterte aber jede
+    Zeile weg."""
+    sammlung = _mit_konto({7: 3, 14: 1, 20: 5})
+    sammlung.observe("explicitMods", "+27% to Cold Resistance", rarity=2,
+                     league="Allflame")
+    sammlung.clear_new()
+    record = sammlung.get("explicitMods", "+27% to Cold Resistance")
+    record.tier_ledger["Allflame"] = {"Ring": {7.0: [1, 50, 50]}}
+    return sammlung
+
+
+def test_album_stats_follow_the_league() -> None:
+    from poe_view.ui.mod_album import album_stats
+    sammlung = _mit_zwei_ligen()
+    records = list(sammlung.records())
+    ladder = _leiter((1, 6, 11), (24, 12, 17), (48, 18, 23))
+
+    ueberall = album_stats(records, ladder)
+    nur_liga = album_stats(records, ladder, "Allflame")
+
+    assert "1 complete sets" in ueberall
+    assert "0 complete sets" in nur_liga
+    assert "tiers 1/3" in nur_liga
+
+
+def test_the_slot_mask_follows_the_range_filter() -> None:
+    from poe_view.ui.mod_album import TIER_SLOTS_ROLE, ModAlbumModel
+    sammlung = _mit_zwei_ligen()
+    records = sorted(sammlung.records(), key=lambda r: r.identity)
+    ladder = _leiter((1, 6, 11), (24, 12, 17), (48, 18, 23))
+    model = ModAlbumModel(records, frozenset(), ladder)
+
+    assert model.data(model.index(0, 0), TIER_SLOTS_ROLE) == [True, True, True]
+
+    model.set_range_filter("Allflame", None)
+
+    assert model.data(model.index(0, 0), TIER_SLOTS_ROLE) == [True, False, False]
+
+
+def test_the_detail_ladder_follows_the_league() -> None:
+    sammlung = _mit_zwei_ligen()
+    record = sammlung.get("explicitMods", "+27% to Cold Resistance")
+    ladder = _leiter((1, 6, 11), (24, 12, 17), (48, 18, 23))
+
+    assert "3 of 3 tiers" in format_record_detail(record, ladder)
+    assert "1 of 3 tiers" in format_record_detail(record, ladder, "Allflame")
+
+
+def test_the_dialog_recomputes_stats_and_detail_on_a_league_change(qapp) -> None:
+    """Kopfzeile und offener Steckbrief muessen mitziehen, sonst
+    behauptet der Filter etwas, das die Zahlen darunter nicht
+    einloesen."""
+    sammlung = _mit_zwei_ligen()
+    ladder = _leiter((1, 6, 11), (24, 12, 17), (48, 18, 23))
+    dialog = ModAlbumDialog(sammlung, None, ladder)
+    dialog._table.selectRow(0)
+    assert "3 of 3 tiers" in dialog._detail.toPlainText()
+
+    index = dialog._league_combo.findData("Allflame")
+    assert index >= 0
+    dialog._league_combo.setCurrentIndex(index)
+
+    assert "0 complete sets" in dialog._stats_label.text()
+    assert "1 of 3 tiers" in dialog._detail.toPlainText()
