@@ -58,7 +58,16 @@ log = logging.getLogger(__name__)
 _BASE_URL = "https://repoe-fork.github.io"
 _FILES = ("mods.min.json", "stat_translations.min.json", "base_items.min.json")
 
-_CACHE_DIR = config.APP_DATA_DIR / "mod-knowledge"
+_DIR_NAME = "mod-knowledge"
+
+
+def _cache_dir() -> Path:
+    """Als Funktion statt Modul-Konstante — wie `cache_backup.directory()`.
+    Eine bei Modul-Import eingefrorene Konstante hätte `config.APP_DATA_DIR`
+    NICHT mehr gesehen, sobald Tests es umbiegen (dieselbe wiederkehrende
+    Falle wie einst bei `cache_backup.BACKUP_DIR`/`config.LOG_DIR`)."""
+    return config.APP_DATA_DIR / _DIR_NAME
+
 
 # RePoE ändert sich mit Spiel-Patches, nicht mit Sitzungen — eine Woche
 # hält den ~30-MB-Download selten, ohne nach einem Liga-Patch wochenlang
@@ -82,7 +91,7 @@ _CLASS_RENAME = {
 # --- Download/Cache (Muster: services/price_cache.py) ------------------- #
 
 def _manifest_path() -> Path:
-    return _CACHE_DIR / "manifest.json"
+    return _cache_dir() / "manifest.json"
 
 
 def is_fresh() -> bool:
@@ -90,7 +99,7 @@ def is_fresh() -> bool:
     manifest = _read_manifest()
     if manifest is None or manifest.get("version") != CACHE_VERSION:
         return False
-    if not all((_CACHE_DIR / name).is_file() for name in _FILES):
+    if not all((_cache_dir() / name).is_file() for name in _FILES):
         return False
     age = time.time() - manifest.get("fetched_at", 0)
     return age <= TTL_SECONDS
@@ -126,11 +135,12 @@ def fetch(http: httpx.Client | None = None) -> bool:
                 return False
             payloads[name] = resp.content
 
-        _CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        cache_dir = _cache_dir()
+        cache_dir.mkdir(parents=True, exist_ok=True)
         for name, data in payloads.items():
-            tmp = _CACHE_DIR / f"{name}.tmp"
+            tmp = cache_dir / f"{name}.tmp"
             tmp.write_bytes(data)
-            tmp.replace(_CACHE_DIR / name)
+            tmp.replace(cache_dir / name)
         _manifest_path().write_text(
             json.dumps({"version": CACHE_VERSION, "fetched_at": time.time()}), encoding="utf-8")
         return True
@@ -148,11 +158,12 @@ def ensure_fresh(http: httpx.Client | None = None) -> bool:
 
 
 def _load_raw() -> tuple[dict, list, dict] | None:
+    cache_dir = _cache_dir()
     try:
-        mods = json.loads((_CACHE_DIR / "mods.min.json").read_text(encoding="utf-8"))
+        mods = json.loads((cache_dir / "mods.min.json").read_text(encoding="utf-8"))
         translations = json.loads(
-            (_CACHE_DIR / "stat_translations.min.json").read_text(encoding="utf-8"))
-        base_items = json.loads((_CACHE_DIR / "base_items.min.json").read_text(encoding="utf-8"))
+            (cache_dir / "stat_translations.min.json").read_text(encoding="utf-8"))
+        base_items = json.loads((cache_dir / "base_items.min.json").read_text(encoding="utf-8"))
         return mods, translations, base_items
     except (OSError, json.JSONDecodeError):
         return None

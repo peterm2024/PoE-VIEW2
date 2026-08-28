@@ -75,14 +75,16 @@ nach [SemVer](https://semver.org/lang/de/).
   trennen lässt. Scharf werden die Bänder, wenn man eine Liga von unten
   hochspielt.
 
-- **Fundament einer echten Mod-Datenbank** (noch ohne UI-Anbindung):
-  PoE-VIEW2 kann jetzt bei Bedarf öffentliche Spieldaten (RePoE) laden
-  und daraus echte Tier-Leitern bauen, statt sie nur aus dem
-  Item-Level zu schätzen. Gegen Peters echten Bestand geprüft: 68 % aller
-  bisher aufgezeichneten, tier-fähigen Sichtungen haben bereits eine
-  belegte Leiter. Die Spieldaten selbst gehören GGG und werden deshalb
-  nicht mit der App ausgeliefert, sondern bei Bedarf heruntergeladen und
-  lokal vorgehalten, ähnlich dem bestehenden Preis-Cache.
+- **Fundament einer echten Mod-Datenbank** (noch ohne sichtbare
+  Auswertung): PoE-VIEW2 lädt jetzt bei jedem Start im Hintergrund
+  öffentliche Spieldaten (RePoE) und baut daraus echte Tier-Leitern,
+  statt sie nur aus dem Item-Level zu schätzen. Gegen Peters echten
+  Bestand geprüft: 68 % aller bisher aufgezeichneten, tier-fähigen
+  Sichtungen haben bereits eine belegte Leiter. Die Spieldaten selbst
+  gehören GGG und werden deshalb nicht mit der App ausgeliefert,
+  sondern bei Bedarf heruntergeladen und lokal vorgehalten, ähnlich dem
+  bestehenden Preis-Cache — unabhängig vom Login, unauffällig, ohne
+  eigene Anzeige.
 
 ### Behoben
 

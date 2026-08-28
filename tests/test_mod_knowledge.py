@@ -9,6 +9,14 @@ import httpx
 
 from poe_view.services import mod_knowledge as mk
 
+# tests/conftest.py stubbt mk.fetch() global weg, damit kein MainWindow()
+# in der Testsuite real gegen repoe-fork.github.io abruft (§4.53). Genau
+# die Tests hier wollen aber die ECHTE fetch()-Logik pruefen - deshalb
+# hier die echte Funktion VOR jeder Fixture einfangen (das Funktionsobjekt
+# selbst aendert sich durch monkeypatch.setattr nicht, nur die Bindung des
+# Modul-Attributs) und in genau diesen Tests wieder einsetzen.
+_real_fetch = mk.fetch
+
 
 def _payload_bytes() -> dict[str, bytes]:
     return {name: f"{{\"marker\": \"{name}\"}}".encode("utf-8") for name in mk._FILES}
@@ -21,12 +29,13 @@ def _mock_client(handler) -> httpx.Client:
 # --- Download/Cache ------------------------------------------------------ #
 
 def test_is_fresh_false_when_nothing_cached(tmp_path, monkeypatch) -> None:
-    monkeypatch.setattr(mk, "_CACHE_DIR", tmp_path / "mod-knowledge")
+    monkeypatch.setattr(mk.config, "APP_DATA_DIR", tmp_path)
     assert mk.is_fresh() is False
 
 
 def test_fetch_writes_all_three_files_and_a_manifest(tmp_path, monkeypatch) -> None:
-    monkeypatch.setattr(mk, "_CACHE_DIR", tmp_path / "mod-knowledge")
+    monkeypatch.setattr(mk.config, "APP_DATA_DIR", tmp_path)
+    monkeypatch.setattr(mk, "fetch", _real_fetch)  # siehe Modul-Docstring
 
     def handler(request: httpx.Request) -> httpx.Response:
         name = request.url.path.rsplit("/", 1)[-1]
@@ -35,13 +44,14 @@ def test_fetch_writes_all_three_files_and_a_manifest(tmp_path, monkeypatch) -> N
     assert mk.fetch(_mock_client(handler)) is True
     assert mk.is_fresh() is True
     for name in mk._FILES:
-        assert (mk._CACHE_DIR / name).read_bytes() == _payload_bytes()[name]
+        assert (mk._cache_dir() / name).read_bytes() == _payload_bytes()[name]
 
 
 def test_fetch_leaves_the_cache_untouched_on_a_failed_request(tmp_path, monkeypatch) -> None:
     """Ein Teil-Download darf keinen inkonsistenten Stand hinterlassen —
     hier bricht der zweite von drei Downloads ab."""
-    monkeypatch.setattr(mk, "_CACHE_DIR", tmp_path / "mod-knowledge")
+    monkeypatch.setattr(mk.config, "APP_DATA_DIR", tmp_path)
+    monkeypatch.setattr(mk, "fetch", _real_fetch)  # siehe Modul-Docstring
     calls = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -51,11 +61,12 @@ def test_fetch_leaves_the_cache_untouched_on_a_failed_request(tmp_path, monkeypa
         return httpx.Response(200, content=b"{}")
 
     assert mk.fetch(_mock_client(handler)) is False
-    assert not mk._CACHE_DIR.exists()
+    assert not mk._cache_dir().exists()
 
 
 def test_fetch_survives_a_network_error(tmp_path, monkeypatch) -> None:
-    monkeypatch.setattr(mk, "_CACHE_DIR", tmp_path / "mod-knowledge")
+    monkeypatch.setattr(mk.config, "APP_DATA_DIR", tmp_path)
+    monkeypatch.setattr(mk, "fetch", _real_fetch)  # siehe Modul-Docstring
 
     def handler(request: httpx.Request) -> httpx.Response:
         raise httpx.ConnectError("kein Netz", request=request)
@@ -65,7 +76,7 @@ def test_fetch_survives_a_network_error(tmp_path, monkeypatch) -> None:
 
 def test_an_entry_from_an_older_cache_version_counts_as_stale(tmp_path, monkeypatch) -> None:
     cache_dir = tmp_path / "mod-knowledge"
-    monkeypatch.setattr(mk, "_CACHE_DIR", cache_dir)
+    monkeypatch.setattr(mk.config, "APP_DATA_DIR", tmp_path)
     cache_dir.mkdir()
     for name in mk._FILES:
         (cache_dir / name).write_text("{}", encoding="utf-8")
@@ -76,7 +87,7 @@ def test_an_entry_from_an_older_cache_version_counts_as_stale(tmp_path, monkeypa
 
 def test_an_entry_older_than_the_ttl_counts_as_stale(tmp_path, monkeypatch) -> None:
     cache_dir = tmp_path / "mod-knowledge"
-    monkeypatch.setattr(mk, "_CACHE_DIR", cache_dir)
+    monkeypatch.setattr(mk.config, "APP_DATA_DIR", tmp_path)
     cache_dir.mkdir()
     for name in mk._FILES:
         (cache_dir / name).write_text("{}", encoding="utf-8")
@@ -86,7 +97,7 @@ def test_an_entry_older_than_the_ttl_counts_as_stale(tmp_path, monkeypatch) -> N
 
 
 def test_ensure_fresh_skips_the_download_when_already_fresh(tmp_path, monkeypatch) -> None:
-    monkeypatch.setattr(mk, "_CACHE_DIR", tmp_path / "mod-knowledge")
+    monkeypatch.setattr(mk.config, "APP_DATA_DIR", tmp_path)
     monkeypatch.setattr(mk, "is_fresh", lambda: True)
     monkeypatch.setattr(mk, "fetch", lambda http=None: (_ for _ in ()).throw(
         AssertionError("fetch() haette nicht aufgerufen werden duerfen")))
@@ -190,13 +201,13 @@ def _write_fixture(cache_dir) -> None:
 
 
 def test_build_returns_none_without_a_cache(tmp_path, monkeypatch) -> None:
-    monkeypatch.setattr(mk, "_CACHE_DIR", tmp_path / "mod-knowledge")
+    monkeypatch.setattr(mk.config, "APP_DATA_DIR", tmp_path)
     assert mk.build() is None
 
 
 def test_build_produces_a_ladder_sorted_by_required_level(tmp_path, monkeypatch) -> None:
     cache_dir = tmp_path / "mod-knowledge"
-    monkeypatch.setattr(mk, "_CACHE_DIR", cache_dir)
+    monkeypatch.setattr(mk.config, "APP_DATA_DIR", tmp_path)
     _write_fixture(cache_dir)
 
     knowledge = mk.build()
@@ -210,7 +221,7 @@ def test_build_uses_the_misc_domain_for_jewels(tmp_path, monkeypatch) -> None:
     """Die Sackgasse, die die Trefferquote von 42% auf 63,3% hob:
     normale Jewels laufen unter domain 'misc', nicht 'item'."""
     cache_dir = tmp_path / "mod-knowledge"
-    monkeypatch.setattr(mk, "_CACHE_DIR", cache_dir)
+    monkeypatch.setattr(mk.config, "APP_DATA_DIR", tmp_path)
     _write_fixture(cache_dir)
     knowledge = mk.build()
     assert knowledge.has("# to Intelligence", "Jewel")
@@ -218,7 +229,7 @@ def test_build_uses_the_misc_domain_for_jewels(tmp_path, monkeypatch) -> None:
 
 def test_build_skips_unreleased_bases(tmp_path, monkeypatch) -> None:
     cache_dir = tmp_path / "mod-knowledge"
-    monkeypatch.setattr(mk, "_CACHE_DIR", cache_dir)
+    monkeypatch.setattr(mk.config, "APP_DATA_DIR", tmp_path)
     _write_fixture(cache_dir)
     knowledge = mk.build()
     # "Ghost Amulet" ist unreleased und traegt trotzdem den gleichen Tag
@@ -230,7 +241,7 @@ def test_build_skips_unreleased_bases(tmp_path, monkeypatch) -> None:
 
 def test_build_skips_essence_only_mods(tmp_path, monkeypatch) -> None:
     cache_dir = tmp_path / "mod-knowledge"
-    monkeypatch.setattr(mk, "_CACHE_DIR", cache_dir)
+    monkeypatch.setattr(mk.config, "APP_DATA_DIR", tmp_path)
     _write_fixture(cache_dir)
     knowledge = mk.build()
     ladder = knowledge.ladder("# to Intelligence", "Amulet")
@@ -239,7 +250,7 @@ def test_build_skips_essence_only_mods(tmp_path, monkeypatch) -> None:
 
 def test_build_skips_multi_stat_mods(tmp_path, monkeypatch) -> None:
     cache_dir = tmp_path / "mod-knowledge"
-    monkeypatch.setattr(mk, "_CACHE_DIR", cache_dir)
+    monkeypatch.setattr(mk.config, "APP_DATA_DIR", tmp_path)
     _write_fixture(cache_dir)
     knowledge = mk.build()
     ladder = knowledge.ladder("# to Intelligence", "Amulet")
@@ -253,7 +264,7 @@ def test_build_a_mod_ineligible_everywhere_produces_no_ladder(tmp_path, monkeypa
     """NotEligibleForAnything hat ueberall Gewicht 0 (weder 'amulet' noch
     'default') und darf deshalb in KEINER Leiter auftauchen."""
     cache_dir = tmp_path / "mod-knowledge"
-    monkeypatch.setattr(mk, "_CACHE_DIR", cache_dir)
+    monkeypatch.setattr(mk.config, "APP_DATA_DIR", tmp_path)
     _write_fixture(cache_dir)
     knowledge = mk.build()
     for steps in knowledge._ladders.values():
@@ -262,7 +273,7 @@ def test_build_a_mod_ineligible_everywhere_produces_no_ladder(tmp_path, monkeypa
 
 def test_build_a_mod_without_a_translation_is_skipped_without_crashing(tmp_path, monkeypatch) -> None:
     cache_dir = tmp_path / "mod-knowledge"
-    monkeypatch.setattr(mk, "_CACHE_DIR", cache_dir)
+    monkeypatch.setattr(mk.config, "APP_DATA_DIR", tmp_path)
     _write_fixture(cache_dir)
     knowledge = mk.build()  # darf nicht an UnknownTranslationMod scheitern
     assert len(knowledge) == 2  # Amulet und Jewel, je fuer additional_intelligence
@@ -270,7 +281,7 @@ def test_build_a_mod_without_a_translation_is_skipped_without_crashing(tmp_path,
 
 def test_get_caches_the_built_knowledge(tmp_path, monkeypatch) -> None:
     cache_dir = tmp_path / "mod-knowledge"
-    monkeypatch.setattr(mk, "_CACHE_DIR", cache_dir)
+    monkeypatch.setattr(mk.config, "APP_DATA_DIR", tmp_path)
     monkeypatch.setattr(mk, "_cached", None)
     _write_fixture(cache_dir)
 

@@ -14,9 +14,10 @@ from PySide6.QtWidgets import QMenu
 
 from poe_view.api.models import Character, Item, StashTab
 from poe_view.api.ninja import PriceIndex
-from poe_view.services import price_cache
-from poe_view.services.api_worker import (FetchPricesJob, FetchStashListJob,
-                                          LOGIN_EXPIRED, LOGIN_NO_TOKEN)
+from poe_view.services import mod_knowledge, price_cache
+from poe_view.services.api_worker import (FetchModKnowledgeJob, FetchPricesJob,
+                                          FetchStashListJob, LOGIN_EXPIRED,
+                                          LOGIN_NO_TOKEN)
 from poe_view.services.poe2_probe import Probe, ProbeCall
 from poe_view.ui import external_tools, mod_bar
 from poe_view.ui.item_table import CONFIGURABLE_COLUMNS
@@ -4883,6 +4884,49 @@ def test_on_prices_loaded_stores_index_and_writes_through_to_disk_cache(qapp, mo
 
     assert win._price_indexes["Standard"] is fake_index
     assert saved == [("Standard", fake_index)]
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_constructor_submits_a_mod_knowledge_job_right_after_bootstrap(qapp, monkeypatch) -> None:
+    """§4.53: laeuft unabhaengig vom Login, deshalb reicht irgendein Platz
+    in der Queue - Hauptsache einmal pro Start, wie bei BootstrapJob
+    daneben dokumentiert."""
+    from poe_view.services.api_worker import ApiWorker, BootstrapJob
+
+    monkeypatch.setattr(ApiWorker, "start", lambda self: None)  # Worker-Thread nie starten
+
+    win = MainWindow()
+
+    jobs = []
+    while not win.worker._jobs.empty():
+        jobs.append(win.worker._jobs.get_nowait())
+
+    assert isinstance(jobs[0], BootstrapJob)
+    assert any(isinstance(j, FetchModKnowledgeJob) for j in jobs[1:])
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_on_mod_knowledge_loaded_stores_the_result(qapp) -> None:
+    win = MainWindow()
+    fake_knowledge = mod_knowledge.Knowledge({})
+
+    win._on_mod_knowledge_loaded(fake_knowledge)
+
+    assert win._mod_knowledge is fake_knowledge
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_on_mod_knowledge_loaded_accepts_none_without_crashing(qapp) -> None:
+    """Kein Cache, kein Netz beim ersten Start - der haeufigste Fall,
+    solange RePoE noch nicht heruntergeladen wurde."""
+    win = MainWindow()
+
+    win._on_mod_knowledge_loaded(None)
+
+    assert win._mod_knowledge is None
     win.worker.stop()
     win.worker.wait(5000)
 

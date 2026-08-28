@@ -31,16 +31,16 @@ from poe_view.api.models import (Character, Item, StashTab,
                                  dominant_category, is_ggg_suffix)
 from poe_view.api.ninja import PriceIndex
 from poe_view.services import (cache_backup, cache_writer, data_cache, gem_xp_log,
-                               icon_cache, mod_collection, poe2_probe,
-                               price_cache, xp_history)
+                               icon_cache, mod_collection, mod_knowledge,
+                               poe2_probe, price_cache, xp_history)
 from poe_view.services.instance_lock import InstanceLock
 from poe_view.services.zone_watcher import ZoneWatcher, resolve_client_log_path
 from poe_view.services.api_worker import (ApiWorker, BootstrapJob,
                                           BulkProgress, FetchAllItemsJob,
                                           FetchCharacterItemsJob,
                                           FetchCharactersJob, FetchIconJob,
-                                          FetchLeaguesJob, FetchPricesJob,
-                                          FetchStashItemsJob,
+                                          FetchLeaguesJob, FetchModKnowledgeJob,
+                                          FetchPricesJob, FetchStashItemsJob,
                                           FetchStashListJob, LOGIN_EXPIRED,
                                           LOGIN_NO_TOKEN, LoginJob,
                                           LogoutJob, Poe2ProbeJob)
@@ -712,6 +712,11 @@ class MainWindow(QMainWindow):
         # Die Mod-Sammlung (§4.52). Bis zum Laden leer — ohne Kontonamen
         # gibt es keine Datei, und das ist der Zustand vor dem Login.
         self._mod_collection = mod_collection.ModCollection()
+        # Echte Tier-Leitern aus RePoE (§4.53) — None, solange nichts
+        # geladen ist (kein Cache, noch kein Download gelungen) oder noch
+        # gar keine Antwort da ist. Rein lesend verwendet, sobald es
+        # eine UI-Stelle dafür gibt (Stufe 2-4, noch nicht gebaut).
+        self._mod_knowledge: mod_knowledge.Knowledge | None = None
         # "full" = alles einlesen, "tiers" = nur Tier-Belege nachtragen
         # (§_restore_mod_collection).
         self._mod_seed_mode = "full"
@@ -738,6 +743,11 @@ class MainWindow(QMainWindow):
         # (FALLSTRICKE #30). `submit()` ist eine reine Queue-Operation und
         # funktioniert bereits vor `worker.start()`.
         self.worker.submit(BootstrapJob())
+        # Anders als Bootstrap spielt die Reihenfolge hier keine Rolle:
+        # Das RePoE-Mod-Wissen braucht keinen Login und hängt an nichts,
+        # was `_build_ui()` auslöst — es darf irgendwo in der Warteschlange
+        # stehen, Hauptsache es läuft einmal pro Start (§FetchModKnowledgeJob).
+        self.worker.submit(FetchModKnowledgeJob())
 
         self._build_ui()
         # NACH `_build_ui()` (die Anzeige muss stehen), aber VOR
@@ -2212,6 +2222,7 @@ class MainWindow(QMainWindow):
         w.bulk_finished.connect(self._on_bulk_finished)
         w.offline_changed.connect(self._on_offline_changed)
         w.prices_loaded.connect(self._on_prices_loaded)
+        w.mod_knowledge_loaded.connect(self._on_mod_knowledge_loaded)
 
     # --- Worker-Slots (Main-Thread) ------------------------------------ #
 
@@ -2603,6 +2614,17 @@ class MainWindow(QMainWindow):
             self.history_model.set_price_index(index)
             self._update_value_sum()
         self._drive_refresh_mode()
+
+    def _on_mod_knowledge_loaded(self, knowledge: mod_knowledge.Knowledge | None) -> None:
+        """Ergebnis von `FetchModKnowledgeJob` (§4.53) — `None`, wenn
+        weder ein gültiger Cache noch ein frischer Download vorlagen
+        (z. B. erster Start ohne Netz). Noch ohne UI-Verwerter, deshalb
+        nur merken und protokollieren."""
+        self._mod_knowledge = knowledge
+        if knowledge is None:
+            log.info("Mod-Wissen: kein Stand verfügbar (kein Cache, Download fehlgeschlagen)")
+        else:
+            log.info("Mod-Wissen geladen: %d Tier-Leitern", len(knowledge))
 
     def _on_characters(self, characters: list[Character]) -> None:
         """/character liefert ligenübergreifend; gefiltert wird lokal übers Dropdown.

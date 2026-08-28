@@ -24,7 +24,7 @@ from poe_view.api import ninja, oauth
 from poe_view.api.client import ApiError, AuthError, PoeApiClient
 from poe_view.api.models import StashTab
 from poe_view.api.rate_limiter import RateLimitManager
-from poe_view.services import icon_cache, poe2_probe, token_store
+from poe_view.services import icon_cache, mod_knowledge, poe2_probe, token_store
 
 log = logging.getLogger(__name__)
 
@@ -160,6 +160,17 @@ class FetchPricesJob:
 
 
 @dataclass
+class FetchModKnowledgeJob:
+    """Lädt bei Bedarf die RePoE-Spieldaten nach und baut daraus die
+    Tier-Leitern (§4.53, ``services/mod_knowledge.py``). Unabhängig von
+    der GGG-API — kein Auth nötig, läuft deshalb auch ohne gesetztes
+    Token (``_NEEDS_AUTH`` lässt diesen Job bewusst aus), genau wie
+    ``FetchPricesJob``. Läuft einmal pro Programmstart: Auch bei einem
+    bereits frischen Cache muss das ~30-MB-JSON neu geparst werden, das
+    ist der eigentlich teure Teil, nicht der Download."""
+
+
+@dataclass
 class Poe2ProbeJob:
     """Einmaliger Rohdaten-Abzug der PoE2-Endpunkte (§4.43).
 
@@ -264,6 +275,7 @@ class ApiWorker(QThread):
     offline_changed = Signal(bool)             # True, solange GGG nicht erreichbar ist (§4.12)
     prices_loaded = Signal(str, object)        # league, PriceIndex
     poe2_probe_loaded = Signal(object)         # poe2_probe.Probe
+    mod_knowledge_loaded = Signal(object)      # mod_knowledge.Knowledge | None
 
     def __init__(self) -> None:
         super().__init__()
@@ -284,6 +296,11 @@ class ApiWorker(QThread):
         self._ninja_http = httpx.Client(timeout=20.0, headers={
             "User-Agent": "PoE-VIEW2-price-lookup (+https://github.com/peterm2024/PoE-VIEW2)",
         })
+        # Eigener, persistenter Client für RePoE — andere Basis-URL, kein
+        # Auth, deutlich längerer Timeout als bei Preisen/Icons: die drei
+        # Dateien zusammen sind ~30 MB.
+        self._repoe_http = httpx.Client(
+            timeout=60.0, headers={"User-Agent": config.user_agent()}, follow_redirects=True)
 
     # Von außen (Main-Thread) aufrufen:
     def submit(self, job) -> None:
@@ -355,6 +372,7 @@ class ApiWorker(QThread):
                 self.busy_changed.emit(False)
         self.client.close()
         self._ninja_http.close()
+        self._repoe_http.close()
 
     # Jobs, die ohne gültiges Token garantiert einen 401 kassieren. Bootstrap
     # und Login stellen die Authentifizierung selbst her, Logout und der
@@ -399,9 +417,12 @@ class ApiWorker(QThread):
 
         Nicht betroffen: Bootstrap (der Kontoname MUSS ermittelt werden,
         sonst wüsste die Instanz nie, ob sie das Konto vielleicht doch
-        beanspruchen darf), Logout, Icons vom CDN und die poe.ninja-Preise
-        — nichts davon läuft über GGGs Rate-Limit-Budget für dieses Konto,
-        und der Preis-Cache verträgt zwei Schreiber (§atomic_json)."""
+        beanspruchen darf), Logout, Icons vom CDN, die poe.ninja-Preise
+        und das RePoE-Mod-Wissen (§4.53) — nichts davon läuft über GGGs
+        Rate-Limit-Budget für dieses Konto, und sowohl der Preis-Cache
+        als auch der Mod-Wissen-Cache vertragen zwei Schreiber
+        (§atomic_json bzw. das eigene Alles-oder-nichts-Schreiben in
+        ``mod_knowledge.fetch``)."""
         if not self.read_only or not isinstance(job, self._NEEDS_AUTH):
             return False
         log.info("%s übersprungen — dieses Konto wird von einer anderen "
@@ -468,6 +489,11 @@ class ApiWorker(QThread):
                 # (z. B. "Loading stash list…") überschreiben.
                 index = ninja.fetch_price_index(league, self._ninja_http)
                 self.prices_loaded.emit(league, index)
+            case FetchModKnowledgeJob():
+                # Ebenfalls ohne Status-Text (§FetchPricesJob) — läuft
+                # unauffällig beim Programmstart, unabhängig vom Login.
+                mod_knowledge.ensure_fresh(self._repoe_http)
+                self.mod_knowledge_loaded.emit(mod_knowledge.get(rebuild=True))
 
     # ------------------------------------------------------------------ #
 

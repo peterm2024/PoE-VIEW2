@@ -7,8 +7,9 @@ Netzwerk) — der Client wird per Monkeypatch durch eine Fake-Methode ersetzt.
 from poe_view.api.models import Item, StashTab
 from poe_view.api.ninja import PriceIndex
 from poe_view.services.api_worker import (ApiWorker, FetchCharacterItemsJob,
-                                          FetchLeaguesJob, FetchPricesJob,
-                                          FetchStashItemsJob, LogoutJob)
+                                          FetchLeaguesJob, FetchModKnowledgeJob,
+                                          FetchPricesJob, FetchStashItemsJob,
+                                          LogoutJob)
 
 
 def test_logout_dispatch_deletes_the_token_and_requests_login(qapp, monkeypatch) -> None:
@@ -468,6 +469,55 @@ def test_fetch_prices_job_runs_without_a_token() -> None:
     assert not worker._skip_unauthenticated(FetchPricesJob("Standard"))
     worker.client.close()
     worker._ninja_http.close()
+
+
+def test_fetch_mod_knowledge_dispatch_refreshes_then_emits_the_built_knowledge(
+        qapp, monkeypatch) -> None:
+    worker = ApiWorker()
+    calls = []
+    monkeypatch.setattr("poe_view.services.api_worker.mod_knowledge.ensure_fresh",
+                        lambda http: calls.append(("ensure_fresh", http)) or True)
+    sentinel = object()
+    monkeypatch.setattr("poe_view.services.api_worker.mod_knowledge.get",
+                        lambda rebuild=False: calls.append(("get", rebuild)) or sentinel)
+
+    received = []
+    worker.mod_knowledge_loaded.connect(received.append)
+
+    worker._dispatch(FetchModKnowledgeJob())
+
+    assert calls == [("ensure_fresh", worker._repoe_http), ("get", True)]
+    assert received == [sentinel]
+    worker.client.close()
+    worker._repoe_http.close()
+
+
+def test_fetch_mod_knowledge_dispatch_emits_no_status_text(qapp, monkeypatch) -> None:
+    """Läuft unauffällig beim Programmstart (§FetchPricesJob) — soll keine
+    relevantere Meldung überschreiben."""
+    worker = ApiWorker()
+    monkeypatch.setattr("poe_view.services.api_worker.mod_knowledge.ensure_fresh",
+                        lambda http: False)
+    monkeypatch.setattr("poe_view.services.api_worker.mod_knowledge.get",
+                        lambda rebuild=False: None)
+    emitted: list[str] = []
+    worker.status.connect(emitted.append)
+
+    worker._dispatch(FetchModKnowledgeJob())
+
+    assert emitted == []
+    worker.client.close()
+    worker._repoe_http.close()
+
+
+def test_fetch_mod_knowledge_job_runs_without_a_token() -> None:
+    """Das RePoE-Mod-Wissen ist unabhängig von der GGG-Anmeldung — kein
+    Eintrag in ``ApiWorker._NEEDS_AUTH``."""
+    worker = ApiWorker()
+    assert not worker.client.has_token
+    assert not worker._skip_unauthenticated(FetchModKnowledgeJob())
+    worker.client.close()
+    worker._repoe_http.close()
 
 
 def test_a_401_without_a_token_does_not_delete_the_stored_token(qapp, monkeypatch) -> None:

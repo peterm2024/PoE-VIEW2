@@ -6318,11 +6318,45 @@ Cluster-Jewels, Abyssal-Sockets) sind noch nicht angefasst.
 `build()` liefert ein schreibgeschütztes `Knowledge`-Objekt
 (`ladder(identity, category)`, `has(...)`), `get()` hält es als
 Im-Speicher-Singleton — das Bauen liest und verarbeitet ~30 MB JSON,
-das lohnt sich nicht bei jeder Abfrage neu. Weder `build()` noch `get()`
-sind bisher an die UI angebunden: Dieser Abschnitt ist das FUNDAMENT
-(Stufe 1 eines vierstufigen Plans — Album-Range gegen die echte Spanne,
-echte T-Nummern statt Prozent, Geisterkarten für nie gesehene Mods),
-Stufe 2–4 stehen noch aus.
+das lohnt sich nicht bei jeder Abfrage neu.
+
+**Das Laden ist verdrahtet, eine UI-Auswertung noch nicht.** Ein neuer
+`FetchModKnowledgeJob` (`services/api_worker.py`) läuft — wie
+`FetchPricesJob` — ohne Login und ohne GGGs Rate-Limit-Budget zu
+berühren, deshalb weder in `_NEEDS_AUTH` noch von `_skip_read_only`
+betroffen. `MainWindow` reiht ihn einmal pro Programmstart ein, direkt
+nach `BootstrapJob` (Reihenfolge spielt hier anders als bei Bootstrap
+keine Rolle — der Job hängt an nichts, was `_build_ui()` auslöst). Im
+Worker-Thread ruft er `ensure_fresh()` (Download nur bei Bedarf) und
+danach IMMER `get(rebuild=True)`: Selbst ein bereits frischer
+Platten-Cache muss einmal pro Prozess aus JSON in Python-Objekte
+geparst werden, das ist der eigentlich teure Teil, nicht der Download
+selbst. Das Ergebnis (`Knowledge | None`) landet über das Signal
+`mod_knowledge_loaded` in `MainWindow._mod_knowledge` — bisher nur
+gespeichert und geloggt, von keiner UI-Stelle gelesen.
+
+**`_cache_dir()` ist eine Funktion, keine Modul-Konstante** — dieselbe
+Regel wie bei `cache_backup.directory()`: `config.APP_DATA_DIR` bei
+Modul-Import einzufrieren hätte den Testschutz (`tests/conftest.py`
+biegt `APP_DATA_DIR` pro Test auf ein Temp-Verzeichnis um) wirkungslos
+gemacht. Aus demselben Grund patcht `conftest.py`s Autouse-Fixture
+zusätzlich `mod_knowledge.fetch` auf einen Fehlschlag: Ohne diese Zeile
+hätte JEDES `MainWindow()` in der Testsuite (der Cache in einem frischen
+Temp-Verzeichnis ist nie "fresh") real gegen `repoe-fork.github.io`
+abgerufen.
+
+Dieser Abschnitt ist damit das FUNDAMENT samt Lade-Pipeline (Stufe 1
+eines vierstufigen Plans — Album-Range gegen die echte Spanne, echte
+T-Nummern statt Prozent, Geisterkarten für nie gesehene Mods), Stufe
+2–4 (die eigentliche UI-Auswertung) stehen noch aus.
+
+Getestet: `tests/test_mod_knowledge.py` (Download/Cache-Lebenszyklus
+gegen gemocktes HTTP, Leiter-Bau gegen kleine RePoE-artige Fixtures,
+beide Sackgassen der Messung als Regressionstest), `tests/
+test_api_worker.py` (Dispatch ruft `ensure_fresh` dann `get(rebuild=
+True)`, kein Status-Text, läuft ohne Token) und `tests/
+test_main_window_helpers.py` (Job steht nach Bootstrap in der Queue,
+`_on_mod_knowledge_loaded` speichert das Ergebnis inklusive `None`).
 
 ## 8. Entwicklungsstand
 

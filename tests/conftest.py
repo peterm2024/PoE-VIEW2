@@ -16,7 +16,8 @@ def qapp():
 @pytest.fixture(autouse=True)
 def _isolated_local_state(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     """Isoliert MainWindow() von echtem lokalem State: OAuth-Token (FALLSTRICKE #6),
-    data-cache.json und ui-settings.ini (Spalten-Sichtbarkeit)."""
+    data-cache.json, ui-settings.ini (Spalten-Sichtbarkeit) und dem
+    RePoE-Download (§4.53)."""
     monkeypatch.setattr("poe_view.services.token_store.load_token", lambda: None)
     monkeypatch.setattr("poe_view.services.data_cache._CACHE_FILE",
                         tmp_path / "unused-data-cache.json")
@@ -38,3 +39,12 @@ def _isolated_local_state(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     # Umgebung anders ausgehen lassen — Tests bestimmen ihren Zustand
     # selbst.
     monkeypatch.delenv("POEVIEW_GEM_XP_LOG", raising=False)
+    # MainWindow() reiht bei jedem Start einen FetchModKnowledgeJob ein
+    # (§4.53) — ohne diese Zeile würde JEDER Test, der ein MainWindow()
+    # baut, echt gegen repoe-fork.github.io abrufen (der Cache in
+    # tmp_path ist immer leer, also nie "fresh"). fetch() als
+    # Fehlschlag simulieren reicht: ensure_fresh() greift dann nie zum
+    # Netz, build() findet nichts und liefert None — schnell und
+    # deterministisch, kein Verhalten der App wird dadurch verändert
+    # (ein echter Offline-Start ohne Cache liefert genau dasselbe None).
+    monkeypatch.setattr("poe_view.services.mod_knowledge.fetch", lambda http=None: False)
