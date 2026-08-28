@@ -57,6 +57,11 @@ class Line:
 
     text: str
     mark: str = ""
+    # Ebenfalls fertiges HTML, HINTER dem Text: das Tier-Etikett der
+    # Mod-Datenbank (``mod_bar.tail_for``, §4.53.4). Kurz genug, dass es
+    # die Umbruch-Warnung von ``_item_blocks`` praktisch nicht trifft —
+    # gemessen sind 0,4 % der Tier-faehigen Zeilen laenger als 66 Zeichen.
+    tail: str = ""
 
 
 def _as_line(zeile: "Line | str") -> Line:
@@ -177,7 +182,8 @@ class ItemDetail(QFrame):
                 + margins.left() + margins.right())
 
     def show_item(self, item: Item, pixmap: QPixmap | None,
-                  mark: Callable[[str, str], str] = _no_mark) -> None:
+                  mark: Callable[[str, str], str] = _no_mark,
+                  tail: Callable[[str, str], str] = _no_mark) -> None:
         colour = RARITY_COLORS.get(item.frameType, "#e8e6e3")
         tags = [tag for tag, present in
                 (("Unidentified", not item.identified), ("Corrupted", item.corrupted))
@@ -185,7 +191,7 @@ class ItemDetail(QFrame):
         suffix = f"  [{', '.join(tags)}]" if tags else ""
         self._name.setText(item.display_name + suffix)
         self._name.setStyleSheet(f"font-weight:600; font-size:13px; color:{colour};")
-        self._props.setText(_blocks_to_html(_item_blocks(item, mark)))
+        self._props.setText(_blocks_to_html(_item_blocks(item, mark, tail)))
 
         if pixmap:
             self._icon.setPixmap(pixmap.scaled(
@@ -196,7 +202,8 @@ class ItemDetail(QFrame):
 
 
 def _item_blocks(item: Item,
-                 mark: Callable[[str, str], str] = _no_mark) -> list[list[Line]]:
+                 mark: Callable[[str, str], str] = _no_mark,
+                 tail: Callable[[str, str], str] = _no_mark) -> list[list[Line]]:
     """Die Textblöcke eines Items in der Reihenfolge des Spiels. Reine
     Datenaufbereitung ohne Qt — dadurch ohne Fenster testbar.
 
@@ -213,7 +220,12 @@ def _item_blocks(item: Item,
     schieben — derselbe Fehler, der die Anzeige schon zweimal gekostet
     hat (§_blocks_to_html). Die feste Breite ist der zweite Teil davon:
     Eine Spalte, die je nach Inhalt schmaler wird, verschöbe den
-    Textanfang von Zeile zu Zeile."""
+    Textanfang von Zeile zu Zeile.
+
+    ``tail`` liefert das Tier-Etikett HINTER der Zeile (§4.53.4) — die
+    eine, bewusst eingegangene Ausnahme von der Regel oben: zwei bis
+    fünf Zeichen, und gemessen an Peters Bestand sind nur 0,4 % der
+    Tier-faehigen Zeilen ueberhaupt laenger als 66 Zeichen."""
     kind = [item.rarity + (f" · {item.typeLine}" if item.name else "")]
 
     properties = [prop.display_text for prop in item.properties if prop.display_value]
@@ -232,7 +244,7 @@ def _item_blocks(item: Item,
     # den expliziten — dieselbe Aufteilung wie im Item-Textexport
     # (§4.38), damit Anzeige und Zwischenablage nicht auseinanderlaufen.
     def markiert(feld: str, zeilen) -> list[Line]:
-        return [Line(zeile, mark(feld, zeile)) for zeile in zeilen]
+        return [Line(zeile, mark(feld, zeile), tail(feld, zeile)) for zeile in zeilen]
 
     return [
         [Line(zeile) for zeile in kind],
@@ -241,7 +253,8 @@ def _item_blocks(item: Item,
         markiert(ENCHANT_MOD_FIELD, extra_mod_lines(item, ENCHANT_MOD_FIELD)),
         markiert("implicitMods", item.implicit_mods),
         markiert("explicitMods", item.explicit_mods)
-        + [Line(zeile, mark(feld, zeile)) for feld, zeile in all_extra_mod_pairs(item)],
+        + [Line(zeile, mark(feld, zeile), tail(feld, zeile))
+           for feld, zeile in all_extra_mod_pairs(item)],
     ]
 
 
@@ -269,7 +282,7 @@ def _blocks_to_html(blocks: Sequence[Sequence[Line | str]]) -> str:
             weggelassen += len(block)
             continue
         genommen = block[:frei]
-        kept.append([zeile.mark + escape(zeile.text)
+        kept.append([zeile.mark + escape(zeile.text) + zeile.tail
                      for zeile in map(_as_line, genommen)])
         weggelassen += len(block) - len(genommen)
         budget -= trenner + len(genommen)

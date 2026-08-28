@@ -343,3 +343,15 @@ def test_the_preferred_width_leaves_room_for_the_bar_column(qapp) -> None:
     assert spalte > 0
     assert detail.preferred_width() >= metrics.averageCharWidth() * 68 + 64 + spalte
 
+
+
+def test_the_tail_lands_after_the_escaped_text_and_is_not_escaped() -> None:
+    """Das Tier-Etikett (§4.53.4) ist fertiges HTML HINTER der Zeile —
+    der Mod-Text davor bleibt escaped."""
+    item = Item.model_validate({"typeLine": "Gold Ring", "frameType": 2,
+                                "explicitMods": ["+96 to <b>maximum</b> Life"]})
+    bloecke = _item_blocks(item, tail=lambda kind, line: '<span>T1</span>')
+
+    html = _blocks_to_html(bloecke)
+
+    assert "&lt;b&gt;maximum&lt;/b&gt; Life<span>T1</span>" in html

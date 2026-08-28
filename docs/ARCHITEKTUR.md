@@ -6666,6 +6666,70 @@ die wieder eingebaute Schatten-Variable und ein v5-Block, der als
 Altbestand "gerettet" wird —, alle rissen; Kontrolllauf grün; Smoke:
 6125 Steckbriefe × 4 Ligasichten ohne Fehler, nichts geschrieben.
 
+#### 4.53.4 Stufe 3: Leiter-Balken und Tier-Etikett im Item-Detail (`ui/mod_bar.py`)
+
+Die Mod-Datenbank kommt dorthin, wo Peter beim Spielen hinschaut: ins
+Detail-Panel des markierten Items und in die Paperdoll. Zwei Dinge
+ändern sich an jeder Mod-Zeile, deren Leiter bekannt ist:
+
+**Der Balken misst gegen die echte Spanne** (`ladder_rating`): 0 ist
+die unterste Sprosse unten, 1 die oberste oben — voll heißt "der beste
+Roll, den das Spiel kennt", nicht mehr "der beste, den diese Sammlung
+kennt". Wo keine Leiter bekannt ist oder der Wert neben ihr liegt
+(gecraftet, Essenz, beeinflusst — 9 % der tier-fähigen Sichtungen),
+bleibt der Sichtungs-Vergleich aus §4.52.2 unverändert stehen, samt
+seiner zwei Farbtöne. Der Erstfund behält sein ✦ — ein Fund ist ein
+Fund, auch wenn man ihn einordnen könnte.
+
+**Hinter der Zeile steht das Tier** (`tail_for`, `ladder_tiers`,
+`tier_label_html`): `T3` in denselben Metallen wie im Album (Gold,
+Silber, Bronze, ab T4 grau; die Farbtabelle `TIER_COLORS` liegt seit
+dieser Stufe in `mod_bar` und wird vom Album importiert — eine Liste an
+zwei Orten läuft auseinander, §4.52). Per `AskUserQuestion` hat Peter
+"hinter der Mod-Zeile" gewählt, gegen "in der Balkenspalte" und "nur
+der Balken". Das Etikett IST zugleich der Hinweis, welcher Maßstab gilt:
+eine Zeile ohne Etikett hat keine Leiter, ihr Balken ist der alte.
+
+**Die eine Ausnahme von der Regel "nichts hinter die Zeile".** `_item_
+blocks` warnt seit §4.52.2, dass angehängter Text die längsten Zeilen
+umbrechen lässt und das Höhenbudget des Panels Zeilen zählt, nicht
+Umbrüche. Vorher gemessen (Scratchpad `stufe3_messung.py`, 52.965
+tier-fähige Ein-Zahl-Zeilen im Cache): 80,4 % haben eine Leiter; von
+denen sind nur 0,4 % länger als 66 Zeichen. Zwei bis fünf Zeichen
+Etikett treffen also praktisch keine Zeile, die nicht ohnehin schon
+umbräche. Deshalb `Line.tail` als eigenes Feld (fertiges HTML, nicht
+escaped — dieselbe Trennung wie `mark`), und `_blocks_to_html` hängt es
+hinter den escapten Text.
+
+**Das Item-Level siebt Mehrdeutigkeiten — aber es richtet wenig aus.**
+2 % der Sichtungen fallen in zwei überlappende Sprossen; für ein
+EINZELNES Item kennen wir das Level exakt (anders als im Kontenbuch,
+§4.53.1), also fliegen Sprossen heraus, die das Item noch nicht rollen
+kann. Gemessen löst das nur 55 von 844 Fällen — die Überlappungen
+liegen meist zwischen Tiers, die beide längst freigeschaltet sind. Der
+Rest steht ehrlich als `T2/T3` da, in der Farbe des besseren. Wird das
+Sieb leer (Level unter jeder passenden Sprosse, eine Daten-Eigenheit),
+gilt die ungesiebte Liste: Das Item ist echt, die Leiter hat die Lücke.
+
+**Dieselben Bedingungen wie beim Kontenbuch** (`_ladder_lookup`, eine
+Closure je Item für Balken UND Etikett): nur Explicit/Implicit, nur
+`tierable` (unkorrumpierte Magic/Rare mit Item-Level), nur Zeilen mit
+genau einer Zahl. Ein Unique bekommt kein `T1`, ein Corrupted keins —
+dort wäre die Nummer eine Behauptung.
+
+`tier_number()` ist dafür vom Album in `services/mod_knowledge.py`
+gewandert — beide Anzeigen zählen von oben, und die Zählung gehört zur
+Leiter, nicht zum Fenster.
+
+Getestet: `tests/test_mod_bar.py` (Rating über die ganze Leiter, T von
+oben, Sieb per Item-Level und sein Nicht-Leerwerden, Metallfarbe des
+besten Tiers, Etikett nur für Affixe mit einer Zahl, keins für
+Unique/Corrupted/ohne Level, Leiter schlägt Sammlung, Fallback neben
+der Leiter, ✦ bleibt), `tests/test_item_detail.py` (Etikett hinter dem
+escapten Text, selbst nicht escaped), `tests/test_main_window_helpers.py`
+(Fenster reicht das Wissen an Balken und Etikett). Zehn Gegenproben,
+alle rissen; Optik nativ per `grab()` geprüft.
+
 ## 8. Entwicklungsstand
 
 Die ursprünglich geplanten Meilensteine (Grundgerüst, Authentifizierung,

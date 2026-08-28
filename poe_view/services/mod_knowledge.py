@@ -253,6 +253,14 @@ class TierStep:
     high: float
 
 
+def tier_number(ladder: list, index: int) -> str:
+    """PoE zählt Tiers von OBEN: die zuletzt freigeschaltete Sprosse ist
+    T1. ``index`` ist die Position in der nach Freischalt-Level
+    aufsteigend sortierten Leiter. Hier statt im Album, weil Album UND
+    Item-Detail (``ui/mod_bar.py``) dieselbe Zählung brauchen."""
+    return f"T{len(ladder) - index}"
+
+
 class Knowledge:
     """Ladders je (Mod-Identität, Item-Kategorie) — schreibgeschützt
     nach dem Bau, damit sie sich wie das Kontenbuch nur lesend

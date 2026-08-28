@@ -9771,6 +9771,25 @@ def test_a_collection_from_before_v7_is_recounted_from_the_cache(qapp, tmp_path)
     win.worker.wait(5000)
 
 
+def test_the_window_hands_its_mod_knowledge_to_bar_and_label(qapp) -> None:
+    """Stufe 3 (§4.53.4): Mit geladenem Mod-Wissen misst der Balken gegen
+    die Leiter und die Zeile bekommt ihr Etikett; ohne bleibt alles leer."""
+    from poe_view.services.mod_knowledge import Knowledge, TierStep
+    win = MainWindow()
+    ring = _ring(ilvl=80, explicitMods=["+35 to maximum Life"])
+    assert win._mod_tail_for(ring)("explicitMods", "+35 to maximum Life") == ""
+
+    win._on_mod_knowledge_loaded(Knowledge({("# to maximum Life", "Ring"): [
+        TierStep(1, 3, 19), TierStep(11, 20, 39)]}))
+
+    assert "T1" in win._mod_tail_for(ring)("explicitMods", "+35 to maximum Life")
+    assert (win._mod_mark_for(ring)("explicitMods", "+39 to maximum Life")
+            == mod_bar.bar_html(1.0))
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
 def test_a_bar_from_the_old_stock_is_dimmed(qapp) -> None:
     """Der Bestwert steht, aber er stuetzt sich auf den Altbestand: In der
     Liga dieses Items gibt es noch zu wenige Beobachtungen. Die Grundlage

@@ -367,6 +367,16 @@ counts them up (<i>6 of 8 tiers collected</i>). A roll that belongs to
 no tier at all gets its own <i>beyond the ladder</i> row: crafted,
 essence and influenced mods roll from tables of their own.</p>
 
+<p>The same knowledge reaches the item panel: every mod line whose ladder
+is known ends in its tier — <b>T1</b> in gold, <b>T2</b> in silver,
+<b>T3</b> in bronze — and the bar in front of it then measures against
+the real ladder, so a full bar means the best roll the game can give,
+not just the best you have seen. A line without a tier label has no
+known ladder (or a crafted, essence or influenced value beside it); its
+bar keeps comparing against your own collection. <b>T2/T3</b> means the
+value sits in two overlapping tiers. Uniques and corrupted items carry
+no tier.</p>
+
 <p>For a mod whose ladder is not known, the table falls back to
 <b>tier bands</b> worked out from item level: a tier cannot appear below
 the level that unlocks it, so the lowest level a value ever showed up on

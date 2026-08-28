@@ -55,10 +55,12 @@ from PySide6.QtWidgets import (QComboBox, QDialog, QHBoxLayout, QHeaderView,
 from poe_view.api.models import (ENCHANT_MOD_FIELD, EXTRA_MOD_FIELDS,
                                  FRAME_TYPE_NAMES)
 from poe_view.services import mod_tiers
+from poe_view.services.mod_knowledge import tier_number  # noqa: F401 — Tests importieren es von hier
 from poe_view.services.mod_collection import (LEGACY_LEAGUE, MAP_RARITY,
                                               UNKNOWN_RARITY, ModCollection,
                                               ModRecord, RaritySpan, base_rarity,
                                               is_corrupted_bucket)
+from poe_view.ui import mod_bar
 from poe_view.ui.theme import DASH_WARN, ROW_CHANGED_COLOR
 
 # Anzeigenamen der Mod-Arten. Eigene Tabelle statt einer aus
@@ -220,13 +222,6 @@ def band_table(konto: dict[float, list[int]],
 # Apostroph wird dort zu "&#x27;".
 LADDER_HEADING = "Tiers, straight from game data"
 BANDS_HEADING = "Tiers, inferred from item level"
-
-
-def tier_number(ladder: list, index: int) -> str:
-    """PoE zählt Tiers von OBEN: die zuletzt freigeschaltete Sprosse ist
-    T1. ``index`` ist die Position in der nach Freischalt-Level
-    aufsteigend sortierten Leiter."""
-    return f"T{len(ladder) - index}"
 
 
 def collected_mask(konto: dict[float, list[int]], ladder: list) -> list[bool]:
@@ -441,8 +436,11 @@ def _band_lines(record: ModRecord, knowledge,
 # 4,5-Grenze fuer Fliesstext. Ab T4 traegt die Nummer keine eigene
 # Farbe mehr: Drei Metalle versteht jeder sofort, zehn Farbstufen
 # niemand.
-T_COLORS = {1: "#e8c15a", 2: "#c8ccd4", 3: "#d09a6a"}
-T_COLOR_REST = "#a8a8a8"
+# Die Metall-Farben der T-Nummern liegen in ``ui/mod_bar.py`` — das
+# Item-Detail malt dieselben Etiketten, und eine Farbtabelle an zwei
+# Orten liefe auseinander.
+T_COLORS = mod_bar.TIER_COLORS
+T_COLOR_REST = mod_bar.TIER_COLOR_REST
 HTML_DIM = "#989898"
 HTML_HEAD_BG = "#3a3a3a"
 HTML_ROW_ALT_BG = "#333333"

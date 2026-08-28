@@ -248,3 +248,105 @@ def test_every_column_starts_with_the_zero_width_guard() -> None:
                    mod_bar.new_html(), mod_bar.blank_html()):
         assert spalte.startswith(mod_bar.BLOCK_START)
 
+
+
+# ------------------------ Stufe 3: die echte Leiter --------------------- #
+# Peter, 2026-08-29: "Hinter der Mod-Zeile". Mit Mod-Wissen misst der
+# Balken gegen die echte Leiter, und die Zeile traegt ihr T-Etikett.
+
+def _leiter(*sprossen, kategorien=("Ring",)):
+    from poe_view.services.mod_knowledge import Knowledge, TierStep
+    stufen = [TierStep(lv, lo, hi) for lv, lo, hi in sprossen]
+    return Knowledge({("# to maximum Life", kat): list(stufen) for kat in kategorien})
+
+
+LIFE = _leiter((1, 3, 9), (5, 10, 19), (11, 20, 29), (18, 30, 39))
+
+
+def test_the_ladder_rating_spans_the_whole_ladder() -> None:
+    ladder = LIFE.ladder("# to maximum Life", "Ring")
+    assert mod_bar.ladder_rating(ladder, 3) == 0.0
+    assert mod_bar.ladder_rating(ladder, 39) == 1.0
+    assert mod_bar.ladder_rating(ladder, 21) == (21 - 3) / (39 - 3)
+    assert mod_bar.ladder_rating(ladder, 50) is None      # neben der Leiter
+    assert mod_bar.ladder_rating(ladder, 2) is None
+
+
+def test_ladder_tiers_count_from_the_top() -> None:
+    ladder = LIFE.ladder("# to maximum Life", "Ring")
+    assert mod_bar.ladder_tiers(ladder, 35, ilvl=80) == ["T1"]
+    assert mod_bar.ladder_tiers(ladder, 5, ilvl=80) == ["T4"]
+    assert mod_bar.ladder_tiers(ladder, 50, ilvl=80) == []
+
+
+def test_overlapping_rungs_are_sieved_by_item_level() -> None:
+    """Zwei Sprossen teilen sich den Wert 15; ein Item der Stufe 8 kann
+    die obere (ab 11) noch nicht rollen. Ohne Sieb stehen beide da."""
+    ladder = _leiter((1, 3, 15), (11, 15, 29)).ladder("# to maximum Life", "Ring")
+    assert mod_bar.ladder_tiers(ladder, 15, ilvl=80) == ["T1", "T2"]
+    assert mod_bar.ladder_tiers(ladder, 15, ilvl=8) == ["T2"]
+
+
+def test_the_sieve_never_empties_the_answer() -> None:
+    """Item-Level unter JEDER Sprosse (Leiter mit Luecken, Daten-Eigenheit):
+    lieber die ungesiebte Liste als gar keine Aussage."""
+    ladder = LIFE.ladder("# to maximum Life", "Ring")
+    assert mod_bar.ladder_tiers(ladder, 35, ilvl=1) == ["T1"]
+
+
+def test_the_label_wears_the_metal_of_its_best_tier() -> None:
+    assert mod_bar.TIER_COLORS[1] in mod_bar.tier_label_html(["T1"])
+    assert mod_bar.TIER_COLORS[2] in mod_bar.tier_label_html(["T2", "T3"])
+    assert "T2/T3" in mod_bar.tier_label_html(["T2", "T3"])
+    assert mod_bar.TIER_COLOR_REST in mod_bar.tier_label_html(["T7"])
+    assert mod_bar.tier_label_html([]) == ""
+
+
+def test_tail_for_labels_a_rare_ring_and_nothing_else() -> None:
+    ring = _ring(ilvl=80, explicitMods=["+35 to maximum Life"])
+    etikett = mod_bar.tail_for(ring, LIFE)
+
+    assert "T1" in etikett("explicitMods", "+35 to maximum Life")
+    assert etikett("explicitMods", "+50 to maximum Life") == ""     # neben der Leiter
+    assert etikett("explicitMods", "Adds 3 to 9 Fire Damage") == ""  # zwei Zahlen
+    assert etikett("enchantMods", "+35 to maximum Life") == ""       # keine Affix-Art
+    assert mod_bar.tail_for(ring, None)("explicitMods", "+35 to maximum Life") == ""
+
+
+def test_uniques_and_corrupted_items_get_no_label() -> None:
+    """Dieselben Bedingungen wie beim Kontenbuch: Uniques haben feste
+    Werte, ein Corrupted kann sein Implicit getauscht haben."""
+    unique = _ring(frameType=3, ilvl=80, explicitMods=["+35 to maximum Life"])
+    korrupt = _ring(ilvl=80, corrupted=True, explicitMods=["+35 to maximum Life"])
+    ohne_ilvl = _ring(explicitMods=["+35 to maximum Life"])
+
+    for item in (unique, korrupt, ohne_ilvl):
+        assert mod_bar.tail_for(item, LIFE)("explicitMods", "+35 to maximum Life") == ""
+
+
+def test_the_bar_measures_against_the_ladder_when_it_is_known() -> None:
+    """Die Sammlung kennt nur 41..96 — nach ihr waere 39 mittelmaessig. Die
+    Leiter sagt: 39 ist das Maximum."""
+    sammlung = _sammlung(range(41, 97))
+    ring = _ring(ilvl=80)
+
+    mit = mod_bar.mark_for(sammlung, ring, LIFE)
+    ohne = mod_bar.mark_for(sammlung, ring)
+
+    assert mit("explicitMods", "+39 to maximum Life") == mod_bar.bar_html(1.0)
+    assert ohne("explicitMods", "+39 to maximum Life") == mod_bar.bar_html(0.0)
+
+
+def test_beside_the_ladder_the_bar_falls_back_to_the_sightings() -> None:
+    sammlung = _sammlung(range(41, 97))
+    spalte = mod_bar.mark_for(sammlung, _ring(ilvl=80), LIFE)
+
+    assert spalte("explicitMods", "+96 to maximum Life") == mod_bar.bar_html(1.0)
+
+
+def test_a_first_sighting_keeps_its_find_mark_even_with_a_ladder() -> None:
+    sammlung = ModCollection()
+    sammlung.observe("explicitMods", "+35 to maximum Life", rarity=2)
+
+    spalte = mod_bar.mark_for(sammlung, _ring(ilvl=80), LIFE)
+    assert spalte("explicitMods", "+35 to maximum Life") == mod_bar.new_html()

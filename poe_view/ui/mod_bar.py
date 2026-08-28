@@ -23,11 +23,15 @@ Gemessen im echten Windows-Qt (nicht offscreen, §FALLSTRICKE #55):
 Die Spalte ist bei 9 pt 42 px breit, unabhängig vom Füllstand, und der
 Text beginnt in jeder Zeile bei 48 px — auch in den Zeilen ohne Balken.
 
-**Was der Balken NICHT ist.** Kein Tier, kein Prozentsatz der echten
-Wertespanne. Er zeigt die Lage innerhalb dessen, was durch Peters Hände
-ging (``services/mod_collection.py``). Ein voller Balken heißt "der beste
-Roll dieser Zeile, den diese Sammlung kennt" — das ist genau die Aussage,
-die vorher der Stern ★ trug.
+**Zwei Maßstäbe, und die Zeile sagt, welcher gilt.** Kennt die
+Mod-Datenbank (§4.53) die echte Leiter der Zeile, misst der Balken gegen
+DIE: voll heißt "der beste Roll, den das Spiel kennt", und hinter der
+Zeile steht das Tier-Etikett (``tail_for``: ``T3``, in den Metallen des
+Albums). Ohne Leiter — oder für einen Wert neben ihr — zeigt er wie
+zuvor die Lage innerhalb dessen, was durch Peters Hände ging
+(``services/mod_collection.py``): voll heißt dann "der beste Roll, den
+diese Sammlung kennt", die Aussage, die vorher der Stern ★ trug. Das
+Etikett ist der Unterschied — eine Zeile ohne Etikett hat keine Leiter.
 """
 
 from __future__ import annotations
@@ -36,8 +40,10 @@ from typing import Callable
 
 from PySide6.QtGui import QColor
 
-from poe_view.api.models import Item
+from poe_view.api.models import Item, item_category
 from poe_view.services import mod_collection
+from poe_view.services.mod_collection import mod_identity, mod_values, tierable
+from poe_view.services.mod_knowledge import tier_number
 from poe_view.ui.theme import DASH_OK, DASH_WARN, blend
 
 # Zellen der Spalte. Jede Zelle ist ein geschütztes Leerzeichen mit
@@ -113,6 +119,91 @@ COLOR_NEW = DASH_WARN
 # drei Rolls wie eine Skala aussähen.
 MIN_BAR_OBSERVATIONS = 5
 
+# Die T-Nummern hinter der Mod-Zeile (Stufe 3 der Mod-Datenbank,
+# §4.53.4), in denselben Metallen wie im Album: T1 Gold, T2 Silber, T3
+# Bronze, ab T4 schlichtes Grau — drei Metalle versteht jeder sofort,
+# zehn Farbstufen niemand. Gerechnet gegen ``PANEL_BG`` (Skript im
+# Scratchpad, 2026-08-28): Gold 8,0, Silber 8,6, Bronze 5,6, Grau 5,3.
+# EINE Tabelle für Album und Item-Detail — ``mod_album`` liest sie hier.
+TIER_COLORS = {1: "#e8c15a", 2: "#c8ccd4", 3: "#d09a6a"}
+TIER_COLOR_REST = "#a8a8a8"
+
+# Abstand zwischen Mod-Text und Etikett — geschützt, damit Qt ihn nicht
+# an einem Umbruch verschluckt.
+TIER_GAP = CELL * 2
+
+
+def ladder_rating(ladder: list, value: float) -> float | None:
+    """Wo liegt der Wert in der ECHTEN Spanne der Leiter — 0 ist die
+    unterste Sprosse unten, 1 die oberste oben (der beste mögliche Roll).
+    ``None`` für Werte neben der Leiter (gecraftet, Essenz, beeinflusst)
+    und für eine entartete Leiter ohne Breite."""
+    lo = min(step.low for step in ladder)
+    hi = max(step.high for step in ladder)
+    if hi <= lo or not lo <= value <= hi:
+        return None
+    return (value - lo) / (hi - lo)
+
+
+def ladder_tiers(ladder: list, value: float, ilvl: int) -> list[str]:
+    """Die T-Nummern, in die der Wert fällt — meist eine, bei
+    überlappenden Sprossen mehrere (2 % der Sichtungen in Peters
+    Bestand). Das Item-Level siebt Sprossen aus, die das Item noch gar
+    nicht rollen kann; bleibt danach nichts übrig, gilt die ungesiebte
+    Liste — die Leiter kann Lücken haben, das Item ist trotzdem echt."""
+    treffer = [i for i, step in enumerate(ladder) if step.low <= value <= step.high]
+    moeglich = [i for i in treffer if ladder[i].required_level <= ilvl]
+    return sorted((tier_number(ladder, i) for i in (moeglich or treffer)),
+                  key=lambda t: int(t[1:]))
+
+
+def tier_label_html(tiers: list[str]) -> str:
+    """``T3`` bzw. ``T2/T3`` als gefärbtes Etikett hinter der Zeile — in
+    der Farbe des BESTEN Tiers. Leer ohne Tiers."""
+    if not tiers:
+        return ""
+    farbe = TIER_COLORS.get(int(tiers[0][1:]), TIER_COLOR_REST)
+    return f'{TIER_GAP}<span style="color:{farbe}">{"/".join(tiers)}</span>'
+
+
+def _ladder_lookup(item: Item, knowledge) -> Callable[[str, str], list]:
+    """Die Leiter zu einer Mod-Zeile DIESES Items — oder ``[]``.
+
+    Dieselben Bedingungen wie beim Kontenbuch (§mod_collection.tierable):
+    gerollte Affixe unkorrumpierter Magic-/Rare-Items mit bekanntem
+    Item-Level, nur Explicit/Implicit, nur Zeilen mit genau einer Zahl."""
+    ilvl = int(getattr(item, "ilvl", 0) or 0)
+    _liga, rarity = mod_collection.item_buckets(item)
+    kategorie = item_category(item) or ""
+    aktiv = (knowledge is not None and kategorie
+             and tierable(rarity, ilvl))
+
+    def leiter(kind: str, line: str) -> list:
+        if not aktiv or kind not in ("explicitMods", "implicitMods"):
+            return []
+        if len(mod_values(line)) != 1:
+            return []
+        return knowledge.ladder(mod_identity(line), kategorie)
+
+    return leiter
+
+
+def tail_for(item: Item, knowledge) -> Callable[[str, str], str]:
+    """Die Etikett-Funktion für DIESES Item: ``(kind, line) -> HTML``,
+    das HINTER die Mod-Zeile kommt (Peters Wahl, 2026-08-29: "hinter
+    der Mod-Zeile"). Leer, wo keine Leiter bekannt ist oder der Wert
+    neben ihr liegt — dort steht dann auch keine Behauptung."""
+    leiter = _ladder_lookup(item, knowledge)
+    ilvl = int(getattr(item, "ilvl", 0) or 0)
+
+    def etikett(kind: str, line: str) -> str:
+        ladder = leiter(kind, line)
+        if not ladder:
+            return ""
+        return tier_label_html(ladder_tiers(ladder, mod_values(line)[0], ilvl))
+
+    return etikett
+
 
 def fill_cells(value: float, cells: int = BAR_CELLS) -> int:
     """Wie viele Zellen sind gefüllt?
@@ -175,7 +266,7 @@ def blank_html(cells: int = BAR_CELLS) -> str:
 
 
 def mark_for(collection: mod_collection.ModCollection,
-             item: Item) -> Callable[[str, str], str]:
+             item: Item, knowledge=None) -> Callable[[str, str], str]:
     """Die Spalten-Funktion für DIESES Item.
 
     Als Abschluss über das Item statt als Funktion mit fünf Argumenten:
@@ -184,12 +275,25 @@ def mark_for(collection: mod_collection.ModCollection,
     Uniques zu messen ergäbe eine Zahl, die nichts bedeutet — und ein Roll
     aus der laufenden Liga gegen einen Altbestand, in dem Items aus
     mehreren Jahren liegen, eine, die etwas anderes bedeutet, als sie zu
-    sagen scheint (§4.52)."""
+    sagen scheint (§4.52).
+
+    **Mit Mod-Wissen misst der Balken gegen die ECHTE Leiter** (§4.53.4):
+    voll heißt dann "der beste Roll, den das Spiel kennt", nicht mehr
+    "der beste, den diese Sammlung kennt" — und die Zeile trägt dann
+    auch ihr T-Etikett (``tail_for``), das den Maßstab sichtbar macht.
+    Der Erstfund behält sein ✦; wo keine Leiter bekannt ist oder der
+    Wert neben ihr liegt, bleibt es beim Sichtungs-Vergleich."""
     liga, rarity = mod_collection.item_buckets(item)
+    leiter = _ladder_lookup(item, knowledge)
 
     def spalte(kind: str, line: str) -> str:
         if collection.is_new(kind, line):
             return new_html()
+        ladder = leiter(kind, line)
+        if ladder:
+            wert = ladder_rating(ladder, mod_values(line)[0])
+            if wert is not None:
+                return bar_html(wert, own_pot=True)
         eintrag = collection.get(kind, line)
         if eintrag is None:
             return blank_html()

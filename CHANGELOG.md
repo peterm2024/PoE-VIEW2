@@ -134,6 +134,18 @@ nach [SemVer](https://semver.org/lang/de/).
   Wertspannen); der Umbau trägt sich beim nächsten Start selbst aus dem
   Cache nach, kein Zählstand geht verloren.
 
+- **Tier-Nummern am Item.** Im Detail-Panel und in der Paperdoll steht
+  hinter jeder Mod-Zeile, deren Leiter das Spiel kennt, ihr Tier —
+  "T1" in Gold, "T2" in Silber, "T3" in Bronze, wie im Album. Der
+  Balken davor misst dann gegen die echte Spanne dieser Leiter: voll
+  heißt "der beste Roll, den es gibt", nicht mehr nur "der beste, den du
+  je gesehen hast". Zeilen ohne Etikett haben keine bekannte Leiter (oder
+  einen Wert daneben — gecraftet, Essenz, beeinflusst); dort bleibt der
+  Vergleich mit deiner eigenen Sammlung. Fällt ein Wert in zwei sich
+  überlappende Tiers, steht "T2/T3" — das Item-Level schließt aus, was
+  das Item noch gar nicht rollen konnte. Uniques und Corrupted bekommen
+  keine Nummer.
+
 ### Behoben
 
 - Die Beschriftung des Schnitts im XP-Graphen war unlesbar, wenn der

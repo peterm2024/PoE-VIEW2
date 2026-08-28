@@ -863,7 +863,12 @@ class MainWindow(QMainWindow):
         Sie stand hier, solange sie aus zwei Zeichen bestand; mit dem
         gezeichneten Balken kamen Farben, Zellenzahl und die Klemmung der
         Ränder dazu, und das ist eine eigene Sache mit eigenen Tests."""
-        return mod_bar.mark_for(self._mod_collection, item)
+        return mod_bar.mark_for(self._mod_collection, item, self._mod_knowledge)
+
+    def _mod_tail_for(self, item: Item):
+        """Das Tier-Etikett hinter jeder Mod-Zeile DIESES Items (§4.53.4)
+        — ``None``-sicher: ohne geladenes Mod-Wissen bleibt es leer."""
+        return mod_bar.tail_for(item, self._mod_knowledge)
 
     def _restore_mod_collection(self) -> None:
         """Die Sammlung des aktiven Kontos holen und, falls sie noch leer
@@ -4181,6 +4186,7 @@ class MainWindow(QMainWindow):
             return
         self._paperdoll_dialog = PaperdollDialog(char, items, self.table_model.pixmap_for,
                                                  mark_for=self._mod_mark_for,
+                                                 tail_for=self._mod_tail_for,
                                                  parent=self)
         self._paperdoll_dialog.show()
 
@@ -4607,7 +4613,7 @@ class MainWindow(QMainWindow):
         item = self.table_model.item_at(source_idx.row())
         if item:
             self.detail.show_item(item, self.table_model.pixmap_for(item),
-                                  self._mod_mark_for(item))
+                                  self._mod_mark_for(item), self._mod_tail_for(item))
         # Herkunfts-Fach im Baum hervorheben (v. a. bei "*"
         # bzw. Aggregat-Ansichten mit mehreren Quell-Tabs) — highlight_stash
         # nutzt bewusst setCurrentItem statt eines Klick-Signals, damit die
