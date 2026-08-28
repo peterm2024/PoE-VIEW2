@@ -224,6 +224,9 @@ def band_table(konto: dict[float, list[int]],
 # HTML-escapten Text verglichen (§record_detail_html), und ein
 # Apostroph wird dort zu "&#x27;".
 LADDER_HEADING = "Tiers, straight from game data"
+# Die Lücken je Basis (§4.53.5): "auf diesen Kategorien könnte der Mod
+# rollen, hier hast du ihn noch nie gesehen".
+UNSEEN_HEADING = "Not rolled yet on:"
 BANDS_HEADING = "Tiers, inferred from item level"
 
 
@@ -351,12 +354,14 @@ def format_bands(record: ModRecord, knowledge=None,
     ``league`` schränkt auf einen Ligen-Topf ein (``None`` = alle) —
     dieselbe Auswahl wie der Liga-Filter des Albums (§4.53.3)."""
     konten = record.ledgers(league)
-    if not konten:
+    if not konten and (knowledge is None
+                       or not knowledge.categories(record.identity)):
         return []
     echte: list[str] = []
     for kategorie, konto, ladder in _ladder_sections(record, knowledge, konten):
         echte.append(_section_head(kategorie, konto))
         echte.extend(_indent(ladder_table(konto, ladder), 4))
+    fehlend = unseen_categories(record, knowledge, konten)
     geschaetzte = _band_lines(record, knowledge, konten, league)
 
     zeilen: list[str] = []
@@ -365,6 +370,8 @@ def format_bands(record: ModRecord, knowledge=None,
                    "(the ladder the game itself rolls from — T1 is the top "
                    "tier; empty", "rows are tiers you have not rolled yet)"]
         zeilen += echte
+    if fehlend:
+        zeilen += ["", f"  {UNSEEN_HEADING} {', '.join(fehlend)}"]
     zeilen += geschaetzte
     return zeilen
 
@@ -383,6 +390,8 @@ def _weighted_categories(konten: dict[str, dict[float, list[int]]]) -> list[str]
 
 
 def _section_head(kategorie: str, konto: dict[float, list[int]]) -> str:
+    if not konto:
+        return f"  {kategorie}  (not rolled yet)"
     sichtungen = sum(zeile[0] for zeile in konto.values())
     einheit = "sighting" if sichtungen == 1 else "sightings"
     return (f"  {kategorie}  ({sichtungen} {einheit}, "
@@ -396,7 +405,12 @@ def _ladder_sections(record: ModRecord, knowledge,
     """(Kategorie, Konto, Leiter) für jede Kategorie MIT echter Leiter,
     nach Sichtungen sortiert — die gemeinsame Quelle beider Renderer.
     ``konten`` kommt vom Aufrufer (``ModRecord.ledgers``), damit die
-    Liga-Auswahl nur EINMAL gerechnet wird."""
+    Liga-Auswahl nur EINMAL gerechnet wird.
+
+    **Ohne ein einziges Konto** (Geisterkarte, §4.53.5 — oder ein Mod,
+    der in dieser Liga noch nie gerollt wurde) stehen ALLE Leitern, die
+    das Spiel für die Identität kennt, mit leerem Konto da: Das ist dann
+    der ganze Inhalt der Karte, die Lücke selbst."""
     if knowledge is None:
         return []
     ergebnis = []
@@ -404,7 +418,22 @@ def _ladder_sections(record: ModRecord, knowledge,
         ladder = knowledge.ladder(record.identity, kategorie)
         if ladder:
             ergebnis.append((kategorie, konten[kategorie], ladder))
+    if not konten:
+        for kategorie in knowledge.categories(record.identity):
+            ergebnis.append((kategorie, {},
+                             knowledge.ladder(record.identity, kategorie)))
     return ergebnis
+
+
+def unseen_categories(record: ModRecord, knowledge,
+                      konten: dict[str, dict[float, list[int]]]) -> list[str]:
+    """Kategorien, auf denen der Mod rollen KANN, aber in dieser Auswahl
+    noch nie gesehen wurde — die Lücken je Basis (§4.53.5). Leer, wenn
+    es gar kein Konto gibt (dann zeigt ``_ladder_sections`` ohnehin
+    alle Leitern)."""
+    if knowledge is None or not konten:
+        return []
+    return [kat for kat in knowledge.categories(record.identity) if kat not in konten]
 
 
 def _band_lines(record: ModRecord, knowledge,
@@ -474,17 +503,20 @@ def _html_ladder_section(kategorie: str, konto: dict[float, list[int]],
     T-Nummern in Gold/Silber/Bronze, Zebra-Zeilen, ungerollte Tiers
     gedaempft, ``beyond the ladder`` und die Sammel-Bilanz darueber."""
     getroffen, gesamt = collected_tiers(konto, ladder)
-    sichtungen = sum(zeile[0] for zeile in konto.values())
-    il_lo = min(zeile[1] for zeile in konto.values())
-    il_hi = max(zeile[2] for zeile in konto.values())
     bilanz = f"{getroffen} of {gesamt} tiers"
     if getroffen == gesamt:
         bilanz = (f'<font color="{HTML_GOLD}"><b>{bilanz} '
                   f'{COMPLETE_MARK}</b></font>')
+    if konto:
+        sichtungen = sum(zeile[0] for zeile in konto.values())
+        il_lo = min(zeile[1] for zeile in konto.values())
+        il_hi = max(zeile[2] for zeile in konto.values())
+        stand = f" — {sichtungen} sightings, item level {il_lo:g}–{il_hi:g} — "
+    else:
+        stand = " — not rolled yet — "
     zellen = [f'<tr bgcolor="{HTML_HEAD_BG}"><td colspan="5">'
               f'<b>{html_escape(kategorie)}</b>'
-              f'<font color="{CARD_TEXT_DIM}"> — {sichtungen} sightings, '
-              f'item level {il_lo:g}–{il_hi:g} — </font>{bilanz}</td></tr>',
+              f'<font color="{CARD_TEXT_DIM}">{stand}</font>{bilanz}</td></tr>',
               f'<tr><td></td>'
               f'<td><font color="{CARD_TEXT_DIM}">Values</font></td>'
               f'<td><font color="{CARD_TEXT_DIM}">from iLvl</font></td>'
@@ -562,6 +594,11 @@ def record_detail_html(record: ModRecord, mono_family: str, knowledge=None,
                      f'rows are tiers you have not rolled yet</font></p>')
         teile.extend(_html_ladder_section(kategorie, konto, ladder)
                      for kategorie, konto, ladder in sektionen)
+    fehlend = unseen_categories(record, knowledge, konten)
+    if fehlend:
+        teile.append(f'<p><font color="{CARD_TEXT_DIM}"><i>'
+                     f'{html_escape(UNSEEN_HEADING)}</i> '
+                     f'{html_escape(", ".join(fehlend))}</font></p>')
 
     baender = _band_lines(record, knowledge, konten, league)
     if baender:
@@ -689,7 +726,15 @@ def tier_slots(record: ModRecord, knowledge,
         return None
     konten = record.ledgers(league)
     if not konten:
-        return None
+        # Geisterkarte (§4.53.5) — oder ein Mod, der in dieser Liga noch
+        # nie gerollt wurde: die LÄNGSTE bekannte Leiter, komplett leer.
+        # Das ist die Lücke, die die Karte zeigen soll; bei gleicher
+        # Länge entscheidet der Name, damit die Karte nicht flackert.
+        leitern = sorted((len(knowledge.ladder(record.identity, kat)), kat)
+                         for kat in knowledge.categories(record.identity))
+        if not leitern:
+            return None
+        return [False] * leitern[-1][0]
     beste: tuple[int, list[bool]] | None = None
     for kategorie, konto in konten.items():
         ladder = knowledge.ladder(record.identity, kategorie)
@@ -811,6 +856,8 @@ CARD_TEXT_NEW = DASH_WARN
 SLOT_FILLED = "#dcb45f"
 SLOT_EMPTY = "#6a6a6a"
 COMPLETE_MARK = "✓"
+# Statt der Range auf einer Geisterkarte (§4.53.5).
+GHOST_TEXT = "not collected yet"
 CARD_PAD = 8
 CARD_RADIUS = 6
 # Kaestchen der Slot-Leiste: klein genug, dass auch 13 Life-Tiers in
@@ -899,8 +946,33 @@ def collection_greeting(records: list[ModRecord],
     return "\n".join(zeilen)
 
 
+def ghost_records(records: list[ModRecord], knowledge) -> list[ModRecord]:
+    """Die Geisterkarten (§4.53.5): eine Hülle für jede Mod-Identität,
+    die das Spiel rollen kann (irgendeine Leiter bekannt) und die in
+    der Sammlung noch nie als Explicit auftauchte. Nie persistiert —
+    sie entstehen beim Öffnen aus Wissen minus Sammlung. Leitern gibt es
+    nur für gerollte Affixe, deshalb ``explicitMods``."""
+    if knowledge is None:
+        return []
+    gesehen = {r.identity for r in records if r.kind == "explicitMods"}
+    return [ModRecord(identity=identity, kind="explicitMods")
+            for identity in sorted(knowledge.identities() - gesehen)]
+
+
+def is_ghost(record: ModRecord, knowledge, league: str | None,
+             rarity_ok: RarityPredicate | None) -> bool:
+    """Eine Karte ohne Sichtung in der Auswahl, deren Mod das Spiel aber
+    kennt — die sichtbare Lücke. Ohne Mod-Wissen gibt es keine Geister:
+    Eine Lücke, die niemand belegen kann, ist keine."""
+    return (knowledge is not None and record.kind == "explicitMods"
+            and matching_count(record, league, rarity_ok) == 0
+            and bool(knowledge.categories(record.identity)))
+
+
 def album_stats(records: list[ModRecord], knowledge,
-                league: str | None = None) -> str:
+                league: str | None = None,
+                rarity_ok: RarityPredicate | None = None,
+                ghosts: bool = True) -> str:
     """Die Sammel-Kopfzeile des Albums (Design-Runde 2026-08-28):
     Bestand, komplette Sets und der Tier-Fortschritt als Balken.
 
@@ -910,12 +982,20 @@ def album_stats(records: list[ModRecord], knowledge,
     geladenes Mod-Wissen bleibt nur der Bestand stehen; ein Balken ohne
     Grundgesamtheit wäre erfunden.
 
-    ``league`` folgt der Liga-Combo des Albums (§4.53.3) — die
-    Kopfzeile redet dann über dieselbe Population wie die Karten
-    darunter."""
-    teile = [f"{len(records):,} mods collected"]
+    ``league`` und ``rarity_ok`` folgen den Combos des Albums (§4.53.3)
+    — die Kopfzeile redet dann über dieselbe Population wie die Karten
+    darunter. Mit Geistern (§4.53.5) heißt der Bestand "312 of 1,100
+    mods collected": gesehen von möglich, und die Sprossen der Geister
+    zählen im Balken als Lücken mit."""
+    gesehen = [r for r in records if matching_count(r, league, rarity_ok) > 0]
+    geister = ([r for r in records if is_ghost(r, knowledge, league, rarity_ok)]
+               if ghosts else [])
+    if geister:
+        teile = [f"{len(gesehen):,} of {len(gesehen) + len(geister):,} mods collected"]
+    else:
+        teile = [f"{len(gesehen):,} mods collected"]
     got = total = sets = 0
-    for record in records:
+    for record in gesehen + geister:
         stand = tier_progress(record, knowledge, league)
         if stand is None:
             continue
@@ -1025,13 +1105,18 @@ class ModAlbumProxy(QSortFilterProxyModel):
     alle geltenden Bedingungen müssen gleichzeitig zutreffen, deshalb kein
     einfacher ``setFilterKeyColumn`` allein."""
 
-    def __init__(self) -> None:
+    def __init__(self, knowledge=None) -> None:
         super().__init__()
         self.setFilterCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
         self.setFilterKeyColumn(IDENTITY_COL)
         self._kind = ""
         self._league: str | None = None
         self._rarities: RarityPredicate | None = None
+        # Geister (§4.53.5) nur, wenn die Raritäts-Auswahl gerollte Items
+        # meint — unter "Unique" wäre jeder Mod ohne Unique-Sichtung ein
+        # Geist, und das ist keine Lücke, sondern Unsinn.
+        self._knowledge = knowledge
+        self._ghosts = True
 
     def set_kind_filter(self, kind: str) -> None:
         # begin/endFilterChange statt invalidateFilter — Letzteres ist seit
@@ -1041,14 +1126,17 @@ class ModAlbumProxy(QSortFilterProxyModel):
         self.endFilterChange()
 
     def set_pot_filter(self, league: str | None,
-                       rarities: RarityPredicate | None) -> None:
+                       rarities: RarityPredicate | None,
+                       ghosts: bool = True) -> None:
         """Liga und Rarität zusammen, weil sie in der Range-Spalte auch
         zusammen wirken (§combined_range_text) — eine Zeile ohne
         passenden Topf für die eine Achse hat für die andere ohnehin
-        nichts zu zeigen."""
+        nichts zu zeigen. ``ghosts``: ob Karten ohne Sichtung in der
+        Auswahl als Geister stehen bleiben dürfen (§4.53.5)."""
         self.beginFilterChange()
         self._league = league
         self._rarities = rarities
+        self._ghosts = ghosts
         self.endFilterChange()
 
     def filterAcceptsRow(self, row: int, parent: QModelIndex) -> bool:  # noqa: N802
@@ -1058,8 +1146,11 @@ class ModAlbumProxy(QSortFilterProxyModel):
             return False
         if self._kind and record.kind != self._kind:
             return False
-        if self._league is not None or self._rarities is not None:
-            if not matching_spans(record, self._league, self._rarities):
+        if not matching_spans(record, self._league, self._rarities):
+            # Keine Sichtung in der Auswahl: als Geist stehen lassen,
+            # wenn das Spiel den Mod kennt (§4.53.5) — sonst weg.
+            if not (self._ghosts and is_ghost(record, self._knowledge,
+                                              self._league, self._rarities)):
                 return False
         return super().filterAcceptsRow(row, parent)
 
@@ -1108,8 +1199,15 @@ class ModCardDelegate(QStyledItemDelegate):
 
         slots = index.data(TIER_SLOTS_ROLE)
         gewaehlt = bool(option.state & QStyle.StateFlag.State_Selected)
+        # Geisterkarte (§4.53.5): keine Sichtung in der Auswahl. Sie
+        # steht im Album, weil das Spiel den Mod kennt — gestrichelter
+        # Rand, gedämpfter Name, leere Slots: der Platz, der noch fehlt.
+        geist = not gesehen
         farbe, randbreite = card_border(record, slots, gewaehlt)
-        painter.setPen(QPen(QColor(farbe), randbreite))
+        stift = QPen(QColor(farbe), randbreite)
+        if geist and not gewaehlt:
+            stift.setStyle(Qt.PenStyle.DashLine)
+        painter.setPen(stift)
         painter.setBrush(QColor(CARD_BG))
         painter.drawRoundedRect(karte, CARD_RADIUS, CARD_RADIUS)
 
@@ -1137,7 +1235,7 @@ class ModCardDelegate(QStyledItemDelegate):
 
         name_rect = QRect(innen.left(), innen.top(),
                           name_rechts - innen.left(), fm.height() * 2)
-        painter.setPen(QColor(CARD_TEXT))
+        painter.setPen(QColor(CARD_TEXT_DIM if geist else CARD_TEXT))
         painter.setClipRect(name_rect)
         # Symbol als Teil des Namens-Strings: dieselbe Umbruch- und
         # Abschneide-Logik, keine eigene Positionsrechnung. Farb-Emoji
@@ -1151,7 +1249,9 @@ class ModCardDelegate(QStyledItemDelegate):
 
         range_rect = QRect(innen.left(), name_rect.bottom() + 2,
                            innen.width(), fm.height())
-        painter.setPen(QColor(CARD_TEXT_RANGE))
+        if geist:
+            range_text = GHOST_TEXT
+        painter.setPen(QColor(CARD_TEXT_DIM if geist else CARD_TEXT_RANGE))
         painter.drawText(range_rect, Qt.AlignmentFlag.AlignLeft,
                          fm.elidedText(range_text, Qt.TextElideMode.ElideRight,
                                        range_rect.width()))
@@ -1211,14 +1311,20 @@ class ModAlbumDialog(QDialog):
         # beim ersten Start ohne Netz der Normalfall. Alles Weitere faellt
         # dann auf die geschaetzten Baender zurueck, nichts bricht.
         self._knowledge = knowledge
-        records = sorted(collection.records(), key=lambda r: r.identity)
+        gesammelt = sorted(collection.records(), key=lambda r: r.identity)
+        # Die Geisterkarten (§4.53.5) stehen zwischen den echten — die
+        # Sortierung nach Name mischt sie ein, wo sie hingehören: neben
+        # ihre Nachbarn, nicht in einen Anhang. Der Gruss darunter zählt
+        # nur die echte Sammlung.
+        records = sorted(gesammelt + ghost_records(gesammelt, knowledge),
+                         key=lambda r: r.identity)
         # Für die Sammel-Kopfzeile, die beim Liga-Wechsel neu rechnet
         # (§_on_pot_filter_changed) — dieselbe Liste wie im Modell.
         self._records = records
         self._model = ModAlbumModel(records, collection.new_keys(), knowledge)
-        self._proxy = ModAlbumProxy()
+        self._proxy = ModAlbumProxy(knowledge)
         self._proxy.setSourceModel(self._model)
-        self._greeting = collection_greeting(records, collection.new_keys())
+        self._greeting = collection_greeting(gesammelt, collection.new_keys())
 
         self._search = QLineEdit()
         self._search.setPlaceholderText("Search…")
@@ -1409,14 +1515,17 @@ class ModAlbumDialog(QDialog):
 
     def _on_pot_filter_changed(self) -> None:
         league = self._league_combo.currentData()
-        rarities = RARITY_GROUPS_BY_NAME.get(self._rarity_combo.currentData() or "")
-        self._proxy.set_pot_filter(league, rarities)
+        gruppe = self._rarity_combo.currentData() or ""
+        rarities = RARITY_GROUPS_BY_NAME.get(gruppe)
+        # Geister nur, solange die Auswahl gerollte Items meint (§4.53.5).
+        geister = gruppe in ("", DEFAULT_RARITY_GROUP)
+        self._proxy.set_pot_filter(league, rarities, geister)
         self._model.set_range_filter(league, rarities)
         # Kopfzeile und offener Steckbrief folgen der Liga (§4.53.3) —
         # sonst behauptete der Filter etwas, das die Zahlen darunter
         # nicht einlösen.
         self._stats_label.setText(
-            album_stats(self._records, self._knowledge, league))
+            album_stats(self._records, self._knowledge, league, rarities, geister))
         self._refresh_detail()
         self._update_count_label()
 

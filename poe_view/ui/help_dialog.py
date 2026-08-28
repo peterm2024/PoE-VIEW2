@@ -336,7 +336,14 @@ once (the singles of the collection), and a <b>✦</b> sits on this
 session's new finds. The line above the cards keeps the score: how many
 mods, how many complete sets, and how far along all their tiers you are.
 A sighting is one item passing through your hands — the same item
-fetched again on the next refresh does not count twice.
+fetched again on the next refresh does not count twice. Mods the game
+can roll that you have never collected in the selected league appear as
+<b>ghost cards</b> — dashed frame, dimmed name, every tier slot empty —
+so the score line reads <i>73 of 313 mods collected</i> and the tier bar
+counts the empty ladders as gaps; a ghost's details list every ladder it
+could roll on, and a collected mod lists the bases it has never rolled
+on yet. Ghosts show while the rarity box means rolled items (all, or
+Normal / Magic / Rare).
 Sort the cards by name, newest finds, most seen or singles first; the
 <b>Show table</b> button flips to a sortable list of the same mods.
 The album opens on the league you are viewing and on

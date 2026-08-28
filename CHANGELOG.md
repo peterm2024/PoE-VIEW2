@@ -136,6 +136,19 @@ nach [SemVer](https://semver.org/lang/de/).
   Wertspannen); der Umbau trägt sich beim nächsten Start selbst aus dem
   Cache nach, kein Zählstand geht verloren.
 
+- **Geisterkarten: das Album zeigt, was noch fehlt.** Jeder Mod, den
+  das Spiel rollen kann und den du in der gewählten Liga noch nie
+  gesehen hast, steht als leere Karte im Album — gestrichelter Rand,
+  gedämpfter Name, alle Tier-Kästchen leer, "not collected yet". Die
+  Kopfzeile sagt dann "73 of 313 mods collected", und der Tier-Balken
+  zählt die leeren Leitern als Lücken mit. Der Steckbrief einer
+  Geisterkarte zeigt jede Leiter, die der Mod rollen könnte; bei einem
+  gesehenen Mod steht darunter, auf welchen Basen er noch nie gerollt
+  wurde ("Not rolled yet on: Amulet, Belt"). Geister erscheinen nur,
+  solange die Raritäts-Auswahl gerollte Items meint — unter "Unique"
+  wäre jeder Mod ohne Unique-Sichtung ein Geist, und das ist keine
+  Lücke.
+
 - **Tier-Nummern am Item.** Im Detail-Panel und in der Paperdoll steht
   hinter jeder Mod-Zeile, deren Leiter das Spiel kennt, ihr Tier —
   "T1" in Gold, "T2" in Silber, "T3" in Bronze, wie im Album. Der

@@ -420,3 +420,14 @@ def test_two_steps_with_the_same_span_are_merged_keeping_the_earliest(
     ladder = mk.build().ladder("# to Intelligence", "Jewel")
 
     assert [(s.required_level, s.low, s.high) for s in ladder] == [(1, 5, 5)]
+
+
+def test_knowledge_lists_its_identities_and_their_categories() -> None:
+    """Die Grundlage der Geisterkarten (§4.53.5)."""
+    wissen = mk.Knowledge({("# to maximum Life", "Ring"): [mk.TierStep(1, 3, 9)],
+                           ("# to maximum Life", "Belt"): [mk.TierStep(1, 3, 9)],
+                           ("#% to Cold Resistance", "Ring"): [mk.TierStep(1, 6, 11)]})
+
+    assert wissen.identities() == {"# to maximum Life", "#% to Cold Resistance"}
+    assert wissen.categories("# to maximum Life") == ["Belt", "Ring"]
+    assert wissen.categories("unknown") == []

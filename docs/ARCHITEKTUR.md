@@ -6743,6 +6743,69 @@ escapten Text, selbst nicht escaped), `tests/test_main_window_helpers.py`
 (Fenster reicht das Wissen an Balken und Etikett). Zehn Gegenproben,
 alle rissen; Optik nativ per `grab()` geprüft.
 
+#### 4.53.5 Stufe 4: Geisterkarten — das Album zeigt, was fehlt (`ui/mod_album.py`)
+
+Die letzte Stufe des Plans vom 2026-08-27/28 und der Kern der Frage,
+die alles ausgelöst hat ("das fühlt sich nicht wie ein Sammel-Album
+an"): Ein Album hat leere Felder. Bisher zeigte das Fenster nur, was
+Peter je gesehen hat; jetzt steht auch da, was er noch NICHT gesehen
+hat — Mods, die das Spiel rollen kann (irgendeine Leiter in §4.53
+bekannt) und die in der Auswahl nie auftauchten.
+
+**Zwei Sorten Geist, eine Darstellung.** `ghost_records()` baut beim
+Öffnen Hüllen (`ModRecord` mit `count == 0`, nie persistiert) für jede
+Identität aus `Knowledge.identities()`, die die Sammlung nicht als
+Explicit kennt — über Peters ganzen Bestand sind das nur 9 (Fischerei-
+Mods). Die zweite, wichtigere Sorte entsteht durch den Filter: Ein
+Mod, der aus Standard bekannt ist, in "SSF R Allflame" aber nie
+gerollt wurde, hat dort keine Spanne — vorher versteckte ihn der Proxy,
+jetzt bleibt er als Geist stehen (`is_ghost`: keine Sichtung in der
+Auswahl UND Leiter bekannt). Gemessen: "73 of 313 mods collected" in
+Peters frischer Liga, 47 von 903 Sprossen. Das ist die Zahl, die ein
+Sammelalbum ausmacht.
+
+**Die Karte:** gestrichelter Rand (Auswahl gewinnt weiterhin),
+gedämpfter Name, `not collected yet` statt der Range, die LÄNGSTE
+bekannte Leiter als leere Slot-Reihe (`tier_slots` ohne Konto; bei
+gleicher Länge der alphabetisch erste Name, damit nichts flackert),
+`0×` in der Fußzeile. Der Delegate entscheidet an `gesehen == 0` — der
+Sichtungszahl der Auswahl, die er ohnehin malt.
+
+**Der Steckbrief eines Geists** listet jede Leiter, die der Mod rollen
+könnte (`_ladder_sections` ohne Konto: alle `Knowledge.categories`
+mit leerem Konto — Kopf "not rolled yet", alle Sprossen `not seen
+yet`). Ein GESEHENER Mod bekommt darunter eine Zeile `Not rolled yet
+on: Amulet, Belt` (`unseen_categories`) — die Lücke je Basis, ohne
+für Feuerresistenz 24 leere Leitern auszurollen.
+
+**Kopfzeile und Balken zählen die Geister mit** (`album_stats`): "73
+of 313 mods collected", und die leeren Leitern gehen als 0-von-n in
+den Sprossen-Balken ein — deshalb fiel Peters Gesamt-Prozentsatz von
+69 % auf 52 %: Vorher war die Grundgesamtheit nur das schon
+Gesehene. Ehrlicher, und genau die Zahl, die beim Spielen wächst.
+
+**Geister nur, wo sie Sinn haben.** Der Proxy lässt sie durch, solange
+die Raritäts-Auswahl gerollte Items meint ("All rarities" oder
+"Normal / Magic / Rare"); unter "Unique" wäre jeder Mod ohne
+Unique-Sichtung ein Geist, und das ist keine Lücke. Der Dialog
+entscheidet das am Combo-Namen (`_on_pot_filter_changed`) und gibt es
+an Proxy und Kopfzeile weiter. Ohne geladenes Mod-Wissen gibt es keine
+Geister — eine Lücke, die niemand belegen kann, ist keine.
+
+Nebenwirkung, bewusst: `tier_slots` liefert für einen Mod ohne Konto
+in der Liga jetzt die leere Maske statt `None`, also zeigt auch die
+Range-Spalte `– · 0/8`. Der Test dazu (§4.53.3, "Liga ohne Belege")
+wurde entsprechend umgeschrieben: Die Lücke ist sichtbar, nicht
+abwesend.
+
+Getestet: `tests/test_mod_album.py` (Geister = Wissen minus Sammlung,
+`is_ghost` je Auswahl, längste Leiter leer, Steckbrief eines Geists,
+`Not rolled yet on`, Kopfzeile "1 of 2", Proxy zeigt/versteckt nach
+Rarität, Standard-Mod wird in der Liga zum Geist) und
+`tests/test_mod_knowledge.py` (`identities`/`categories`). Zehn
+Gegenproben, alle rissen. Smoke: 6135 Steckbriefe × 2 Sichten ohne
+Fehler, Album nativ gegriffen.
+
 ## 8. Entwicklungsstand
 
 Die ursprünglich geplanten Meilensteine (Grundgerüst, Authentifizierung,

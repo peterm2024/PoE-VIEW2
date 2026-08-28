@@ -268,9 +268,26 @@ class Knowledge:
 
     def __init__(self, ladders: dict[tuple[str, str], list[TierStep]]) -> None:
         self._ladders = ladders
+        # Je Identität ihre Kategorien — die Grundlage der Geisterkarten
+        # (§4.53.5): "Welche Mods gibt es überhaupt, die ich noch nie
+        # gesehen habe?" Sortiert, damit die Anzeige deterministisch ist.
+        kategorien: dict[str, list[str]] = {}
+        for identity, category in ladders:
+            kategorien.setdefault(identity, []).append(category)
+        self._categories = {identity: sorted(kats)
+                            for identity, kats in kategorien.items()}
 
     def ladder(self, identity: str, category: str) -> list[TierStep]:
         return self._ladders.get((identity, category), [])
+
+    def identities(self) -> frozenset[str]:
+        """Alle Mod-Identitäten, für die irgendeine Leiter bekannt ist."""
+        return frozenset(self._categories)
+
+    def categories(self, identity: str) -> list[str]:
+        """Die Kategorien, auf denen dieser Mod rollen kann — leer für
+        eine unbekannte Identität."""
+        return list(self._categories.get(identity, ()))
 
     def has(self, identity: str, category: str) -> bool:
         return (identity, category) in self._ladders

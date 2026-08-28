@@ -960,15 +960,16 @@ def test_the_tier_progress_disappears_only_for_the_rarity_filter() -> None:
 
 
 def test_the_tier_progress_follows_the_league_filter() -> None:
-    """Eine Liga ohne eigene Belege zeigt keinen Zaehler — die Slots und
-    Haekchen anderer Ligen duerfen nicht durchscheinen (Peters
-    Screenshot mit Liga-Filter, 2026-08-28)."""
+    """Eine Liga ohne eigene Belege zeigt die LEERE Leiter — die Slots
+    und Haekchen anderer Ligen duerfen nicht durchscheinen (Peters
+    Screenshot mit Liga-Filter, 2026-08-28). Seit den Geisterkarten
+    (§4.53.5) ist die Luecke selbst sichtbar: 0 von 3, nicht nichts."""
     sammlung = _mit_konto({7: 3, 20: 5})
     record = sammlung.get("explicitMods", "+27% to Cold Resistance")
     ladder = _leiter((1, 6, 11), (24, 12, 17), (48, 18, 23))
 
-    assert "/" not in range_column_text(record, "Allflame", None, ladder)
-    assert tier_slots(record, ladder, "Allflame") is None
+    assert range_column_text(record, "Allflame", None, ladder).endswith("0/3")
+    assert tier_slots(record, ladder, "Allflame") == [False, False, False]
 
 
 def test_without_mod_knowledge_the_range_column_is_unchanged() -> None:
@@ -1276,3 +1277,136 @@ def test_an_unknown_league_leaves_all_leagues_selected(qapp) -> None:
 
     assert dialog._league_combo.currentData() is None
     assert dialog._rarity_combo.currentData() == "Normal / Magic / Rare"
+
+
+# ------------------------- Stufe 4: Geisterkarten ----------------------- #
+# Nie gesehene Mods, die das Spiel kennt, stehen als leere Karten im
+# Album — "collected X of Y" (§4.53.5).
+
+def _wissen_mit_geist():
+    """Cold Resistance (gesehen) auf Ring+Amulet, Lightning (nie
+    gesehen) auf Ring mit drei Sprossen."""
+    from poe_view.services.mod_knowledge import Knowledge, TierStep
+    kalt = [TierStep(1, 6, 11), TierStep(24, 12, 17)]
+    blitz = [TierStep(1, 6, 11), TierStep(24, 12, 17), TierStep(48, 18, 23)]
+    return Knowledge({("#% to Cold Resistance", "Ring"): kalt,
+                      ("#% to Cold Resistance", "Amulet"): kalt,
+                      ("#% to Lightning Resistance", "Ring"): blitz})
+
+
+def test_ghost_records_are_the_known_mods_never_collected() -> None:
+    from poe_view.ui.mod_album import ghost_records
+    sammlung = _mit_konto({7: 3})
+    records = list(sammlung.records())
+
+    geister = ghost_records(records, _wissen_mit_geist())
+
+    assert [g.identity for g in geister] == ["#% to Lightning Resistance"]
+    assert geister[0].kind == "explicitMods" and geister[0].count == 0
+    assert ghost_records(records, None) == []
+
+
+def test_is_ghost_means_no_sighting_in_the_selection_but_a_known_ladder() -> None:
+    from poe_view.ui.mod_album import ghost_records, is_ghost
+    sammlung = _mit_zwei_ligen()
+    record = sammlung.get("explicitMods", "+27% to Cold Resistance")
+    wissen = _wissen_mit_geist()
+    geist = ghost_records([record], wissen)[0]
+
+    assert is_ghost(geist, wissen, None, None) is True
+    assert is_ghost(record, wissen, None, None) is False
+    assert is_ghost(record, wissen, "Mirage", None) is True      # dort nie gesehen
+    assert is_ghost(record, wissen, "Allflame", None) is False
+    assert is_ghost(geist, None, None, None) is False           # ohne Wissen kein Geist
+
+
+def test_a_ghost_shows_the_longest_ladder_all_empty() -> None:
+    from poe_view.ui.mod_album import ghost_records
+    from poe_view.services.mod_knowledge import Knowledge, TierStep
+    wissen = Knowledge({("#% to Lightning Resistance", "Ring"): [TierStep(1, 6, 11)],
+                        ("#% to Lightning Resistance", "Belt"): [TierStep(1, 6, 11),
+                                                                 TierStep(24, 12, 17)]})
+    geist = ghost_records([], wissen)[0]
+
+    assert tier_slots(geist, wissen) == [False, False]
+    assert tier_progress(geist, wissen) == (0, 2)
+
+
+def test_a_ghosts_detail_lists_every_ladder_it_could_roll() -> None:
+    from poe_view.ui.mod_album import ghost_records
+    wissen = _wissen_mit_geist()
+    geist = ghost_records([], wissen)[1]      # Lightning
+
+    text = format_record_detail(geist, wissen)
+
+    assert LADDER_HEADING in text
+    assert "not rolled yet" in text
+    assert text.count("not seen yet") == 3
+    assert "0 of 3 tiers" in text
+
+
+def test_the_detail_names_the_bases_a_mod_was_never_rolled_on() -> None:
+    """Die Luecke je Basis: Cold Resistance nur auf Ringen gesehen, das
+    Spiel kennt auch Amulette."""
+    from poe_view.ui.mod_album import UNSEEN_HEADING
+    sammlung = _mit_konto({7: 3})
+    record = sammlung.get("explicitMods", "+27% to Cold Resistance")
+
+    text = format_record_detail(record, _wissen_mit_geist())
+    html = record_detail_html(record, "Consolas", _wissen_mit_geist())
+
+    assert f"{UNSEEN_HEADING} Amulet" in text
+    assert "Amulet" in html and UNSEEN_HEADING in html
+    assert "Ring" not in text.split(UNSEEN_HEADING)[1]
+
+
+def test_album_stats_count_collected_of_possible() -> None:
+    from poe_view.ui.mod_album import album_stats, ghost_records
+    sammlung = _mit_konto({7: 3, 14: 1})
+    records = list(sammlung.records())
+    wissen = _wissen_mit_geist()
+    alle = records + ghost_records(records, wissen)
+
+    mit = album_stats(alle, wissen)
+    ohne = album_stats(alle, wissen, ghosts=False)
+
+    assert mit.startswith("1 of 2 mods collected")
+    assert "tiers 2/5" in mit                       # 2 von 2 + 0 von 3
+    assert ohne.startswith("1 mods collected")
+    assert "tiers 2/2" in ohne
+
+
+def test_the_album_shows_ghosts_for_rolled_items_but_not_for_uniques(qapp) -> None:
+    sammlung = _mit_konto({7: 3})
+    # Eine Unique-Sichtung, damit "Unique" ueberhaupt in der Box steht.
+    sammlung.observe("explicitMods", "+30% to Cold Resistance", rarity=3)
+    sammlung.clear_new()
+    dialog = ModAlbumDialog(sammlung, None, _wissen_mit_geist())
+    assert dialog._proxy.rowCount() == 2                  # echte + Geist
+
+    index = dialog._rarity_combo.findData("Unique")
+    assert index >= 0
+    dialog._rarity_combo.setCurrentIndex(index)
+    assert dialog._proxy.rowCount() == 1                  # kein Geist unter Unique
+
+    dialog._rarity_combo.setCurrentIndex(0)
+    assert dialog._proxy.rowCount() == 2
+    assert "1 of 2 mods collected" in dialog._stats_label.text()
+
+
+def test_a_mod_never_seen_in_the_league_becomes_a_ghost_there(qapp) -> None:
+    """Peters Fall: frische Liga, der Mod ist aus Standard bekannt — im
+    Album der Liga steht er als leere Karte, nicht gar nicht."""
+    from poe_view.services.mod_knowledge import Knowledge, TierStep
+    sammlung = _mit_konto({7: 3})
+    sammlung.observe("explicitMods", "+50 to maximum Life", rarity=2, league="Allflame")
+    sammlung.clear_new()
+    wissen = Knowledge({("#% to Cold Resistance", "Ring"): [TierStep(1, 6, 11)]})
+    dialog = ModAlbumDialog(sammlung, None, wissen, league="Allflame")
+
+    zeilen = [dialog._model.record_at(dialog._proxy.mapToSource(
+        dialog._proxy.index(i, 0)).row()).identity for i in range(dialog._proxy.rowCount())]
+
+    assert "#% to Cold Resistance" in zeilen
+    assert "0 of 1 tiers" in record_detail_html(
+        sammlung.get("explicitMods", "+27% to Cold Resistance"), "C", wissen, "Allflame")
