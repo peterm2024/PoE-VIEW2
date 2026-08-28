@@ -41,6 +41,11 @@ _LEFTOVER_TAG = re.compile(r"<<[^<>]*>>")
 FRAME_TYPE_NAMES = {
     0: "Normal", 1: "Magic", 2: "Rare", 3: "Unique", 4: "Gem",
     5: "Currency", 6: "Divination Card", 7: "Quest", 8: "Prophecy", 9: "Relic",
+    # 10 fiel auf Peters Album-Screenshot als rohes "frameType 10" auf.
+    # Am echten Cache nachgeschlagen: ausschließlich Valdo Maps und
+    # Foil-Uniques aus Valdos Puzzle-Box (29 Items, z. B. ein foil
+    # "Wurm's Molt") — der Regenbogen-Rahmen des Spiels.
+    10: "Foil",
 }
 
 

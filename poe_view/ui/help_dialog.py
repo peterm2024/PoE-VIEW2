@@ -326,8 +326,15 @@ values change between them; Standard and the other permanent leagues
 share one pot, because they hold items rolled in every league there ever
 was. The <b>Mods</b> toolbar button opens the whole collection as an
 <b>album of cards</b> — every mod a card with its range and how often it
-was seen, a <b>golden frame</b> around the ones seen exactly once (the
-singles of the collection) and a <b>✦</b> on this session's new finds.
+was seen. Cards carry a <b>coloured edge and symbol</b> for their theme
+(fire red, lightning yellow, cold blue, chaos green, and so on — the
+colours you know from the game), and where the real tier ladder is
+known, a row of <b>slots</b>, one box per tier: filled means rolled,
+an empty outline is a gap in your album. A <b>golden frame with a ✓</b>
+crowns a complete set, a <b>silver frame</b> marks the mods seen exactly
+once (the singles of the collection), and a <b>✦</b> sits on this
+session's new finds. The line above the cards keeps the score: how many
+mods, how many complete sets, and how far along all their tiers you are.
 Sort the cards by name, newest finds, most seen or singles first; the
 <b>Show table</b> button flips to a sortable list of the same mods.
 Search and the filters (text, kind, league, rarity) work in both views,

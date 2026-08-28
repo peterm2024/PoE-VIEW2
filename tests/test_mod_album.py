@@ -7,6 +7,7 @@ from poe_view.services.mod_collection import (CORRUPTED_OFFSET, LEGACY_LEAGUE,
                                               ModCollection)
 from poe_view.services import mod_tiers
 from poe_view.ui.mod_album import (BANDS_HEADING, COLUMNS, COUNT_COL,
+                                   RARITY_GROUPS_BY_NAME,
                                    EXAMPLE_COL, IDENTITY_COL, KIND_COL,
                                    LADDER_HEADING, RANGE_COL, ModAlbumDialog,
                                    collected_tiers, combined_range_text,
@@ -893,19 +894,37 @@ def test_categories_are_ordered_by_sightings_not_alphabetically() -> None:
     assert text.index("Ring") < text.index("Amulet")
 
 
-def test_only_the_tables_are_monospace_whichever_comes_first() -> None:
-    """record_detail_html teilt an der ERSTEN Tabellen-Ueberschrift.
-    Bei einer echten Leiter ist das eine andere als bei den Baendern."""
+def test_the_real_ladder_is_rendered_as_a_drawn_table() -> None:
+    """Design-Runde 2026-08-28 (Peter: "gezeichnete Tabellen"): Die
+    echte Leiter ist eine <table> mit farbigen T-Nummern, keine
+    Monospace-Texttabelle mehr - die Zellen richten die Spalten aus."""
     sammlung = _mit_konto({7: 3, 20: 5})
     record = sammlung.get("explicitMods", "+27% to Cold Resistance")
 
     html = record_detail_html(record, "Courier New",
                              _leiter((1, 6, 11), (24, 12, 17), (48, 18, 23)))
 
-    kopf, _, tabelle = html.partition("<pre")
-    assert LADDER_HEADING not in kopf      # Ueberschrift gehoert zur Tabelle
-    assert LADDER_HEADING in tabelle
-    assert "seen 1" in kopf                # Fliesstext bleibt proportional
+    assert "<table" in html
+    assert "<pre" not in html              # keine Baender -> kein pre
+    from poe_view.ui.mod_album import T_COLORS
+    assert T_COLORS[1] in html             # T1 traegt Gold
+    assert "not seen yet" in html          # die Luecke (12-17) bleibt sichtbar
+    assert "seen 1" in html.partition("<table")[0]  # Fliesstext im Kopf
+
+
+def test_the_estimated_bands_stay_monospace_below_the_drawn_ladder() -> None:
+    """Die Baender bleiben eine <pre>-Texttabelle - ausdruecklich
+    schlichter als die gezeichnete Leiter: Der optische Rangunterschied
+    ist die Botschaft (belegt gegen geraten)."""
+    sammlung = _mit_belegen([(6, 5), (12, 14), (18, 26), (24, 38), (30, 50)])
+    record = sammlung.get("explicitMods", "+27% to Cold Resistance")
+
+    html = record_detail_html(record, "Courier New", _leiter())
+
+    assert "<table" not in html
+    _, _, pre = html.partition("<pre")
+    assert BANDS_HEADING in pre
+    assert "Courier New" in pre
 
 
 # ------------------------- Der Tier-Zaehler in der Range ----------------- #
@@ -967,3 +986,124 @@ def test_tier_progress_is_none_when_no_ladder_matches() -> None:
 
     assert tier_progress(record, _leiter((1, 6, 11))) is None
     assert tier_progress(record, None) is None
+
+
+def test_foil_has_a_name_and_counts_as_unique() -> None:
+    """Peters Album-Screenshot zeigte ein rohes "frameType 10". Am echten
+    Cache nachgeschlagen: Valdo Maps und Foil-Uniques aus Valdos
+    Puzzle-Box - Uniques mit Regenbogen-Rahmen, keine eigene Klasse."""
+    assert rarity_label(10) == "Foil"
+    assert RARITY_GROUPS_BY_NAME["Unique"](10)
+    assert RARITY_GROUPS_BY_NAME["Unique"](3)
+    assert not RARITY_GROUPS_BY_NAME["Unique"](2)
+
+
+# --------------- Die Design-Runde 2026-08-28 (A/B/C/D) ------------------- #
+
+def test_mod_theme_picks_the_game_language_colors() -> None:
+    from poe_view.ui.mod_album import mod_theme
+    assert mod_theme("#% to Fire Resistance")[0] == "Fire"
+    assert mod_theme("+# to maximum Life")[0] == "Life"
+    assert mod_theme("# to Strength")[0] == "Attributes"
+    assert mod_theme("#% increased Rarity of Items found") is None
+
+
+def test_minion_mods_beat_every_other_theme() -> None:
+    """"Minions deal #% increased Damage" darf nicht an einem spaeteren
+    Muster haengenbleiben - die Reihenfolge der Tabelle ist Prioritaet."""
+    from poe_view.ui.mod_album import mod_theme
+    assert mod_theme("Minions have #% increased Attack Speed")[0] == "Minion"
+    assert mod_theme("Minions deal #% increased Fire Damage")[0] == "Minion"
+
+
+def test_every_theme_pair_keeps_its_distance() -> None:
+    """Die Farbabstaende sind Teil des Designs (CIEDE2000 >= 12 je Paar,
+    gerechnet im Scratchpad) - dieser Test friert nur ein, dass keine
+    zwei Themen DIESELBE Farbe bekommen, der Rechenweg steht im Skript."""
+    from poe_view.ui.mod_album import MOD_THEMES
+    farben = [farbe for _, _, farbe, _ in MOD_THEMES]
+    assert len(farben) == len(set(farben))
+
+
+def test_collected_mask_runs_from_lowest_tier_to_t1() -> None:
+    """Das LETZTE Element der Maske ist T1 - die Slot-Leiste zeichnet
+    links das unterste Tier, rechts aussen sitzt das beste."""
+    from poe_view.services.mod_knowledge import TierStep
+    from poe_view.ui.mod_album import collected_mask
+    ladder = [TierStep(1, 6, 11), TierStep(24, 12, 17), TierStep(48, 18, 23)]
+
+    maske = collected_mask({20.0: [1, 60, 60]}, ladder)   # nur T1 getroffen
+
+    assert maske == [False, False, True]
+
+
+def test_card_border_ranks_selection_over_gold_over_silver() -> None:
+    from poe_view.ui.mod_album import (CARD_BORDER, CARD_BORDER_COMPLETE,
+                                       CARD_BORDER_SELECTED,
+                                       CARD_BORDER_SINGLE, card_border)
+    sammlung = _mit_konto({7: 3})
+    # Ein zweites Mal gesehen: sonst greift die Einzelstueck-Regel und
+    # der Test prueft nur die falsche Stufe der Rangordnung.
+    sammlung.observe("explicitMods", "+29% to Cold Resistance", rarity=2)
+    record = sammlung.get("explicitMods", "+27% to Cold Resistance")
+    assert record.count > 1
+
+    # Auswahl schlaegt alles - auch eine komplette Leiter.
+    assert card_border(record, [True, True], True)[0] == CARD_BORDER_SELECTED
+    # Komplette Leiter: Gold, auch wenn der Mod oft gesehen wurde.
+    assert card_border(record, [True, True], False)[0] == CARD_BORDER_COMPLETE
+    # Unvollstaendige Leiter, mehrfach gesehen: grau.
+    assert card_border(record, [True, False], False)[0] == CARD_BORDER
+    # Einzelstueck ohne Leiter: Silber (frueher Gold - Gold heisst
+    # seit der Design-Runde ausschliesslich "Set komplett").
+    einzel = ModCollection()
+    einzel.observe("explicitMods", "+1 to nothing", rarity=2)
+    einzelrec = einzel.get("explicitMods", "+1 to nothing")
+    assert card_border(einzelrec, None, False)[0] == CARD_BORDER_SINGLE
+    assert CARD_BORDER_SINGLE != CARD_BORDER_COMPLETE
+
+
+def test_the_model_serves_the_slot_mask_role() -> None:
+    from poe_view.ui.mod_album import TIER_SLOTS_ROLE, ModAlbumModel
+    sammlung = _mit_konto({7: 3, 20: 5})
+    records = sorted(sammlung.records(), key=lambda r: r.identity)
+    ladder = _leiter((1, 6, 11), (24, 12, 17), (48, 18, 23))
+
+    mit = ModAlbumModel(records, frozenset(), ladder)
+    ohne = ModAlbumModel(records, frozenset(), None)
+
+    assert mit.data(mit.index(0, 0), TIER_SLOTS_ROLE) == [True, False, True]
+    assert ohne.data(ohne.index(0, 0), TIER_SLOTS_ROLE) is None
+
+
+def test_album_stats_counts_sets_and_draws_a_bar() -> None:
+    from poe_view.ui.mod_album import album_stats
+    sammlung = _mit_konto({7: 3, 14: 1, 20: 5})   # alle drei Sprossen
+    records = list(sammlung.records())
+    ladder = _leiter((1, 6, 11), (24, 12, 17), (48, 18, 23))
+
+    text = album_stats(records, ladder)
+
+    assert "1 mods collected" in text
+    assert "1 complete sets" in text
+    assert "tiers 3/3" in text
+    assert "100%" in text
+
+
+def test_album_stats_without_knowledge_shows_only_the_count() -> None:
+    from poe_view.ui.mod_album import album_stats
+    sammlung = _mit_konto({7: 3})
+
+    text = album_stats(list(sammlung.records()), None)
+
+    assert "mods collected" in text
+    assert "tiers" not in text          # kein Balken ohne Grundgesamtheit
+
+
+def test_the_dialog_carries_the_stats_line(qapp) -> None:
+    sammlung = _mit_konto({7: 3, 14: 1, 20: 5})
+    ladder = _leiter((1, 6, 11), (24, 12, 17), (48, 18, 23))
+
+    dialog = ModAlbumDialog(sammlung, None, ladder)
+
+    assert "complete sets" in dialog._stats_label.text()

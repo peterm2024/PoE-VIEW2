@@ -6473,6 +6473,76 @@ beide Male weil der Test den Fall zu harmlos nachbaute — die
 Kategorie-Sortierung war gar nicht geprüft, weil beide Kategorien in
 verschiedenen Tabellen-Blöcken lagen.
 
+#### 4.53.2 Die Design-Runde: das Album wird ein Album (`ui/mod_album.py`)
+
+Peter am 2026-08-28, mit Screenshot des fertigen Stufe-2-Albums: "Das
+sieht alles noch sehr öde aus [...] evtl Symbole und verschiedene
+Farben, gezeichnete Tabellen, unterteilte Fenster, Icons". Nach kurzer
+Recherche (Pokémon TCG Pocket, Panini-Alben, Completeness-Meter,
+Gold/Silber/Bronze-Konventionen) vier Bausteine vorgeschlagen, Peter
+hat alle vier gewählt:
+
+**A — Themen-Streifen und Symbol** (`MOD_THEMES`, `mod_theme()`): Aus
+der Identität wird per Regex-Tabelle ein Thema abgeleitet (Feuer,
+Kälte, Blitz, Chaos, Life, Mana, ES, Rüstung, Ausweichen, Angriff,
+Zauber, Minion, Tempo, Attribute) — die Karte bekommt ein 4-px-Band an
+der linken Innenkante und das Symbol vor dem Namen. Die Farben folgen
+der Sprache des Spiels, sind aber gerechnet: jedes Paar CIEDE2000
+≥ 12,4, jede Fläche ≥ 30 gegen den Kartengrund. Die REIHENFOLGE der
+Tabelle ist Priorität (Minion zuerst, sonst gewänne bei "Minions deal
+#% increased Fire Damage" das Feuer); ein Mod ohne Treffer bleibt grau
+— das Thema ist ein Zusatzsignal, keine Taxonomie. `lru_cache`, weil
+der Delegate bei jedem Neuzeichnen fragt.
+
+**B — Slot-Leiste und Gold für volle Sets** (`collected_mask`,
+`tier_slots`, `card_border`, `TIER_SLOTS_ROLE`): Ein Kästchen je Tier,
+von links (unterstes) nach rechts (T1), gefüllt = gesammelt — das
+Panini-Prinzip, die Lücke ist in der Übersicht sichtbar. Eine komplette
+Leiter bekommt einen satten Goldrahmen plus ✓ in der Fußzeile.
+**Der Einzelstück-Rahmen wechselte deshalb von Gold auf Silber:** Zwei
+Goldrahmen mit verschiedener Bedeutung (dE nur 14,7) wären nicht
+auseinanderzuhalten gewesen; seit dieser Runde heißt Gold ausschließlich
+"Set komplett" (Silber gegen Gold: dE 34,3). Die Rangordnung der Ränder
+steht in `card_border()`: Auswahl > Gold > Silber > Grau — Auswahl
+zuerst, sonst verlöre man die Markierung beim Anklicken einer
+ausgezeichneten Karte.
+
+**C — Der Steckbrief zeichnet die Leiter** (`_html_ladder_section`,
+`ladder_rows`): Die echten Leitern sind jetzt `<table>`-Blöcke im
+`QTextEdit` — Zellen richten die Spalten aus, die Monospace-Schrift
+braucht dort niemand mehr. T1/T2/T3 tragen Gold/Silber/Bronze, ab T4
+bleibt die Nummer grau (drei Metalle versteht jeder sofort, zehn
+Farbstufen niemand); Sichtungen als logarithmischer Mini-Balken (2×
+neben 216× — linear wäre einer unsichtbar); ungerollte Tiers gedämpft
+kursiv; Zebra-Zeilen. Die Tabelle hat bewusst KEIN `width="100%"` —
+sonst verteilt Qt die Spalten gleichmäßig übers Feld und zwischen
+ihnen klaffen fingerbreite Lücken. Die geschätzten Prozent-Bänder
+bleiben eine `<pre>`-Texttabelle: ausdrücklich schlichter, der optische
+Rangunterschied IST die Botschaft (belegt gegen geraten). Beide
+Renderer (Text für `ladder_table`, HTML) speisen sich aus DENSELBEN
+Strukturdaten (`ladder_rows`, `_beyond_the_ladder`,
+`_ladder_sections`) — zwei Darstellungen, eine Zeilenlogik.
+
+**D — Die Sammel-Kopfzeile** (`album_stats`): über den Karten der
+Stand der Sammlung — Bestand, komplette Sets, Tier-Fortschritt als
+Balken. Der Balken zählt SPROSSEN, nicht Mods; ohne geladenes
+Mod-Wissen bleibt nur der Bestand stehen, ein Balken ohne
+Grundgesamtheit wäre erfunden. An Peters Bestand beim Bau: "6,125 mods
+· 216 complete sets ✓ · tiers 611/881 ▰▰▰▰▰▰▰▱▱▱ 69%".
+
+Beim Screenshot-Abgleich fiel nebenbei `frameType 10` als rohe Zahl in
+der Topf-Liste auf — am echten Cache nachgeschlagen sind das Valdo
+Maps und Foil-Uniques aus Valdos Puzzle-Box. `FRAME_TYPE_NAMES[10] =
+"Foil"`, und die Unique-Filtergruppe nimmt 10 mit auf.
+
+Getestet: `tests/test_mod_album.py` (Themen-Präzedenz, Masken-
+Reihenfolge, Rang der Ränder, Slot-Rolle im Modell, gezeichnete Tabelle
+mit Gold-T1 und sichtbarer Lücke, Bänder bleiben `<pre>`, Kopfzeilen-
+Statistik, Foil-Label). Sechs Gegenproben, alle rissen den passenden
+Test; Kontrolllauf grün. Smoke über alle 6125 echten Steckbriefe ohne
+Fehler, Optik nativ per `grab()` geprüft (nicht offscreen — dort wäre
+die Palette hell, §FALLSTRICKE #55/#71/#76).
+
 ## 8. Entwicklungsstand
 
 Die ursprünglich geplanten Meilensteine (Grundgerüst, Authentifizierung,

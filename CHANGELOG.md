@@ -102,6 +102,21 @@ nach [SemVer](https://semver.org/lang/de/).
   gleich mit; sie tritt zurück, sobald nach Liga oder Rarität gefiltert
   wird, weil der Tier-Stand über alle Ligen hinweg geführt wird.
 
+- **Das Album sieht jetzt nach Sammelalbum aus.** Jede Karte trägt einen
+  Farbstreifen und ein Symbol für ihr Thema — Feuer rot, Blitz gelb,
+  Kälte blau, Chaos grün, wie im Spiel. Unter der Wertspanne sitzt eine
+  Reihe kleiner Kästchen, eines je Tier: gefüllt heißt gerollt, ein
+  leerer Umriss ist eine Lücke im Album. Komplette Sets bekommen einen
+  goldenen Rahmen mit Häkchen; der Rahmen der Einzelstücke ist dafür von
+  Gold auf Silber gewechselt, damit Gold eindeutig "vollständig" heißt.
+  Über den Karten steht der Stand der Sammlung — wie viele Mods, wie
+  viele komplette Sets, wie weit alle Tiers zusammen sind. Und im
+  Steckbrief ist die Tier-Leiter jetzt eine gezeichnete Tabelle statt
+  einer Textwand: T1 bis T3 in Gold, Silber und Bronze, Sichtungen als
+  kleiner Balken, nie gerollte Stufen gedämpft. Nebenbei haben Valdos
+  Foil-Uniques einen Namen bekommen, wo vorher ein rohes "frameType 10"
+  stand.
+
 ### Behoben
 
 - Die Beschriftung des Schnitts im XP-Graphen war unlesbar, wenn der

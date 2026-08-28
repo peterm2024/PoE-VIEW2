@@ -37,7 +37,9 @@ Kommentar bei ``CORRUPTED_OFFSET``).
 
 from __future__ import annotations
 
+import re
 import time
+from functools import lru_cache
 from html import escape as html_escape
 from typing import Callable
 
@@ -94,7 +96,10 @@ RarityPredicate = Callable[[int], bool]
 
 RARITY_GROUPS: tuple[tuple[str, RarityPredicate], ...] = (
     ("Normal / Magic / Rare", lambda r: r in (0, 1, 2)),
-    ("Unique", lambda r: r == 3),
+    # Foil (10) zaehlt zu Unique: Valdos Foil-Uniques sind Uniques mit
+    # Regenbogen-Rahmen, keine eigene Item-Klasse. Ohne diese Zeile
+    # fiele frameType 10 in gar keine Filter-Gruppe.
+    ("Unique", lambda r: r in (3, 10)),
     ("Corrupted", is_corrupted_bucket),
     ("Map", lambda r: r == MAP_RARITY),
     ("Gem / Currency / Card / Relic", lambda r: r in (4, 5, 6, 9)),
@@ -224,6 +229,17 @@ def tier_number(ladder: list, index: int) -> str:
     return f"T{len(ladder) - index}"
 
 
+def collected_mask(konto: dict[float, list[int]], ladder: list) -> list[bool]:
+    """Je Sprosse der Leiter: schon ein Wert aus dem Kontenbuch darin?
+
+    In Leiter-Reihenfolge (nach Freischalt-Level aufsteigend) — das
+    LETZTE Element ist also T1. Die Slot-Leiste auf der Karte zeichnet
+    genau diese Liste von links nach rechts: rechts außen sitzt das
+    beste Tier, wie ein Fortschritt, der nach rechts wächst."""
+    return [any(step.low <= wert <= step.high for wert in konto)
+            for step in ladder]
+
+
 def collected_tiers(konto: dict[float, list[int]],
                     ladder: list) -> tuple[int, int]:
     """(gesammelt, vorhanden) — wie viele Sprossen der Leiter schon ein
@@ -233,9 +249,45 @@ def collected_tiers(konto: dict[float, list[int]],
     sondern "wie vollständig". Werte, die in keine Sprosse fallen,
     zählen bewusst nicht mit — sie gehören keinem Tier an
     (§ladder_table)."""
-    getroffen = sum(1 for step in ladder
-                   if any(step.low <= wert <= step.high for wert in konto))
-    return getroffen, len(ladder)
+    maske = collected_mask(konto, ladder)
+    return sum(maske), len(maske)
+
+
+def ladder_rows(konto: dict[float, list[int]],
+                ladder: list) -> list[tuple[str, str, str, int, str]]:
+    """Eine Zeile je Sprosse, von T1 abwärts, als reine Daten:
+    (T-Nummer, Wertspanne, "from iLvl N", Sichtungen, bester Wert).
+
+    Gemeinsame Quelle für die Text-Tabelle (``ladder_table``) und die
+    gezeichnete im Steckbrief (``record_detail_html``) — zwei Renderer,
+    EINE Zeilenlogik, sonst liefen sie beim nächsten Umbau auseinander."""
+    zeilen = []
+    for i, step in enumerate(ladder):
+        drin = {wert: zeile for wert, zeile in konto.items()
+               if step.low <= wert <= step.high}
+        gesehen = sum(zeile[0] for zeile in drin.values())
+        zeilen.append((tier_number(ladder, i),
+                      _spread_text([(step.low, step.high)]),
+                      f"from iLvl {step.required_level}",
+                      gesehen,
+                      _fmt_num(max(drin)) if drin else ""))
+    return zeilen
+
+
+def _beyond_the_ladder(konto: dict[float, list[int]],
+                       ladder: list) -> tuple[int, str] | None:
+    """(Sichtungen, Wertspanne) der Werte NEBEN der Leiter — oder None.
+
+    Als SPANNE, nicht als Werteliste: Hier stehen zwei ganz verschiedene
+    Dinge nebeneinander — Werte unter der untersten Sprosse (aus fremden
+    Roll-Tabellen) und solche über der obersten (gecraftet, Essenz,
+    beeinflusst). Eine Liste zeigte je nach Sortierung nur eine Sorte."""
+    ausserhalb = {wert: zeile for wert, zeile in konto.items()
+                 if not any(step.low <= wert <= step.high for step in ladder)}
+    if not ausserhalb:
+        return None
+    n = sum(zeile[0] for zeile in ausserhalb.values())
+    return n, _spread_text([(min(ausserhalb), max(ausserhalb))])
 
 
 def ladder_table(konto: dict[float, list[int]], ladder: list) -> list[str]:
@@ -253,33 +305,21 @@ def ladder_table(konto: dict[float, list[int]], ladder: list) -> list[str]:
     eine Zuordnung zu erfinden wäre schlechter als beide zu nennen. An
     Peters Bestand gemessen betrifft das 3,8 % der Sichtungen."""
     zeilen = [f"{'':<5}{'Values':<12}{'':<16}{'Seen':>7}   Best"]
-    for i, step in enumerate(ladder):
-        drin = {wert: zeile for wert, zeile in konto.items()
-               if step.low <= wert <= step.high}
-        gesehen = sum(zeile[0] for zeile in drin.values())
-        werte = _spread_text([(step.low, step.high)])
-        ab = f"from iLvl {step.required_level}"
+    for tier, werte, ab, gesehen, best in ladder_rows(konto, ladder):
         if gesehen:
-            zeilen.append(f"{tier_number(ladder, i):<5}{werte:<12}{ab:<16}"
-                         f"{gesehen:>6}×   {_fmt_num(max(drin))}")
+            zeilen.append(f"{tier:<5}{werte:<12}{ab:<16}"
+                         f"{gesehen:>6}×   {best}")
         else:
-            zeilen.append(f"{tier_number(ladder, i):<5}{werte:<12}{ab:<16}"
+            zeilen.append(f"{tier:<5}{werte:<12}{ab:<16}"
                          f"{'not seen yet':>13}")
-    ausserhalb = {wert: zeile for wert, zeile in konto.items()
-                 if not any(step.low <= wert <= step.high for step in ladder)}
+    ausserhalb = _beyond_the_ladder(konto, ladder)
     if ausserhalb:
         # Gecraftete, mit Essenz gerollte und beeinflusste Mods rollen
         # aus eigenen Tabellen, die hier nicht mitgebaut werden — ihre
         # Werte liegen deshalb neben der Leiter statt darauf. Sie
         # verschweigen wäre falsch: Es sind echte Sichtungen, und
         # gerade die hohen sind die interessanten.
-        n = sum(zeile[0] for zeile in ausserhalb.values())
-        # Als SPANNE, nicht als Werteliste: Hier stehen zwei ganz
-        # verschiedene Dinge nebeneinander — Werte unter der untersten
-        # Sprosse (aus fremden Roll-Tabellen) und solche über der
-        # obersten (gecraftet, Essenz, beeinflusst). Eine Liste zeigte
-        # je nach Sortierung nur eine der beiden Sorten.
-        werte = _spread_text([(min(ausserhalb), max(ausserhalb))])
+        n, werte = ausserhalb
         zeilen.append(f"{'':<5}{'beyond the ladder':<28}{n:>6}×   {werte}")
     getroffen, gesamt = collected_tiers(konto, ladder)
     zeilen.append("")
@@ -311,33 +351,10 @@ def format_bands(record: ModRecord, knowledge=None) -> list[str]:
     if not record.tier_ledger:
         return []
     echte: list[str] = []
-    geschaetzte: list[str] = []
-    # Nach Sichtungen absteigend, nicht alphabetisch: Ein verbreiteter
-    # Mod wie Feuerresistenz hat in Peters Bestand 24 Kategorien, und
-    # jede Leiter ist elf Zeilen lang. Alphabetisch stünde "Amulet" oben,
-    # auch wenn die Kategorie zwei Sichtungen hat und "Ring" zweihundert.
-    nach_gewicht = sorted(record.tier_ledger,
-                         key=lambda kat: (-sum(z[0] for z in record.tier_ledger[kat].values()),
-                                         kat))
-    for kategorie in nach_gewicht:
-        konto = record.tier_ledger[kategorie]
-        sichtungen = sum(zeile[0] for zeile in konto.values())
-        einheit = "sighting" if sichtungen == 1 else "sightings"
-        kopf = (f"  {kategorie}  ({sichtungen} {einheit}, "
-                f"item level {min(z[1] for z in konto.values())}–"
-                f"{max(z[2] for z in konto.values())})")
-        ladder = knowledge.ladder(record.identity, kategorie) if knowledge else []
-        if ladder:
-            echte.append(kopf)
-            echte.extend(_indent(ladder_table(konto, ladder), 4))
-            continue
-        geschaetzte.append(kopf)
-        front = record.tier_front(kategorie)
-        baender = mod_tiers.bands(front)
-        if not baender:
-            geschaetzte.append(f"      {mod_tiers.why_silent(front)}")
-            continue
-        geschaetzte.extend(_indent(band_table(konto, baender), 6))
+    for kategorie, konto, ladder in _ladder_sections(record, knowledge):
+        echte.append(_section_head(kategorie, konto))
+        echte.extend(_indent(ladder_table(konto, ladder), 4))
+    geschaetzte = _band_lines(record, knowledge)
 
     zeilen: list[str] = []
     if echte:
@@ -345,36 +362,191 @@ def format_bands(record: ModRecord, knowledge=None) -> list[str]:
                    "(the ladder the game itself rolls from — T1 is the top "
                    "tier; empty", "rows are tiers you have not rolled yet)"]
         zeilen += echte
-    if geschaetzte:
-        zeilen += ["", BANDS_HEADING,
-                   "(no ladder known for this one — bands as % of the seen "
-                   "span. Tier", "numbers would clash with the real ones "
-                   "while this is a guess. Upper", "bounds are proven, lower "
-                   "bounds assume tiers meet without gaps)"]
-        zeilen += geschaetzte
+    zeilen += geschaetzte
     return zeilen
 
 
-def record_detail_html(record: ModRecord, mono_family: str, knowledge=None) -> str:
-    """Der Steckbrief fürs Anzeige-Feld: Fließtext in der normalen
-    Schrift, NUR die Tier-Tabellen in einer festen — das ganze Feld
-    gesperrt zu setzen machte es kaum noch lesbar (Peter, 2026-08-28).
-    Quelle bleibt ``format_record_detail``; hier wird nur aufgeteilt und
-    escaped.
+def _weighted_categories(record: ModRecord) -> list[str]:
+    """Nach Sichtungen absteigend, nicht alphabetisch: Ein verbreiteter
+    Mod wie Feuerresistenz hat in Peters Bestand 24 Kategorien, und jede
+    Leiter ist elf Zeilen lang. Alphabetisch stünde "Amulet" oben, auch
+    wenn die Kategorie zwei Sichtungen hat und "Ring" zweihundert."""
+    return sorted(record.tier_ledger,
+                 key=lambda kat: (-sum(z[0] for z in record.tier_ledger[kat].values()),
+                                 kat))
 
-    Geteilt wird an der ERSTEN Tabellen-Überschrift, egal welche der
-    beiden es ist: Ab dort stehen nur noch Tabellen (§format_bands kann
-    beide nacheinander ausgeben, echte Leiter zuerst)."""
+
+def _section_head(kategorie: str, konto: dict[float, list[int]]) -> str:
+    sichtungen = sum(zeile[0] for zeile in konto.values())
+    einheit = "sighting" if sichtungen == 1 else "sightings"
+    return (f"  {kategorie}  ({sichtungen} {einheit}, "
+            f"item level {min(z[1] for z in konto.values())}–"
+            f"{max(z[2] for z in konto.values())})")
+
+
+def _ladder_sections(record: ModRecord,
+                     knowledge) -> list[tuple[str, dict, list]]:
+    """(Kategorie, Konto, Leiter) für jede Kategorie MIT echter Leiter,
+    nach Sichtungen sortiert — die gemeinsame Quelle beider Renderer."""
+    if knowledge is None:
+        return []
+    ergebnis = []
+    for kategorie in _weighted_categories(record):
+        ladder = knowledge.ladder(record.identity, kategorie)
+        if ladder:
+            ergebnis.append((kategorie, record.tier_ledger[kategorie], ladder))
+    return ergebnis
+
+
+def _band_lines(record: ModRecord, knowledge) -> list[str]:
+    """Der Prozent-Bänder-Block (Überschrift + Sektionen) als Text —
+    nur die Kategorien OHNE echte Leiter, oder leer."""
+    sektionen: list[str] = []
+    for kategorie in _weighted_categories(record):
+        if knowledge is not None and knowledge.ladder(record.identity, kategorie):
+            continue
+        konto = record.tier_ledger[kategorie]
+        sektionen.append(_section_head(kategorie, konto))
+        front = record.tier_front(kategorie)
+        baender = mod_tiers.bands(front)
+        if not baender:
+            sektionen.append(f"      {mod_tiers.why_silent(front)}")
+            continue
+        sektionen.extend(_indent(band_table(konto, baender), 6))
+    if not sektionen:
+        return []
+    return ["", BANDS_HEADING,
+            "(no ladder known for this one — bands as % of the seen "
+            "span. Tier", "numbers would clash with the real ones "
+            "while this is a guess. Upper", "bounds are proven, lower "
+            "bounds assume tiers meet without gaps)"] + sektionen
+
+
+# Farben des gezeichneten Steckbriefs, gerechnet gegen den Feld-Grund
+# #2d2d2d (Skript im Scratchpad, 2026-08-28): T1 Gold 8,0 - T2 Silber
+# 8,6 - T3 Bronze 5,6 - Uebrige 5,8 - Gedaempftes 4,8 - alle ueber der
+# 4,5-Grenze fuer Fliesstext. Ab T4 traegt die Nummer keine eigene
+# Farbe mehr: Drei Metalle versteht jeder sofort, zehn Farbstufen
+# niemand.
+T_COLORS = {1: "#e8c15a", 2: "#c8ccd4", 3: "#d09a6a"}
+T_COLOR_REST = "#a8a8a8"
+HTML_DIM = "#989898"
+HTML_HEAD_BG = "#3a3a3a"
+HTML_ROW_ALT_BG = "#333333"
+HTML_BAR = "#8fbf7f"
+HTML_GOLD = "#e8c15a"
+
+
+def _tier_color(label: str) -> str:
+    try:
+        return T_COLORS.get(int(label.lstrip("T")), T_COLOR_REST)
+    except ValueError:
+        return T_COLOR_REST
+
+
+def _seen_cell(gesehen: int) -> str:
+    """Sichtungen als Mini-Balken plus Zahl. Logarithmisch, weil in
+    Peters Bestand 2x neben 216x steht - linear waere entweder der
+    kleine Balken unsichtbar oder der grosse gesprengt."""
+    breite = min(8, 1 + int(gesehen).bit_length() // 2)
+    balken = "▰" * breite
+    return (f'<font color="{HTML_BAR}">{balken}</font> '
+            f'<font color="{CARD_TEXT}">{gesehen}×</font>')
+
+
+def _html_ladder_section(kategorie: str, konto: dict[float, list[int]],
+                         ladder: list) -> str:
+    """Eine Kategorie als gezeichnete Tabelle: Kopfzeile mit Grund,
+    T-Nummern in Gold/Silber/Bronze, Zebra-Zeilen, ungerollte Tiers
+    gedaempft, ``beyond the ladder`` und die Sammel-Bilanz darueber."""
+    getroffen, gesamt = collected_tiers(konto, ladder)
+    sichtungen = sum(zeile[0] for zeile in konto.values())
+    il_lo = min(zeile[1] for zeile in konto.values())
+    il_hi = max(zeile[2] for zeile in konto.values())
+    bilanz = f"{getroffen} of {gesamt} tiers"
+    if getroffen == gesamt:
+        bilanz = (f'<font color="{HTML_GOLD}"><b>{bilanz} '
+                  f'{COMPLETE_MARK}</b></font>')
+    zellen = [f'<tr bgcolor="{HTML_HEAD_BG}"><td colspan="5">'
+              f'<b>{html_escape(kategorie)}</b>'
+              f'<font color="{CARD_TEXT_DIM}"> — {sichtungen} sightings, '
+              f'item level {il_lo:g}–{il_hi:g} — </font>{bilanz}</td></tr>',
+              f'<tr><td></td>'
+              f'<td><font color="{CARD_TEXT_DIM}">Values</font></td>'
+              f'<td><font color="{CARD_TEXT_DIM}">from iLvl</font></td>'
+              f'<td><font color="{CARD_TEXT_DIM}">Seen</font></td>'
+              f'<td><font color="{CARD_TEXT_DIM}">Best</font></td></tr>']
+    for i, (tier, werte, ab, gesehen, best) in enumerate(ladder_rows(konto, ladder)):
+        zebra = f' bgcolor="{HTML_ROW_ALT_BG}"' if i % 2 else ""
+        ilvl = ab.removeprefix("from iLvl ")
+        if gesehen:
+            zellen.append(
+                f'<tr{zebra}>'
+                f'<td><font color="{_tier_color(tier)}"><b>{tier}</b></font></td>'
+                f'<td>{html_escape(werte)}</td>'
+                f'<td><font color="{CARD_TEXT_DIM}">{ilvl}</font></td>'
+                f'<td>{_seen_cell(gesehen)}</td>'
+                f'<td><font color="{HTML_BAR}">{best}</font></td></tr>')
+        else:
+            zellen.append(
+                f'<tr{zebra}>'
+                f'<td><font color="{HTML_DIM}">{tier}</font></td>'
+                f'<td><font color="{HTML_DIM}">{html_escape(werte)}</font></td>'
+                f'<td><font color="{HTML_DIM}">{ilvl}</font></td>'
+                f'<td colspan="2"><font color="{HTML_DIM}">'
+                f'<i>not seen yet</i></font></td></tr>')
+    ausserhalb = _beyond_the_ladder(konto, ladder)
+    if ausserhalb:
+        n, werte = ausserhalb
+        zellen.append(
+            f'<tr><td></td>'
+            f'<td colspan="2"><font color="{CARD_TEXT_DIM}">'
+            f'<i>beyond the ladder</i></font></td>'
+            f'<td>{_seen_cell(n)}</td>'
+            f'<td><font color="{CARD_TEXT_DIM}">{html_escape(werte)}</font>'
+            f'</td></tr>')
+    # Ohne width="100%": Die Tabelle schrumpft auf ihre Inhaltsbreite,
+    # sonst verteilt Qt die fünf Spalten gleichmäßig über das ganze Feld
+    # und zwischen Values und iLvl klaffen fingerbreite Lücken.
+    return ('<table cellspacing="0" cellpadding="3">'
+            + "".join(zellen) + "</table>")
+
+
+def record_detail_html(record: ModRecord, mono_family: str, knowledge=None) -> str:
+    """Der Steckbrief fuers Anzeige-Feld - drei Absaetze, drei Techniken:
+
+    1. Der Fliesstext-Kopf (Beispielzeile, Toepfe, Spannen) in der
+       normalen Schrift - das ganze Feld gesperrt zu setzen machte es
+       kaum noch lesbar (Peter, 2026-08-28).
+    2. Die echten Leitern als GEZEICHNETE Tabellen (Design-Runde
+       2026-08-28, Peter: "gezeichnete Tabellen"): Zellen richten die
+       Spalten aus, keine Monospace-Schrift mehr noetig; T-Nummern in
+       Gold/Silber/Bronze, ungerollte Tiers gedaempft.
+    3. Die geschaetzten Prozent-Baender weiterhin als ``<pre>`` in
+       fester Schrift - sie bleiben eine Texttabelle, ausdruecklich
+       schlichter als die echten Leitern: Der optische Rangunterschied
+       IST die Botschaft (belegt gegen geraten)."""
     zeilen = format_record_detail(record, knowledge).splitlines()
     kandidaten = [zeilen.index(kopf) for kopf in (LADDER_HEADING, BANDS_HEADING)
                  if kopf in zeilen]
     start = min(kandidaten) if kandidaten else len(zeilen)
-    kopf = "<br>".join(html_escape(z) for z in zeilen[:start])
-    if start >= len(zeilen):
-        return kopf
-    tabelle = html_escape("\n".join(zeilen[start:]))
-    return (f"{kopf}<pre style=\"font-family:'{mono_family}',Consolas,"
-            f"monospace; margin:0;\">{tabelle}</pre>")
+    teile = ["<br>".join(html_escape(z) for z in zeilen[:start])]
+
+    sektionen = _ladder_sections(record, knowledge)
+    if sektionen:
+        teile.append(f'<p><b>{html_escape(LADDER_HEADING)}</b><br>'
+                     f'<font color="{CARD_TEXT_DIM}">the ladder the game '
+                     f'itself rolls from — T1 is the top tier; dimmed '
+                     f'rows are tiers you have not rolled yet</font></p>')
+        teile.extend(_html_ladder_section(kategorie, konto, ladder)
+                     for kategorie, konto, ladder in sektionen)
+
+    baender = _band_lines(record, knowledge)
+    if baender:
+        tabelle = html_escape("\n".join(baender))
+        teile.append(f"<pre style=\"font-family:'{mono_family}',Consolas,"
+                     f"monospace; margin:0;\">{tabelle}</pre>")
+    return "".join(teile)
 
 
 def format_record_detail(record: ModRecord, knowledge=None) -> str:
@@ -443,9 +615,9 @@ def combined_range_text(record: ModRecord, league: str | None,
     return _spread_text(spread)
 
 
-def tier_progress(record: ModRecord, knowledge) -> tuple[int, int] | None:
-    """"So viele der möglichen Tiers hast du" — oder ``None``, wenn für
-    diesen Eintrag keine echte Leiter bekannt ist.
+def tier_slots(record: ModRecord, knowledge) -> list[bool] | None:
+    """Die Slot-Maske des Eintrags — oder ``None``, wenn für keinen
+    seiner Töpfe eine echte Leiter bekannt ist.
 
     Bei mehreren Basis-Kategorien zählt die mit den MEISTEN Sichtungen:
     Ein Mod, der überwiegend auf Ringen durch die Hände geht, soll seinen
@@ -454,15 +626,42 @@ def tier_progress(record: ModRecord, knowledge) -> tuple[int, int] | None:
     einzeln."""
     if knowledge is None or not record.tier_ledger:
         return None
-    beste: tuple[int, tuple[int, int]] | None = None
+    beste: tuple[int, list[bool]] | None = None
     for kategorie, konto in record.tier_ledger.items():
         ladder = knowledge.ladder(record.identity, kategorie)
         if not ladder:
             continue
         sichtungen = sum(zeile[0] for zeile in konto.values())
         if beste is None or sichtungen > beste[0]:
-            beste = (sichtungen, collected_tiers(konto, ladder))
+            beste = (sichtungen, collected_mask(konto, ladder))
     return beste[1] if beste else None
+
+
+def tier_progress(record: ModRecord, knowledge) -> tuple[int, int] | None:
+    """"So viele der möglichen Tiers hast du" — dieselbe Kategorie-Wahl
+    wie ``tier_slots``, nur verdichtet auf (gesammelt, vorhanden)."""
+    maske = tier_slots(record, knowledge)
+    return (sum(maske), len(maske)) if maske is not None else None
+
+
+def card_border(record: ModRecord, slots: list[bool] | None,
+                selected: bool) -> tuple[str, int]:
+    """(Farbe, Strichbreite) des Kartenrands — die Rangordnung der
+    Auszeichnungen:
+
+    1. Auswahl schlägt alles (sonst verlöre man die Markierung aus dem
+       Blick, sobald eine ausgezeichnete Karte angeklickt wird).
+    2. Gold für die KOMPLETTE Leiter — die Panini-Semantik "Set voll".
+    3. Silber für das Einzelstück (genau eine Sichtung) — vorher Gold,
+       umgefärbt, damit Gold eindeutig Vollständigkeit heißt.
+    4. Grau für alle anderen."""
+    if selected:
+        return CARD_BORDER_SELECTED, 2
+    if slots and all(slots):
+        return CARD_BORDER_COMPLETE, 2
+    if record.count == 1:
+        return CARD_BORDER_SINGLE, 2
+    return CARD_BORDER, 1
 
 
 def range_column_text(record: ModRecord, league: str | None,
@@ -493,6 +692,9 @@ COLUMNS = ("Mod", "Kind", "Range", "Seen", "Example")
 RECORD_ROLE = Qt.ItemDataRole.UserRole
 FIRST_SEEN_ROLE = Qt.ItemDataRole.UserRole + 1
 NEW_ROLE = Qt.ItemDataRole.UserRole + 2
+# list[bool] je Tier (§collected_mask) oder None ohne bekannte Leiter —
+# die Slot-Leiste der Karte und ihr Gold-Rahmen hängen daran.
+TIER_SLOTS_ROLE = Qt.ItemDataRole.UserRole + 3
 
 # Die Sortier-Linsen der Kartenansicht — das ist der Trophäen-Teil des
 # Albums: "Neuzugänge", "Arbeitspferde", "Einzelstücke" sind keine
@@ -524,15 +726,78 @@ ALBUM_SORTS_BY_NAME = {name: (col, role, order)
 ALBUM_BG = "#2d2d2d"
 CARD_BG = "#3c3c3c"
 CARD_BORDER = "#555555"
-CARD_BORDER_SINGLE = DASH_WARN
+# Silber statt des früheren Golds (Design-Runde 2026-08-28): Gold ehrt
+# seither die VOLLSTÄNDIGKEIT (§CARD_BORDER_COMPLETE), und zwei goldene
+# Ränder mit verschiedener Bedeutung nebeneinander wären nicht zu
+# unterscheiden gewesen (dE der beiden Goldtöne nur 14,7 — Silber gegen
+# Gold: 34,3). Silber auf Karte: WCAG 6,9, dE 54,9.
+CARD_BORDER_SINGLE = "#c8ccd4"
 CARD_BORDER_SELECTED = ROW_CHANGED_COLOR
+# Sattes Gold für die komplette Leiter — die Panini-Semantik "Set voll".
+# Auf Karte: WCAG 7,9, dE 64,5; gegen den Auswahl-Rand (Türkis) dE 44,8.
+CARD_BORDER_COMPLETE = "#ffd700"
 CARD_TEXT = "#e8e6e3"
 CARD_TEXT_DIM = "#b0b0b0"
 CARD_TEXT_RANGE = "#8fbf7f"
 CARD_TEXT_NEW = DASH_WARN
+# Slot-Leiste (ein Kästchen je Tier): gefüllt in mattem Gold (WCAG 5,6,
+# dE 55 zur Karte), leere Slots nur als Umriss — die Lücke ist die
+# Botschaft, sie soll sichtbar, aber leise sein.
+SLOT_FILLED = "#dcb45f"
+SLOT_EMPTY = "#6a6a6a"
+COMPLETE_MARK = "✓"
 CARD_PAD = 8
 CARD_RADIUS = 6
+# Kaestchen der Slot-Leiste: klein genug, dass auch 13 Life-Tiers in
+# eine Karte passen (13*(10+3) = 169 px, die Karte ist ~260 breit).
+SLOT_W = 10
+SLOT_H = 7
+SLOT_GAP = 3
 NEW_MARK = "✦"
+
+# Mod-Themen für Farbstreifen und Symbol auf der Karte (Design-Runde
+# 2026-08-28, Peter: "Symbole und verschiedene Farben"). Die Farben
+# folgen der Sprache des Spiels (Feuer rot, Kälte blau, Blitz gelb,
+# Chaos giftgrün, ...), sind aber GERECHNET: jedes Paar CIEDE2000
+# >= 12,4, jede Fläche >= 30 gegen den Kartengrund, jede Glyphe, die in
+# Themenfarbe gemalt wird, WCAG >= 3 (Grenze für grafische Objekte —
+# der Streifen trägt die Info nie allein, der Mod-Text steht daneben).
+#
+# REIHENFOLGE = PRIORITÄT, erste Übereinstimmung gewinnt: "Minions deal
+# #% increased Damage" soll Minion sein, nicht irgendein späterer
+# Treffer; "Energy Shield" darf nicht bei einem allgemeineren Muster
+# hängenbleiben. Ein Zusatzsignal, keine Taxonomie — Mods ohne Treffer
+# bleiben schlicht grau.
+MOD_THEMES: tuple[tuple[str, str, str, str], ...] = (
+    ("Minion", r"\bMinion", "#a868e8", "👥"),
+    ("Energy Shield", r"\bEnergy Shield\b", "#8ad8d0", "◈"),
+    ("Life", r"\bLife\b", "#e05a6a", "♥"),
+    ("Mana", r"\bMana\b", "#6a8ae8", "💧"),
+    ("Fire", r"\bFire\b|\bIgnite|\bBurning\b", "#e06c4a", "🔥"),
+    ("Cold", r"\bCold\b|\bChill|\bFreeze|\bFrost", "#6ab8e8", "❄"),
+    ("Lightning", r"\bLightning\b|\bShock", "#e8cf5a", "⚡"),
+    ("Chaos", r"\bChaos\b|\bPoison|\bWither", "#98c838", "☠"),
+    ("Armour", r"\bArmour\b|\bPhysical Damage Reduction\b", "#b08a5a", "🛡"),
+    ("Evasion", r"\bEvasion\b|\bBlind\b", "#50c878", "💨"),
+    ("Attack", r"\bAttack|\bAccuracy\b|\bMelee\b|\bProjectile", "#e8955a", "⚔"),
+    ("Caster", r"\bSpell|\bCast\b|\bCast Speed\b", "#c898f0", "✨"),
+    ("Speed", r"\bMovement Speed\b", "#e0e0e0", "»"),
+    ("Attributes", r"\bStrength\b|\bDexterity\b|\bIntelligence\b|\bAttributes\b",
+     "#e070c8", "✚"),
+)
+_THEME_PATTERNS = tuple((re.compile(muster), name, farbe, symbol)
+                        for name, muster, farbe, symbol in MOD_THEMES)
+
+
+@lru_cache(maxsize=8192)
+def mod_theme(identity: str) -> tuple[str, str, str] | None:
+    """(Themenname, Farbe, Symbol) — oder ``None`` für Mods ohne
+    erkennbares Thema. Gecacht, weil der Karten-Delegate bei jedem
+    Neuzeichnen fragt und die Antwort je Identität konstant ist."""
+    for muster, name, farbe, symbol in _THEME_PATTERNS:
+        if muster.search(identity):
+            return name, farbe, symbol
+    return None
 
 
 def first_seen_text(record: ModRecord) -> str:
@@ -567,6 +832,34 @@ def collection_greeting(records: list[ModRecord],
     zeilen.append("Select a mod to see every rarity and league it has "
                   "been seen on.")
     return "\n".join(zeilen)
+
+
+def album_stats(records: list[ModRecord], knowledge) -> str:
+    """Die Sammel-Kopfzeile des Albums (Design-Runde 2026-08-28):
+    Bestand, komplette Sets und der Tier-Fortschritt als Balken.
+
+    Der Balken zählt SPROSSEN, nicht Mods: "wie viele der Tiers, die
+    das Spiel für deine gesehenen Mods kennt, hast du schon gerollt" —
+    das ist die Zahl, die beim Spielen tatsächlich wächst. Ohne
+    geladenes Mod-Wissen bleibt nur der Bestand stehen; ein Balken ohne
+    Grundgesamtheit wäre erfunden."""
+    teile = [f"{len(records):,} mods collected"]
+    got = total = sets = 0
+    for record in records:
+        stand = tier_progress(record, knowledge)
+        if stand is None:
+            continue
+        got += stand[0]
+        total += stand[1]
+        if stand[0] == stand[1]:
+            sets += 1
+    if total:
+        teile.append(f"{sets} complete sets {COMPLETE_MARK}")
+        anteil = got / total
+        voll = round(anteil * 10)
+        balken = "▰" * voll + "▱" * (10 - voll)
+        teile.append(f"tiers {got:,}/{total:,} {balken} {anteil:.0%}")
+    return "  ·  ".join(teile)
 
 
 class ModAlbumModel(QAbstractTableModel):
@@ -626,6 +919,8 @@ class ModAlbumModel(QAbstractTableModel):
             return record.first_seen
         if role == NEW_ROLE:
             return (record.kind, record.identity) in self._new_keys
+        if role == TIER_SLOTS_ROLE:
+            return tier_slots(record, self._knowledge)
         if role == Qt.ItemDataRole.ToolTipRole and index.column() == IDENTITY_COL:
             # In der Tabelle wegen 381-Zeichen-Identitäten nützlich, in
             # der Kartenansicht notwendig: Dort wird ein langer Name nach
@@ -704,10 +999,12 @@ class ModCardDelegate(QStyledItemDelegate):
     laufen unverändert über dasselbe Proxy-Modell wie die Tabelle.
 
     Aufbau einer Karte:
-        Name (bis zwei Zeilen, dann abgeschnitten — Volltext im Tooltip)
+        [Themen-Streifen links] Symbol + Name (bis zwei Zeilen)
         Range (grün — dieselbe Auswahl-Logik wie die Range-Spalte)
+        Slot-Leiste: ein Kästchen je Tier, gefüllt = gesammelt
         Art unten links, Sichtungen unten rechts (gedämpft)
-    Goldener Rand: nur einmal gesehen — das Einzelstück der Sammlung.
+    Rand nach Rang (§card_border): Auswahl > Gold (Leiter komplett,
+    zusätzlich ✓ in der Fußzeile) > Silber (Einzelstück) > Grau.
     ✦ oben rechts: neu in dieser Sitzung (dasselbe Zeichen wie am Item,
     §mod_bar.NEW_MARK)."""
 
@@ -718,7 +1015,9 @@ class ModCardDelegate(QStyledItemDelegate):
         # mittellange Identität je Zeile. Höhe: zwei Namenszeilen, Range,
         # Fußzeile.
         breite = fm.horizontalAdvance("#% increased Global Critical Strike Chance")
-        return QSize(breite + 2 * CARD_PAD, fm.height() * 4 + 2 * CARD_PAD + 6)
+        # + eine gute halbe Zeile für die Slot-Leiste unter der Range.
+        return QSize(breite + 2 * CARD_PAD,
+                     fm.height() * 4 + SLOT_H + 2 * CARD_PAD + 10)
 
     def paint(self, painter: QPainter, option: QStyleOptionViewItem,
               index: QModelIndex) -> None:
@@ -733,19 +1032,24 @@ class ModCardDelegate(QStyledItemDelegate):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         karte = option.rect.adjusted(1, 1, -1, -1)
 
+        slots = index.data(TIER_SLOTS_ROLE)
         gewaehlt = bool(option.state & QStyle.StateFlag.State_Selected)
-        if gewaehlt:
-            rand, randbreite = QColor(CARD_BORDER_SELECTED), 2
-        elif record.count == 1:
-            rand, randbreite = QColor(CARD_BORDER_SINGLE), 2
-        else:
-            rand, randbreite = QColor(CARD_BORDER), 1
-        painter.setPen(QPen(rand, randbreite))
+        farbe, randbreite = card_border(record, slots, gewaehlt)
+        painter.setPen(QPen(QColor(farbe), randbreite))
         painter.setBrush(QColor(CARD_BG))
         painter.drawRoundedRect(karte, CARD_RADIUS, CARD_RADIUS)
 
         fm = option.fontMetrics
         innen = karte.adjusted(CARD_PAD, CARD_PAD, -CARD_PAD, -CARD_PAD)
+
+        # Themen-Streifen: ein schmales Band an der linken Innenkante,
+        # unter dem Rand, damit Auswahl/Gold ihn nie verdecken müssen.
+        thema = mod_theme(record.identity)
+        if thema is not None:
+            streifen = QRect(karte.left() + 2, karte.top() + CARD_RADIUS,
+                             4, karte.height() - 2 * CARD_RADIUS)
+            painter.fillRect(streifen, QColor(thema[1]))
+            innen = innen.adjusted(6, 0, 0, 0)
 
         # ✦ zuerst, damit der Name weiß, wie viel Breite ihm bleibt.
         name_rechts = innen.right()
@@ -761,9 +1065,14 @@ class ModCardDelegate(QStyledItemDelegate):
                           name_rechts - innen.left(), fm.height() * 2)
         painter.setPen(QColor(CARD_TEXT))
         painter.setClipRect(name_rect)
+        # Symbol als Teil des Namens-Strings: dieselbe Umbruch- und
+        # Abschneide-Logik, keine eigene Positionsrechnung. Farb-Emoji
+        # bringen ihre Farbe mit; Textglyphen erben CARD_TEXT — der
+        # Streifen traegt die Themenfarbe, nicht das Zeichen.
+        titel = f"{thema[2]} {record.identity}" if thema else record.identity
         painter.drawText(name_rect,
                          Qt.TextFlag.TextWordWrap | Qt.AlignmentFlag.AlignTop,
-                         record.identity)
+                         titel)
         painter.setClipping(False)
 
         range_rect = QRect(innen.left(), name_rect.bottom() + 2,
@@ -773,10 +1082,15 @@ class ModCardDelegate(QStyledItemDelegate):
                          fm.elidedText(range_text, Qt.TextElideMode.ElideRight,
                                        range_rect.width()))
 
+        if slots:
+            self._paint_slots(painter, innen, range_rect.bottom() + 4, slots)
+
         fuss = QRect(innen.left(), innen.bottom() - fm.height() + 1,
                      innen.width(), fm.height())
         painter.setPen(QColor(CARD_TEXT_DIM))
         zaehler = f"{gesehen}×"
+        if slots and all(slots):
+            zaehler = f"{COMPLETE_MARK} {zaehler}"
         zaehler_breite = fm.horizontalAdvance(zaehler)
         painter.drawText(fuss, Qt.AlignmentFlag.AlignRight, zaehler)
         painter.drawText(fuss, Qt.AlignmentFlag.AlignLeft,
@@ -784,6 +1098,27 @@ class ModCardDelegate(QStyledItemDelegate):
                                        Qt.TextElideMode.ElideRight,
                                        fuss.width() - zaehler_breite - 8))
         painter.restore()
+
+    @staticmethod
+    def _paint_slots(painter: QPainter, innen: QRect, oben: int,
+                     slots: list[bool]) -> None:
+        """Die Slot-Leiste: ein Kästchen je Tier, von links (unterstes
+        Tier) nach rechts (T1) — gefüllt heißt gesammelt, der Umriss
+        allein ist die sichtbare Lücke (Panini-Prinzip). Bei sehr
+        langen Leitern (Life: 13) schrumpfen die Kästchen, bis alle in
+        die Kartenbreite passen."""
+        n = len(slots)
+        breite = min(SLOT_W, max(4, (innen.width() - (n - 1) * SLOT_GAP) // n))
+        x = innen.left()
+        for gefuellt in slots:
+            rechteck = QRect(x, oben, breite, SLOT_H)
+            if gefuellt:
+                painter.fillRect(rechteck, QColor(SLOT_FILLED))
+            else:
+                painter.setPen(QPen(QColor(SLOT_EMPTY), 1))
+                painter.setBrush(Qt.BrushStyle.NoBrush)
+                painter.drawRect(rechteck)
+            x += breite + SLOT_GAP
 
 
 class ModAlbumDialog(QDialog):
@@ -926,8 +1261,16 @@ class ModAlbumDialog(QDialog):
         splitter.setStretchFactor(0, 3)
         splitter.setStretchFactor(1, 2)
 
+        # Die Sammel-Kopfzeile (§album_stats) — über den Karten, damit
+        # das Fenster als Sammlung beginnt, nicht als Suchmaske. Gold
+        # wie die Komplett-Auszeichnung; auf dem Fenstergrund gerechnet
+        # (WCAG 8,0 auf #2d2d2d).
+        self._stats_label = QLabel(album_stats(records, knowledge))
+        self._stats_label.setStyleSheet(f"color: {HTML_GOLD}; padding: 2px;")
+
         layout = QVBoxLayout(self)
         layout.addLayout(top_row)
+        layout.addWidget(self._stats_label)
         layout.addWidget(splitter, stretch=1)
 
         self._update_count_label()
