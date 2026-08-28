@@ -1507,3 +1507,31 @@ als die Schatten-Variable probeweise wieder eingebaut wurde.
 zuerst nach gleichnamigen lokalen Namen (insbesondere
 Schleifenvariablen) suchen — die Kollision ist in Python stumm und
 zeigt sich nur an Daten, die zufällig mehr als einen Durchlauf haben.
+
+## 81. "T2 71× gesehen" — die Sammlung zählte Abrufe, nicht Items
+
+**Symptom:** Im Mod-Album einer frisch gestarteten Liga stand für EIN
+Paar Boots "T2 · 71×", und dieselbe 71 tauchte bei Body Armour, Helm
+und Gürtel auf. Peter: "Hier stimmt doch wieder etwas nicht."
+
+**Ursache:** `_on_character_items` und `_on_stash_items` reichten bei
+jedem Abruf alle Items erneut an `ModCollection.observe_items`. Der
+Charakter wird beim Auto-Refresh alle ~56 s abgeholt — 81 Abrufe seit
+dem Tier-Neuaufbau, die vier gleichen Zahlen waren die angelegte
+Ausrüstung. Seit dem Bau der Sammlung (24.08.) waren damit ALLE
+Sichtungszahlen Bestand × Abrufe; die Schwelle "mindestens fünf
+Sichtungen für einen Balken" nahm ein einzelnes Item nach fünf
+Refreshes. Vier Tage lang unbemerkt, weil die Zahlen im großen
+Altbestand plausibel aussahen — erst die Liga-Sicht war klein genug.
+
+**Lösung:** `mod_collection.fresh_items()` vor jedem `observe_items`:
+Verglichen wird gegen den vorigen Stand desselben Fachs/Charakters,
+Fingerabdruck = Item-ID + alle Mod-Zeilen. Dazu Aufbau 7 der Datei:
+Alte Zählstände werden nicht übernommen, sondern aus dem Cache neu
+gezählt (jedes Item einmal), die alte Datei bleibt als
+`mod-collection-X.pre-v7.json` liegen. ARCHITEKTUR §4.52.7.
+
+**Lehre:** Ein Zähler, der bei jedem Ereignis hochgeht, misst das
+Ereignis — nicht das, was man meint. "Gesehen" muss definiert sein
+(Item oder Abruf?), BEVOR die erste Zahl in eine Datei geht; hinterher
+lässt sich die Vervielfachung nicht mehr herausrechnen, nur neu zählen.

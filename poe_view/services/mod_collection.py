@@ -42,7 +42,8 @@ from typing import Iterable, Sequence
 
 from poe_view import config
 from poe_view.api.models import (ENCHANT_MOD_FIELD, EXTRA_MOD_FIELDS,
-                                 extra_mod_lines, item_category, map_tier)
+                                 all_extra_mod_pairs, extra_mod_lines,
+                                 item_category, map_tier)
 from poe_view.services.atomic_json import write_json
 from poe_view.services.csv_export import sanitize_filename
 
@@ -95,7 +96,21 @@ log = logging.getLogger(__name__)
 # (Kategorie direkt außen) wird beim Laden verworfen — der Cache kennt
 # die Liga jedes Items, also baut ``backfill_tiers`` das Buch beim
 # nächsten Start liga-getrennt neu, wie bei den Sprüngen davor.
-VERSION = 6
+#
+# 7 (2026-08-29): **Die Zählstände selbst waren falsch.** Seit dem Bau
+# der Sammlung reichte das Fenster bei JEDEM Abruf eines Fachs oder
+# Charakters alle Items erneut an ``observe_items`` — und der Charakter
+# wird beim Auto-Refresh alle ~56 s abgeholt. Peter sah im Album seiner
+# frischen Liga "T2 71× gesehen" für EIN Paar Boots (81 Abrufe seit dem
+# Neuaufbau). Eine Sichtung heißt seither "ein Item durch die Hände
+# gegangen", nicht "eine Abfrage" (``fresh_items``), und ein Stand aus
+# Aufbau ≤ 6 wird nicht übernommen, sondern aus dem Cache neu gezählt —
+# jedes Item genau einmal. Behalten wird dabei NUR ``first_seen`` je
+# Eintrag (das lässt sich aus dem Cache nicht wiedergewinnen); Einträge,
+# die beim Neuaufbau nicht mehr auftauchen (verkauft, zerlegt), fallen
+# weg — Peters Entscheidung, weil die alten Zahlen sonst für immer
+# verfälscht blieben. Die alte Datei bleibt daneben liegen (``retire``).
+VERSION = 7
 
 # Die Felder der API, deren Inhalt gesammelt wird — die Art eines
 # Eintrags IST der Feldname. Getrennt gehalten statt in einen Topf
@@ -398,6 +413,32 @@ def item_buckets(item) -> tuple[str, int]:
     return league_bucket(getattr(item, "league", "")), collection_bucket(item)
 
 
+def item_fingerprint(item) -> tuple:
+    """Woran die Sammlung ein Item wiedererkennt: seine ID plus alle
+    Mod-Zeilen. Die ID allein reicht nicht — ein gecraftetes Item behält
+    sie und hat trotzdem neue Zeilen, die gezählt werden sollen."""
+    return (getattr(item, "id", None), getattr(item, "typeLine", ""),
+            tuple(item.explicit_mods), tuple(item.implicit_mods),
+            tuple(all_extra_mod_pairs(item)),
+            tuple(extra_mod_lines(item, ENCHANT_MOD_FIELD)))
+
+
+def fresh_items(items: Iterable, previous: Iterable) -> list:
+    """Nur die Items, die es im vorigen Stand desselben Fachs/Charakters
+    noch nicht gab — der Filter vor jedem ``observe_items`` (§VERSION,
+    Aufbau 7).
+
+    Eine Sichtung soll "ein Item durch die Hände gegangen" heißen. Ohne
+    diesen Filter zählte jeder Abruf desselben Fachs alles erneut, und
+    der Charakter wird beim Auto-Refresh alle ~56 s abgeholt: Peters
+    Boots standen nach 81 Abrufen mit "71× gesehen" im Album. Verglichen
+    wird gegen den vorigen Stand des GLEICHEN Behälters, nicht gegen die
+    ganze Sammlung — das braucht keinen Speicher, und ein Item, das in
+    ein anderes Fach wandert, zählt höchstens einmal mehr."""
+    bekannt = {item_fingerprint(alt) for alt in previous}
+    return [item for item in items if item_fingerprint(item) not in bekannt]
+
+
 @dataclass
 class ModRecord:
     """Was die Sammlung über eine Mod-Identität weiß.
@@ -675,6 +716,11 @@ class ModCollection:
         # Anzeige sieht ein Item immer erst, NACHDEM es eingetragen wurde
         # — zum Anzeigezeitpunkt ist also nichts mehr neu.
         self._new: set[tuple[str, str]] = set()
+        # Ein Stand aus Aufbau ≤ 6 trägt falsche Zählstände (§VERSION,
+        # Aufbau 7): Die Einträge sind dann nur noch Hüllen mit
+        # ``first_seen``, und das Fenster muss sie aus dem Cache neu
+        # füllen (``prune_unseen`` räumt danach auf, was nicht mehr da ist).
+        self.needs_rebuild = False
 
     # ------------------------------ Füllen ---------------------------- #
 
@@ -788,6 +834,19 @@ class ModCollection:
         wirklich frisch hereinkommt."""
         self._new.clear()
 
+    def prune_unseen(self) -> int:
+        """Nach dem Neuaufbau (§VERSION, Aufbau 7): Hüllen wegwerfen, die
+        beim Neuzählen aus dem Cache nicht mehr aufgetaucht sind — das
+        sind die inzwischen verkauften oder zerlegten Items. Gibt zurück,
+        wie viele es waren."""
+        tot = [key for key, r in self._records.items() if r.count == 0]
+        for key in tot:
+            del self._records[key]
+        if tot:
+            self._dirty = True
+        self.needs_rebuild = False
+        return len(tot)
+
     def new_keys(self) -> frozenset[tuple[str, str]]:
         """Die Funde dieser Sitzung als Schnappschuss — fürs Album, das
         beim Öffnen den Stand einfriert (§ui/mod_album.py) und deshalb
@@ -826,12 +885,22 @@ class ModCollection:
         zeilen = payload.get("mods")
         if not isinstance(zeilen, list):
             return sammlung
+        version = payload.get("version")
+        alt = not isinstance(version, int) or version < 7
         for zeile in zeilen:
             if not isinstance(zeile, dict):
                 continue
             eintrag = ModRecord.from_row(zeile)
-            if eintrag is not None:
-                sammlung._records[(eintrag.kind, eintrag.identity)] = eintrag
+            if eintrag is None:
+                continue
+            if alt:
+                # Aufbau ≤ 6 zählte jeden Abruf als Sichtung (§VERSION,
+                # Aufbau 7): Nur die Hülle mit ``first_seen`` bleibt, der
+                # Rest wird aus dem Cache neu gezählt.
+                eintrag = ModRecord(identity=eintrag.identity, kind=eintrag.kind,
+                                    first_seen=eintrag.first_seen)
+            sammlung._records[(eintrag.kind, eintrag.identity)] = eintrag
+        sammlung.needs_rebuild = alt and bool(sammlung._records)
         return sammlung
 
     def save(self, path: Path) -> bool:
@@ -882,6 +951,24 @@ def load(path: Path) -> ModCollection:
         sammlung._dirty = False
         return sammlung
     return ModCollection.from_payload(payload)
+
+
+def retire(path: Path) -> Path | None:
+    """Die alte Datei vor dem Neuaufbau beiseitelegen statt überschreiben
+    (``mod-collection-X.json`` → ``mod-collection-X.pre-v7.json``).
+
+    Zwei Gründe: Der Neuaufbau kann WENIGER Einträge haben als die alte
+    Datei (verkaufte Items), und ``save`` lehnt Schrumpfen zu Recht ab —
+    ohne Datei daneben gibt es nichts, wogegen es schrumpfen könnte. Und
+    die alten Zahlen bleiben nachlesbar, falls jemand sie doch noch
+    braucht. Gibt den neuen Pfad zurück, ``None`` ohne Datei."""
+    if not path.exists():
+        return None
+    ziel = path.with_name(f"{path.stem}.pre-v{VERSION}{path.suffix}")
+    if ziel.exists():
+        ziel.unlink()
+    path.rename(ziel)
+    return ziel
 
 
 def _count_in_file(path: Path) -> int | None:

@@ -6254,6 +6254,48 @@ Wert, Front aus dem Buch nimmt je Wert das niedrigste iLvl, alter
 ein einziges "T", kein Wert fällt zwischen zwei Bänder, Tabelle im
 Steckbrief).
 
+#### 4.52.7 Eine Sichtung ist ein Item, kein Abruf (Aufbau 7)
+
+Peter, 2026-08-28 spät, im Album seiner frischen Liga: "T2 71× gesehen?
+Kontrollier das doch bei Gelegenheit nach." Ein Paar Boots mit +101
+Life, in vier Kategorien zugleich dieselbe 71 — das war die aktuelle
+Ausrüstung, und das Log zeigte 81 Charakter-Abrufe seit dem
+Tier-Neuaufbau (Auto-Refresh alle ~56 s fürs XP-Tracking).
+`_on_character_items` und `_on_stash_items` reichten bei JEDEM Abruf
+alle Items erneut an `observe_items` — seit dem Bau der Sammlung am
+24.08. Die Zahlen waren also Bestand × Abrufe, und die Fünf-Sichtungen-
+Schwelle des Balkens (§4.52.2) ließ sich mit fünf Abrufen eines
+einzigen Items nehmen. Aufgefallen ist es erst, als die Liga-Sicht
+(§4.53.3) klein genug war, um die Wiederholung zu erkennen.
+
+**Der Filter** (`fresh_items`): Vor jedem `observe_items` wird gegen
+den vorigen Stand DESSELBEN Behälters (Fach bzw. Charakter) verglichen;
+gezählt wird nur, was dort noch nicht lag. Der Fingerabdruck ist die
+Item-ID plus alle Mod-Zeilen (`item_fingerprint`) — die ID allein
+reicht nicht, ein gecraftetes Item behält sie und hat trotzdem neue
+Zeilen. Kein persistenter Speicher nötig: Beim Start ist der Cache aus
+der Datei der Vergleichsstand. Ein Item, das in ein anderes Fach
+wandert, zählt höchstens einmal mehr — bewusst hingenommen, statt 59.000
+Fingerabdrücke mitzuschreiben.
+
+**Der Neuaufbau** (Peters Entscheidung, "Beides"): Ein Stand aus
+Aufbau ≤ 6 wird nicht übernommen. `from_payload` behält je Eintrag nur
+die Hülle mit `first_seen` (aus dem Cache nicht wiedergewinnbar) und
+setzt `needs_rebuild`; `_restore_mod_collection` legt die alte Datei
+beiseite (`retire` → `mod-collection-X.pre-v7.json`) und zählt den
+ganzen Cache in Scheiben neu (Seed-Modus "rebuild"); `prune_unseen`
+wirft danach die Hüllen weg, die nicht mehr auftauchten — verkaufte
+oder zerlegte Items. Das Beiseitelegen ist kein Komfort, sondern
+Voraussetzung: `save` lehnt Schrumpfen zu Recht ab (§4.52), und der
+Neuaufbau kann kleiner sein als die alte Datei.
+
+Getestet: `tests/test_mod_collection.py` (Fingerabdruck sieht Crafts,
+Refetch zählt nicht, Hüllen mit `first_seen`, v7 lädt normal, `observe`
+auf eine Hülle behält das Datum, `prune_unseen`, `retire`) und
+`tests/test_main_window_helpers.py` (Fach dreimal abgeholt = 1
+Sichtung, Charakter fünfmal + einmal gecraftet = 2, Neuaufbau-Weg
+Ende-zu-Ende mit beiseitegelegter Datei). Acht Gegenproben, alle rissen.
+
 ### 4.53 Das Fundament der echten Mod-Datenbank (`services/mod_knowledge.py`)
 
 Peter beim Betrachten der Prozent-Bänder aus §4.52.6, nach einem

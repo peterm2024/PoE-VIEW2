@@ -13,7 +13,9 @@ nach [SemVer](https://semver.org/lang/de/).
   welchen Item-Stufen, getrennt nach Rarität. Die Sammlung füllt sich beim
   ersten Start aus dem vorhandenen Cache (bei einem gewachsenen Bestand
   rund 6000 verschiedene Mods) und wächst danach nebenbei weiter, ohne
-  einen einzigen zusätzlichen Abruf. Sie sagt, was DU gesehen hast — nicht,
+  einen einzigen zusätzlichen Abruf. Eine Sichtung ist ein Item, das
+  durch deine Hände geht — dasselbe Item beim nächsten Abruf noch einmal
+  zu sehen zählt nicht. Sie sagt, was DU gesehen hast — nicht,
   was das Spiel erlaubt. Weil sich Mod-Werte von Liga zu Liga ändern,
   bekommt jede temporäre Liga ihren eigenen Topf; Standard und die übrigen
   dauerhaften Ligen teilen sich einen, denn dort liegen Items aus jeder je

@@ -875,8 +875,21 @@ class MainWindow(QMainWindow):
         Ruckler, über die Peter sich ohnehin beschwert."""
         if not self._account_name:
             return
-        self._mod_collection = mod_collection.load(
-            mod_collection.path_for(self._account_name))
+        pfad = mod_collection.path_for(self._account_name)
+        self._mod_collection = mod_collection.load(pfad)
+        if self._mod_collection.needs_rebuild:
+            # Ein Stand aus Aufbau <= 6 zaehlte jeden Abruf als Sichtung
+            # (§4.52.7). Die alte Datei bleibt daneben liegen, die Zahlen
+            # werden aus dem Cache neu gezaehlt — jedes Item genau einmal;
+            # nur ``first_seen`` ueberlebt in den Huellen.
+            alt = mod_collection.retire(pfad)
+            self._mod_seed_queue = list(self._all_cached_items())
+            self._mod_seed_mode = "rebuild"
+            log.info("Mod-Sammlung aus Aufbau vor 7 — Zaehlstaende werden aus "
+                     "%d Cache-Items neu aufgebaut, alte Datei liegt unter %s.",
+                     len(self._mod_seed_queue), alt)
+            QTimer.singleShot(0, self._seed_mod_collection_slice)
+            return
         if len(self._mod_collection):
             log.info("Mod-Sammlung geladen: %s",
                      mod_collection.summary(self._mod_collection))
@@ -925,6 +938,12 @@ class MainWindow(QMainWindow):
         if self._mod_seed_queue:
             QTimer.singleShot(0, self._seed_mod_collection_slice)
         else:
+            if self._mod_collection.needs_rebuild:
+                # Huellen, die beim Neuzaehlen nicht mehr auftauchten,
+                # sind verkaufte oder zerlegte Items (§4.52.7).
+                weg = self._mod_collection.prune_unseen()
+                log.info("Mod-Sammlung neu gezaehlt, %d Eintraege ohne "
+                         "Item im Cache entfernt.", weg)
             log.info("Mod-Sammlung %s: %s",
                      "um Tier-Belege ergänzt" if nur_tiers
                      else "aus dem Cache gefüllt",
@@ -2934,7 +2953,11 @@ class MainWindow(QMainWindow):
         # Nutzer eine Karte in ein Map-Stash-Unterfach, gibt es das Fach
         # plötzlich — dann gehört es zurück in den Rundlauf.
         self._missing_stashes.get(league, set()).discard(stash_id)
-        self._mod_collection.observe_items(items)          # §4.52
+        # Nur, was in DIESEM Fach neu oder verändert ist (§4.52.7) — der
+        # Rundlauf holt dasselbe Fach immer wieder, und jeder Abruf zählte
+        # sonst jedes Item erneut.
+        self._mod_collection.observe_items(mod_collection.fresh_items(
+            items, self._items.get(league, {}).get(stash_id, [])))
         self._last_loaded.setdefault(league, {})[stash_id] = datetime.now(timezone.utc).isoformat()
         self._items.setdefault(league, {})[stash_id] = items
         if silent:
@@ -4099,8 +4122,12 @@ class MainWindow(QMainWindow):
         ein spät eintreffender Job Daten eines inzwischen abgewählten
         Charakters in die aktuelle Ansicht einsickern lassen (analog
         `_on_stash_items`)."""
-        self._mod_collection.observe_items(items)          # §4.52
         previous_items = self._character_items.get(name)  # vor dem Überschreiben: Diff-Basis
+        # Nur neue/veränderte Items zählen (§4.52.7): Der Charakter wird
+        # beim Auto-Refresh alle ~56 s abgeholt — ohne diesen Filter stand
+        # ein Paar Boots nach 81 Abrufen mit "71× gesehen" im Album.
+        self._mod_collection.observe_items(mod_collection.fresh_items(
+            items, previous_items or []))
         # Taugt dieser vorige Stand überhaupt als Vergleichsbasis? Beim
         # ersten Abruf eines Charakters in dieser Sitzung stammt er aus der
         # Datei und kann wochenalt sein — dann ist JEDER daraus abgeleitete

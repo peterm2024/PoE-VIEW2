@@ -335,6 +335,8 @@ crowns a complete set, a <b>silver frame</b> marks the mods seen exactly
 once (the singles of the collection), and a <b>✦</b> sits on this
 session's new finds. The line above the cards keeps the score: how many
 mods, how many complete sets, and how far along all their tiers you are.
+A sighting is one item passing through your hands — the same item
+fetched again on the next refresh does not count twice.
 Sort the cards by name, newest finds, most seen or singles first; the
 <b>Show table</b> button flips to a sortable list of the same mods.
 Search and the filters (text, kind, league, rarity) work in both views,

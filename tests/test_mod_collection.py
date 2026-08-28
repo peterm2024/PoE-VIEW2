@@ -509,16 +509,12 @@ def test_a_league_with_enough_sightings_stands_on_its_own() -> None:
 def test_the_first_version_of_the_file_becomes_the_old_stock(tmp_path) -> None:
     """Die Fassung vor der Ligen-Trennung kannte keine Ligen. Was dort
     steht, ist ununterscheidbar gemischt — also genau das, was der
-    Altbestand ist. Lieber uebernehmen als wegwerfen: Die Sammlung ist der
-    einzige Ort, an dem ein verkauftes Item noch existiert."""
-    pfad = tmp_path / "alt.json"
-    pfad.write_text(json.dumps({"version": 1, "mods": [{
+    Altbestand ist. (Zeilen-Ebene: Auf Datei-Ebene wird ein Stand vor
+    Aufbau 7 ohnehin neu gezaehlt, siehe unten.)"""
+    eintrag = ModRecord.from_row({
         "identity": "# to maximum Life", "kind": "explicitMods", "count": 7,
         "by_rarity": {"2": {"count": 7, "lows": [41], "highs": [96]}},
-    }]}), encoding="utf-8")
-
-    sammlung = mc.load(pfad)
-    eintrag = sammlung.get("explicitMods", "+50 to maximum Life")
+    })
 
     assert eintrag.count == 7
     assert eintrag.span(RARE, LEGACY_LEAGUE).spread == [(41.0, 96.0)]
@@ -687,20 +683,13 @@ def test_tier_evidence_survives_a_round_trip(tmp_path) -> None:
 
 
 def test_a_v2_file_without_tiers_still_loads(tmp_path) -> None:
-    """Ein alter Stand darf nicht verlorengehen, nur weil ihm ein Feld
-    fehlt — dieselbe Regel wie beim Ligen-Umbau."""
-    ziel = tmp_path / "alt.json"
-    ziel.write_text(json.dumps({
-        "version": 2,
-        "mods": [{"identity": "# to maximum Life", "kind": "explicitMods",
-                  "count": 7, "example": "+96 to maximum Life",
-                  "spans": {"": {"2": {"count": 7, "lows": [41], "highs": [96],
-                                       "ilvl_low": 10, "ilvl_high": 80}}}}],
-    }), encoding="utf-8")
+    """Eine Zeile ohne Tier-Feld ist keine kaputte Zeile."""
+    eintrag = ModRecord.from_row(
+        {"identity": "# to maximum Life", "kind": "explicitMods",
+         "count": 7, "example": "+96 to maximum Life",
+         "spans": {"": {"2": {"count": 7, "lows": [41], "highs": [96],
+                              "ilvl_low": 10, "ilvl_high": 80}}}})
 
-    zurueck = mc.load(ziel)
-
-    eintrag = zurueck.get("explicitMods", "+96 to maximum Life")
     assert eintrag.count == 7
     assert eintrag.tier_ledger == {}
 
@@ -804,22 +793,15 @@ def test_an_old_tiers_block_is_dropped_on_load(tmp_path) -> None:
     """Aufbau 3/4 traegt nur die Front — ohne Zaehlungen waere sie im
     Kontenbuch eine Zeile mit erfundenem n. Verwerfen, der Nachtrag baut
     das Buch beim naechsten Start aus dem Cache neu auf."""
-    ziel = tmp_path / "alt.json"
-    ziel.write_text(json.dumps({
-        "version": 4,
-        "mods": [{"identity": "#% to Cold Resistance", "kind": "explicitMods",
-                  "count": 7, "example": "+27% to Cold Resistance",
-                  "spans": {"": {"2": {"count": 7, "lows": [6], "highs": [48],
-                                       "ilvl_low": 5, "ilvl_high": 80}}},
-                  "tiers": {"Ring": [[27, 42]]}}],
-    }), encoding="utf-8")
+    eintrag = ModRecord.from_row(
+        {"identity": "#% to Cold Resistance", "kind": "explicitMods",
+         "count": 7, "example": "+27% to Cold Resistance",
+         "spans": {"": {"2": {"count": 7, "lows": [6], "highs": [48],
+                              "ilvl_low": 5, "ilvl_high": 80}}},
+         "tiers": {"Ring": [[27, 42]]}})
 
-    zurueck = mc.load(ziel)
-
-    eintrag = zurueck.get("explicitMods", "+27% to Cold Resistance")
     assert eintrag.count == 7                    # nichts verloren
     assert eintrag.tier_ledger == {}             # aber kein erfundenes n
-    assert zurueck.has_tier_evidence() is False  # der Nachtrag laeuft an
 
 
 # ----------------------- Die Liga-Ebene (Aufbau 6) ---------------------- #
@@ -893,22 +875,125 @@ def test_a_v5_ledger_without_the_league_level_is_dropped_on_load(tmp_path) -> No
     """Aufbau 5 fuehrte die Kategorie direkt aussen. Ein erfundener
     Liga-Topf waere eine Behauptung — verwerfen, der Nachtrag baut das
     Buch liga-getrennt neu (wie beim tiers-Block aus Aufbau 3/4)."""
+    eintrag = ModRecord.from_row(
+        {"identity": "#% to Cold Resistance", "kind": "explicitMods",
+         "count": 7, "example": "+27% to Cold Resistance",
+         "spans": {"": {"2": {"count": 7, "lows": [6], "highs": [48],
+                              "ilvl_low": 5, "ilvl_high": 80}}},
+         "ledger": {"Ring": [[27, 3, 35, 60]]}})
+
+    assert eintrag.count == 7                    # nichts verloren
+    assert eintrag.tier_ledger == {}             # aber kein erfundener Topf
+
+
+# ------------------ Aufbau 7: Sichtung = Item, nicht Abruf ------------- #
+# Peter, 2026-08-28 spaet: "T2 71x gesehen? Kontrollier das doch bei
+# Gelegenheit nach" — ein Paar Boots, 81 Charakter-Abrufe seit dem
+# Neuaufbau. Jeder Abruf zaehlte alles erneut.
+
+def _zeile(**felder) -> dict:
+    return {"identity": "# to maximum Life", "kind": "explicitMods", "count": 7,
+            "example": "+96 to maximum Life", "first_seen": 1_700_000_000.0,
+            "spans": {"": {"2": {"count": 7, "lows": [41], "highs": [96],
+                                 "ilvl_low": 10, "ilvl_high": 80}}},
+            **felder}
+
+
+def test_a_file_before_v7_keeps_only_hulls_and_asks_for_a_rebuild(tmp_path) -> None:
+    """Die Zaehlstaende aus Aufbau <= 6 sind Abrufe, keine Items — sie
+    werden nicht uebernommen. Was bleibt, ist ``first_seen``: Das laesst
+    sich aus dem Cache nicht wiedergewinnen."""
     ziel = tmp_path / "alt.json"
-    ziel.write_text(json.dumps({
-        "version": 5,
-        "mods": [{"identity": "#% to Cold Resistance", "kind": "explicitMods",
-                  "count": 7, "example": "+27% to Cold Resistance",
-                  "spans": {"": {"2": {"count": 7, "lows": [6], "highs": [48],
-                                       "ilvl_low": 5, "ilvl_high": 80}}},
-                  "ledger": {"Ring": [[27, 3, 35, 60]]}}],
-    }), encoding="utf-8")
+    ziel.write_text(json.dumps({"version": 6, "mods": [_zeile()]}), encoding="utf-8")
 
     zurueck = mc.load(ziel)
 
-    eintrag = zurueck.get("explicitMods", "+27% to Cold Resistance")
-    assert eintrag.count == 7                    # nichts verloren
-    assert eintrag.tier_ledger == {}             # aber kein erfundener Topf
-    assert zurueck.has_tier_evidence() is False  # der Nachtrag laeuft an
+    eintrag = zurueck.get("explicitMods", "+96 to maximum Life")
+    assert zurueck.needs_rebuild is True
+    assert eintrag.count == 0 and eintrag.spans == {} and eintrag.tier_ledger == {}
+    assert eintrag.first_seen == 1_700_000_000.0
+
+
+def test_a_v7_file_loads_as_it_is(tmp_path) -> None:
+    ziel = tmp_path / "neu.json"
+    ziel.write_text(json.dumps({"version": 7, "mods": [_zeile()]}), encoding="utf-8")
+
+    zurueck = mc.load(ziel)
+
+    assert zurueck.needs_rebuild is False
+    assert zurueck.get("explicitMods", "+96 to maximum Life").count == 7
+
+
+def test_an_empty_file_needs_no_rebuild() -> None:
+    assert ModCollection.from_payload({"version": 3, "mods": []}).needs_rebuild is False
+
+
+def test_a_hull_keeps_its_first_seen_when_it_is_counted_again(tmp_path) -> None:
+    """Der Neuaufbau laeuft ueber ``observe`` — und der darf das alte Datum
+    nicht durch "heute" ersetzen, sonst waeren 6000 Eintraege auf einmal
+    die Neuzugaenge dieser Woche."""
+    ziel = tmp_path / "alt.json"
+    ziel.write_text(json.dumps({"version": 6, "mods": [_zeile()]}), encoding="utf-8")
+    zurueck = mc.load(ziel)
+
+    zurueck.observe("explicitMods", "+50 to maximum Life", rarity=2)
+
+    eintrag = zurueck.get("explicitMods", "+50 to maximum Life")
+    assert eintrag.count == 1
+    assert eintrag.first_seen == 1_700_000_000.0
+    assert ("explicitMods", "# to maximum Life") not in zurueck.new_keys()
+
+
+def test_prune_unseen_drops_the_hulls_nothing_filled(tmp_path) -> None:
+    ziel = tmp_path / "alt.json"
+    ziel.write_text(json.dumps({"version": 6, "mods": [
+        _zeile(), _zeile(identity="#% to Cold Resistance")]}), encoding="utf-8")
+    zurueck = mc.load(ziel)
+    zurueck.observe("explicitMods", "+50 to maximum Life", rarity=2)
+
+    assert zurueck.prune_unseen() == 1
+    assert zurueck.needs_rebuild is False
+    assert len(zurueck) == 1
+    assert zurueck.dirty is True
+
+
+def test_retire_moves_the_old_file_aside(tmp_path) -> None:
+    """Die alte Datei wird nicht ueberschrieben, sondern beiseitegelegt:
+    ``save`` lehnt Schrumpfen ab, und der Neuaufbau kann kleiner sein
+    (verkaufte Items). Ohne Datei daneben gibt es nichts, wogegen es
+    schrumpfen koennte."""
+    ziel = tmp_path / "mod-collection-x.json"
+    ziel.write_text("{}", encoding="utf-8")
+
+    weg = mc.retire(ziel)
+
+    assert not ziel.exists()
+    assert weg == tmp_path / f"mod-collection-x.pre-v{mc.VERSION}.json"
+    assert weg.exists()
+    assert mc.retire(ziel) is None
+
+
+def test_fresh_items_skips_what_the_previous_fetch_already_had() -> None:
+    alt = _item(id="a", frameType=RARE, explicitMods=["+27% to Cold Resistance"])
+    gleich = _item(id="a", frameType=RARE, explicitMods=["+27% to Cold Resistance"])
+    gecraftet = _item(id="a", frameType=RARE,
+                      explicitMods=["+27% to Cold Resistance", "+50 to maximum Life"])
+    neu = _item(id="b", frameType=RARE, explicitMods=["+27% to Cold Resistance"])
+
+    frisch = mc.fresh_items([gleich, gecraftet, neu], [alt])
+
+    assert frisch == [gecraftet, neu]
+
+
+def test_a_refetch_does_not_count_twice() -> None:
+    """Der Kern: dasselbe Item zweimal abgeholt ist EINE Sichtung."""
+    item = _item(id="a", frameType=RARE, ilvl=42,
+                 explicitMods=["+27% to Cold Resistance"])
+    sammlung = ModCollection()
+    sammlung.observe_items(mc.fresh_items([item], []))
+    sammlung.observe_items(mc.fresh_items([item], [item]))
+
+    assert sammlung.get("explicitMods", "+27% to Cold Resistance").count == 1
 
 
 def test_the_league_level_survives_a_round_trip(tmp_path) -> None:

@@ -9697,6 +9697,80 @@ def test_the_starting_stock_is_read_in_slices(qapp) -> None:
     win.worker.wait(5000)
 
 
+def test_refetching_a_tab_does_not_count_its_items_again(qapp) -> None:
+    """Peters "T2 71x gesehen" (2026-08-28): Der Rundlauf holt dasselbe
+    Fach immer wieder, und jeder Abruf zaehlte jedes Item erneut. Eine
+    Sichtung ist ein Item, kein Abruf (§4.52.7)."""
+    win = MainWindow()
+    win._current_league = "Standard"
+    item = _ring(id="a", explicitMods=["+96 to maximum Life"])
+
+    win._on_stash_items("Standard", "t1", "Tab", [item], silent=True)
+    win._on_stash_items("Standard", "t1", "Tab", [item], silent=True)
+    win._on_stash_items("Standard", "t1", "Tab", [item], silent=True)
+
+    assert win._mod_collection.get("explicitMods", "+96 to maximum Life").count == 1
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_refetching_a_character_does_not_count_its_gear_again(qapp) -> None:
+    """Der Charakter wird beim Auto-Refresh alle ~56 s abgeholt — 81 Abrufe
+    seit dem Neuaufbau, und die Boots standen mit 71x im Album."""
+    win = MainWindow()
+    boots = _ring(id="a", typeLine="Iron Greaves", inventoryId="Boots",
+                  explicitMods=["+101 to maximum Life"])
+    andere = _ring(id="a", typeLine="Iron Greaves", inventoryId="Boots",
+                   explicitMods=["+101 to maximum Life", "+30% to Fire Resistance"])
+
+    for _ in range(5):
+        win._on_character_items("WitchOfPeter", [boots], False)
+    win._on_character_items("WitchOfPeter", [andere], False)   # gecraftet
+
+    assert win._mod_collection.get("explicitMods", "+101 to maximum Life").count == 2
+    assert win._mod_collection.get("explicitMods", "+30% to Fire Resistance").count == 1
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_a_collection_from_before_v7_is_recounted_from_the_cache(qapp, tmp_path) -> None:
+    """Die alte Datei wird beiseitegelegt, die Huellen werden aus dem
+    Cache neu gezaehlt, was nicht mehr auftaucht faellt weg — und das
+    Erstsichtungs-Datum ueberlebt."""
+    import json
+    from poe_view.services import mod_collection as mc
+    win = MainWindow()
+    win._account_name = "TestAccount#1234"
+    pfad = mc.path_for(win._account_name)
+    pfad.parent.mkdir(parents=True, exist_ok=True)
+    zeile = {"identity": "# to maximum Life", "kind": "explicitMods", "count": 71,
+             "example": "+101 to maximum Life", "first_seen": 1_700_000_000.0,
+             "spans": {"": {"2": {"count": 71, "lows": [101], "highs": [101],
+                                  "ilvl_low": 40, "ilvl_high": 40}}}}
+    verkauft = dict(zeile, identity="#% to Cold Resistance", example="+27% to Cold Resistance")
+    pfad.write_text(json.dumps({"version": 6, "mods": [zeile, verkauft]}), encoding="utf-8")
+    win._items = {"Standard": {"t1": [_ring(id="a", explicitMods=["+101 to maximum Life"])]}}
+
+    win._restore_mod_collection()
+    assert win._mod_seed_mode == "rebuild"
+    while win._mod_seed_queue:
+        win._seed_mod_collection_slice()
+    win._seed_mod_collection_slice()
+
+    eintrag = win._mod_collection.get("explicitMods", "+101 to maximum Life")
+    assert eintrag.count == 1                     # einmal, nicht 71-mal
+    assert eintrag.first_seen == 1_700_000_000.0
+    assert win._mod_collection.get("explicitMods", "+27% to Cold Resistance") is None
+    assert win._mod_collection.needs_rebuild is False
+    assert pfad.with_name(f"{pfad.stem}.pre-v{mc.VERSION}.json").exists()
+    assert json.loads(pfad.read_text(encoding="utf-8"))["version"] == mc.VERSION
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
 def test_a_bar_from_the_old_stock_is_dimmed(qapp) -> None:
     """Der Bestwert steht, aber er stuetzt sich auf den Altbestand: In der
     Liga dieses Items gibt es noch zu wenige Beobachtungen. Die Grundlage
