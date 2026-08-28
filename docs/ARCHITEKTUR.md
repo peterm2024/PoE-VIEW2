@@ -6666,6 +6666,19 @@ die wieder eingebaute Schatten-Variable und ein v5-Block, der als
 Altbestand "gerettet" wird —, alle rissen; Kontrolllauf grün; Smoke:
 6125 Steckbriefe × 4 Ligasichten ohne Fehler, nichts geschrieben.
 
+**Vorwahl beim Öffnen** (`ModAlbumDialog(..., league=)`, `_preselect`,
+2026-08-29): Das Hauptfenster gibt seine `_current_league` mit, das
+Album beginnt in deren Topf (`league_bucket` — "Standard" landet im
+Altbestand) und auf `DEFAULT_RARITY_GROUP` = "Normal / Magic / Rare".
+Peter: "als Standard die aktuell im Viewer ausgewählte Liga nehmen
+sowie auf normal/magic/rare stellen." Eine Liga ohne einzige Sichtung
+steht nicht in der Box, dann bleibt es bei "All leagues". Die Vorwahl
+läuft ERST am Ende von `__init__`, weil die Combos
+`_on_pot_filter_changed` auslösen und das Kopfzeile und Detailfeld
+anfasst. Beim Einbau prompt FALLSTRICKE #80 zum zweiten Mal erlebt: die
+Schleife `for league in seen_leagues` überschattete den Parameter, jedes
+Album öffnete in der alphabetisch letzten Liga.
+
 #### 4.53.4 Stufe 3: Leiter-Balken und Tier-Etikett im Item-Detail (`ui/mod_bar.py`)
 
 Die Mod-Datenbank kommt dorthin, wo Peter beim Spielen hinschaut: ins

@@ -185,6 +185,9 @@ def test_the_range_column_combines_every_pot_by_default(qapp) -> None:
     sammlung.observe("explicitMods", "+96 to maximum Life", rarity=3)
     sammlung.clear_new()
     dialog = ModAlbumDialog(sammlung)
+    # Das Album oeffnet seit 2026-08-29 auf "Normal / Magic / Rare"
+    # (§_preselect); "alles" ist der erste Eintrag der Box.
+    dialog._rarity_combo.setCurrentIndex(0)
 
     idx = dialog._proxy.index(0, RANGE_COL)
     assert dialog._proxy.data(idx) == "41–96"
@@ -1214,6 +1217,7 @@ def test_the_seen_line_names_the_selection_and_keeps_the_total() -> None:
 def test_the_dialog_passes_the_rarity_filter_to_the_detail(qapp) -> None:
     sammlung = _mit_zwei_ligen()
     dialog = ModAlbumDialog(sammlung, None, None)
+    dialog._rarity_combo.setCurrentIndex(0)        # Vorwahl zuruecknehmen
     dialog._table.selectRow(0)
     assert "in total" in dialog._detail.toPlainText()
     assert "this selection" not in dialog._detail.toPlainText()
@@ -1240,3 +1244,35 @@ def test_the_dialog_recomputes_stats_and_detail_on_a_league_change(qapp) -> None
 
     assert "0 complete sets" in dialog._stats_label.text()
     assert "1 of 3 tiers" in dialog._detail.toPlainText()
+
+
+# ------------------------ Vorwahl beim Oeffnen ------------------------- #
+# Peter, 2026-08-29: "als Standard die aktuell im Viewer ausgewaehlte
+# Liga nehmen sowie auf normal/magic/rare stellen".
+
+def test_the_album_opens_in_the_viewers_league_and_on_rolled_items(qapp) -> None:
+    sammlung = _mit_zwei_ligen()
+
+    dialog = ModAlbumDialog(sammlung, None, None, league="Allflame")
+
+    assert dialog._league_combo.currentData() == "Allflame"
+    assert dialog._rarity_combo.currentData() == "Normal / Magic / Rare"
+    # und die Vorwahl ist schon wirksam, nicht nur angezeigt:
+    assert "Allflame" in dialog._stats_label.text() or dialog._proxy.rowCount() == 1
+
+
+def test_a_permanent_league_lands_in_the_old_stock_pot(qapp) -> None:
+    sammlung = _mit_zwei_ligen()
+
+    dialog = ModAlbumDialog(sammlung, None, None, league="Standard")
+
+    assert dialog._league_combo.currentData() == LEGACY_LEAGUE
+
+
+def test_an_unknown_league_leaves_all_leagues_selected(qapp) -> None:
+    sammlung = _mit_zwei_ligen()
+
+    dialog = ModAlbumDialog(sammlung, None, None, league="Mirage")
+
+    assert dialog._league_combo.currentData() is None
+    assert dialog._rarity_combo.currentData() == "Normal / Magic / Rare"

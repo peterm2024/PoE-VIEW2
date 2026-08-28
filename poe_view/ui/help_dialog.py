@@ -339,6 +339,9 @@ A sighting is one item passing through your hands — the same item
 fetched again on the next refresh does not count twice.
 Sort the cards by name, newest finds, most seen or singles first; the
 <b>Show table</b> button flips to a sortable list of the same mods.
+The album opens on the league you are viewing and on
+<b>Normal / Magic / Rare</b>, the rolled items a collection is about; both
+boxes stay free to change.
 Search and the filters (text, kind, league, rarity) work in both views,
 and the <b>Range</b> column shows the lowest and highest value ever seen
 for whichever of those you have selected (everything, if you have not

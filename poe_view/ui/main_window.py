@@ -4964,8 +4964,12 @@ class MainWindow(QMainWindow):
         # das Album soll den Stand vom Öffnen zeigen — wie die Sammlung
         # daneben. Ist es noch nicht da, fällt die Tier-Tabelle auf die
         # geschätzten Bänder zurück.
+        # Vorbelegt mit der Liga des Viewers und "Normal / Magic / Rare"
+        # (Peter, 2026-08-29): Wer ein Album aufschlägt, meint die Liga,
+        # die er gerade spielt — und die gerollten Items darin.
         self._mod_album_dialog = ModAlbumDialog(self._mod_collection, self,
-                                               self._mod_knowledge)
+                                               self._mod_knowledge,
+                                               league=self._current_league)
         self._mod_album_dialog.show()
 
     def _open_settings_dialog(self) -> None:

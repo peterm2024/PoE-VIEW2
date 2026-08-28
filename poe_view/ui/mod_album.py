@@ -59,7 +59,7 @@ from poe_view.services.mod_knowledge import tier_number  # noqa: F401 — Tests 
 from poe_view.services.mod_collection import (LEGACY_LEAGUE, MAP_RARITY,
                                               UNKNOWN_RARITY, ModCollection,
                                               ModRecord, RaritySpan, base_rarity,
-                                              is_corrupted_bucket)
+                                              is_corrupted_bucket, league_bucket)
 from poe_view.ui import mod_bar
 from poe_view.ui.theme import DASH_WARN, ROW_CHANGED_COLOR
 
@@ -107,6 +107,9 @@ RARITY_GROUPS: tuple[tuple[str, RarityPredicate], ...] = (
     ("Gem / Currency / Card / Relic", lambda r: r in (4, 5, 6, 9)),
     ("Unknown rarity", lambda r: r == UNKNOWN_RARITY),
 )
+# Die Vorwahl beim Öffnen: die gerollten Items — das ist die Gruppe, um
+# die es im Sammelalbum geht (Peter, 2026-08-29).
+DEFAULT_RARITY_GROUP = RARITY_GROUPS[0][0]
 # Als Dict griffbereit für die Combo-Box: Ihre ``itemData`` trägt nur den
 # Namen, nicht das Prädikat selbst — ``QComboBox.findData`` vergleicht
 # Python-Tupel über den Umweg von QVariant manchmal nicht gleich, auch
@@ -1194,7 +1197,12 @@ class ModCardDelegate(QStyledItemDelegate):
 
 class ModAlbumDialog(QDialog):
     def __init__(self, collection: ModCollection, parent: QWidget | None = None,
-                 knowledge=None) -> None:
+                 knowledge=None, league: str | None = None) -> None:
+        """``league`` ist die Liga des Viewers beim Öffnen — das Album
+        beginnt dann in ihrem Topf und mit "Normal / Magic / Rare"
+        (Peter, 2026-08-29: "als Standard die aktuell im Viewer
+        ausgewählte Liga nehmen sowie auf normal/magic/rare stellen").
+        Vorbelegung, keine Sperre: Beide Boxen bleiben umschaltbar."""
         super().__init__(parent)
         self.setWindowTitle("Mod Collection")
         self.resize(900, 560)
@@ -1230,9 +1238,12 @@ class ModAlbumDialog(QDialog):
         # waehlbare Liga (siehe ``matching_spans``).
         self._league_combo = QComboBox()
         self._league_combo.addItem("All leagues", None)
-        seen_leagues = sorted({league for record in records for league in record.leagues})
-        for league in seen_leagues:
-            self._league_combo.addItem(league_label(league), league)
+        # ``liga``, nicht ``league`` — der Parameter gleichen Namens wird
+        # unten fuer die Vorwahl gebraucht (FALLSTRICKE #80, zum zweiten
+        # Mal an diesem Tag: Die Schleife liess die LETZTE Liga stehen).
+        seen_leagues = sorted({liga for record in records for liga in record.leagues})
+        for liga in seen_leagues:
+            self._league_combo.addItem(league_label(liga), liga)
         self._league_combo.currentIndexChanged.connect(self._on_pot_filter_changed)
 
         self._rarity_combo = QComboBox()
@@ -1349,6 +1360,21 @@ class ModAlbumDialog(QDialog):
 
         self._update_count_label()
         self._on_album_sort_changed()
+        # Erst jetzt, wo Kopfzeile und Detailfeld stehen — die Combos
+        # loesen ``_on_pot_filter_changed`` aus, und das setzt beide.
+        self._preselect(league, DEFAULT_RARITY_GROUP)
+
+    def _preselect(self, league: str | None, rarity_group: str) -> None:
+        """Liga-Topf des Viewers und die gerollten Raritaeten vorwaehlen —
+        nur, wenn es die Eintraege gibt (eine Liga ohne einzige Sichtung
+        steht nicht in der Box, dann bleibt es bei "All leagues")."""
+        if league is not None:
+            index = self._league_combo.findData(league_bucket(league))
+            if index >= 0:
+                self._league_combo.setCurrentIndex(index)
+        index = self._rarity_combo.findData(rarity_group)
+        if index >= 0:
+            self._rarity_combo.setCurrentIndex(index)
 
     def _toggle_view(self) -> None:
         zur_tabelle = self._stack.currentWidget() is self._cards

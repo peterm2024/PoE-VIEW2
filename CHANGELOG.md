@@ -129,7 +129,9 @@ nach [SemVer](https://semver.org/lang/de/).
   Wertspannen im Steckbrief zeigt nur noch die gewählte Liga und
   Rarität — die Zeilen der alten Ligen irritieren beim Start einer
   neuen nur; die Gesamtzahl der Sichtungen steht als Nebensatz
-  daneben. Dafür führt die
+  daneben. Das Album öffnet gleich in der Liga, die im Viewer gewählt
+  ist, und auf "Normal / Magic / Rare" — beide Boxen bleiben
+  umschaltbar. Dafür führt die
   Sammlung ihr Tier-Kontenbuch jetzt je Liga (dieselben Töpfe wie die
   Wertspannen); der Umbau trägt sich beim nächsten Start selbst aus dem
   Cache nach, kein Zählstand geht verloren.
