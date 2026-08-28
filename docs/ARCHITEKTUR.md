@@ -6288,32 +6288,60 @@ war Teil der Messung, keine Abkürzung erst hier.
 
 **Die Ground-Truth-Leiter ist über (Identität, `item_category()`)
 geschlüsselt**, im selben Namensraum wie `ModRecord.tier_ledger` — nur
-so sind beide vergleichbar. Da RePoEs Eligibility über Item-BASIS-Tags
-läuft ("dex_boots", nicht "boots"), aber `item_category()` gröber ist
-("Boots"), bildet `build()` je Kategorie die Vereinigung aller Tags
-ausgelieferter Basen (`base_items.json`, `release_state: released`) und
-prüft ein Mod als eligible, sobald er für IRGENDEINEN Tag dieser
-Vereinigung ein positives Gewicht trägt. Eine Annäherung (kann einen
-Mod fälschlich einer ganzen Kategorie zuschlagen, der nur eine
-Rüstungsvariante trifft) — dieselbe, mit der die Kernzahl unten
-gemessen wurde, und über alle ausgelieferten Basen sogar vollständiger
-als die ursprüngliche Messung gegen nur Peters eigenen Bestand.
+so sind beide vergleichbar. RePoEs Eligibility läuft dagegen über
+Item-BASIS-Tags ("dex_boots", nicht "boots"), also muss `build()`
+übersetzen: Es hält je Kategorie die Tag-Mengen ihrer ausgelieferten
+Basen (`_bases_by_category`, eine Menge JE BASIS) und lässt einen Mod
+zu, sobald er auf irgendeiner davon erscheinen kann.
 
-**Zwei Sackgassen der ursprünglichen Messung stecken jetzt als
-Regressionstests im Modul selbst** (`tests/test_mod_knowledge.py`,
-Gegenprobe gefahren): Slot-Tags statt Basis-Tags hätten lokale
-Verteidigungs-Mods (Evasion/Armour/ES-%) verpasst; `domain: "item"`
-statt `("item", "misc")` hätte normale Jewels komplett ausgelassen
-(Jewels laufen unter `"misc"`) — beide Filter sind hier fest verdrahtet
-und beide Gegenproben rissen den erwarteten Test.
+**Drei Fehler in genau dieser Übersetzung — alle drei erst durch eine
+Messung sichtbar, keiner durch einen Test** (FALLSTRICKE #79; Peters
+CraftOfExile-Screenshot nennt für Intelligence/Amulett neun Tiers, die
+erste Fassung baute eine einzige Sprosse, und die auch noch die
+falsche):
+
+1. *`spawn_weights` ist eine geordnete LISTE, keine Tabelle.* Das Spiel
+   nimmt den ersten Eintrag, dessen Tag die Basis trägt; `default`
+   steht am Ende und fängt den Rest. Die erste Fassung iterierte
+   stattdessen über die Tags der Basis und schlug in einer
+   Gewichts-Tabelle nach — dieselbe Menge, andere Reihenfolge. Weil die
+   Tags in einem `frozenset` lagen, war das Ergebnis zwischen zwei
+   Prozessen sogar verschieden (Pythons Hash-Randomisierung): Derselbe
+   Cache lieferte mal eine Leiter, mal keine.
+2. *Die Tag-VEREINIGUNG einer Kategorie ist eine Basis, die es nicht
+   gibt.* Ein Schild vereinigt `int_armour`, `str_armour`, … — und die
+   lokalen Verteidigungs-Mods schließen genau die fremden
+   Rüstungstypen mit Gewicht 0 aus, VOR ihrem eigenen Tag. Gegen das
+   Phantom geprüft greift der Ausschluss und der Mod verschwindet. An
+   echten Daten trifft das 781 (Mod, Kategorie)-Paare, ausnahmslos in
+   dieser Richtung. Deshalb wird je Basis geprüft und über die Basen
+   oderverknüpft.
+3. *Die Domain bestimmt die Kategorie, nicht das Gewicht.*
+   `IntelligenceJewel` trägt `[{not_int: 300}, {default: 500}]`; ein
+   Amulett hat keinen dieser Tags außer `default`, also war der
+   Jewel-Mod für JEDE Kategorie zugelassen und schob sich als
+   zusätzliche Sprosse vor die echten. Jetzt gilt: `domain: "misc"` und
+   `"abyss_jewel"` nur für Jewels, `"item"` für alles außer Jewels.
+
+Danach reproduziert das Modul Peters Screenblatt exakt (neun Sprossen,
+Freischaltung bei iLvl 1/11/22/33/44/55/66/74/82). Alle drei Fehler
+stecken als Regressionstest im Modul, jeder mit gefahrener Gegenprobe.
+
+**Was Annäherung BLEIBT:** Eine Kategorie fasst mehrere Basen zusammen,
+ein Mod gilt als "für Boots möglich", sobald irgendein Stiefel ihn
+tragen kann — auf einem Plattenstiefel muss er deshalb nicht erscheinen.
+Ebenso fallen Abyss- und gewöhnliche Jewels in einen Topf, weil
+`item_category()` sie über die baseType-Endung ohnehin nicht trennt.
+Beides ist die Auflösung, die unser eigener Kategorie-Begriff hergibt.
 
 **Kernzahl, validiert gegen das fertige Modul (nicht nur das
-Mess-Skript):** 68,0 % von Peters 111.619 tier-fähigen Sichtungen haben
-eine belegte Leiter (36,1 % der 2.144 Identität/Kategorie-Paare) — mehr
-als die ursprünglichen 63,3 %, weil `build()` Tags aus ALLEN
-ausgelieferten Basen zieht statt nur aus Peters eigenen. Die
-verbleibenden Lücken (waffentyp-bedingte Jewel-Mods, Hybrid-ES/Armour,
-Cluster-Jewels, Abyssal-Sockets) sind noch nicht angefasst.
+Mess-Skript):** **81,0 %** von Peters 113.290 tier-fähigen Sichtungen
+haben eine belegte Leiter (39,5 % der 2.144 Identität/Kategorie-Paare,
+davon 620 mit mehr als einer Sprosse). Vor der Korrektur der drei
+Fehler oben waren es 68,0 % — und von den damals 9.842 "Leitern" hatten
+nur 3,3 % überhaupt mehr als eine Sprosse, waren also gar keine Leitern.
+Die verbleibenden Lücken (waffentyp-bedingte Jewel-Mods,
+Hybrid-ES/Armour, Cluster-Jewels) sind noch nicht angefasst.
 
 `build()` liefert ein schreibgeschütztes `Knowledge`-Objekt
 (`ladder(identity, category)`, `has(...)`), `get()` hält es als
@@ -6352,11 +6380,22 @@ T-Nummern statt Prozent, Geisterkarten für nie gesehene Mods), Stufe
 
 Getestet: `tests/test_mod_knowledge.py` (Download/Cache-Lebenszyklus
 gegen gemocktes HTTP, Leiter-Bau gegen kleine RePoE-artige Fixtures,
-beide Sackgassen der Messung als Regressionstest), `tests/
-test_api_worker.py` (Dispatch ruft `ensure_fresh` dann `get(rebuild=
-True)`, kein Status-Text, läuft ohne Token) und `tests/
-test_main_window_helpers.py` (Job steht nach Bootstrap in der Queue,
-`_on_mod_knowledge_loaded` speichert das Ergebnis inklusive `None`).
+die Sackgassen der Messung UND die drei Übersetzungsfehler oben als
+Regressionstest — die Fixture bildet dafür die echten Muster nach: eine
+Basis mit zwei Tags für die Reihenfolge, zwei Basen derselben Kategorie
+für die je-Basis-Prüfung, ein Jewel-Mod mit positivem `default` für die
+Domain-Regel), `tests/test_api_worker.py` (Dispatch ruft `ensure_fresh`
+dann `get(rebuild=True)`, kein Status-Text, läuft ohne Token) und
+`tests/test_main_window_helpers.py` (Job steht nach Bootstrap in der
+Queue, `_on_mod_knowledge_loaded` speichert das Ergebnis inklusive
+`None`).
+
+Eine der vier Gegenproben überlebte zunächst — der je-Basis-Test war so
+gebaut, dass die Vereinigung dieselbe Antwort gab. Erst die Messung an
+echten Daten zeigte das eigentliche Muster (Ausschlüsse mit Gewicht 0
+VOR dem erlaubten Tag), und mit ihm in der Fixture riss die Gegenprobe.
+Wieder ein Fall der Regel aus FALLSTRICKE: Eine überlebende Gegenprobe
+zeigt auf den Test, nicht auf den Code.
 
 ## 8. Entwicklungsstand
 

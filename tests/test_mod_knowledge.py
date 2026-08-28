@@ -135,17 +135,31 @@ def test_render_identity_unknown_stat_id_returns_none() -> None:
 def _write_fixture(cache_dir) -> None:
     cache_dir.mkdir(parents=True, exist_ok=True)
     base_items = {
+        # Zwei Tags, damit die REIHENFOLGE der spawn_weights geprueft
+        # werden kann: ueber ein Set iteriert kaeme mal "amulet", mal
+        # "default" zuerst - mit gegenteiligem Ergebnis.
         "Metadata/Items/Amulets/Test": {
             "name": "Test Amulet", "item_class": "Amulet",
-            "release_state": "released", "tags": ["amulet"],
+            "release_state": "released", "tags": ["amulet", "default"],
+        },
+        # Zweite Basis DERSELBEN Kategorie mit einem eigenen Tag: eine
+        # Pruefung gegen die Tag-VEREINIGUNG saehe hier eine Basis, die
+        # es nicht gibt (amulet + talisman gleichzeitig).
+        "Metadata/Items/Amulets/Talisman": {
+            "name": "Test Talisman", "item_class": "Amulet",
+            "release_state": "released", "tags": ["talisman", "default"],
         },
         "Metadata/Items/Jewels/Test": {
             "name": "Test Jewel", "item_class": "Jewel",
-            "release_state": "released", "tags": ["jewel"],
+            "release_state": "released", "tags": ["jewel", "default"],
+        },
+        "Metadata/Items/Jewels/Abyss": {
+            "name": "Test Abyss Jewel", "item_class": "AbyssJewel",
+            "release_state": "released", "tags": ["abyss_jewel", "default"],
         },
         "Metadata/Items/Amulets/Unreleased": {
             "name": "Ghost Amulet", "item_class": "Amulet",
-            "release_state": "unreleased", "tags": ["amulet"],
+            "release_state": "unreleased", "tags": ["amulet", "default"],
         },
     }
     translations = [
@@ -167,10 +181,33 @@ def _write_fixture(cache_dir) -> None:
             "stats": [{"id": "additional_intelligence", "min": 13, "max": 20}],
             "spawn_weights": [{"tag": "amulet", "weight": 1000}, {"tag": "default", "weight": 0}],
         },
+        # Genau die Bauart des echten `IntelligenceJewel`: ein Jewel-Mod,
+        # dessen `default` POSITIV ist. Er darf trotzdem nur auf Jewels
+        # landen - die Domain entscheidet, nicht das Gewicht.
         "IntJewelMisc": {
             "domain": "misc", "generation_type": "suffix", "required_level": 1,
             "stats": [{"id": "additional_intelligence", "min": 5, "max": 5}],
-            "spawn_weights": [{"tag": "jewel", "weight": 1000}, {"tag": "default", "weight": 0}],
+            "spawn_weights": [{"tag": "not_int", "weight": 300}, {"tag": "default", "weight": 500}],
+        },
+        # Wertgleich zum Mod darueber: zwei Sprossen, die sich um nichts
+        # unterscheiden, gehoeren in der Leiter zu einer zusammengefasst.
+        "IntJewelAbyss": {
+            "domain": "abyss_jewel", "generation_type": "suffix", "required_level": 9,
+            "stats": [{"id": "additional_intelligence", "min": 5, "max": 5}],
+            "spawn_weights": [{"tag": "default", "weight": 500}],
+        },
+        # Die Bauart der echten lokalen Verteidigungs-Mods
+        # (`LocalIncreasedEvasionRatingPercent8` & Co., 781 Faelle):
+        # erst die AUSSCHLUESSE mit Gewicht 0, dann der eine erlaubte
+        # Tag. Gegen die Tag-Vereinigung einer Kategorie geprueft greift
+        # der Ausschluss und der Mod verschwindet - obwohl es eine echte
+        # Basis gibt, auf der er erscheint.
+        "IntAmuletButNotTalisman": {
+            "domain": "item", "generation_type": "prefix", "required_level": 40,
+            "stats": [{"id": "additional_intelligence", "min": 30, "max": 35}],
+            "spawn_weights": [{"tag": "talisman", "weight": 0},
+                             {"tag": "amulet", "weight": 800},
+                             {"tag": "default", "weight": 0}],
         },
         "NotEligibleForAnything": {
             "domain": "item", "generation_type": "prefix", "required_level": 1,
@@ -212,9 +249,10 @@ def test_build_produces_a_ladder_sorted_by_required_level(tmp_path, monkeypatch)
 
     knowledge = mk.build()
     ladder = knowledge.ladder("# to Intelligence", "Amulet")
-    assert [step.required_level for step in ladder] == [1, 22]
+    assert [step.required_level for step in ladder] == [1, 22, 40]
     assert (ladder[0].low, ladder[0].high) == (8, 12)
     assert (ladder[1].low, ladder[1].high) == (13, 20)
+    assert (ladder[2].low, ladder[2].high) == (30, 35)
 
 
 def test_build_uses_the_misc_domain_for_jewels(tmp_path, monkeypatch) -> None:
@@ -256,8 +294,9 @@ def test_build_skips_multi_stat_mods(tmp_path, monkeypatch) -> None:
     ladder = knowledge.ladder("# to Intelligence", "Amulet")
     # TwoStatMod haette (1, 1) beigetragen, wie EssenceOnlyMod - beide
     # muessen draussen bleiben, die vorigen zwei Tests pruefen das schon
-    # ueber den Wert; hier zaehlt nur die Laenge.
-    assert len(ladder) == 2
+    # ueber den Wert; hier zaehlt nur die Laenge (drei echte Sprossen:
+    # IntAmuletLow, IntAmuletHigh, IntTalismanOnly).
+    assert len(ladder) == 3
 
 
 def test_build_a_mod_ineligible_everywhere_produces_no_ladder(tmp_path, monkeypatch) -> None:
@@ -292,3 +331,92 @@ def test_get_caches_the_built_knowledge(tmp_path, monkeypatch) -> None:
     cache_dir.joinpath("mods.min.json").unlink()
     assert mk.get() is first
     assert mk.get(rebuild=True) is None
+
+
+# --- Die drei Fehler, die Peters CraftOfExile-Screenshot aufdeckte ------- #
+
+def test_the_order_of_spawn_weights_decides_not_the_order_of_tags(
+        tmp_path, monkeypatch) -> None:
+    """Der Fehler, der acht von neun Amulett-Sprossen verschluckte:
+    `spawn_weights` ist eine geordnete Liste, `default` faengt am Ende
+    alles Uebrige. Wer stattdessen ueber die Tags der Basis iteriert,
+    bekommt bei `[{amulet: 1000}, {default: 0}]` und einer Basis mit
+    beiden Tags mal True und mal False - Pythons Set-Reihenfolge ist
+    zwischen zwei Prozessen verschieden."""
+    tags = frozenset({"amulet", "default"})
+    weights = [{"tag": "amulet", "weight": 1000}, {"tag": "default", "weight": 0}]
+    assert mk._eligible(weights, tags) is True
+    # Dieselbe Menge, umgekehrte Liste: jetzt gewinnt `default`.
+    assert mk._eligible(list(reversed(weights)), tags) is False
+
+
+def test_a_mod_without_any_matching_tag_and_without_default_is_out() -> None:
+    assert mk._eligible([{"tag": "ring", "weight": 1000}], frozenset({"amulet"})) is False
+
+
+def test_a_ladder_collects_mods_from_every_base_of_its_category(
+        tmp_path, monkeypatch) -> None:
+    """Ein Mod, der auf gewoehnlichen Amuletten erscheint, aber auf
+    Talismanen ausgeschlossen ist, gehoert in die Amulett-Leiter -
+    `item_category()` kennt keinen eigenen Topf fuer Talismane.
+
+    Gegen die Tag-VEREINIGUNG geprueft faellt er durch: dort stuende
+    eine Phantom-Basis mit `amulet` UND `talisman` gleichzeitig, der
+    Ausschluss `{talisman: 0}` steht in der Liste vorn und gewinnt. An
+    echten Daten trifft das 781 (Mod, Kategorie)-Paare, allesamt lokale
+    Verteidigungs-Mods, die ihre fremden Ruestungstypen genau so
+    ausschliessen."""
+    cache_dir = tmp_path / "mod-knowledge"
+    monkeypatch.setattr(mk.config, "APP_DATA_DIR", tmp_path)
+    _write_fixture(cache_dir)
+
+    ladder = mk.build().ladder("# to Intelligence", "Amulet")
+
+    assert (30, 35) in [(s.low, s.high) for s in ladder]
+
+
+def test_a_jewel_mod_with_a_positive_default_stays_out_of_other_categories(
+        tmp_path, monkeypatch) -> None:
+    """Die eine Sprosse zu viel: `IntelligenceJewel` traegt
+    `[{not_int: 300}, {default: 500}]`, und ein Amulett hat weder
+    `not_int` noch sonst einen passenden Tag - `default` griff, der
+    Jewel-Mod stand in JEDER Kategorie. Gegen Peters
+    CraftOfExile-Screenshot war das genau eine Sprosse zu viel."""
+    cache_dir = tmp_path / "mod-knowledge"
+    monkeypatch.setattr(mk.config, "APP_DATA_DIR", tmp_path)
+    _write_fixture(cache_dir)
+
+    knowledge = mk.build()
+
+    assert 5 not in [s.low for s in knowledge.ladder("# to Intelligence", "Amulet")]
+    assert 5 in [s.low for s in knowledge.ladder("# to Intelligence", "Jewel")]
+
+
+def test_abyss_jewels_land_in_the_same_category_as_ordinary_jewels(
+        tmp_path, monkeypatch) -> None:
+    """`item_category()` entscheidet ueber die baseType-Endung, und ein
+    "Searching Eye Jewel" endet auf "Jewel" wie jedes andere - RePoEs
+    eigene Klasse "AbyssJewel" muss deshalb dorthin abgebildet werden,
+    sonst haette die Kategorie gar keine Leiter."""
+    cache_dir = tmp_path / "mod-knowledge"
+    monkeypatch.setattr(mk.config, "APP_DATA_DIR", tmp_path)
+    _write_fixture(cache_dir)
+
+    knowledge = mk.build()
+
+    assert knowledge.has("# to Intelligence", "Jewel")
+    assert not knowledge.has("# to Intelligence", "AbyssJewel")
+
+
+def test_two_steps_with_the_same_span_are_merged_keeping_the_earliest(
+        tmp_path, monkeypatch) -> None:
+    """Der gewoehnliche und der Abyss-Jewel-Mod tragen beide 5-5. Zwei
+    Stufen, die sich um nichts unterscheiden, waeren im Album zwei
+    Zeilen ohne Unterschied; behalten wird die frueher freigeschaltete."""
+    cache_dir = tmp_path / "mod-knowledge"
+    monkeypatch.setattr(mk.config, "APP_DATA_DIR", tmp_path)
+    _write_fixture(cache_dir)
+
+    ladder = mk.build().ladder("# to Intelligence", "Jewel")
+
+    assert [(s.required_level, s.low, s.high) for s in ladder] == [(1, 5, 5)]

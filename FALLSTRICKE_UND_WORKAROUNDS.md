@@ -1397,3 +1397,88 @@ die Combo-Box selbst.
 Getestet: `tests/test_mod_album.py` (jeder Raritäts-Filter wird über
 seinen String-Namen gefunden, nicht über sein Tupel).
 
+
+## 79. Eine Tier-Leiter, die je nach Prozessstart anders aussah — und acht von neun Sprossen verlor
+
+**Ausgangslage:** `services/mod_knowledge.py` (§4.53) übersetzt RePoEs
+Mod-Definitionen in Tier-Leitern. Ob ein Mod auf einer Item-Basis
+erscheinen kann, entscheidet dort `spawn_weights` — eine Liste aus
+`{tag, weight}`-Paaren. Die erste Fassung las sie als Nachschlagetabelle:
+
+```python
+gewichte = {w["tag"]: w["weight"] for w in spawn_weights}
+for tag in tags:                      # tags ist ein frozenset
+    if tag in gewichte:
+        return gewichte[tag] > 0
+return gewichte.get("default", 0) > 0
+```
+
+Das sieht wie dieselbe Frage aus, ist aber eine andere: **Die
+Reihenfolge der LISTE entscheidet, nicht die der Tags.** Das Spiel geht
+`spawn_weights` von oben nach unten durch und nimmt den ersten Eintrag,
+dessen Tag die Basis trägt; `default` steht deshalb am Ende und fängt
+alles Übrige.
+
+Bei `Dexterity1` — `[{amulet: 1000}, {default: 0}]` — und einem Amulett
+mit den Tags `{amulet, default}` hängt das Ergebnis daran, welchen Tag
+die Schleife zuerst zieht. Und weil `tags` ein `frozenset` ist, ist
+diese Reihenfolge zwischen zwei PROZESSEN verschieden (Pythons
+String-Hash-Randomisierung). Derselbe Cache, dasselbe Programm, zwei
+Starts:
+
+```
+Lauf A:  '# to Dexterity' / Amulet ->  1 Sprosse
+Lauf B:  '# to Dexterity' / Amulet -> 10 Sprossen
+```
+
+**Warum kein Test das fand:** Die Testfixture gab jeder Basis genau
+EINEN Tag. Bei einem einzigen Tag sind beide Lesarten identisch — die
+Fixture konnte den Unterschied gar nicht ausdrücken.
+
+**Gefunden wurde es an Peters Screenshot.** Er hatte für Intelligenz auf
+Amuletten bei CraftOfExile nachgesehen: neun Tiers. Unsere Leiter hatte
+eine einzige Sprosse, und die stammte nicht einmal von einem Amulett.
+
+**Zwei weitere Fehler in derselben Übersetzung, beide erst durch die
+Messung sichtbar:**
+
+*Die Tag-Vereinigung einer Kategorie ist eine Basis, die es nicht gibt.*
+Unsere `item_category()` ist gröber als RePoEs Tags ("Boots" gegen
+"dex_boots"), also lag es nahe, je Kategorie alle Tags zu vereinigen.
+Ein Schild vereinigt dadurch `int_armour`, `str_armour`, `dex_armour` —
+und die lokalen Verteidigungs-Mods schließen genau die fremden
+Rüstungstypen mit Gewicht 0 aus, VOR ihrem eigenen Tag. Gegen dieses
+Phantom geprüft greift der Ausschluss, der Mod verschwindet. An echten
+Daten: 781 (Mod, Kategorie)-Paare, ausnahmslos in dieser Richtung.
+
+*Die Domain bestimmt die Kategorie, nicht das Gewicht.*
+`IntelligenceJewel` trägt `[{not_int: 300}, {default: 500}]`. Ein
+Amulett hat keinen dieser Tags, also greift `default` mit 500 — der
+Jewel-Mod war für JEDE Kategorie zugelassen und schob sich als
+zusätzliche Sprosse vor die echten. Genau eine Sprosse zu viel
+gegenüber Peters Screenshot.
+
+**Der Fix**: Die Liste in ihrer Reihenfolge lesen; je BASIS prüfen und
+über die Basen einer Kategorie oderverknüpfen; die Domain auf die
+erlaubten Kategorien abbilden (`misc`/`abyss_jewel` nur Jewels, `item`
+alles außer Jewels). Danach reproduziert das Modul Peters neun Sprossen
+exakt, samt Freischalt-Leveln (1/11/22/33/44/55/66/74/82). Die
+Trefferquote gegen seinen Bestand stieg von 68,0 % auf 81,0 % der
+Sichtungen — und der Anteil der "Leitern" mit mehr als einer Sprosse
+von 3,3 % auf 74,4 %: Vorher waren die meisten gar keine Leitern.
+
+**Lehre:** Eine Liste aus `{schlüssel, wert}`-Paaren in ein `dict`
+umzuschreiben wirft die Reihenfolge weg — und wenn die fremde Seite
+diese Reihenfolge als Regel benutzt, ist die Umschreibung nicht eine
+Optimierung, sondern ein anderer Algorithmus. Bei einer Menge als
+Iterationsquelle kommt hinzu, dass der Fehler nicht einmal stabil ist.
+Und: Eine Fixture, in der jedes Objekt genau ein Merkmal trägt, kann
+Reihenfolge-Fehler grundsätzlich nicht fangen.
+
+Getestet: `tests/test_mod_knowledge.py` — die Fixture bildet jetzt die
+echten Muster nach (eine Basis mit zwei Tags, zwei Basen derselben
+Kategorie mit Ausschluss-vor-Erlaubnis, ein Jewel-Mod mit positivem
+`default`), alle drei Fehler haben einen eigenen Test mit gefahrener
+Gegenprobe. Die Gegenprobe zur je-Basis-Prüfung überlebte zunächst,
+weil der erste Test das Muster zu harmlos nachbaute — erst die Messung
+an echten Daten lieferte das Muster, mit dem sie reißt.

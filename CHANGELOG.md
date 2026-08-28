@@ -78,9 +78,11 @@ nach [SemVer](https://semver.org/lang/de/).
 - **Fundament einer echten Mod-Datenbank** (noch ohne sichtbare
   Auswertung): PoE-VIEW2 lädt jetzt bei jedem Start im Hintergrund
   öffentliche Spieldaten (RePoE) und baut daraus echte Tier-Leitern,
-  statt sie nur aus dem Item-Level zu schätzen. Gegen Peters echten
-  Bestand geprüft: 68 % aller bisher aufgezeichneten, tier-fähigen
-  Sichtungen haben bereits eine belegte Leiter. Die Spieldaten selbst
+  statt sie nur aus dem Item-Level zu schätzen. Gegen einen echten,
+  gewachsenen Bestand geprüft: 81 % aller bisher aufgezeichneten,
+  tier-fähigen Sichtungen haben bereits eine belegte Leiter, und für
+  Intelligenz auf Amuletten stimmen alle neun Stufen samt ihrer
+  Freischalt-Level mit den bekannten Tabellen überein. Die Spieldaten selbst
   gehören GGG und werden deshalb nicht mit der App ausgeliefert,
   sondern bei Bedarf heruntergeladen und lokal vorgehalten, ähnlich dem
   bestehenden Preis-Cache — unabhängig vom Login, unauffällig, ohne

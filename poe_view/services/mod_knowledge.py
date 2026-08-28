@@ -78,14 +78,34 @@ TTL_SECONDS = 7 * 24 * 3600
 # heruntergeladenen Rohdaten selbst) — wie bei price_cache.CACHE_VERSION.
 CACHE_VERSION = 1
 
-# Waffen-Item-Klassen: RePoEs Bezeichnung -> unsere item_category()
-# (nur eingetragen, wo sie abweichen; sonst identisch).
+# RePoEs Bezeichnung -> unsere item_category() (nur eingetragen, wo sie
+# abweichen; sonst identisch). Die Waffen heißen bei RePoE "One Hand
+# Sword", bei uns "One Handed Sword". "AbyssJewel" fällt bei uns mit
+# "Jewel" zusammen: `item_category()` entscheidet über die
+# baseType-Endung, und ein "Searching Eye Jewel" endet auf "Jewel" wie
+# jedes andere. Die Leitern beider Jewel-Arten landen dadurch in einem
+# Topf — dieselbe Annäherung wie bei den Rüstungstypen, siehe §4.53.
 _CLASS_RENAME = {
     "One Hand Sword": "One Handed Sword", "Two Hand Sword": "Two Handed Sword",
     "Thrusting One Hand Sword": "Thrusting One Handed Sword",
     "One Hand Axe": "One Handed Axe", "Two Hand Axe": "Two Handed Axe",
     "One Hand Mace": "One Handed Mace", "Two Hand Mace": "Two Handed Mace",
+    "AbyssJewel": "Jewel",
 }
+
+# Unsere Kategorien, auf denen Jewel-Mods leben. Getrennt von der
+# übrigen Ausrüstung, weil RePoE sie über die DOMAIN trennt und nicht
+# über Tags: Ein Jewel-Mod wie `DexterityJewel` trägt
+# `[{not_dex: 300}, {default: 500}]` — auf ein Amulett (Tags
+# `{amulet, default}`) passt `default`, der Mod wäre also für JEDE
+# Kategorie zugelassen und schob sich vor die echten Amulett-Sprossen.
+# Genau eine Sprosse zu viel gegenüber Peters CraftOfExile-Screenshot.
+JEWEL_CATEGORIES = frozenset({"Jewel"})
+
+# Domains, deren Mods ausschließlich auf Jewels erscheinen. "misc" sind
+# die gewöhnlichen Jewels (nicht "item", was lange unbemerkt blieb),
+# "abyss_jewel" die aus den Abyss-Fassungen.
+_JEWEL_DOMAINS = frozenset({"misc", "abyss_jewel"})
 
 
 # --- Download/Cache (Muster: services/price_cache.py) ------------------- #
@@ -201,15 +221,24 @@ def render_identity(by_id: dict, stat_id: str, value: float) -> str | None:
 
 
 def _eligible(spawn_weights: list[dict], tags: frozenset) -> bool:
-    """Kann ein Mod mit diesen `spawn_weights` auf einer Basis mit
-    diesen Tags auftreten? RePoE prüft die Tags der Basis der Reihe
-    nach gegen die Gewichtstabelle des Mods und nimmt den ersten
-    Treffer; ohne Tag-Treffer entscheidet `default`."""
-    gewichte = {w["tag"]: w["weight"] for w in spawn_weights}
-    for tag in tags:
-        if tag in gewichte:
-            return gewichte[tag] > 0
-    return gewichte.get("default", 0) > 0
+    """Kann ein Mod mit diesen `spawn_weights` auf einer Basis mit genau
+    diesen Tags auftreten?
+
+    **Die Reihenfolge der Liste entscheidet, nicht die der Tags.** Das
+    Spiel geht `spawn_weights` von oben nach unten durch und nimmt den
+    ERSTEN Eintrag, dessen Tag die Basis trägt; `default` steht deshalb
+    immer am Ende und fängt alles Übrige. Der erste Entwurf hatte
+    stattdessen über die Tags der Basis iteriert und in einer
+    Gewichts-Tabelle nachgeschlagen — dieselbe Menge, andere Reihenfolge,
+    und weil `tags` ein `frozenset` ist, war die Reihenfolge zwischen
+    zwei Prozessen sogar verschieden (Pythons Hash-Randomisierung). Ein
+    Mod wie `Dexterity1` (`[{amulet: 1000}, {default: 0}]`) fiel damit
+    mal durch und mal nicht: An Peters CraftOfExile-Screenshot gemessen
+    fehlten acht von neun Amulett-Sprossen (§4.53)."""
+    for eintrag in spawn_weights:
+        if eintrag["tag"] == "default" or eintrag["tag"] in tags:
+            return eintrag["weight"] > 0
+    return False
 
 
 # --- Tier-Leitern --------------------------------------------------------- #
@@ -242,15 +271,28 @@ class Knowledge:
         return len(self._ladders)
 
 
-def _tags_by_category(base_items: dict) -> dict[str, set[str]]:
-    tags: dict[str, set[str]] = {}
+def _bases_by_category(base_items: dict) -> dict[str, set[frozenset[str]]]:
+    """Je Kategorie die Tag-Mengen ihrer ausgelieferten Basen — EINE
+    Menge je Basis, nicht eine Vereinigung über alle.
+
+    Die Vereinigung wäre falsch, obwohl sie naheliegt: Sie mischt die
+    Tags verschiedener Basen zu einer Basis, die es nicht gibt, und die
+    Reihenfolge-Regel in `_eligible` liefert für dieses Phantom eine
+    andere Antwort als für jede echte Basis. Ein Mod gilt für die
+    Kategorie, wenn er auf IRGENDEINER ihrer Basen erscheinen kann —
+    das ist die Frage, die zum gröberen Kategorie-Begriff von
+    `item_category()` passt.
+
+    Dedupliziert, weil viele Basen dieselben Tags tragen (866 Mengen
+    statt gut 2000 Basen)."""
+    basen: dict[str, set[frozenset[str]]] = {}
     for base in base_items.values():
         cls = base.get("item_class")
         if base.get("release_state") != "released" or not cls:
             continue
         category = _CLASS_RENAME.get(cls, cls)
-        tags.setdefault(category, set()).update(base.get("tags") or [])
-    return tags
+        basen.setdefault(category, set()).add(frozenset(base.get("tags") or []))
+    return basen
 
 
 def build() -> Knowledge | None:
@@ -262,11 +304,14 @@ def build() -> Knowledge | None:
         return None
     mods, translations, base_items = raw
     by_id = {t["ids"][0]: t for t in translations if len(t.get("ids") or []) == 1}
-    tags_by_category = _tags_by_category(base_items)
+    bases_by_category = _bases_by_category(base_items)
+    equipment = set(bases_by_category) - JEWEL_CATEGORIES
 
     ladders: dict[tuple[str, str], list[TierStep]] = {}
     for mod in mods.values():
-        if mod.get("domain") not in ("item", "misc"):
+        categories = (JEWEL_CATEGORIES if mod.get("domain") in _JEWEL_DOMAINS
+                      else equipment if mod.get("domain") == "item" else None)
+        if not categories:
             continue
         if mod.get("generation_type") not in ("prefix", "suffix"):
             continue
@@ -280,8 +325,9 @@ def build() -> Knowledge | None:
         required_level = mod.get("required_level", 0)
 
         identity: str | None = None
-        for category, tags in tags_by_category.items():
-            if not _eligible(spawn_weights, frozenset(tags)):
+        for category in categories:
+            if not any(_eligible(spawn_weights, tags)
+                      for tags in bases_by_category[category]):
                 continue
             if identity is None:
                 identity = render_identity(by_id, stat["id"], stat["min"])
@@ -290,9 +336,24 @@ def build() -> Knowledge | None:
             ladders.setdefault((identity, category), []).append(
                 TierStep(required_level, stat["min"], stat["max"]))
 
-    for steps in ladders.values():
-        steps.sort(key=lambda s: s.required_level)
-    return Knowledge(ladders)
+    return Knowledge({schluessel: _tidy(steps)
+                     for schluessel, steps in ladders.items()})
+
+
+def _tidy(steps: list[TierStep]) -> list[TierStep]:
+    """Sprossen nach Freischalt-Level ordnen und wertgleiche
+    zusammenfassen.
+
+    Zwei Sprossen mit derselben Spanne sind für den Betrachter dieselbe
+    Stufe, auch wenn RePoE sie getrennt führt: Bei Jewels stehen der
+    gewöhnliche und der Abyss-Mod nebeneinander (beide `12–16`), und die
+    Leiter zeigte sonst zwei Stufen, die sich um nichts unterscheiden.
+    Behalten wird die früheste — das Freischalt-Level ist eine Aussage
+    darüber, ab wann die Spanne erreichbar ist."""
+    beste: dict[tuple[float, float], TierStep] = {}
+    for step in sorted(steps, key=lambda s: s.required_level):
+        beste.setdefault((step.low, step.high), step)
+    return sorted(beste.values(), key=lambda s: s.required_level)
 
 
 _cached: Knowledge | None = None
