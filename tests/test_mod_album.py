@@ -1104,7 +1104,9 @@ def test_album_stats_counts_sets_and_draws_a_bar() -> None:
 
     text = album_stats(records, ladder)
 
-    assert "1 mods collected" in text
+    # "of 1", obwohl nichts fehlt: Der Zaehler wechselt beim letzten Fund
+    # nicht die Form (§album_stats).
+    assert "1 of 1 mods collected" in text
     assert "1 complete sets" in text
     assert "tiers 3/3" in text
     assert "100%" in text
@@ -1410,3 +1412,79 @@ def test_a_mod_never_seen_in_the_league_becomes_a_ghost_there(qapp) -> None:
     assert "#% to Cold Resistance" in zeilen
     assert "0 of 1 tiers" in record_detail_html(
         sammlung.get("explicitMods", "+27% to Cold Resistance"), "C", wissen, "Allflame")
+
+
+# --------------------------- Neu laden (§4.53.6) ------------------------ #
+# Peter: "Wird die Mod Collection aktualisiert, waehrend das Fenster
+# offen ist?" — die Sammlung ja, das Fenster nicht. Jetzt per Knopf.
+
+def test_reloading_picks_up_what_the_collection_gained(qapp) -> None:
+    sammlung = _sammlung()
+    dialog = ModAlbumDialog(sammlung)
+    vorher = dialog._model.rowCount()
+
+    sammlung.observe("explicitMods", "+30% to Cold Resistance", rarity=2)
+
+    assert dialog._model.rowCount() == vorher, "Schnappschuss bleibt bis zum Knopf"
+    dialog._reload()
+    assert dialog._model.rowCount() == vorher + 1
+    # Auch die ANSICHT muss es erfahren: Der Proxy haelt eine eigene
+    # Zuordnung und merkt einen stillen Austausch sonst nicht.
+    assert dialog._proxy.rowCount() == vorher + 1
+    assert "3 of" not in dialog._count_label.text()  # Zaehler zeigt 4
+
+
+def test_reloading_keeps_search_filter_and_selection(qapp) -> None:
+    """Wer beim Spielen nachsieht, ob der Fund drin ist, will danach
+    nicht seine Ansicht neu einstellen."""
+    sammlung = _sammlung()
+    dialog = ModAlbumDialog(sammlung)
+    dialog._search.setText("maximum life")
+    dialog._table.selectRow(0)
+    gewaehlt = dialog._model.record_at(dialog._proxy.mapToSource(
+        dialog._table.selectionModel().currentIndex()).row()).identity
+
+    sammlung.observe("explicitMods", "+30% to Cold Resistance", rarity=2)
+    dialog._reload()
+
+    assert dialog._search.text() == "maximum life"
+    assert dialog._proxy.rowCount() == 1, "die Suche gilt weiter"
+    aktuell = dialog._model.record_at(dialog._proxy.mapToSource(
+        dialog._table.selectionModel().currentIndex()).row())
+    assert aktuell.identity == gewaehlt
+    assert dialog._detail.toPlainText() != ""
+
+
+def test_reloading_lets_a_ghost_become_a_real_card(qapp) -> None:
+    """Der eigentliche Moment: Der eben gerollte Mod war eine leere
+    Karte und ist jetzt gesammelt."""
+    from poe_view.ui.mod_album import GHOST_TEXT, is_ghost
+    sammlung = _mit_konto({7: 3})
+    wissen = _wissen_mit_geist()
+    dialog = ModAlbumDialog(sammlung, None, wissen)
+    geist = [r for r in dialog._records if r.identity == "#% to Lightning Resistance"][0]
+    assert is_ghost(geist, wissen, None, None) is True
+    assert "1 of 2 mods collected" in dialog._stats_label.text()
+
+    sammlung.observe("explicitMods", "+20% to Lightning Resistance", rarity=2)
+    dialog._reload()
+
+    echt = [r for r in dialog._records if r.identity == "#% to Lightning Resistance"][0]
+    assert is_ghost(echt, wissen, None, None) is False
+    assert echt.count == 1
+    assert "2 of 2 mods collected" in dialog._stats_label.text()
+    assert GHOST_TEXT not in dialog._detail.toPlainText()
+
+
+def test_knowledge_arriving_later_fills_the_open_album(qapp) -> None:
+    """Der RePoE-Download braucht beim Start ein paar Sekunden; ein
+    Album, das vorher aufgeht, waere sonst bis zum Schliessen blind."""
+    sammlung = _mit_konto({7: 3})
+    dialog = ModAlbumDialog(sammlung, None, None)
+    assert "complete sets" not in dialog._stats_label.text()
+    assert dialog._proxy.rowCount() == 1
+
+    dialog.update_knowledge(_wissen_mit_geist())
+
+    assert "1 of 2 mods collected" in dialog._stats_label.text()
+    assert dialog._proxy.rowCount() == 2, "der Geist ist jetzt bekannt"

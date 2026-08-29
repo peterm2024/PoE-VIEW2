@@ -2642,13 +2642,18 @@ class MainWindow(QMainWindow):
     def _on_mod_knowledge_loaded(self, knowledge: mod_knowledge.Knowledge | None) -> None:
         """Ergebnis von `FetchModKnowledgeJob` (§4.53) — `None`, wenn
         weder ein gültiger Cache noch ein frischer Download vorlagen
-        (z. B. erster Start ohne Netz). Noch ohne UI-Verwerter, deshalb
-        nur merken und protokollieren."""
+        (z. B. erster Start ohne Netz)."""
         self._mod_knowledge = knowledge
         if knowledge is None:
             log.info("Mod-Wissen: kein Stand verfügbar (kein Cache, Download fehlgeschlagen)")
         else:
             log.info("Mod-Wissen geladen: %d Tier-Leitern", len(knowledge))
+        # Steht das Album schon offen, bekommt es die Leitern nachgereicht
+        # (§4.53.6) — der Download braucht beim Start ein paar Sekunden,
+        # und ein Album ohne Tiers wäre bis zum nächsten Öffnen blind.
+        dialog = getattr(self, "_mod_album_dialog", None)
+        if knowledge is not None and dialog is not None and dialog.isVisible():
+            dialog.update_knowledge(knowledge)
 
     def _on_characters(self, characters: list[Character]) -> None:
         """/character liefert ligenübergreifend; gefiltert wird lokal übers Dropdown.

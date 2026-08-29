@@ -6806,6 +6806,55 @@ Rarität, Standard-Mod wird in der Liga zum Geist) und
 Gegenproben, alle rissen. Smoke: 6135 Steckbriefe × 2 Sichten ohne
 Fehler, Album nativ gegriffen.
 
+#### 4.53.6 Der Schnappschuss bekommt einen Knopf (`ui/mod_album.py`)
+
+Peter, 2026-08-29: "Wird die Mod Collection aktualisiert, während das
+Mod Collection Fenster offen ist?" Antwort: die SAMMLUNG ja (jeder
+Abruf trägt ein, §4.52.7), das FENSTER nicht — es ist bewusst ein
+Schnappschuss vom Öffnen, wie die Paperdoll. Zur Wahl standen ein
+Neu-Laden-Knopf und eine Live-Ansicht; Peter hat den Knopf gewählt.
+Der Grund gegen live: Beim Sortieren nach "Most seen" oder mit Geistern,
+die zu echten Karten werden, springen die Karten unter dem Mauszeiger
+weg — und der Charakter-Refresh feuert alle ~56 s.
+
+**`_reload()` behält, was der Nutzer eingestellt hat**: Suchtext,
+Art-/Liga-/Raritätsfilter, Sortierung und die markierte Karte. Die
+Auswahl wird über (Art, Identität) wiedergefunden (`_selected_key`,
+`ModAlbumModel.row_of`), nicht über die Zeilennummer — nach dem
+Neuladen steht dort eine andere Karte. Danach läuft dieselbe Kette wie
+beim Umschalten eines Filters (`_on_pot_filter_changed`), die Kopfzeile,
+Zähler, Range-Spalte und Steckbrief in einem Zug setzt.
+
+**Warum ein Modell-Reset und kein neues Modell:** `ModAlbumModel.set_
+records()` tauscht die Liste zwischen `beginResetModel`/`endResetModel`.
+Ein neu gesetztes Modell hätte die Ansichten neu verdrahten müssen —
+Tabelle und Karten teilen sich EIN Auswahlmodell (§4.52.5), und
+`setModel` erzeugt ein neues. Der Reset lässt Proxy, Ansichten und
+Auswahlmodell unangetastet. (Die Gegenprobe dazu überlebte zuerst: Der
+Test prüfte nur `_model.rowCount()`, und das liest die Liste direkt —
+er hätte einen stillen Austausch ohne Signal nicht bemerkt. Jetzt prüft
+er die Proxy-Zeilen, also die Seite, die die Ansicht wirklich sieht.
+Dieselbe Lehre wie in §4.53.1: Eine überlebende Gegenprobe zeigt auf
+den Test.)
+
+**Spät eintreffendes Mod-Wissen** nimmt denselben Weg: Der
+RePoE-Download braucht beim Start ein paar Sekunden, und ein vorher
+geöffnetes Album wäre bis zum Schließen ohne Leitern, Slots und
+Geister. `_on_mod_knowledge_loaded` reicht es an ein sichtbares Album
+weiter (`update_knowledge` → `_reload`), Proxy inklusive (er braucht es
+für `is_ghost`).
+
+Nebenbei vereinheitlicht: Die Kopfzeile zeigt "X of Y mods collected"
+jetzt auch dann, wenn nichts fehlt ("313 of 313") — ein Zähler, der
+beim letzten Fund die Form wechselt, nimmt die Belohnung weg. Ohne
+Mod-Wissen bleibt es beim blanken Bestand, da gibt es kein Y.
+
+Getestet: `tests/test_mod_album.py` (Neuladen holt Zuwachs und meldet
+ihn der Ansicht, Suche/Filter/Auswahl überleben, Geist wird zur echten
+Karte samt Kopfzeile, spätes Wissen füllt das offene Album) und
+`tests/test_main_window_helpers.py` (Fenster reicht das Wissen durch).
+Sieben Gegenproben, alle rissen.
+
 ## 8. Entwicklungsstand
 
 Die ursprünglich geplanten Meilensteine (Grundgerüst, Authentifizierung,

@@ -9815,3 +9815,26 @@ def test_a_bar_from_the_old_stock_is_dimmed(qapp) -> None:
     win.worker.stop()
     win.worker.wait(5000)
 
+
+
+def test_mod_knowledge_reaches_an_open_album(qapp) -> None:
+    """Peters Frage nach dem Live-Verhalten (§4.53.6): Der Download
+    trifft nach dem Oeffnen ein und wird nachgereicht."""
+    from poe_view.services.mod_knowledge import Knowledge, TierStep
+    win = MainWindow()
+    win._mod_collection.observe("explicitMods", "+7% to Cold Resistance",
+                                rarity=2, ilvl=50, category="Ring")
+    win._mod_collection.clear_new()
+    win._open_mod_album()
+    dialog = win._mod_album_dialog
+    assert dialog._knowledge is None
+
+    win._on_mod_knowledge_loaded(Knowledge({
+        ("#% to Cold Resistance", "Ring"): [TierStep(1, 6, 11)]}))
+
+    assert dialog._knowledge is not None
+    assert "complete sets" in dialog._stats_label.text()
+
+    dialog.close()
+    win.worker.stop()
+    win.worker.wait(5000)

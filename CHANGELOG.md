@@ -136,6 +136,14 @@ nach [SemVer](https://semver.org/lang/de/).
   Wertspannen); der Umbau trägt sich beim nächsten Start selbst aus dem
   Cache nach, kein Zählstand geht verloren.
 
+- **Ein ⟳-Knopf im Album** holt den inzwischen gewachsenen Stand der
+  Sammlung, ohne das Fenster zu schließen — Suche, Filter, Sortierung
+  und die markierte Karte bleiben, wie sie sind. Das Album selbst ist
+  weiterhin ein Schnappschuss vom Öffnen; ohne den Knopf ändert sich
+  unter der Hand nichts. Trifft das Spieldaten-Paket erst nach dem
+  Öffnen ein (der Download läuft beim Start im Hintergrund), füllen
+  sich Leitern, Tier-Kästchen und Geisterkarten von selbst nach.
+
 - **Geisterkarten: das Album zeigt, was noch fehlt.** Jeder Mod, den
   das Spiel rollen kann und den du in der gewählten Liga noch nie
   gesehen hast, steht als leere Karte im Album — gestrichelter Rand,

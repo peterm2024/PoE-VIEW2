@@ -990,7 +990,12 @@ def album_stats(records: list[ModRecord], knowledge,
     gesehen = [r for r in records if matching_count(r, league, rarity_ok) > 0]
     geister = ([r for r in records if is_ghost(r, knowledge, league, rarity_ok)]
                if ghosts else [])
-    if geister:
+    # "X of Y", sobald es ein Y gibt — auch wenn gerade nichts fehlt:
+    # "313 of 313 mods collected" ist die Belohnung, auf die ein Album
+    # hinarbeitet, und ein Zähler, der beim letzten Fund die Form
+    # wechselt, nimmt sie weg. Ohne Mod-Wissen (oder mit abgeschalteten
+    # Geistern) gibt es kein Y — dann bleibt der blanke Bestand.
+    if ghosts and knowledge is not None:
         teile = [f"{len(gesehen):,} of {len(gesehen) + len(geister):,} mods collected"]
     else:
         teile = [f"{len(gesehen):,} mods collected"]
@@ -1038,6 +1043,32 @@ class ModAlbumModel(QAbstractTableModel):
 
     def record_at(self, row: int) -> ModRecord | None:
         return self._records[row] if 0 <= row < len(self._records) else None
+
+    def row_of(self, key: tuple[str, str]) -> int:
+        """Die Zeile zu (Art, Identität) — ``-1``, wenn es sie nicht (mehr)
+        gibt. Für das Wiederfinden der Auswahl nach einem Neuladen."""
+        for row, record in enumerate(self._records):
+            if (record.kind, record.identity) == key:
+                return row
+        return -1
+
+    def set_records(self, records: list[ModRecord],
+                    new_keys: frozenset[tuple[str, str]],
+                    knowledge=None) -> None:
+        """Die Liste austauschen (§4.53.6, Neu laden).
+
+        Ein voller Reset statt Einzel-Signalen: Beim Neuladen kommen
+        Karten dazu, Geister werden zu echten Karten, Sichtungszahlen
+        springen — jede Zeile kann sich geändert haben. Das SOURCE-Modell
+        zurückzusetzen lässt Proxy, Ansichten und ihr Auswahlmodell
+        unangetastet; ein neues Modell zu setzen würde die Verdrahtung
+        der beiden Ansichten auf EIN Auswahlmodell zerreißen."""
+        self.beginResetModel()
+        self._records = records
+        self._new_keys = new_keys
+        if knowledge is not None:
+            self._knowledge = knowledge
+        self.endResetModel()
 
     def set_range_filter(self, league: str | None,
                          rarities: RarityPredicate | None) -> None:
@@ -1137,6 +1168,13 @@ class ModAlbumProxy(QSortFilterProxyModel):
         self._league = league
         self._rarities = rarities
         self._ghosts = ghosts
+        self.endFilterChange()
+
+    def set_knowledge(self, knowledge) -> None:
+        """Das Mod-Wissen kann NACH dem Öffnen eintreffen (§4.53.6) — der
+        Proxy braucht es für ``is_ghost``."""
+        self.beginFilterChange()
+        self._knowledge = knowledge
         self.endFilterChange()
 
     def filterAcceptsRow(self, row: int, parent: QModelIndex) -> bool:  # noqa: N802
@@ -1311,6 +1349,9 @@ class ModAlbumDialog(QDialog):
         # beim ersten Start ohne Netz der Normalfall. Alles Weitere faellt
         # dann auf die geschaetzten Baender zurueck, nichts bricht.
         self._knowledge = knowledge
+        # Die LEBENDE Sammlung, nur fürs Neuladen (§4.53.6): Alles andere
+        # arbeitet weiter auf dem Schnappschuss ``self._records``.
+        self._collection = collection
         gesammelt = sorted(collection.records(), key=lambda r: r.identity)
         # Die Geisterkarten (§4.53.5) stehen zwischen den echten — die
         # Sortierung nach Name mischt sie ein, wo sie hingehören: neben
@@ -1376,6 +1417,12 @@ class ModAlbumDialog(QDialog):
         self._view_button = QPushButton("☰ Show table")
         self._view_button.clicked.connect(self._toggle_view)
 
+        # Das Fenster ist ein Schnappschuss (§4.53.6) — der Knopf holt den
+        # inzwischen gewachsenen Stand, ohne dass man es schließen muss.
+        self._reload_button = QPushButton("⟳")
+        self._reload_button.setToolTip("Reload from the collection")
+        self._reload_button.clicked.connect(self._reload)
+
         top_row = QHBoxLayout()
         top_row.addWidget(self._search, stretch=1)
         top_row.addWidget(self._kind_combo)
@@ -1383,6 +1430,7 @@ class ModAlbumDialog(QDialog):
         top_row.addWidget(self._rarity_combo)
         top_row.addWidget(self._sort_combo)
         top_row.addWidget(self._view_button)
+        top_row.addWidget(self._reload_button)
         top_row.addWidget(self._count_label)
 
         self._table = QTableView()
@@ -1553,3 +1601,54 @@ class ModAlbumDialog(QDialog):
         Auswahl, sondern die Liga darunter geändert hat."""
         self._on_row_changed(self._table.selectionModel().currentIndex(),
                              QModelIndex())
+
+    # ------------------------------ Neu laden -------------------------- #
+
+    def _selected_key(self) -> tuple[str, str] | None:
+        """(Art, Identität) der markierten Karte — der Anker fürs
+        Neuladen. Die Zeilennummer taugt dafür nicht: Nach dem Neuladen
+        stehen an derselben Stelle andere Karten."""
+        index = self._table.selectionModel().currentIndex()
+        if not index.isValid():
+            return None
+        record = self._model.record_at(self._proxy.mapToSource(index).row())
+        return None if record is None else (record.kind, record.identity)
+
+    def _reload(self) -> None:
+        """Den Schnappschuss durch den aktuellen Stand der Sammlung
+        ersetzen (§4.53.6).
+
+        **Suche, Filter, Sortierung und die markierte Karte bleiben.**
+        Genau dafür gibt es den Knopf: Wer beim Spielen das Album offen
+        lässt, will nachsehen, ob der eben gefundene Mod schon drin ist —
+        und nicht danach seine Ansicht neu einstellen. Die Auswahl wird
+        über (Art, Identität) wiedergefunden, nicht über die Zeile."""
+        anker = self._selected_key()
+        gesammelt = sorted(self._collection.records(), key=lambda r: r.identity)
+        neu_dazu = self._collection.new_keys()
+        self._records = sorted(
+            gesammelt + ghost_records(gesammelt, self._knowledge),
+            key=lambda r: r.identity)
+        self._greeting = collection_greeting(gesammelt, neu_dazu)
+        self._detail.setPlaceholderText(self._greeting)
+        self._model.set_records(self._records, neu_dazu, self._knowledge)
+        self._on_album_sort_changed()
+        # Setzt Proxy-Filter, Range-Spalte, Kopfzeile, Zähler und den
+        # Steckbrief in einem Zug — dieselbe Kette wie beim Umschalten
+        # eines Filters.
+        self._on_pot_filter_changed()
+        if anker is not None:
+            zeile = self._model.row_of(anker)
+            if zeile >= 0:
+                index = self._proxy.mapFromSource(self._model.index(zeile, 0))
+                if index.isValid():
+                    self._table.setCurrentIndex(index)
+
+    def update_knowledge(self, knowledge) -> None:
+        """Das Mod-Wissen ist erst NACH dem Öffnen eingetroffen (§4.53.6)
+        — Leitern, Slots, Geister und Kopfzeile füllen sich nachträglich,
+        ohne dass man das Fenster schließen muss. Kein Sonderfall im
+        Rest des Codes: Es ist derselbe Weg wie beim Knopf."""
+        self._knowledge = knowledge
+        self._proxy.set_knowledge(knowledge)
+        self._reload()
