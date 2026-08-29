@@ -714,8 +714,8 @@ class MainWindow(QMainWindow):
         self._mod_collection = mod_collection.ModCollection()
         # Echte Tier-Leitern aus RePoE (§4.53) — None, solange nichts
         # geladen ist (kein Cache, noch kein Download gelungen) oder noch
-        # gar keine Antwort da ist. Rein lesend verwendet, sobald es
-        # eine UI-Stelle dafür gibt (Stufe 2-4, noch nicht gebaut).
+        # gar keine Antwort da ist. Rein lesend verwendet: Album
+        # (§4.53.1–4.53.5), Balken und Tier-Etikett am Item (§4.53.4).
         self._mod_knowledge: mod_knowledge.Knowledge | None = None
         # "full" = alles einlesen, "backfill" = nur Tier-Belege und/oder
         # Hauptwerte nachtragen, "rebuild" = Zaehlstaende neu aufbauen
@@ -941,8 +941,8 @@ class MainWindow(QMainWindow):
             return
         scheibe = self._mod_seed_queue[:self._MOD_SEED_SLICE]
         del self._mod_seed_queue[:len(scheibe)]
-        nur_tiers = getattr(self, "_mod_seed_mode", "full") == "backfill"
-        if nur_tiers:
+        nachtrag = getattr(self, "_mod_seed_mode", "full") == "backfill"
+        if nachtrag:
             if getattr(self, "_mod_backfill_tiers", False):
                 self._mod_collection.backfill_tiers(scheibe)
             if getattr(self, "_mod_backfill_stats", False):
@@ -959,7 +959,7 @@ class MainWindow(QMainWindow):
                 log.info("Mod-Sammlung neu gezaehlt, %d Eintraege ohne "
                          "Item im Cache entfernt.", weg)
             log.info("Mod-Sammlung %s: %s",
-                     "nachgetragen (Tier-Belege/Hauptwerte)" if nur_tiers
+                     "nachgetragen (Tier-Belege/Hauptwerte)" if nachtrag
                      else "aus dem Cache gefüllt",
                      mod_collection.summary(self._mod_collection))
             # Der Grundstock ist kein Fund: 6125 Einträge auf einmal wären

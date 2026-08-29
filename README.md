@@ -38,7 +38,10 @@ first.
 ![League-wide search across tabs and characters](docs/screenshots/uebersicht.png)
 
 A single stash tab with an item selected; its mods are shown in the
-detail panel below.
+detail panel below. The bar in front of each line shows where that roll
+sits on the real tier ladder (or, without a known ladder, between the
+worst and best roll you have ever seen), and the tier stands behind the
+line.
 
 ![Single tab with a selected item and its mods](docs/screenshots/item-details.png)
 
@@ -50,6 +53,16 @@ to a single line by default. On the right, the levelling panel shows gem
 progress and the last three hours of experience.
 
 ![Character inventory with refresh highlighting and the item history](docs/screenshots/charakter-verlauf.png)
+
+The mod collection as an album: one card per mod, a coloured edge and
+symbol for its theme, a row of slots — one per tier the game can roll,
+filled means you have rolled it — and a golden frame for a complete set.
+Dashed cards are ghosts: mods the game knows that you have not collected
+in this league yet. The score line above counts collected of possible;
+the panel below is the selected mod's ladder, straight from game data,
+with the tiers you still miss left empty.
+
+![The mod collection as an album with tier slots, ghost cards and the tier ladder](docs/screenshots/mod-album.png)
 
 ## Features
 
@@ -141,6 +154,44 @@ progress and the last three hours of experience.
   reference sites you define yourself (name plus a URL template with a
   `{slug}` placeholder). Nothing is preconfigured — see
   [Data sources](#data-sources).
+
+### Mod collection
+
+- **Every mod line that passes through your stash is collected**: how
+  often seen, lowest and highest roll, on which item levels — kept apart
+  by league (temporary leagues each get their own pot, the permanent
+  ones share one) and by rarity, with corrupted items counted
+  separately. The collection fills itself from the existing cache on
+  first start and grows from then on without a single extra request. A
+  sighting is one item passing through your hands; the same item fetched
+  again on the next refresh does not count twice.
+- **A bar in front of every mod line** in the item panel: where this
+  roll sits on the real tier ladder of that mod — full means the best
+  roll the game can give — with the tier (`T1` gold, `T2` silver, `T3`
+  bronze) behind the line. Where no ladder is known, the bar compares
+  against the worst and best roll you have seen yourself. `✦` marks a
+  mod seen for the first time.
+- **Real tier ladders from game data**: PoE-VIEW2 downloads public game
+  data (RePoE) in the background at start and builds the tier ladder of
+  every prefix and suffix per item base — checked against a real stash:
+  81 % of all tier-capable sightings have a proven ladder. Hybrid mods
+  (e.g. "Fire and Lightning Resistances") are a known gap.
+- **The album** (toolbar button "📚 Mods"): one card per mod, with a
+  coloured edge and symbol for its theme, a row of tier slots (filled =
+  rolled) and a golden frame for a complete set. Ghost cards show what
+  the game can roll but you have never collected in the selected league;
+  the score line reads "73 of 313 mods collected". The detail panel
+  lists every league and rarity the mod was seen in and its full ladder
+  — T1 at the top, unlock level, how often seen, your best roll, the
+  missing tiers left empty. Search, kind/league/rarity filters, sorting
+  by name, newest finds, most seen, most complete or most missing; a
+  table view for serious searching; `⟳` reloads what the collection
+  gained while the window was open. The album opens on the league you
+  are viewing.
+- **Base stats are collected too**: armour, evasion, energy shield,
+  ward and block per armour type, physical and elemental damage, crit
+  and attacks per second per weapon type — as cards of their own and
+  with the same bar on the item panel.
 
 ### Levelling
 
@@ -242,6 +293,11 @@ PoE-VIEW2 contacts these hosts, and no others:
   data. Note that SSF leagues are not tracked there at all: without
   player trading there is no market activity to derive prices from, so
   the Value column stays empty in those leagues.
+- **`repoe-fork.github.io`** — the public RePoE export of the game's
+  mod tables (`mods`, `stat_translations`, `base_items`, about 30 MB),
+  for the real tier ladders in the mod collection. Downloaded at start
+  and cached for seven days. The data itself belongs to Grinding Gear
+  Games; it is fetched at runtime and never shipped with PoE-VIEW2.
 
 Beyond that, the item lookups in the right-click menu are **empty out of
 the box**. PoE-VIEW2 deliberately ships without any preconfigured
@@ -347,7 +403,7 @@ the worker, and the UI logic. It requires no network access.
 
 PoE-VIEW2 is in daily use. Login, stash and character views, search,
 filters, CSV export, refresh modes, price display, levelling display,
-and offline mode all work. The project is developed by a single person
+the mod collection with its album, and offline mode all work. The project is developed by a single person
 and makes no claim to completeness compared to the official PoE website.
 Bug reports and pull requests are welcome.
 

@@ -57,6 +57,7 @@ from poe_view.services import data_cache, token_store  # noqa: E402
 data_cache._CACHE_FILE = _TMP / "unused.json"
 token_store.load_token = lambda: None  # kein echtes Konto, kein echter Login
 
+from poe_view.services.mod_knowledge import Knowledge, TierStep  # noqa: E402
 from poe_view.ui.favourites import FavouriteRow  # noqa: E402
 from poe_view.ui.item_history import HistoryEntry  # noqa: E402
 from poe_view.ui.main_window import MainWindow, _XpWatch  # noqa: E402
@@ -274,6 +275,76 @@ def _character_items(before: bool) -> list[Item]:
 
 
 # --------------------------------------------------------------------- #
+# Die Mod-Sammlung (§4.52) und das Mod-Wissen (§4.53) fuer die Bilder:
+# ohne Sichtungen gaebe es keine Balken, ohne Leitern keine T-Etiketten,
+# keine Slots und keine Geisterkarten. Beides erfunden, aber in der Form
+# der echten Daten — die Leitern folgen dem Sechser-Raster, das PoE
+# tatsaechlich fuer Resistenzen benutzt.
+
+_DEMO_LADDERS: dict[str, list[tuple[int, int, int]]] = {
+    "# to maximum Life": [(1, 3, 9), (5, 10, 19), (11, 20, 29), (18, 30, 39),
+                          (24, 40, 49), (30, 50, 59), (36, 60, 69), (44, 70, 79),
+                          (54, 80, 89), (64, 90, 99), (73, 100, 109), (81, 110, 119),
+                          (86, 120, 129)],
+    "#% to Fire Resistance": [(1, 6, 11), (12, 12, 17), (24, 18, 23), (36, 24, 29),
+                              (48, 30, 35), (60, 36, 41), (72, 42, 45), (84, 46, 48)],
+    "#% to Cold Resistance": [(1, 6, 11), (12, 12, 17), (24, 18, 23), (36, 24, 29),
+                              (48, 30, 35), (60, 36, 41), (72, 42, 45), (84, 46, 48)],
+    "#% to Lightning Resistance": [(1, 6, 11), (12, 12, 17), (24, 18, 23), (36, 24, 29),
+                                   (48, 30, 35), (60, 36, 41), (72, 42, 45), (84, 46, 48)],
+    "#% to Chaos Resistance": [(16, 5, 10), (30, 11, 15), (44, 16, 20), (56, 21, 25),
+                               (65, 26, 30), (81, 31, 35)],
+    "# to maximum Mana": [(1, 15, 19), (11, 20, 29), (18, 30, 39), (24, 40, 49),
+                          (30, 50, 59), (36, 60, 69), (44, 70, 79), (54, 80, 89),
+                          (64, 90, 99), (73, 100, 109), (81, 110, 119)],
+    "# to maximum Energy Shield": [(1, 3, 5), (9, 6, 11), (18, 12, 17), (30, 18, 23),
+                                   (42, 24, 29), (54, 30, 35), (66, 36, 41),
+                                   (78, 42, 47), (86, 48, 53)],
+    "#% increased Movement Speed": [(15, 10, 10), (30, 15, 15), (40, 20, 20),
+                                    (55, 25, 25), (70, 30, 30), (86, 35, 35)],
+    # Nie in den Demo-Items — das sind die Geisterkarten im Album.
+    "# to Accuracy Rating": [(1, 5, 15), (5, 16, 60), (11, 61, 120), (23, 121, 200),
+                             (35, 201, 300), (48, 301, 350), (63, 351, 400)],
+    "#% increased Rarity of Items found": [(3, 6, 10), (12, 11, 14), (28, 15, 18),
+                                           (61, 19, 22), (75, 23, 26)],
+}
+_DEMO_LADDER_CATEGORIES = ("Gloves", "Body Armour", "Helmet", "Boots", "Belt",
+                           "Ring", "Amulet")
+
+
+def _demo_knowledge() -> Knowledge:
+    return Knowledge({(identity, kat): [TierStep(lv, lo, hi) for lv, lo, hi in stufen]
+                      for identity, stufen in _DEMO_LADDERS.items()
+                      for kat in _DEMO_LADDER_CATEGORIES})
+
+
+def _scaled(line: str, faktor: float) -> str:
+    """Dieselbe Mod-Zeile mit skalierten Zahlen — ein anderer Roll."""
+    import re
+    return re.sub(r"\d+", lambda m: str(max(1, round(int(m.group()) * faktor))), line)
+
+
+def _seed_mod_collection(win: MainWindow) -> None:
+    """Sichtungen fuer die Sammlung: jede Demo-Rare in sechs Varianten mit
+    absteigenden Rolls, damit die Balken eine Spanne haben und die Slots
+    mehrere Sprossen treffen. Deterministisch, damit die Bilder bei jedem
+    Lauf gleich ausfallen."""
+    for i, (name, base, ilvl, mods) in enumerate(_RARES):
+        for k, faktor in enumerate((1.0, 0.85, 0.7, 0.55, 0.45, 0.35)):
+            item = _rare(f"{name}-{k}", base, max(30, ilvl - 8 * k),
+                         [_scaled(m, faktor) for m in mods], 0, 0)
+            item.league = LEAGUE
+            win._mod_collection.observe_item(item)
+    for item in _items_by_tab()["rares"]:
+        item.league = LEAGUE
+        win._mod_collection.observe_item(item)
+    win._mod_collection.clear_new()
+    # Ein einzelner Fund dieser Sitzung, damit das ✦ im Bild vorkommt.
+    fund = _rare("Demo Find", "Amethyst Ring", 80, ["+15% to Cold Resistance"], 0, 0)
+    fund.league = LEAGUE
+    win._mod_collection.observe_item(fund)
+    win._on_mod_knowledge_loaded(_demo_knowledge())
+
 
 def _build_window() -> MainWindow:
     win = MainWindow()
@@ -328,6 +399,7 @@ def _build_window() -> MainWindow:
         "X-Rate-Limit-Account-State": "3:10:0,12:300:0",
     })
     win._on_rate_limit_changed(*win.worker.rate_limiter.snapshot())
+    _seed_mod_collection(win)
     return win
 
 
@@ -394,10 +466,36 @@ def _item_details(win: MainWindow) -> None:
     win._current_stash_id = "rares"
     win._current_tab_name = "Rares"
     win._show_items("rares", win._items[LEAGUE]["rares"], "Rares")
-    win.table.selectRow(5)
-    win._on_row_selected(win.proxy.index(5, 0), None)
+    # Ein Item mit Kategorie und drei Mods, die alle eine Demo-Leiter
+    # haben — so zeigt das Bild Balken UND Tier-Etiketten (§4.53.4). Das
+    # Zepter, das vorher markiert war, hat als Waffe ohne Properties
+    # keine Kategorie und damit nichts von beidem.
+    zeile = _row_of(win, "Doom Grip")
+    win.table.selectRow(zeile)
+    win._on_row_selected(win.proxy.index(zeile, 0), None)
     win._note_view_updated()
     _shot(win, "item-details.png")
+
+
+def _mod_album(win: MainWindow) -> None:
+    """Das Album (§4.53): Karten mit Slots, ein Geist, der Steckbrief mit
+    der Leiter. Geoeffnet wie im Programm — in der Liga des Viewers."""
+    app = QApplication.instance()
+    win._open_mod_album()
+    dlg = win._mod_album_dialog
+    dlg.resize(1500, 820)
+    for _ in range(3):
+        app.processEvents()
+    zeile = dlg._model.row_of(("explicitMods", "# to maximum Life"))
+    index = dlg._proxy.mapFromSource(dlg._model.index(zeile, 0))
+    dlg._table.setCurrentIndex(index)
+    dlg._cards.scrollTo(index)
+    for _ in range(3):
+        app.processEvents()
+    path = OUT / "mod-album.png"
+    assert dlg.grab().save(str(path)), "mod-album.png ließ sich nicht schreiben"
+    print(f"  {path.relative_to(OUT.parent.parent)}  ({path.stat().st_size // 1024} KB)")
+    dlg.close()
 
 
 def _demo_leveling(win: MainWindow) -> None:
@@ -515,6 +613,7 @@ def main() -> None:
     print("Screenshots aus erfundenen Daten:")
     _overview(win)
     _item_details(win)
+    _mod_album(win)
     _character_history(win)
     win.worker.stop()
     win.worker.wait(5000)

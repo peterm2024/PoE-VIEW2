@@ -6,6 +6,8 @@ nach [SemVer](https://semver.org/lang/de/).
 
 ## [Unveröffentlicht]
 
+## [0.12.0] - 2026-08-29
+
 ### Neu
 
 - **Mod-Sammlung**: Jede Mod-Zeile, die durch die Truhe geht, wird
@@ -1162,7 +1164,8 @@ Erste veröffentlichte Version.
 Die technischen Hintergründe einzelner Entscheidungen stehen in
 [FALLSTRICKE_UND_WORKAROUNDS.md](FALLSTRICKE_UND_WORKAROUNDS.md).
 
-[Unveröffentlicht]: https://github.com/peterm2024/PoE-VIEW2/compare/v0.11.2...HEAD
+[Unveröffentlicht]: https://github.com/peterm2024/PoE-VIEW2/compare/v0.12.0...HEAD
+[0.12.0]: https://github.com/peterm2024/PoE-VIEW2/compare/v0.11.2...v0.12.0
 [0.11.2]: https://github.com/peterm2024/PoE-VIEW2/compare/v0.11.1...v0.11.2
 [0.11.1]: https://github.com/peterm2024/PoE-VIEW2/compare/v0.11.0...v0.11.1
 [0.11.0]: https://github.com/peterm2024/PoE-VIEW2/compare/v0.10.0...v0.11.0
