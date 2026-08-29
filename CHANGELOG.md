@@ -136,6 +136,13 @@ nach [SemVer](https://semver.org/lang/de/).
   Wertspannen); der Umbau trägt sich beim nächsten Start selbst aus dem
   Cache nach, kein Zählstand geht verloren.
 
+- **Album maximierbar, zwei neue Sortierungen.** Das Album-Fenster hat
+  jetzt Maximieren-/Minimieren-Knöpfe. Die Sortier-Box kennt "Most
+  complete first" (volle Sets zuerst, nach Anteil gesammelter Tiers)
+  und "Most missing first" (die größten Lücken zuerst — die Karten, an
+  denen sich Arbeit am meisten lohnt); Mods ohne bekannte Leiter stehen
+  in beiden am Ende.
+
 - **Ein ⟳-Knopf im Album** holt den inzwischen gewachsenen Stand der
   Sammlung, ohne das Fenster zu schließen — Suche, Filter, Sortierung
   und die markierte Karte bleiben, wie sie sind. Das Album selbst ist

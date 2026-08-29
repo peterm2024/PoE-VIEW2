@@ -1488,3 +1488,58 @@ def test_knowledge_arriving_later_fills_the_open_album(qapp) -> None:
 
     assert "1 of 2 mods collected" in dialog._stats_label.text()
     assert dialog._proxy.rowCount() == 2, "der Geist ist jetzt bekannt"
+
+
+# ----------------- Maximieren und Vollstaendigkeits-Sortierung ---------- #
+# Peter, 2026-08-29: "wenn man das Fenster maximieren koennte. Die
+# Sortierung sollte auch ueber completeness gehen."
+
+def test_the_album_window_can_be_maximised(qapp) -> None:
+    from PySide6.QtCore import Qt
+    dialog = ModAlbumDialog(_sammlung())
+
+    assert dialog.windowFlags() & Qt.WindowType.WindowMaximizeButtonHint
+
+
+def test_completeness_roles_rank_full_sets_and_gaps() -> None:
+    from poe_view.ui.mod_album import (COMPLETENESS_ROLE, MISSING_ROLE,
+                                       ModAlbumModel, ghost_records)
+    from poe_view.services.mod_knowledge import Knowledge, TierStep
+    sammlung = _mit_konto({7: 3, 14: 1})            # 2 von 2 Sprossen
+    sammlung.observe("explicitMods", "+50 to maximum Life", rarity=2)
+    sammlung.clear_new()
+    wissen = Knowledge({("#% to Cold Resistance", "Ring"): [TierStep(1, 6, 11),
+                                                           TierStep(24, 12, 17)],
+                        ("#% to Lightning Resistance", "Ring"): [TierStep(1, 6, 11),
+                                                                TierStep(24, 12, 17),
+                                                                TierStep(48, 18, 23)]})
+    records = sorted(sammlung.records(), key=lambda r: r.identity)
+    records = sorted(records + ghost_records(records, wissen), key=lambda r: r.identity)
+    model = ModAlbumModel(records, frozenset(), wissen)
+    by_name = {r.identity: i for i, r in enumerate(records)}
+
+    def rolle(identity, role):
+        return model.data(model.index(by_name[identity], 0), role)
+
+    assert rolle("#% to Cold Resistance", COMPLETENESS_ROLE) == 1.0
+    assert rolle("#% to Lightning Resistance", COMPLETENESS_ROLE) == 0.0   # Geist
+    assert rolle("# to maximum Life", COMPLETENESS_ROLE) == -1             # keine Leiter
+    assert rolle("#% to Cold Resistance", MISSING_ROLE) == 0
+    assert rolle("#% to Lightning Resistance", MISSING_ROLE) == 3
+    assert rolle("# to maximum Life", MISSING_ROLE) == -1
+
+
+def test_the_sort_box_offers_the_completeness_lenses(qapp) -> None:
+    from poe_view.ui.mod_album import COMPLETENESS_ROLE, MISSING_ROLE
+    sammlung = _mit_konto({7: 3})
+    dialog = ModAlbumDialog(sammlung, None, _wissen_mit_geist())
+
+    dialog._sort_combo.setCurrentIndex(dialog._sort_combo.findData("Most missing first"))
+    assert dialog._proxy.sortRole() == MISSING_ROLE
+    erste = dialog._model.record_at(dialog._proxy.mapToSource(dialog._proxy.index(0, 0)).row())
+    assert erste.identity == "#% to Lightning Resistance"      # der Geist, 3 fehlen
+
+    dialog._sort_combo.setCurrentIndex(dialog._sort_combo.findData("Most complete first"))
+    assert dialog._proxy.sortRole() == COMPLETENESS_ROLE
+    erste = dialog._model.record_at(dialog._proxy.mapToSource(dialog._proxy.index(0, 0)).row())
+    assert erste.identity == "#% to Cold Resistance"

@@ -346,7 +346,8 @@ on yet. Ghosts show while the rarity box means rolled items (all, or
 Normal / Magic / Rare). The window is a snapshot of the moment you
 opened it: the collection keeps growing behind it, and <b>⟳</b> pulls
 that growth in, keeping your search, filters and selected card.
-Sort the cards by name, newest finds, most seen or singles first; the
+Sort the cards by name, newest finds, most seen, singles first, most
+complete first or most missing first (the biggest gaps on top); the
 <b>Show table</b> button flips to a sortable list of the same mods.
 The album opens on the league you are viewing and on
 <b>Normal / Magic / Rare</b>, the rolled items a collection is about; both

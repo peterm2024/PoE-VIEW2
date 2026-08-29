@@ -805,6 +805,13 @@ NEW_ROLE = Qt.ItemDataRole.UserRole + 2
 # list[bool] je Tier (§collected_mask) oder None ohne bekannte Leiter —
 # die Slot-Leiste der Karte und ihr Gold-Rahmen hängen daran.
 TIER_SLOTS_ROLE = Qt.ItemDataRole.UserRole + 3
+# Sortier-Rollen der Vollständigkeit (Peter, 2026-08-29: "Die Sortierung
+# sollte auch über completeness gehen"): Anteil gesammelter Sprossen
+# bzw. Zahl der FEHLENDEN — beides -1 ohne bekannte Leiter, damit
+# Karten ohne Leiter in beiden Sortierungen (absteigend) ans Ende
+# fallen statt sich zwischen die Lücken zu mischen.
+COMPLETENESS_ROLE = Qt.ItemDataRole.UserRole + 4
+MISSING_ROLE = Qt.ItemDataRole.UserRole + 5
 
 # Die Sortier-Linsen der Kartenansicht — das ist der Trophäen-Teil des
 # Albums: "Neuzugänge", "Arbeitspferde", "Einzelstücke" sind keine
@@ -820,6 +827,12 @@ ALBUM_SORTS: tuple[tuple[str, int, int, Qt.SortOrder], ...] = (
      Qt.SortOrder.DescendingOrder),
     ("Seen once first", COUNT_COL, Qt.ItemDataRole.DisplayRole,
      Qt.SortOrder.AscendingOrder),
+    # Die Sammel-Linsen: volle Sets zuerst — oder die größten Lücken,
+    # also die Karten, an denen es sich am meisten zu arbeiten lohnt.
+    ("Most complete first", IDENTITY_COL, COMPLETENESS_ROLE,
+     Qt.SortOrder.DescendingOrder),
+    ("Most missing first", IDENTITY_COL, MISSING_ROLE,
+     Qt.SortOrder.DescendingOrder),
 )
 ALBUM_SORTS_BY_NAME = {name: (col, role, order)
                        for name, col, role, order in ALBUM_SORTS}
@@ -1106,6 +1119,12 @@ class ModAlbumModel(QAbstractTableModel):
             # Folgt dem Liga-Filter (§4.53.3): Gold-Rahmen und Slots
             # zeigen den Stand der ausgewählten Liga, nicht aller.
             return tier_slots(record, self._knowledge, self._range_league)
+        if role in (COMPLETENESS_ROLE, MISSING_ROLE):
+            stand = tier_progress(record, self._knowledge, self._range_league)
+            if stand is None or stand[1] == 0:
+                return -1
+            return (stand[0] / stand[1] if role == COMPLETENESS_ROLE
+                    else stand[1] - stand[0])
         if role == Qt.ItemDataRole.ToolTipRole and index.column() == IDENTITY_COL:
             # In der Tabelle wegen 381-Zeichen-Identitäten nützlich, in
             # der Kartenansicht notwendig: Dort wird ein langer Name nach
@@ -1344,6 +1363,12 @@ class ModAlbumDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Mod Collection")
         self.resize(900, 560)
+        # Ein QDialog bekommt unter Windows keinen Maximieren-Knopf, bis
+        # man ihn ausdrücklich anfordert (Peter, 2026-08-29: "wenn man
+        # das Fenster maximieren könnte") — 6000 Karten wollen Platz.
+        self.setWindowFlags(self.windowFlags()
+                            | Qt.WindowType.WindowMaximizeButtonHint
+                            | Qt.WindowType.WindowMinimizeButtonHint)
 
         # ``None``, solange das Mod-Wissen (§4.53) nicht geladen ist —
         # beim ersten Start ohne Netz der Normalfall. Alles Weitere faellt

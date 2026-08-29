@@ -6855,6 +6855,19 @@ Karte samt Kopfzeile, spätes Wissen füllt das offene Album) und
 `tests/test_main_window_helpers.py` (Fenster reicht das Wissen durch).
 Sieben Gegenproben, alle rissen.
 
+**Nachträge vom 2026-08-29 (Peter: "maximieren", "Sortierung über
+completeness"):** Ein `QDialog` bekommt unter Windows keinen
+Maximieren-Knopf, bis man `WindowMaximizeButtonHint` setzt — 6000
+Karten wollen Platz. Zwei Sortier-Linsen dazu: "Most complete first"
+(`COMPLETENESS_ROLE`, Anteil gesammelter Sprossen) und "Most missing
+first" (`MISSING_ROLE`, Zahl der fehlenden — die Karten, an denen sich
+Arbeit lohnt). Beide Rollen liefern `-1` ohne Leiter, beide Linsen
+sortieren absteigend: So landen Karten ohne Leiter in beiden am Ende,
+statt sich zwischen die Lücken zu mischen. Zwei Rollen statt einer
+mit zwei Richtungen, genau deshalb — eine einzige Zahl kann "unbekannt"
+nicht in beiden Richtungen ans Ende legen. Beide folgen dem Liga-Filter
+wie die Slots. Vier Gegenproben, alle rissen.
+
 ## 8. Entwicklungsstand
 
 Die ursprünglich geplanten Meilensteine (Grundgerüst, Authentifizierung,
