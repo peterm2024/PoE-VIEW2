@@ -343,7 +343,12 @@ so the score line reads <i>73 of 313 mods collected</i> and the tier bar
 counts the empty ladders as gaps; a ghost's details list every ladder it
 could roll on, and a collected mod lists the bases it has never rolled
 on yet. Ghosts show while the rarity box means rolled items (all, or
-Normal / Magic / Rare). The window is a snapshot of the moment you
+Normal / Magic / Rare). The collection also keeps the <b>base stats</b>
+— armour, evasion, energy shield, ward and block per armour type,
+physical and elemental damage, crit and attacks per second per weapon
+type — as cards of their own ("Body Armour: Armour #"), and the same
+lines in the item panel get a bar showing where that value sits between
+the worst and best you have seen on that kind of item. The window is a snapshot of the moment you
 opened it: the collection keeps growing behind it, and <b>⟳</b> pulls
 that growth in, keeping your search, filters and selected card.
 Sort the cards by name, newest finds, most seen, singles first, most

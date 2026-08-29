@@ -56,7 +56,7 @@ from poe_view.api.models import (ENCHANT_MOD_FIELD, EXTRA_MOD_FIELDS,
                                  FRAME_TYPE_NAMES)
 from poe_view.services import mod_tiers
 from poe_view.services.mod_knowledge import tier_number  # noqa: F401 — Tests importieren es von hier
-from poe_view.services.mod_collection import (LEGACY_LEAGUE, MAP_RARITY,
+from poe_view.services.mod_collection import (BASE_STAT_KIND, LEGACY_LEAGUE, MAP_RARITY,
                                               UNKNOWN_RARITY, ModCollection,
                                               ModRecord, RaritySpan, base_rarity,
                                               is_corrupted_bucket, league_bucket)
@@ -78,10 +78,13 @@ KIND_LABELS = {
     "crucibleMods": "Crucible",
     "logbookMods": "Logbook",
     "ultimatumMods": "Ultimatum",
+    BASE_STAT_KIND: "Base stat",
 }
 # Reihenfolge des Filter-Menüs: die häufigen zuerst (siehe ARCHITEKTUR
-# §4.52, gemessen an Peters Bestand), Rest alphabetisch über EXTRA_MOD_FIELDS.
-KIND_ORDER = ("explicitMods", "implicitMods", ENCHANT_MOD_FIELD, *EXTRA_MOD_FIELDS)
+# §4.52, gemessen an Peters Bestand), Rest alphabetisch über EXTRA_MOD_FIELDS;
+# die Hauptwerte (§4.52.8) zuletzt — sie sind keine Mods.
+KIND_ORDER = ("explicitMods", "implicitMods", ENCHANT_MOD_FIELD, *EXTRA_MOD_FIELDS,
+              BASE_STAT_KIND)
 
 # Grobe Raritäts-Gruppen für den Filter — Peters eigene Gliederung
 # ("Unique, Corrupted, (Normal/Magic/Rare), evtl. noch andere"). Rare/

@@ -1008,3 +1008,103 @@ def test_the_league_level_survives_a_round_trip(tmp_path) -> None:
 
     eintrag = zurueck.get("explicitMods", "+27% to Cold Resistance")
     assert eintrag.tier_ledger == {"Allflame": {"Ring": {27.0: [1, 42, 42]}}}
+
+
+# ------------------------ Hauptwerte (Aufbau 8) ------------------------- #
+# Peter, 2026-08-29: "den Ruestungswert und Schadenswert in Abhaengigkeit
+# von der jeweiligen Ruestungs- oder Waffenart" — Rohwerte einzeln.
+
+def _prop(name, *werte):
+    return {"name": name, "values": [[w, 0] for w in werte]}
+
+
+def test_base_stat_line_puts_the_category_first() -> None:
+    from types import SimpleNamespace
+    prop = SimpleNamespace(name="Armour", values=[["668", 0]])
+
+    assert mc.base_stat_line("Body Armour", prop) == "Body Armour: Armour 668"
+    assert mc.base_stat_line("", prop) is None
+
+
+def test_damage_ranges_are_written_with_to_not_a_dash() -> None:
+    """``mod_values("42-127")`` laese -127 als negative Zahl."""
+    from types import SimpleNamespace
+    prop = SimpleNamespace(name="Physical Damage", values=[["42-127", 0]])
+
+    zeile = mc.base_stat_line("Bow", prop)
+
+    assert zeile == "Bow: Physical Damage 42 to 127"
+    assert mc.mod_values(zeile) == [42.0, 127.0]
+    assert mc.mod_identity(zeile) == "Bow: Physical Damage # to #"
+
+
+def test_elemental_damage_is_the_sum_over_the_elements() -> None:
+    from types import SimpleNamespace
+    prop = SimpleNamespace(name="Elemental Damage",
+                           values=[["133-269", 4], ["10-20", 5], ["1-4", 6]])
+
+    assert mc.base_stat_line("Bow", prop) == "Bow: Elemental Damage 144 to 293"
+
+
+def test_only_base_stats_become_lines() -> None:
+    from types import SimpleNamespace
+    for name in ("Quality", "Memory Strands", "Weapon Range: {0} metres", "Bow"):
+        prop = SimpleNamespace(name=name, values=[["+7%", 0]])
+        assert mc.base_stat_line("Bow", prop) is None
+    assert mc.base_stat_line("Wand", SimpleNamespace(name="Critical Strike Chance",
+                                                     values=[["8.00%", 0]])) == (
+        "Wand: Critical Strike Chance 8.00%")
+
+
+def test_base_stat_lines_of_a_weapon_and_a_chest() -> None:
+    bogen = _item(typeLine="Death Bow", frameType=RARE, ilvl=70,
+                  properties=[_prop("Bow"), _prop("Physical Damage", "42-127"),
+                              _prop("Critical Strike Chance", "6.50%"),
+                              _prop("Attacks per Second", "1.40"),
+                              _prop("Quality", "+10%")])
+    brust = _item(typeLine="Plate Vest", frameType=RARE, ilvl=70,
+                  properties=[_prop("Armour", "668"), _prop("Energy Shield", "87")])
+
+    assert mc.base_stat_lines(bogen) == ["Bow: Physical Damage 42 to 127",
+                                         "Bow: Critical Strike Chance 6.50%",
+                                         "Bow: Attacks per Second 1.40"]
+    assert mc.base_stat_lines(brust) == ["Body Armour: Armour 668",
+                                         "Body Armour: Energy Shield 87"]
+
+
+def test_observing_an_item_collects_its_base_stats() -> None:
+    sammlung = ModCollection()
+    sammlung.observe_item(_item(typeLine="Plate Vest", frameType=RARE, ilvl=70,
+                                properties=[_prop("Armour", "668")]))
+
+    eintrag = sammlung.get(mc.BASE_STAT_KIND, "Body Armour: Armour 500")
+    assert eintrag is not None and eintrag.count == 1
+    assert eintrag.span(RARE).spread == [(668.0, 668.0)]
+    assert eintrag.tier_ledger == {}           # kein Tier-Konto fuer Hauptwerte
+    assert sammlung.has_base_stats() is True
+
+
+def test_backfilling_base_stats_adds_them_without_touching_mod_counts() -> None:
+    item = _item(typeLine="Plate Vest", frameType=RARE, ilvl=70,
+                 explicitMods=["+96 to maximum Life"],
+                 properties=[_prop("Armour", "668")])
+    sammlung = ModCollection()
+    sammlung.observe("explicitMods", "+96 to maximum Life", rarity=RARE, ilvl=70)
+    assert sammlung.has_base_stats() is False
+
+    assert sammlung.backfill_base_stats([item]) == 1
+
+    assert sammlung.has_base_stats() is True
+    assert sammlung.get("explicitMods", "+96 to maximum Life").count == 1
+    assert sammlung.get(mc.BASE_STAT_KIND, "Body Armour: Armour 1").count == 1
+
+
+def test_base_stats_survive_the_round_trip() -> None:
+    sammlung = ModCollection()
+    sammlung.observe_item(_item(typeLine="Plate Vest", frameType=RARE, ilvl=70,
+                                properties=[_prop("Armour", "668")]))
+
+    kopie = ModCollection.from_payload(sammlung.to_payload())
+
+    assert kopie.has_base_stats() is True
+    assert kopie.get(mc.BASE_STAT_KIND, "Body Armour: Armour 1").count == 1

@@ -717,7 +717,8 @@ class MainWindow(QMainWindow):
         # gar keine Antwort da ist. Rein lesend verwendet, sobald es
         # eine UI-Stelle dafür gibt (Stufe 2-4, noch nicht gebaut).
         self._mod_knowledge: mod_knowledge.Knowledge | None = None
-        # "full" = alles einlesen, "tiers" = nur Tier-Belege nachtragen
+        # "full" = alles einlesen, "backfill" = nur Tier-Belege und/oder
+        # Hauptwerte nachtragen, "rebuild" = Zaehlstaende neu aufbauen
         # (§_restore_mod_collection).
         self._mod_seed_mode = "full"
         # Items, die noch in die Sammlung müssen. Der Cache liefert beim
@@ -899,16 +900,21 @@ class MainWindow(QMainWindow):
             log.info("Mod-Sammlung geladen: %s",
                      mod_collection.summary(self._mod_collection))
             self._mod_collection.clear_new()
-            # Ein Stand aus der Zeit vor den Tier-Belegen (§4.52.4) kennt
-            # sie nicht. Nachtragen statt neu einlesen: Neu einlesen
-            # zaehlte jede Sichtung ein zweites Mal, und das liesse sich
-            # nie wieder herausrechnen.
-            if not self._mod_collection.has_tier_evidence():
+            # Ein Stand aus der Zeit vor den Tier-Belegen (§4.52.4) oder
+            # vor den Hauptwerten (§4.52.8) kennt sie nicht. Nachtragen
+            # statt neu einlesen: Neu einlesen zaehlte jede Sichtung ein
+            # zweites Mal, und das liesse sich nie wieder herausrechnen.
+            self._mod_backfill_tiers = not self._mod_collection.has_tier_evidence()
+            self._mod_backfill_stats = not self._mod_collection.has_base_stats()
+            if self._mod_backfill_tiers or self._mod_backfill_stats:
                 self._mod_seed_queue = list(self._all_cached_items())
-                self._mod_seed_mode = "tiers"
+                self._mod_seed_mode = "backfill"
                 if self._mod_seed_queue:
-                    log.info("Mod-Sammlung ohne Tier-Belege — %d Items aus dem "
-                             "Cache werden dafuer nachgelesen.",
+                    log.info("Mod-Sammlung ohne %s — %d Items aus dem Cache "
+                             "werden dafuer nachgelesen.",
+                             " und ".join(w for w, fehlt in (
+                                 ("Tier-Belege", self._mod_backfill_tiers),
+                                 ("Hauptwerte", self._mod_backfill_stats)) if fehlt),
                              len(self._mod_seed_queue))
                     QTimer.singleShot(0, self._seed_mod_collection_slice)
             return
@@ -935,9 +941,12 @@ class MainWindow(QMainWindow):
             return
         scheibe = self._mod_seed_queue[:self._MOD_SEED_SLICE]
         del self._mod_seed_queue[:len(scheibe)]
-        nur_tiers = getattr(self, "_mod_seed_mode", "full") == "tiers"
+        nur_tiers = getattr(self, "_mod_seed_mode", "full") == "backfill"
         if nur_tiers:
-            self._mod_collection.backfill_tiers(scheibe)
+            if getattr(self, "_mod_backfill_tiers", False):
+                self._mod_collection.backfill_tiers(scheibe)
+            if getattr(self, "_mod_backfill_stats", False):
+                self._mod_collection.backfill_base_stats(scheibe)
         else:
             self._mod_collection.observe_items(scheibe)
         if self._mod_seed_queue:
@@ -950,7 +959,7 @@ class MainWindow(QMainWindow):
                 log.info("Mod-Sammlung neu gezaehlt, %d Eintraege ohne "
                          "Item im Cache entfernt.", weg)
             log.info("Mod-Sammlung %s: %s",
-                     "um Tier-Belege ergänzt" if nur_tiers
+                     "nachgetragen (Tier-Belege/Hauptwerte)" if nur_tiers
                      else "aus dem Cache gefüllt",
                      mod_collection.summary(self._mod_collection))
             # Der Grundstock ist kein Fund: 6125 Einträge auf einmal wären

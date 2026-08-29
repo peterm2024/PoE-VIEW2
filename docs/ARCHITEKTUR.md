@@ -6296,6 +6296,70 @@ auf eine Hülle behält das Datum, `prune_unseen`, `retire`) und
 Sichtung, Charakter fünfmal + einmal gecraftet = 2, Neuaufbau-Weg
 Ende-zu-Ende mit beiseitegelegter Datei). Acht Gegenproben, alle rissen.
 
+#### 4.52.8 Hauptwerte: Rüstung und Schaden als Pseudo-Zeilen (Aufbau 8)
+
+Peter, 2026-08-29: "Ich hätte gerne auch die Main-Stats berücksichtigt,
+also den Rüstungswert und Schadenswert in Abhängigkeit von der
+jeweiligen Rüstungs- oder Waffenart." Per `AskUserQuestion` entschieden:
+Album-Karten UND Balken am Item, Maßstab die gesehene Spanne, Rohwerte
+einzeln (kein errechneter DPS).
+
+**Gemessen, was es zu sammeln gibt** (22.096 Normal/Magic/Rare-Items
+mit Kategorie in Peters Cache): Rüstungsteile tragen Armour, Evasion
+Rating, Energy Shield, Ward; Schilde dazu Chance to Block; Waffen
+Physical Damage (`"42-127"`), Critical Strike Chance (`"6.50%"`),
+Attacks per Second, Elemental Damage (ein Wert je Element). Quality,
+Weapon Range und Memory Strands bleiben draußen — keine Basiseigenschaft,
+die man sammelt. `base_items` in RePoE kennt zwar den Grundwert jeder
+Basis (Plate Vest 19–27 Armour), aber Peter hat die GESEHENE Spanne als
+Maßstab gewählt: Quality und lokale Mods heben ein 2.400er Body Armour
+weit über jeden Grundwert, ein Balken gegen die Basen stünde bei 300 %.
+
+**Der Kniff: Hauptwerte gehen als Pseudo-Zeilen denselben Weg wie
+Mods.** `base_stat_line()` macht aus Kategorie und Property eine Zeile
+— `"Body Armour: Armour 668"`, `"Bow: Physical Damage 42 to 127"` —
+und die Sammlung behandelt sie unter der erfundenen Art
+`BASE_STAT_KIND` wie jede Mod-Zeile: `mod_identity` ergibt `"Body
+Armour: Armour #"`, Spannen je Liga und Rarität, Karte im Album (Art
+"Base stat"), Balken über `mod_bar.mark_for` — kein neuer Datentyp,
+kein zweites Kontenbuch. Die Kategorie steht VORN in der Zeile, weil
+668 Armour auf Handschuhen enorm und auf einer Brust mager ist; sie ist
+Teil der Identität, nicht Zusatzachse. Kein Tier-Konto (kein
+`category`-Argument beim `observe`): Für Hauptwerte gibt es keine
+Leiter.
+
+**Zwei Fallen aus der API-Schreibweise:** `"42-127"` darf nicht durch
+`mod_values` — dessen Zahlen-Regex läse `-127` als negative Zahl. Die
+Zeile schreibt deshalb `to` wie das Spiel selbst ("Adds 42 to 127"),
+über einen eigenen Spannen-Regex (`_DAMAGE_RANGE`). Und Elemental
+Damage steht als bis zu drei Werte (Feuer, Kälte, Blitz) — gesammelt
+wird die SUMME der Minima und Maxima, der Gesamtwert, der beim
+Vergleichen zählt.
+
+**Im Item-Detail** bekommen die Property-Zeilen jetzt eine Balkenspalte:
+Hauptwerte den Balken (oder ✦), die übrigen Eigenschaften eine leere
+Spalte derselben Breite — sonst stünde Quality drei Zellen weiter links
+als Armour. Mit `_no_mark` bleibt alles leer, die Breiten-Tests des
+Panels sind unberührt.
+
+**Nachtrag statt Neuaufbau:** Das Dateiformat ändert sich nicht, nur
+eine neue Art steht in den Zeilen. `has_base_stats()` entscheidet beim
+Start; `backfill_base_stats()` DARF zählen (die Einträge existieren
+noch nicht, nichts verdoppelt sich) und lässt Mod-Zählstände in Ruhe.
+`_restore_mod_collection` fasst Tier- und Hauptwert-Nachtrag zum
+Seed-Modus "backfill" mit zwei Flags zusammen — beide können fehlen,
+beide laufen dann in derselben Scheiben-Schleife.
+
+Getestet: `tests/test_mod_collection.py` (Kategorie vorn, `to` statt
+Bindestrich samt `mod_values`/`mod_identity` darauf, Elementar-Summe,
+Nicht-Hauptwerte bleiben draußen, Bogen und Brust, `observe_item`
+sammelt ohne Tier-Konto, Nachtrag lässt Zählstände in Ruhe, Roundtrip),
+`tests/test_item_detail.py` (Balkenspalte für Hauptwerte, leere für den
+Rest, nichts ohne Marken-Funktion), `tests/test_main_window_helpers.py`
+(Stand mit Tiers, ohne Hauptwerte → nur die kommen dazu). Acht
+Gegenproben, alle rissen; Smoke am echten Cache, Detail und Album nativ
+gegriffen.
+
 ### 4.53 Das Fundament der echten Mod-Datenbank (`services/mod_knowledge.py`)
 
 Peter beim Betrachten der Prozent-Bänder aus §4.52.6, nach einem

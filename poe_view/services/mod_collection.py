@@ -110,7 +110,15 @@ log = logging.getLogger(__name__)
 # die beim Neuaufbau nicht mehr auftauchen (verkauft, zerlegt), fallen
 # weg — Peters Entscheidung, weil die alten Zahlen sonst für immer
 # verfälscht blieben. Die alte Datei bleibt daneben liegen (``retire``).
-VERSION = 7
+#
+# 8 (2026-08-29): Hauptwerte als eigene Art ``BASE_STAT_KIND`` —
+# Rüstung, Ausweichen, Energieschild, Schaden, Crit, APS je Kategorie
+# als Pseudo-Zeilen ("Body Armour: Armour 668"), §4.52.8. Das
+# Dateiformat ändert sich NICHT, nur eine neue Art steht in den Zeilen;
+# ein Stand ohne sie (``has_base_stats`` False) bekommt sie beim
+# nächsten Start aus dem Cache nachgetragen (``backfill_base_stats``),
+# ohne einen Mod-Zählstand anzufassen.
+VERSION = 8
 
 # Die Felder der API, deren Inhalt gesammelt wird — die Art eines
 # Eintrags IST der Feldname. Getrennt gehalten statt in einen Topf
@@ -123,10 +131,82 @@ VERSION = 7
 # genau der Fehler, vor dem der Kommentar an ``EXTRA_MOD_FIELDS`` warnt
 # ("Genau EINE davon zu vergessen ist der Fehler, den es zu verhindern
 # gilt"). Eine Liste an zwei Orten ist eine Liste, die auseinanderläuft.
+# ``BASE_STAT_KIND`` ist der eine Eintrag, der NICHT aus der API kommt:
+# die Hauptwerte eines Items (Rüstung, Schaden, …) als eigene Art, damit
+# sie denselben Weg gehen wie Mod-Zeilen — Spannen je Liga und Rarität,
+# Karte im Album, Balken am Item (§4.52.8). Der Name ist erfunden und
+# kollidiert absichtlich mit keinem API-Feld.
+BASE_STAT_KIND = "baseStats"
 MOD_KINDS = ("explicitMods", "implicitMods", ENCHANT_MOD_FIELD,
-             *EXTRA_MOD_FIELDS)
+             *EXTRA_MOD_FIELDS, BASE_STAT_KIND)
 
 _NUMBER = re.compile(r"[-+]?\d+(?:\.\d+)?")
+
+# Die Hauptwerte, die als Pseudo-Zeile in die Sammlung gehen (Peter,
+# 2026-08-29: "den Rüstungswert und Schadenswert in Abhängigkeit von der
+# jeweiligen Rüstungs- oder Waffenart" — Rohwerte einzeln, seine Wahl).
+# Gemessen an seinem Cache tragen Rüstungsteile Armour/Evasion/Energy
+# Shield/Ward, Schilde dazu Chance to Block, Waffen Physical Damage,
+# Critical Strike Chance, Attacks per Second und Elemental Damage.
+# Quality, Weapon Range und Memory Strands sind absichtlich nicht dabei:
+# keine Basiseigenschaft, die man sammelt.
+BASE_STATS = ("Armour", "Evasion Rating", "Energy Shield", "Ward",
+              "Chance to Block", "Physical Damage", "Elemental Damage",
+              "Critical Strike Chance", "Attacks per Second")
+
+# Eine Schadens-Spanne der API: ``"42-127"``. NICHT über ``_NUMBER``
+# lesen — dort wäre ``-127`` eine negative Zahl.
+_DAMAGE_RANGE = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)\s*$")
+
+
+def base_stat_line(category: str, prop) -> str | None:
+    """Die Pseudo-Zeile eines Hauptwerts, oder ``None`` für alles, was
+    keiner ist: ``"Body Armour: Armour 668"``,
+    ``"Bow: Physical Damage 42 to 127"``.
+
+    Die Kategorie steht vorn, weil ein Rüstungswert nur je Rüstungsart
+    etwas bedeutet — 668 ist auf Handschuhen enorm und auf einer
+    Brustrüstung mager. Schadens-Spannen werden mit ``to`` geschrieben
+    wie im Spiel ("Adds 42 to 127"), nicht mit Bindestrich: ``mod_values``
+    läse ``-127`` sonst als negative Zahl. Elementarschaden ist die SUMME
+    über die Elemente — Feuer, Kälte und Blitz stehen in der API als drei
+    Werte, gesammelt wird der Gesamtwert, der beim Vergleichen zählt."""
+    name = getattr(prop, "name", "")
+    if name not in BASE_STATS or not category:
+        return None
+    werte = getattr(prop, "values", None) or []
+    if name == "Elemental Damage":
+        lo = hi = 0.0
+        for eintrag in werte:
+            treffer = _DAMAGE_RANGE.match(str(eintrag[0])) if eintrag else None
+            if treffer is None:
+                return None
+            lo += float(treffer.group(1))
+            hi += float(treffer.group(2))
+        if not werte:
+            return None
+        return f"{category}: {name} {_as_number(lo)} to {_as_number(hi)}"
+    try:
+        wert = str(werte[0][0])
+    except (IndexError, TypeError):
+        return None
+    treffer = _DAMAGE_RANGE.match(wert)
+    if treffer:
+        return f"{category}: {name} {treffer.group(1)} to {treffer.group(2)}"
+    return f"{category}: {name} {wert}"
+
+
+def base_stat_lines(item) -> list[str]:
+    """Alle Hauptwert-Zeilen eines Items (§base_stat_line)."""
+    category = item_category(item) or ""
+    if not category:
+        return []
+    zeilen = []
+    for prop in getattr(item, "properties", None) or []:
+        zeile = base_stat_line(category, prop)
+        if zeile is not None:
+            zeilen.append(zeile)
+    return zeilen
 
 # Ab so vielen fehlenden Einträgen gilt ein Speichervorgang als
 # Datenverlust und wird abgelehnt. Die Sammlung wächst nur; sie schrumpft
@@ -810,10 +890,37 @@ class ModCollection:
                 if self.observe(kind, line, ilvl=ilvl, rarity=rarity,
                                 league=liga) is not None:
                     gezaehlt += 1
+        # Die Hauptwerte (§4.52.8) — ohne Kategorie-Argument: Sie steht
+        # schon in der Zeile, und ein Tier-Konto gibt es für sie nicht.
+        for line in base_stat_lines(item):
+            if self.observe(BASE_STAT_KIND, line, ilvl=ilvl, rarity=rarity,
+                            league=liga) is not None:
+                gezaehlt += 1
         return gezaehlt
 
     def observe_items(self, items: Iterable) -> int:
         return sum(self.observe_item(item) for item in items)
+
+    def backfill_base_stats(self, items: Iterable) -> int:
+        """Nur die Hauptwerte nachtragen (§4.52.8) — für einen Stand, der
+        vor Aufbau 8 entstand. Anders als ``backfill_tiers`` DARF hier
+        gezählt werden: Die Einträge existieren noch gar nicht, es gibt
+        nichts zu verdoppeln. Gibt die Zahl der eingetragenen Zeilen
+        zurück."""
+        getroffen = 0
+        for item in items:
+            ilvl = int(getattr(item, "ilvl", 0) or 0)
+            liga, rarity = item_buckets(item)
+            for line in base_stat_lines(item):
+                if self.observe(BASE_STAT_KIND, line, ilvl=ilvl, rarity=rarity,
+                                league=liga) is not None:
+                    getroffen += 1
+        return getroffen
+
+    def has_base_stats(self) -> bool:
+        """Kennt die Sammlung schon Hauptwerte? Entscheidet über den
+        Nachtrag beim Start (§_restore_mod_collection)."""
+        return any(kind == BASE_STAT_KIND for kind, _ in self._records)
 
     # ------------------------------ Lesen ----------------------------- #
 

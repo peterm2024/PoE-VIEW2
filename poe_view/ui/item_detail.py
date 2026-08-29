@@ -28,7 +28,9 @@ from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout
 
 from poe_view.api.models import (ENCHANT_MOD_FIELD, Item, all_extra_mod_pairs,
-                                 extra_mod_lines, req_attribute, req_level)
+                                 extra_mod_lines, item_category, req_attribute,
+                                 req_level)
+from poe_view.services.mod_collection import BASE_STAT_KIND, base_stat_line
 from poe_view.ui import mod_bar
 from poe_view.ui.theme import RARITY_COLORS
 
@@ -228,7 +230,14 @@ def _item_blocks(item: Item,
     Tier-faehigen Zeilen ueberhaupt laenger als 66 Zeichen."""
     kind = [item.rarity + (f" · {item.typeLine}" if item.name else "")]
 
-    properties = [prop.display_text for prop in item.properties if prop.display_value]
+    # Die Hauptwerte (Armour, Physical Damage, …) bekommen dieselbe
+    # Balkenspalte wie die Mod-Zeilen (§4.52.8); die übrigen Eigenschaften
+    # (Quality, Weapon Range) eine leere Spalte derselben Breite, damit
+    # der Block bündig bleibt. Mit ``_no_mark`` bleibt beides leer.
+    kategorie = item_category(item) or ""
+    properties = [Line(prop.display_text,
+                       mark(BASE_STAT_KIND, base_stat_line(kategorie, prop) or ""))
+                  for prop in item.properties if prop.display_value]
 
     requirements = []
     if item.ilvl:
@@ -248,7 +257,7 @@ def _item_blocks(item: Item,
 
     return [
         [Line(zeile) for zeile in kind],
-        [Line(zeile) for zeile in properties],
+        properties,
         [Line(" · ".join(requirements))] if requirements else [],
         markiert(ENCHANT_MOD_FIELD, extra_mod_lines(item, ENCHANT_MOD_FIELD)),
         markiert("implicitMods", item.implicit_mods),

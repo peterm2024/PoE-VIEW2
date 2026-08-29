@@ -136,6 +136,17 @@ nach [SemVer](https://semver.org/lang/de/).
   Wertspannen); der Umbau trägt sich beim nächsten Start selbst aus dem
   Cache nach, kein Zählstand geht verloren.
 
+- **Hauptwerte in der Sammlung.** Rüstung, Ausweichen, Energieschild,
+  Ward und Block je Rüstungsart, physischer und elementarer Schaden,
+  Crit und Angriffe pro Sekunde je Waffenart werden jetzt wie Mod-Zeilen
+  gesammelt: Im Album stehen sie als eigene Karten ("Body Armour: Armour
+  #", "Bow: Physical Damage # to #") mit der je gesehenen Spanne, und im
+  Item-Detail bekommt die Armour- oder Schadenszeile denselben Balken
+  wie die Mods — wo dieser Wert zwischen dem schlechtesten und besten
+  liegt, den du auf dieser Art Item je gesehen hast. Elementarschaden
+  zählt als Summe über die Elemente. Ein bestehender Bestand trägt die
+  Hauptwerte beim nächsten Start aus dem Cache nach.
+
 - **Album maximierbar, zwei neue Sortierungen.** Das Album-Fenster hat
   jetzt Maximieren-/Minimieren-Knöpfe. Die Sortier-Box kennt "Most
   complete first" (volle Sets zuerst, nach Anteil gesammelter Tiers)

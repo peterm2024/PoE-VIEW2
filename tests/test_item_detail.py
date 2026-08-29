@@ -355,3 +355,20 @@ def test_the_tail_lands_after_the_escaped_text_and_is_not_escaped() -> None:
     html = _blocks_to_html(bloecke)
 
     assert "&lt;b&gt;maximum&lt;/b&gt; Life<span>T1</span>" in html
+
+
+def test_base_stat_lines_get_the_bar_column_and_the_rest_a_blank_one() -> None:
+    """Hauptwerte (§4.52.8) bekommen die Balkenspalte wie Mod-Zeilen; die
+    uebrigen Eigenschaften eine leere Spalte derselben Breite, damit
+    der Block buendig bleibt."""
+    item = Item.model_validate({
+        "typeLine": "Plate Vest", "frameType": 2, "ilvl": 70,
+        "properties": [{"name": "Armour", "values": [["668", 0]]},
+                       {"name": "Quality", "values": [["+7%", 1]]}]})
+
+    bloecke = _item_blocks(item, mark=lambda kind, line: f"[{kind}|{line}]")
+
+    eigenschaften = bloecke[1]
+    assert eigenschaften[0].mark == "[baseStats|Body Armour: Armour 668]"
+    assert eigenschaften[1].mark == "[baseStats|]"
+    assert _item_blocks(item)[1][0].mark == ""      # ohne Marken-Funktion nichts

@@ -9838,3 +9838,37 @@ def test_mod_knowledge_reaches_an_open_album(qapp) -> None:
     dialog.close()
     win.worker.stop()
     win.worker.wait(5000)
+
+
+def test_a_collection_without_base_stats_gets_them_backfilled(qapp) -> None:
+    """Aufbau 8 (§4.52.8): Ein Stand mit Tier-Belegen, aber ohne
+    Hauptwerte, bekommt nur die nachgetragen — kein Mod-Zaehlstand
+    veraendert sich."""
+    import json
+    from poe_view.services import mod_collection as mc
+    win = MainWindow()
+    win._account_name = "TestAccount#1234"
+    pfad = mc.path_for(win._account_name)
+    pfad.parent.mkdir(parents=True, exist_ok=True)
+    pfad.write_text(json.dumps({"version": 7, "mods": [
+        {"identity": "# to maximum Life", "kind": "explicitMods", "count": 3,
+         "example": "+96 to maximum Life",
+         "spans": {"": {"2": {"count": 3, "lows": [96], "highs": [96],
+                              "ilvl_low": 70, "ilvl_high": 70}}},
+         "ledger": {"": {"Body Armour": [[96, 3, 70, 70]]}}}]}), encoding="utf-8")
+    win._items = {"Standard": {"t1": [Item.model_validate({
+        "typeLine": "Plate Vest", "frameType": 2, "ilvl": 70,
+        "explicitMods": ["+96 to maximum Life"],
+        "properties": [{"name": "Armour", "values": [["668", 0]]}]})]}}
+
+    win._restore_mod_collection()
+    assert win._mod_seed_mode == "backfill"
+    assert win._mod_backfill_stats is True and win._mod_backfill_tiers is False
+    while win._mod_seed_queue:
+        win._seed_mod_collection_slice()
+
+    assert win._mod_collection.get("explicitMods", "+96 to maximum Life").count == 3
+    assert win._mod_collection.get(mc.BASE_STAT_KIND, "Body Armour: Armour 1").count == 1
+
+    win.worker.stop()
+    win.worker.wait(5000)
