@@ -7,7 +7,9 @@ Versionsstand in `CHANGELOG.md` und in `poe_view/__init__.py`
 
 ## 1. Version festlegen
 
-1. `poe_view/__init__.py` → `__version__` auf die neue Version setzen.
+1. `poe_view/__init__.py` → `__version__` auf die neue Version setzen
+   (dabei fällt der `+dev`-Anhang aus Schritt 4 unten weg — das Release
+   trägt die saubere Nummer).
 2. `CHANGELOG.md`: Abschnitt `[Unveröffentlicht]` in `## [X.Y.Z] - JJJJ-MM-TT`
    umbenennen, neuen leeren `[Unveröffentlicht]`-Abschnitt darüber anlegen.
 3. Tests ausführen (`pytest`). Nur bei vollständig grüner Suite weitermachen.
@@ -95,7 +97,21 @@ gh release create vX.Y.Z dist/PoE-VIEW2.exe \
 
 Der `--notes-file`-Ausdruck schneidet den passenden Abschnitt aus dem
 Changelog heraus. Alternativ lässt sich der Text manuell einfügen;
-`gh release create` fragt sonst interaktiv danach.
+`gh release create` fragt sonst interaktiv danach. (In der Praxis
+werden die Notes bisher auf Englisch neu formuliert — der Changelog ist
+deutsch, der Release-Text gehört laut Sprachkonvention zur englischen
+Außenseite.)
+
+4. **Direkt nach dem Release:** `__version__` auf `X.Y.Z+dev` setzen
+   (die eben veröffentlichte Nummer plus Anhang) und committen. Ein
+   zwischen zwei Releases gebauter Stand zeigt sich damit im
+   Fenstertitel selbst als "neuer als das letzte Release" — ohne den
+   Anhang ist einem Zwischen-Build nicht anzusehen, ob ein Fix schon
+   drinsteckt (Peter, 2026-09-09: frische .exe zeigte "v0.12.0", war
+   aber neuer). Der Anhang wandert auch in den OAuth-User-Agent
+   (`config.user_agent`), was gewollt ist: GGG sieht dann, dass ein
+   Entwicklungsstand unterwegs war. SemVer wertet `+dev` als reine
+   Build-Metadaten, die Nummer selbst bleibt die des letzten Releases.
 
 ## 4. Einmalig: Repo-Metadaten für Auffindbarkeit
 
