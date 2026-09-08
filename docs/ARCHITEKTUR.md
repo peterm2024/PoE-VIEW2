@@ -709,6 +709,31 @@ holt Unbekanntes nach, er hält Bekanntes frisch. Weil Auto damit auch
 mit aus; sonst bliebe es für immer stehen (nur der Stash-Modus setzt es
 sonst zurück) und eine im Spiel umsortierte Truhe unentdeckt.
 
+**Vorrang-Takt der Spezial-Eltern (`_pick_due_special_parent`).** Ein
+Spezial-Tab (UniqueStash/MapStash), dessen Unter-Fächer einmal entdeckt
+sind, ist keine ladbare Einheit mehr (`_flatten_stashes` überspringt
+ihn) — und stand damit in KEINER Kandidatenauswahl mehr: Sein
+Zeitstempel fror ein (Peters Unique-Tab zeigte "⟳ 7d ago" bei laufendem
+Auto-Modus), und ein neu entstandenes Unter-Fach — die erste Unique
+einer Kategorie legt eines an — hätte der Sweep nie entdeckt, ebenso
+wenig das Verschwinden eines geleerten (FALLSTRICKE #82). Deshalb prüfen
+BEIDE Sweep-Treiber (`_drive_auto_sweep` und der Stash-Zweig von
+`_drive_refresh_mode`) vor der normalen Kandidatenwahl, ob ein
+Spezial-Eltern-Tab der aktuellen Liga älter als
+`SPECIAL_PARENT_REFRESH_AGE` (10 min) ist, der älteste zuerst;
+404-Fächer bleiben außen vor (§4.50). Der feste, bewusst flotte Takt
+statt der normalen Rotation (~100 min bei Peters Truhengröße) ist
+Peters Entscheidung (2026-09-08): Die Antwort ist winzig (nur die
+Kinderliste, keine Items, ~2 der ~128 Sweep-Abrufe pro Stunde), ein
+"alle Kategorien vorhanden"-Kriterium gibt die API nicht her (GGG
+liefert nur GEFÜLLTE Kategorien, die Gesamtzahl bliebe geraten), und
+in der Liga-Stash-Liste trägt der Eltern-Tab auch keine Item-Zahl, an
+deren Änderung man den Abruf hängen könnte (im echten Cache geprüft:
+`metadata` enthält nur die Farbe). Die Antwort läuft über den normalen
+`_on_stash_children`-Pfad — Zeitstempel, Übernahme der getauften
+Kategorien (`_carry_over_stamps`) und Neu-Abflachung inklusive —, womit
+nebenbei die Alters-Anzeige des Eltern-Knotens im Baum wieder stimmt.
+
 **Budget-Schutz:** Vor jedem Auto-Refresh-Versuch prüft
 `RateLimitManager.headroom_fraction()` (Minimum der "noch frei"-Anteile
 über alle bekannten Policies/Regeln), ob mindestens

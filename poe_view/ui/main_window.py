@@ -473,6 +473,16 @@ class MainWindow(QMainWindow):
     # Rundlauf des Stash-Modus zurück, statt stillzustehen
     # (§_pick_auto_sweep_candidate).
     AUTO_REFRESH_MIN_AGE = timedelta(days=1)
+    # Spezial-Eltern (UniqueStash/MapStash mit bereits entdeckten Kindern)
+    # sind keine ladbaren Einheiten mehr (§_flatten_stashes) und würden vom
+    # Sweep nie wieder abgerufen — dabei ist NUR ihr Abruf der Weg, ein neu
+    # entstandenes Unter-Fach zu entdecken (die erste Unique einer Kategorie
+    # legt eines an) oder ein verschwundenes loszuwerden. Deshalb bekommen
+    # sie einen eigenen Vorrang-Takt (§_pick_due_special_parent). 10 Minuten
+    # sind bewusst deutlich flotter als der Rundlauf (~100 min bei Peters
+    # Truhe): Die Antwort ist winzig (nur die Kinderliste, keine Items) und
+    # kostet ~2 der ~128 Sweep-Abrufe pro Stunde (Peter, 2026-09-08).
+    SPECIAL_PARENT_REFRESH_AGE = timedelta(minutes=10)
     # Nur eine kleine Notreserve für manuelle Klicks halten, kein hartes
     # 50/50-Splitting mehr (Peter: "sollte doch eigentlich permanent
     # laufen — Manual-Refresh kann ich ja auch jederzeit machen"). Alle
@@ -5428,7 +5438,7 @@ class MainWindow(QMainWindow):
                 self._refresh_mode_pending = True
                 self.worker.submit(FetchStashListJob(self._current_league, silent=True))
                 return
-            candidate = self._pick_stash_mode_candidate()
+            candidate = self._pick_due_special_parent() or self._pick_stash_mode_candidate()
             if candidate is None:
                 return
             self._refresh_mode_pending = True
@@ -5496,7 +5506,9 @@ class MainWindow(QMainWindow):
     def _drive_auto_sweep(self) -> bool:
         """Sweep-Schritt des Auto-Modus — gibt zurück, ob ein Job rausging.
 
-        Vorrang hat weiterhin die 1-Tag-Regel
+        Ganz vorne steht der Vorrang-Takt der Spezial-Eltern
+        (§_pick_due_special_parent) — die stehen in keiner anderen
+        Kandidatenauswahl mehr. Danach hat weiterhin die 1-Tag-Regel Vorrang
         (``_pick_auto_refresh_candidate``): noch nie geladene Fächer
         zuerst, danach alles, was älter als einen Tag ist. Erst wenn die
         nichts mehr hergibt, übernimmt der Rundlauf des Stash-Modus
@@ -5519,7 +5531,9 @@ class MainWindow(QMainWindow):
             self._refresh_mode_pending = True
             self.worker.submit(FetchStashListJob(self._current_league, silent=True))
             return True
-        candidate = self._pick_auto_refresh_candidate() or self._pick_stash_mode_candidate()
+        candidate = (self._pick_due_special_parent()
+                     or self._pick_auto_refresh_candidate()
+                     or self._pick_stash_mode_candidate())
         if candidate is None:
             return False
         self._refresh_mode_pending = True
@@ -5652,6 +5666,53 @@ class MainWindow(QMainWindow):
         `_pick_auto_refresh_candidate` UND `_pick_stash_mode_candidate`, um
         solche Fächer beim Refresh nachrangig zu behandeln."""
         return "remove-only" in stash.name.lower()
+
+    @staticmethod
+    def _special_parents(stashes: list[StashTab]) -> list[StashTab]:
+        """Spezial-Tabs (MapStash/UniqueStash) mit bereits entdeckten Kindern
+        einsammeln — das Gegenstück zu ``_flatten_stashes``, das genau diese
+        Knoten überspringt. Ordner werden durchlaufen (ein Spezial-Tab kann
+        in einem Ordner stecken, Peters "Uniq" liegt im Ordner "Special");
+        unterhalb eines Spezial-Tabs gibt es keine weiteren Container."""
+        found: list[StashTab] = []
+        for stash in stashes:
+            if stash.is_folder:
+                found.extend(MainWindow._special_parents(stash.children))
+            elif stash.children:
+                found.append(stash)
+        return found
+
+    def _pick_due_special_parent(self) -> StashTab | None:
+        """Fälliger Spezial-Eltern-Tab (älter als SPECIAL_PARENT_REFRESH_AGE),
+        der älteste zuerst — oder None, wenn keiner fällig ist.
+
+        Läuft in beiden Sweep-Treibern VOR der normalen Kandidatenwahl:
+        Spezial-Eltern stehen nicht in ``_leaf_stashes`` und würden sonst nie
+        wieder abgerufen (real beobachtet: Peters Unique-Tab stand 7 Tage auf
+        demselben Zeitstempel, während seine Unter-Fächer im Takt liefen —
+        ein NEUES Unter-Fach hätte der Sweep nie entdeckt). Der Abruf eines
+        Eltern-Tabs liefert nur die Kinderliste und läuft über den normalen
+        ``_on_stash_children``-Pfad, der auch den Zeitstempel setzt — damit
+        stimmt nebenbei die Alters-Anzeige im Baum wieder. Ein Fach, das GGG
+        mit 404 beantwortet, bleibt außen vor (§4.50, dieselbe Regel wie in
+        den anderen Pickern)."""
+        tree = self._stash_trees.get(self._current_league)
+        if not tree:
+            return None
+        league_loaded = self._last_loaded.get(self._current_league, {})
+        fehlend = self._missing_stashes.get(self._current_league, set())
+        now = datetime.now(timezone.utc)
+        due: list[tuple[datetime, StashTab]] = []
+        for stash in self._special_parents(tree):
+            if stash.id in fehlend:
+                continue
+            iso = league_loaded.get(stash.id)
+            loaded_at = self._NEVER_LOADED if iso is None else datetime.fromisoformat(iso)
+            if now - loaded_at >= self.SPECIAL_PARENT_REFRESH_AGE:
+                due.append((loaded_at, stash))
+        if not due:
+            return None
+        return min(due, key=lambda pair: pair[0])[1]
 
     def _pick_auto_refresh_candidate(self) -> StashTab | None:
         """Ältester Tab der aktuellen Liga — inkl. noch nie geladener Tabs (⬇).

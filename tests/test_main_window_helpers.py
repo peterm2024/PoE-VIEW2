@@ -1045,6 +1045,105 @@ def test_pick_auto_refresh_candidate_prefers_oldest_stale_tab(qapp) -> None:
     win.worker.wait(5000)
 
 
+def _make_special_parent(stash_id: str, child_ids: list[str],
+                         name: str = "Uniq") -> StashTab:
+    """UniqueStash-Eltern-Tab mit bereits entdeckten (namenlosen) Kindern —
+    die Form, in der ein Spezial-Tab nach seinem ersten Abruf im Baum steht."""
+    return StashTab.model_validate({
+        "id": stash_id, "name": name, "type": "UniqueStash", "metadata": {},
+        "children": [{"id": cid, "name": "", "type": "UniqueStash",
+                      "parent": stash_id, "metadata": {"items": 1}}
+                     for cid in child_ids]})
+
+
+def test_a_stale_special_parent_becomes_the_sweep_candidate(qapp) -> None:
+    """Peters Fund vom 2026-09-08: Der Unique-Eltern-Tab stand 7 Tage auf
+    demselben Zeitstempel, weil er nach der Kinder-Entdeckung in keiner
+    Kandidatenauswahl mehr vorkam — ein neues Unter-Fach (die erste Unique
+    einer Kategorie) hätte der Sweep nie entdeckt. Jetzt ist er wieder
+    fällig, sobald er älter als SPECIAL_PARENT_REFRESH_AGE ist — auch wenn
+    er in einem Ordner steckt (Peters 'Uniq' liegt im Ordner 'Special')."""
+    win = MainWindow()
+    win._current_league = "Standard"
+    now = datetime.now(timezone.utc)
+    parent = _make_special_parent("eltern", ["kind1", "kind2"])
+    ordner = StashTab.model_validate({"id": "ordner", "name": "Special",
+                                      "type": "Folder", "metadata": {"folder": True}})
+    ordner.children = [parent]
+    win._stash_trees["Standard"] = [ordner]
+    win._last_loaded["Standard"] = {
+        "eltern": (now - timedelta(days=7)).isoformat(),
+        "kind1": now.isoformat(), "kind2": now.isoformat(),
+    }
+
+    candidate = win._pick_due_special_parent()
+    assert candidate is not None and candidate.id == "eltern"
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_a_fresh_special_parent_is_not_due(qapp) -> None:
+    """Innerhalb des 10-Minuten-Takts kommt der Eltern-Tab NICHT dran —
+    sonst fräße der Vorrang den halben Sweep auf."""
+    win = MainWindow()
+    win._current_league = "Standard"
+    now = datetime.now(timezone.utc)
+    win._stash_trees["Standard"] = [_make_special_parent("eltern", ["kind1"])]
+    win._last_loaded["Standard"] = {"eltern": (now - timedelta(minutes=5)).isoformat()}
+
+    assert win._pick_due_special_parent() is None
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_a_special_tab_without_children_is_no_parent_candidate(qapp) -> None:
+    """Ein UniqueStash VOR seiner Entdeckung hat keine Kinder, steht als
+    normales Leaf in _leaf_stashes und wird dort abgeräumt — der
+    Eltern-Vorrang ist nur für Tabs zuständig, die aus den Leaves
+    herausgefallen sind. Ein 404-Fach (§4.50) bleibt ebenfalls außen vor."""
+    win = MainWindow()
+    win._current_league = "Standard"
+    now = datetime.now(timezone.utc)
+    unentdeckt = StashTab.model_validate({"id": "neu", "name": "DU",
+                                          "type": "UniqueStash", "metadata": {}})
+    tot = _make_special_parent("tot", ["kindx"])
+    win._stash_trees["Standard"] = [unentdeckt, tot]
+    win._last_loaded["Standard"] = {"tot": (now - timedelta(days=1)).isoformat()}
+    win._missing_stashes["Standard"] = {"tot"}
+
+    assert win._pick_due_special_parent() is None
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_the_auto_sweep_fetches_a_due_special_parent_first(qapp, monkeypatch) -> None:
+    """Der fällige Eltern-Tab gewinnt im Auto-Sweep gegen den normalen
+    Rundlauf: Der abgeschickte Job zielt auf den Eltern-Tab (ohne
+    parent_id — sein Abruf liefert die Kinderliste)."""
+    win = MainWindow()
+    win._current_league = "Standard"
+    now = datetime.now(timezone.utc)
+    win._stash_trees["Standard"] = [_make_special_parent("eltern", ["kind1"])]
+    win._leaf_stashes = [_make_leaf("leaf", "Leaf")]
+    win._last_loaded["Standard"] = {
+        "eltern": (now - timedelta(hours=1)).isoformat(),
+        "leaf": (now - timedelta(days=3)).isoformat(),
+    }
+    submitted = []
+    monkeypatch.setattr(win.worker, "submit", lambda job: submitted.append(job))
+
+    assert win._drive_auto_sweep() is True
+    assert len(submitted) == 1
+    assert submitted[0].stash_id == "eltern"
+    assert submitted[0].parent_id is None
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
 def test_pick_auto_refresh_candidate_deprioritises_remove_only_tabs(qapp) -> None:
     """Tabs mit 'Remove-only' im Namen nur nehmen, wenn es
     keine andere stale Alternative gibt."""

@@ -6,6 +6,18 @@ nach [SemVer](https://semver.org/lang/de/).
 
 ## [Unveröffentlicht]
 
+### Behoben
+
+- **Der Unique-/Map-Eltern-Tab wurde vom Auto-Sweep nie wieder
+  abgerufen**, sobald seine Unter-Fächer einmal entdeckt waren — der
+  Sweep lud nur noch die Unter-Fächer. Die Daten darunter blieben
+  dadurch zwar frisch, aber die Alters-Anzeige des Eltern-Knotens fror
+  ein ("⟳ 7d ago" bei laufendem Auto-Modus), und ein NEUES Unter-Fach —
+  die erste Unique einer Kategorie legt eines an — wäre erst beim
+  nächsten Klick aufgetaucht. Jetzt ruft der Sweep solche Eltern-Tabs
+  alle ~10 Minuten mit Vorrang ab; die Antwort ist winzig (nur die
+  Liste der Unter-Fächer) und kostet ~2 von ~128 Abrufen pro Stunde.
+
 ## [0.12.0] - 2026-08-29
 
 ### Neu

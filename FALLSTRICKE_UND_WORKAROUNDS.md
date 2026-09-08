@@ -1535,3 +1535,32 @@ gezählt (jedes Item einmal), die alte Datei bleibt als
 Ereignis — nicht das, was man meint. "Gesehen" muss definiert sein
 (Item oder Abruf?), BEVOR die erste Zahl in eine Datei geht; hinterher
 lässt sich die Vervielfachung nicht mehr herausrechnen, nur neu zählen.
+
+## 82. "Seit 7 Tagen nicht aktualisiert" — der Unique-Eltern-Tab fiel nach der Kinder-Entdeckung aus jedem Sweep
+
+**Symptom:** Im Stash-Baum stand am Unique-Tab "⟳ 7d ago", obwohl der
+Auto-Modus lief. Peter: "der 'Unique'-Folder im Auto-Modus seit 7 Tagen
+nicht mehr aktualisiert."
+
+**Ursache:** Spezial-Tabs (UniqueStash/MapStash) liefern beim Abruf
+keine Items, sondern ihre Unter-Fächer. Sobald die bekannt sind, nimmt
+`_flatten_stashes` nur noch die KINDER als ladbare Einheiten auf — mit
+Absicht, dort liegen die Items. Der Eltern-Tab stand damit in keiner
+Kandidatenauswahl mehr: Sein Zeitstempel (und die Alters-Anzeige im
+Baum) fror auf dem letzten Klick/Load-All ein, und — der eigentliche
+Schaden — ein NEU entstandenes Unter-Fach (die erste Unique einer
+Kategorie legt eines an) hätte der Sweep nie entdeckt; ebenso wenig,
+dass ein geleertes wieder verschwindet. Die Kinder selbst waren dabei
+topaktuell: Die Daten stimmten, nur die Tür zu neuen Kategorien war zu.
+
+**Lösung:** Eigener Vorrang-Takt `_pick_due_special_parent()` in beiden
+Sweep-Treibern vor der normalen Kandidatenwahl: Spezial-Eltern mit
+bekannten Kindern werden wieder abgerufen, sobald ihr letzter Abruf
+älter als `SPECIAL_PARENT_REFRESH_AGE` (10 min) ist. Die Antwort ist
+winzig (nur die Kinderliste) und läuft über den bestehenden
+`_on_stash_children`-Pfad — Zeitstempel, Taufe-Übernahme und
+Neu-Abflachung inklusive. ARCHITEKTUR §4.8.
+
+**Lehre:** Wer einen Knoten aus der Lade-Rotation nimmt, muss sagen,
+wer ihn stattdessen lädt. "Die Kinder decken den Eltern ab" gilt nur
+für die Items — die Mitglieder-LISTE kennt allein der Eltern-Abruf.
