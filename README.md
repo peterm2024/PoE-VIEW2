@@ -214,6 +214,14 @@ with the tiers you still miss left empty.
   the number. The graph survives a restart: measured sections are stored
   per account and drawn again next time, so closing the program does not
   empty it.
+- **Death counter**: with the `Client.txt` watch enabled, the levelling
+  panel counts the shown character's deaths of the last 24 hours
+  ("☠ 4 deaths (24 h)") and the graph marks each death with a thin red
+  line — even in the middle of a green bar. The bars alone cannot show
+  this: each bar is the net of its stretch, and a death inside a good
+  run disappears in it. The count is read from the game's own log, so it
+  survives restarts, and the rolling window means a session running past
+  midnight keeps its count.
 - **Watched stack sizes**: right-click any item and pick *Watch stack
   size* to put it in a table filling the right-hand side of the levelling
   panel. It adds up every
