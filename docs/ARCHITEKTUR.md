@@ -4538,18 +4538,22 @@ Bausteine:
   Der laufende Watcher meldet jeden neuen Tod sofort (gleicher
   Tail-Mechanismus wie Zonenwechsel). Der Zeitpunkt kommt aus der
   Log-Zeile selbst, nicht von der Ankunft des Ereignisses.
-- **`zone_watcher.deaths_on(path, day)`:** Volle Durchsicht der Datei
-  für EINEN Tag, Name → Zeitpunkte. Läuft beim Anlegen des Watchers
+- **`zone_watcher.deaths_since(path, cutoff)`:** Volle Durchsicht der
+  Datei ab einem Zeitpunkt (typisch: jetzt minus 24 h), Name →
+  Zeitpunkte. Läuft beim Anlegen des Watchers
   (`_apply_zone_watcher_config`), damit der Zähler einen App-Neustart
   übersteht — der Watcher selbst beginnt am Dateiende. ~10 MB mit
   Substring-Vorfilter, einmalig, unkritisch.
 - **`MainWindow._deaths`** (Name → Zeitpunkte) mit
-  `_deaths_today(name)`: Gefiltert wird beim ANZEIGEN, nicht beim
-  Sammeln — um Mitternacht springt der Zähler von selbst auf null.
-  In einer Gruppe landen auch fremde Namen im Wörterbuch; sie stören
-  nicht, die Anzeige fragt nur nach dem gezeigten Charakter.
-- **Kopfzeile im Leveling-Feld:** "☠ 4 deaths today" unter der Rate.
-  `deaths_today=None` (keine Client.txt beobachtet) lässt die Zeile
+  `_recent_deaths(name)`: ROLLIERENDE 24 h (`DEATH_WINDOW`) statt
+  Kalendertag — Peter, 2026-09-14: "Die meisten Gamer zocken über
+  Mitternacht hinaus und das ist dann blöd, wenn das zurückgesetzt
+  wird." Gefiltert wird beim ANZEIGEN, nicht beim Sammeln; alte
+  Einträge fallen von selbst heraus. In einer Gruppe landen auch
+  fremde Namen im Wörterbuch; sie stören nicht, die Anzeige fragt nur
+  nach dem gezeigten Charakter.
+- **Kopfzeile im Leveling-Feld:** "☠ 4 deaths (24 h)" unter der Rate.
+  `recent_deaths=None` (keine Client.txt beobachtet) lässt die Zeile
   ganz weg — eine "0" wäre eine Behauptung ohne Beleg.
 - **Marker im Graphen:** `graph_layout(..., deaths=...)` →
   `Layout.marks`, gezeichnet als dünne halbtransparente rote Linien
@@ -4559,13 +4563,13 @@ Bausteine:
   monotone Uhr des Graphen um (`now_mono - (now_wall - t)`); Marker
   erscheinen auch ohne einen einzigen Balken.
 
-Getestet: `tests/test_zone_watcher.py` (Tag- und Namens-Zuordnung,
+Getestet: `tests/test_zone_watcher.py` (Fenster- und Namens-Zuordnung,
 fehlende Datei, Live-Ereignis mit Zeit aus der Zeile, kein Übersprechen
 auf Zonen-/Inventar-Signale), `tests/test_xp_graph.py` (Marker-Position,
 Fenster-Grenze, Marker ohne Balken), `tests/test_leveling_panel.py`
 (Zeile mit Singular/Plural, ohne Client.txt keine Zeile),
-`tests/test_main_window_helpers.py` (Heute-Filter, Ereignis landet im
-Zähler).
+`tests/test_main_window_helpers.py` (rollierendes 24-h-Fenster, Ereignis
+landet im Zähler).
 
 ---
 

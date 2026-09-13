@@ -9,16 +9,17 @@ nach [SemVer](https://semver.org/lang/de/).
 ### Neu
 
 - **Death Counter.** Wird die Client.txt beobachtet (Settings > Zone
-  Refresh), zählt das Leveling-Feld die heutigen Tode des angezeigten
-  Charakters ("☠ 4 deaths today") und der XP-Graph markiert jeden
-  Todeszeitpunkt mit einer dünnen roten Linie — auch mitten in einem
-  grünen Balken. Denn aus den XP-Balken allein sind Tode nicht
-  ablesbar: Jeder Balken ist das Netto seines Zeitfensters, ein Tod in
-  einem langen Fenster mit gutem Fang verschwindet darin spurlos (real
-  passiert: vier Tode, nur drei erkennbar). Die Client.txt führt jeden
-  Tod einzeln auf; der Zähler übersteht App-Neustarts, weil er beim
-  Start aus der Datei nachgeladen wird, und springt um Mitternacht von
-  selbst auf null.
+  Refresh), zählt das Leveling-Feld die Tode des angezeigten
+  Charakters in den letzten 24 Stunden ("☠ 4 deaths (24 h)") und der
+  XP-Graph markiert jeden Todeszeitpunkt mit einer dünnen roten Linie
+  — auch mitten in einem grünen Balken. Denn aus den XP-Balken allein
+  sind Tode nicht ablesbar: Jeder Balken ist das Netto seines
+  Zeitfensters, ein Tod in einem langen Fenster mit gutem Fang
+  verschwindet darin spurlos (real passiert: vier Tode, nur drei
+  erkennbar). Die Client.txt führt jeden Tod einzeln auf; der Zähler
+  übersteht App-Neustarts, weil er beim Start aus der Datei nachgeladen
+  wird. Bewusst ein rollierendes Fenster statt "heute": Wer über
+  Mitternacht hinaus spielt, will keinen Reset mitten in der Sitzung.
 
 ## [0.12.1] - 2026-09-09
 

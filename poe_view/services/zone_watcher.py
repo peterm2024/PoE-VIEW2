@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import logging
 import re
-from datetime import date, datetime
+from datetime import datetime
 from pathlib import Path
 
 from PySide6.QtCore import QFileSystemWatcher, QObject, QTimer, Signal
@@ -114,8 +114,13 @@ def _line_time(line: str) -> datetime | None:
         return None
 
 
-def deaths_on(log_path: Path, day: date) -> dict[str, list[datetime]]:
-    """Alle "has been slain"-Zeilen EINES Tages: Charaktername → Zeitpunkte.
+def deaths_since(log_path: Path, cutoff: datetime) -> dict[str, list[datetime]]:
+    """Alle "has been slain"-Zeilen ab ``cutoff``: Charaktername → Zeitpunkte.
+
+    Rollierendes Fenster statt Kalendertag (Peter, 2026-09-14: "Die
+    meisten Gamer zocken über Mitternacht hinaus und das ist dann blöd,
+    wenn das zurückgesetzt wird") — der Aufrufer gibt typischerweise
+    "jetzt minus 24 h" mit.
 
     Volle Durchsicht der Datei statt Tail — der Todes-Zähler soll einen
     App-Neustart überstehen, und die Client.txt hält die Historie ohnehin
@@ -123,7 +128,6 @@ def deaths_on(log_path: Path, day: date) -> dict[str, list[datetime]]:
     bedeutet schlicht: keine älteren Tode mehr belegbar). ~10 MB mit dem
     billigen Substring-Filter vor der Regex sind einmalig beim Start
     kein Thema."""
-    stichtag = f"{day.year:04d}/{day.month:02d}/{day.day:02d}"
     gefunden: dict[str, list[datetime]] = {}
     try:
         raw = log_path.read_bytes()
@@ -131,11 +135,11 @@ def deaths_on(log_path: Path, day: date) -> dict[str, list[datetime]]:
         log.warning("Todes-Zähler: Client.txt nicht lesbar: %s", log_path)
         return gefunden
     for line in raw.decode("utf-8", errors="replace").splitlines():
-        if " has been slain." not in line or not line.startswith(stichtag):
+        if " has been slain." not in line:
             continue
         match = _DEATH_LINE.search(line)
         zeit = _line_time(line)
-        if match and zeit is not None:
+        if match and zeit is not None and zeit >= cutoff:
             gefunden.setdefault(match.group(1), []).append(zeit)
     return gefunden
 

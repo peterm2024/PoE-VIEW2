@@ -12,7 +12,7 @@ import logging
 import time
 from collections import deque
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Iterator
 
 from PySide6.QtCore import QSettings, Qt, QTimer, QUrl, Signal
@@ -34,7 +34,7 @@ from poe_view.services import (cache_backup, cache_writer, data_cache, gem_xp_lo
                                icon_cache, mod_collection, mod_knowledge,
                                poe2_probe, price_cache, xp_history)
 from poe_view.services.instance_lock import InstanceLock
-from poe_view.services.zone_watcher import (ZoneWatcher, deaths_on,
+from poe_view.services.zone_watcher import (ZoneWatcher, deaths_since,
                                               resolve_client_log_path)
 from poe_view.services.api_worker import (ApiWorker, BootstrapJob,
                                           BulkProgress, FetchAllItemsJob,
@@ -484,6 +484,10 @@ class MainWindow(QMainWindow):
     # Truhe): Die Antwort ist winzig (nur die Kinderliste, keine Items) und
     # kostet ~2 der ~128 Sweep-Abrufe pro Stunde (Peter, 2026-09-08).
     SPECIAL_PARENT_REFRESH_AGE = timedelta(minutes=10)
+    # Fenster des Death Counters: rollierende 24 h statt Kalendertag
+    # (Peter, 2026-09-14: "Die meisten Gamer zocken über Mitternacht
+    # hinaus und das ist dann blöd, wenn das zurückgesetzt wird").
+    DEATH_WINDOW = timedelta(hours=24)
     # Nur eine kleine Notreserve für manuelle Klicks halten, kein hartes
     # 50/50-Splitting mehr (Peter: "sollte doch eigentlich permanent
     # laufen — Manual-Refresh kann ich ja auch jederzeit machen"). Alle
@@ -670,7 +674,7 @@ class MainWindow(QMainWindow):
         self._zone_watcher: ZoneWatcher | None = None
         # Tode aus der Client.txt: Charaktername → Zeitpunkte (naive lokale
         # Zeit, wie das Spiel sie schreibt). Beim Anlegen des Watchers mit
-        # dem heutigen Tag aus der Datei gefüllt (§_apply_zone_watcher_config),
+        # den letzten 24 h aus der Datei gefüllt (§_apply_zone_watcher_config),
         # danach live ergänzt (§_on_death_seen). Quelle ist bewusst die
         # Client.txt und NICHT die XP-Deltas — ein Tod in einem langen
         # Messfenster verschwindet im Netto (FALLSTRICKE #83).
@@ -4607,7 +4611,7 @@ class MainWindow(QMainWindow):
         # Todes-Zeitpunkte für den Graphen von der Wanduhr (Client.txt) auf
         # dessen Uhr (time.monotonic()) umrechnen — beide "jetzt" direkt
         # nacheinander gelesen, der Versatz ist vernachlässigbar.
-        tode = self._deaths_today(name)
+        tode = self._recent_deaths(name)
         now_mono, now_wall = time.monotonic(), time.time()
         self.leveling.show_character(
             name,
@@ -4618,16 +4622,18 @@ class MainWindow(QMainWindow):
             points=watch.history if watch else (),
             now=now_mono,
             gems=gem_progress_of(items or []),
-            deaths_today=len(tode) if self._zone_watcher is not None else None,
+            recent_deaths=len(tode) if self._zone_watcher is not None else None,
             death_marks=[now_mono - (now_wall - zeit.timestamp()) for zeit in tode])
 
-    def _deaths_today(self, name: str) -> list[datetime]:
-        """Die heutigen Tode eines Charakters — beim Anzeigen gefiltert
-        statt beim Sammeln, damit der Zähler um Mitternacht von selbst
-        auf null springt, ohne dass irgendwo aufgeräumt werden muss."""
-        heute = date.today()
+    def _recent_deaths(self, name: str) -> list[datetime]:
+        """Die Tode eines Charakters der letzten 24 h — rollierendes
+        Fenster statt Kalendertag (Peter, 2026-09-14: wer über
+        Mitternacht spielt, will keinen Reset mittendrin). Beim Anzeigen
+        gefiltert statt beim Sammeln: Alte Einträge fallen von selbst
+        heraus, ohne dass irgendwo aufgeräumt werden muss."""
+        grenze = datetime.now() - self.DEATH_WINDOW
         return [zeit for zeit in self._deaths.get(name, ())
-                if zeit.date() == heute]
+                if zeit >= grenze]
 
     def _on_death_seen(self, name: str, at: datetime) -> None:
         """Ein Tod aus der Client.txt (§ZoneWatcher.death_seen). In einer
@@ -4903,11 +4909,11 @@ class MainWindow(QMainWindow):
         self._zone_watcher.zone_changed.connect(self._on_zone_changed)
         self._zone_watcher.inventory_event.connect(self._on_inventory_event)
         self._zone_watcher.death_seen.connect(self._on_death_seen)
-        # Heutige Tode aus der Datei nachladen, damit der Zaehler einen
+        # Die letzten 24 h aus der Datei nachladen, damit der Zaehler einen
         # App-Neustart uebersteht — der Watcher selbst beginnt am Dateiende.
-        self._deaths = deaths_on(resolved, date.today())
+        self._deaths = deaths_since(resolved, datetime.now() - self.DEATH_WINDOW)
         if self._deaths:
-            log.info("Todes-Zaehler: %d Tode heute in der Client.txt (%s).",
+            log.info("Todes-Zaehler: %d Tode in den letzten 24 h laut Client.txt (%s).",
                      sum(len(zeiten) for zeiten in self._deaths.values()),
                      ", ".join(sorted(self._deaths)))
 

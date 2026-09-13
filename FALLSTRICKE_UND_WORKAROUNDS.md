@@ -1582,10 +1582,12 @@ sich Ereignisse grundsätzlich nicht rekonstruieren; jede Deutung, die
 das versucht, hat mehrere gleich plausible Lesarten.
 
 **Lösung:** Tode aus der Client.txt zählen (`<Name> has been slain.`,
-mit Zeitstempel und Name in der Zeile): `deaths_on()` liest beim Start
-den heutigen Tag nach, das `death_seen`-Signal meldet neue live. Anzeige
-als "☠ N deaths today" im Leveling-Feld plus rote Zeitmarken im Graphen
-— gerade auf grünen Balken. ARCHITEKTUR §4.40.2.
+mit Zeitstempel und Name in der Zeile): `deaths_since()` liest beim
+Start die letzten 24 h nach, das `death_seen`-Signal meldet neue live.
+Anzeige als "☠ N deaths (24 h)" im Leveling-Feld — rollierendes Fenster
+statt Kalendertag, wer über Mitternacht spielt, will keinen Reset
+mittendrin — plus rote Zeitmarken im Graphen, gerade auf grünen Balken.
+ARCHITEKTUR §4.40.2.
 
 **Lehre:** Ein Integral verrät nicht, was unterwegs passiert ist. Wer
 Ereignisse zählen will, braucht die Ereignis-Quelle — nicht die

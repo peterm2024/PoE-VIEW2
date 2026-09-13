@@ -9973,17 +9973,20 @@ def test_a_collection_without_base_stats_gets_them_backfilled(qapp) -> None:
     win.worker.wait(5000)
 
 
-def test_deaths_today_filters_other_days(qapp) -> None:
-    """Der Zähler wird beim ANZEIGEN auf heute gefiltert — um Mitternacht
-    springt er damit von selbst auf null, ohne Aufräum-Code."""
-    from datetime import date, datetime, timedelta
+def test_recent_deaths_uses_a_rolling_24h_window(qapp) -> None:
+    """Rollierend statt Kalendertag (Peter, 2026-09-14: wer über
+    Mitternacht spielt, will keinen Reset mittendrin): Ein Tod von vor
+    23 h zählt noch, einer von vor 25 h nicht mehr — egal, auf welches
+    Datum sie fallen. Gefiltert wird beim ANZEIGEN, ohne Aufräum-Code."""
+    from datetime import datetime, timedelta
     win = MainWindow()
-    heute = datetime.combine(date.today(), datetime.min.time()).replace(hour=12)
-    gestern = heute - timedelta(days=1)
-    win._deaths = {"WitchOfPeter": [gestern, heute, heute.replace(hour=13)]}
+    jetzt = datetime.now()
+    win._deaths = {"WitchOfPeter": [jetzt - timedelta(hours=25),
+                                    jetzt - timedelta(hours=23),
+                                    jetzt - timedelta(minutes=5)]}
 
-    assert len(win._deaths_today("WitchOfPeter")) == 2
-    assert win._deaths_today("Unbekannt") == []
+    assert len(win._recent_deaths("WitchOfPeter")) == 2
+    assert win._recent_deaths("Unbekannt") == []
 
     win.worker.stop()
     win.worker.wait(5000)

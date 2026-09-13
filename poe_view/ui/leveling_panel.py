@@ -104,7 +104,7 @@ class LevelingPanel(QFrame):
                        rate_text: str | None, age_note: str,
                        points: Sequence[XpPoint] = (), now: float = 0.0,
                        gems: Sequence[GemProgress] = (),
-                       deaths_today: int | None = None,
+                       recent_deaths: int | None = None,
                        death_marks: Sequence[float] = ()) -> None:
         """``rate_text`` ist die fertig formatierte Rate ("119.2M XP/h")
         oder ``None``, solange erst eine Veröffentlichung beobachtet wurde
@@ -116,9 +116,11 @@ class LevelingPanel(QFrame):
         eine leere Achse, was für einen Charakter ohne beobachteten
         Abschnitt genau richtig ist.
 
-        ``deaths_today`` ist die Zahl der heutigen Tode aus der Client.txt
-        — ``None``, wenn keine Client.txt beobachtet wird: Dann fehlt die
-        Zeile ganz, denn "0" wäre eine Behauptung ohne Beleg.
+        ``recent_deaths`` ist die Zahl der Tode der letzten 24 h aus der
+        Client.txt — rollierendes Fenster, kein Kalendertag (wer über
+        Mitternacht spielt, will keinen Reset mittendrin). ``None``, wenn
+        keine Client.txt beobachtet wird: Dann fehlt die Zeile ganz, denn
+        "0" wäre eine Behauptung ohne Beleg.
         ``death_marks`` sind dieselben Tode als Zeitpunkte für den Graphen
         (auf dessen Uhr, §XpGraph.set_points)."""
         self._title.setText(name)
@@ -131,9 +133,9 @@ class LevelingPanel(QFrame):
             lines.append(f"<b>{rate_text}</b>{age_note}")
         else:
             lines.append("<i>Rate follows after the next zone change</i>")
-        if deaths_today is not None:
-            wort = "death" if deaths_today == 1 else "deaths"
-            lines.append(f"☠ {deaths_today} {wort} today")
+        if recent_deaths is not None:
+            wort = "death" if recent_deaths == 1 else "deaths"
+            lines.append(f"☠ {recent_deaths} {wort} (24 h)")
         self._body.setText("<br>".join(lines))
         self._graph.set_points(points, now, death_marks)
         self._graph.show()
