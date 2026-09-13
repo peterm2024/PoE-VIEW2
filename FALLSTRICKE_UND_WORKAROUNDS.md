@@ -1564,3 +1564,29 @@ Neu-Abflachung inklusive. ARCHITEKTUR §4.8.
 **Lehre:** Wer einen Knoten aus der Lade-Rotation nimmt, muss sagen,
 wer ihn stattdessen lädt. "Die Kinder decken den Eltern ab" gilt nur
 für die Items — die Mitglieder-LISTE kennt allein der Eltern-Abruf.
+
+## 83. Vier Tode, drei sichtbar, falsch verteilt — XP-Deltas sind Nettowerte
+
+**Symptom:** Peters XP-Graph zeigte an einem Abend mit vier Toden
+(Client.txt: 19:25, 19:39, 19:56, 20:48) nur drei rote Balken — und die
+erste Analyse aus den Zahlen machte daraus "zwei Tode in 28 Sekunden um
+19:25". Beides falsch.
+
+**Ursache:** Jeder Messpunkt des XP-Verlaufs ist das NETTO eines
+Fensters zwischen zwei Veröffentlichungen. Der Tod um 19:39 fiel in ein
+11,5-Minuten-Fenster mit gutem Fang: netto +1,9 Mio., der Balken war
+GRÜN, der Tod unsichtbar. Umgekehrt las sich das saubere −4,55 Mio.
+eines kurzen Fensters wie eine doppelte Strafe von 2×2,27 Mio. — dabei
+war es EIN Tod, und die Strafe beträgt ~4,5 Mio. Aus Nettowerten lassen
+sich Ereignisse grundsätzlich nicht rekonstruieren; jede Deutung, die
+das versucht, hat mehrere gleich plausible Lesarten.
+
+**Lösung:** Tode aus der Client.txt zählen (`<Name> has been slain.`,
+mit Zeitstempel und Name in der Zeile): `deaths_on()` liest beim Start
+den heutigen Tag nach, das `death_seen`-Signal meldet neue live. Anzeige
+als "☠ N deaths today" im Leveling-Feld plus rote Zeitmarken im Graphen
+— gerade auf grünen Balken. ARCHITEKTUR §4.40.2.
+
+**Lehre:** Ein Integral verrät nicht, was unterwegs passiert ist. Wer
+Ereignisse zählen will, braucht die Ereignis-Quelle — nicht die
+Summenkurve, durch die sie hindurchgelaufen sind.

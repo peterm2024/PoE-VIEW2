@@ -302,3 +302,65 @@ def test_without_the_debug_line_the_id_stays_empty(qapp, tmp_path) -> None:
 
     assert zonen == ["The Coast"]
     assert watcher.last_instance_id == ""
+
+
+# --- Tode: "has been slain" je Charakter und Tag ----------------------- #
+
+_DEATH_LINE_A = ('2026/09/13 19:25:16 28758625 cffb065b [INFO Client 19976] '
+                 ': WitchOfPeter has been slain.\n')
+_DEATH_LINE_B = ('2026/09/13 20:48:14 33736781 cffb065b [INFO Client 19976] '
+                 ': Demo Ranger has been slain.\n')
+_DEATH_YESTERDAY = ('2026/09/12 23:59:59 11111111 cffb065b [INFO Client 19976] '
+                    ': WitchOfPeter has been slain.\n')
+
+
+def test_deaths_on_counts_only_the_requested_day_per_character(tmp_path) -> None:
+    """Anlass (2026-09-13): Aus den XP-Deltas sind Tode nicht ablesbar —
+    ein Tod in einem 11,5-Minuten-Fenster verschwand im Netto (+1,9 Mio.).
+    Die Client.txt ist die verlässliche Quelle für den Zähler."""
+    from datetime import date, datetime
+    from poe_view.services.zone_watcher import deaths_on
+    log = tmp_path / "Client.txt"
+    _write(log, _DEATH_YESTERDAY + _DEATH_LINE_A + _DEATH_LINE_B + _ZONE_LINE)
+
+    tode = deaths_on(log, date(2026, 9, 13))
+
+    assert set(tode) == {"WitchOfPeter", "Demo Ranger"}
+    assert tode["WitchOfPeter"] == [datetime(2026, 9, 13, 19, 25, 16)]
+    assert tode["Demo Ranger"] == [datetime(2026, 9, 13, 20, 48, 14)]
+
+
+def test_deaths_on_returns_empty_for_a_missing_file(tmp_path) -> None:
+    from datetime import date
+    from poe_view.services.zone_watcher import deaths_on
+    assert deaths_on(tmp_path / "fehlt.txt", date(2026, 9, 13)) == {}
+
+
+def test_a_newly_appended_death_line_is_emitted_with_its_time(tmp_path, qapp) -> None:
+    from datetime import datetime
+    log = tmp_path / "Client.txt"
+    _write(log, _OTHER_LINE)
+    watcher = ZoneWatcher(log)
+    seen = []
+    watcher.death_seen.connect(lambda name, at: seen.append((name, at)))
+
+    with log.open("a", encoding="utf-8") as f:
+        f.write(_DEATH_LINE_A)
+    watcher.check_now()
+
+    assert seen == [("WitchOfPeter", datetime(2026, 9, 13, 19, 25, 16))]
+
+
+def test_a_death_line_is_no_zone_or_inventory_event(tmp_path, qapp) -> None:
+    log = tmp_path / "Client.txt"
+    _write(log, _OTHER_LINE)
+    watcher = ZoneWatcher(log)
+    zonen, inventar = [], []
+    watcher.zone_changed.connect(zonen.append)
+    watcher.inventory_event.connect(inventar.append)
+
+    with log.open("a", encoding="utf-8") as f:
+        f.write(_DEATH_LINE_A)
+    watcher.check_now()
+
+    assert zonen == [] and inventar == []

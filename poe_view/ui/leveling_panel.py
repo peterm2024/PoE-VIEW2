@@ -103,7 +103,9 @@ class LevelingPanel(QFrame):
     def show_character(self, name: str, level: int | None, experience: int | None,
                        rate_text: str | None, age_note: str,
                        points: Sequence[XpPoint] = (), now: float = 0.0,
-                       gems: Sequence[GemProgress] = ()) -> None:
+                       gems: Sequence[GemProgress] = (),
+                       deaths_today: int | None = None,
+                       death_marks: Sequence[float] = ()) -> None:
         """``rate_text`` ist die fertig formatierte Rate ("119.2M XP/h")
         oder ``None``, solange erst eine Veröffentlichung beobachtet wurde
         — dann steht dort, WARUM noch nichts da ist. Das ist keine
@@ -112,7 +114,13 @@ class LevelingPanel(QFrame):
 
         ``points``/``now`` speisen den Graphen darunter; ohne sie zeigt er
         eine leere Achse, was für einen Charakter ohne beobachteten
-        Abschnitt genau richtig ist."""
+        Abschnitt genau richtig ist.
+
+        ``deaths_today`` ist die Zahl der heutigen Tode aus der Client.txt
+        — ``None``, wenn keine Client.txt beobachtet wird: Dann fehlt die
+        Zeile ganz, denn "0" wäre eine Behauptung ohne Beleg.
+        ``death_marks`` sind dieselben Tode als Zeitpunkte für den Graphen
+        (auf dessen Uhr, §XpGraph.set_points)."""
         self._title.setText(name)
         lines = []
         if level:
@@ -123,7 +131,10 @@ class LevelingPanel(QFrame):
             lines.append(f"<b>{rate_text}</b>{age_note}")
         else:
             lines.append("<i>Rate follows after the next zone change</i>")
+        if deaths_today is not None:
+            wort = "death" if deaths_today == 1 else "deaths"
+            lines.append(f"☠ {deaths_today} {wort} today")
         self._body.setText("<br>".join(lines))
-        self._graph.set_points(points, now)
+        self._graph.set_points(points, now, death_marks)
         self._graph.show()
         self._gems.set_gems(gems)

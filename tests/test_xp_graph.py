@@ -380,3 +380,32 @@ def test_the_label_stays_inside_the_plot() -> None:
     assert oben + ZEILE <= flach
     assert oben >= ZEILE          # und trotzdem nicht in der ersten Zeile
 
+
+
+# --- Todes-Marker (Client.txt) an der Zeitachse ------------------------ #
+
+def test_a_death_inside_the_window_gets_a_mark_at_its_time() -> None:
+    """Eine Stunde her bei drei Stunden Fenster: der Marker sitzt bei
+    zwei Dritteln der Breite."""
+    layout = graph_layout([_point(5, 300, 1000.0)], now=0.0,
+                          width=WIDTH, height=HEIGHT,
+                          deaths=[-3600.0])
+    assert layout.marks == pytest.approx([WIDTH * 2 / 3])
+
+
+def test_a_death_outside_the_window_gets_no_mark() -> None:
+    layout = graph_layout([_point(5, 300, 1000.0)], now=0.0,
+                          width=WIDTH, height=HEIGHT,
+                          deaths=[-GRAPH_SPAN_S - 1.0])
+    assert layout.marks == []
+
+
+def test_death_marks_survive_an_empty_graph() -> None:
+    """Anlass (2026-09-13): Ein Tod ist KEIN Balken-Ereignis — er muss
+    auch dann sichtbar sein, wenn (noch) kein Abschnitt im Fenster liegt,
+    und erst recht auf einem gruenen Balken, in dessen Netto er
+    verschwindet (Tod 19:39:09 in +1,9-Mio.-Fenster)."""
+    layout = graph_layout([], now=0.0, width=WIDTH, height=HEIGHT,
+                          deaths=[-1800.0])
+    assert layout.bars == []
+    assert layout.marks == pytest.approx([WIDTH * 5 / 6])

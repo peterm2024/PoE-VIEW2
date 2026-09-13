@@ -12,7 +12,7 @@ import logging
 import time
 from collections import deque
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Iterator
 
 from PySide6.QtCore import QSettings, Qt, QTimer, QUrl, Signal
@@ -34,7 +34,8 @@ from poe_view.services import (cache_backup, cache_writer, data_cache, gem_xp_lo
                                icon_cache, mod_collection, mod_knowledge,
                                poe2_probe, price_cache, xp_history)
 from poe_view.services.instance_lock import InstanceLock
-from poe_view.services.zone_watcher import ZoneWatcher, resolve_client_log_path
+from poe_view.services.zone_watcher import (ZoneWatcher, deaths_on,
+                                              resolve_client_log_path)
 from poe_view.services.api_worker import (ApiWorker, BootstrapJob,
                                           BulkProgress, FetchAllItemsJob,
                                           FetchCharacterItemsJob,
@@ -667,6 +668,13 @@ class MainWindow(QMainWindow):
         # nähme den Abzug beim ersten Klick im Baum wieder mit.
         self._poe2_viewer: RawDataViewer | None = None
         self._zone_watcher: ZoneWatcher | None = None
+        # Tode aus der Client.txt: Charaktername → Zeitpunkte (naive lokale
+        # Zeit, wie das Spiel sie schreibt). Beim Anlegen des Watchers mit
+        # dem heutigen Tag aus der Datei gefüllt (§_apply_zone_watcher_config),
+        # danach live ergänzt (§_on_death_seen). Quelle ist bewusst die
+        # Client.txt und NICHT die XP-Deltas — ein Tod in einem langen
+        # Messfenster verschwindet im Netto (FALLSTRICKE #83).
+        self._deaths: dict[str, list[datetime]] = {}
         # Messung zu Peters offener Frage, wovon GGGs Veröffentlichung
         # abhängt (§_PublishWatch). Der Zonenwechsel-Zähler ist global,
         # die Buchführung pro Charakter.
@@ -4596,6 +4604,11 @@ class MainWindow(QMainWindow):
         Abruf."""
         watch = self._xp_watch.get(name)
         rate = self._xp_per_hour(name)
+        # Todes-Zeitpunkte für den Graphen von der Wanduhr (Client.txt) auf
+        # dessen Uhr (time.monotonic()) umrechnen — beide "jetzt" direkt
+        # nacheinander gelesen, der Versatz ist vernachlässigbar.
+        tode = self._deaths_today(name)
+        now_mono, now_wall = time.monotonic(), time.time()
         self.leveling.show_character(
             name,
             level=watch.level if watch else None,
@@ -4603,8 +4616,29 @@ class MainWindow(QMainWindow):
             rate_text=self._format_xp_rate(rate) if rate is not None else None,
             age_note=self._xp_rate_age_note(name),
             points=watch.history if watch else (),
-            now=time.monotonic(),
-            gems=gem_progress_of(items or []))
+            now=now_mono,
+            gems=gem_progress_of(items or []),
+            deaths_today=len(tode) if self._zone_watcher is not None else None,
+            death_marks=[now_mono - (now_wall - zeit.timestamp()) for zeit in tode])
+
+    def _deaths_today(self, name: str) -> list[datetime]:
+        """Die heutigen Tode eines Charakters — beim Anzeigen gefiltert
+        statt beim Sammeln, damit der Zähler um Mitternacht von selbst
+        auf null springt, ohne dass irgendwo aufgeräumt werden muss."""
+        heute = date.today()
+        return [zeit for zeit in self._deaths.get(name, ())
+                if zeit.date() == heute]
+
+    def _on_death_seen(self, name: str, at: datetime) -> None:
+        """Ein Tod aus der Client.txt (§ZoneWatcher.death_seen). In einer
+        Gruppe kommen hier auch fremde Namen an — die stören nicht, die
+        Anzeige fragt ohnehin nur nach dem gerade gezeigten Charakter."""
+        self._deaths.setdefault(name, []).append(at)
+        if name == self._current_character_name:
+            # Sofort nachziehen statt auf den nächsten Charakter-Refresh zu
+            # warten — die zwischengespeicherte Ausrüstung hält die
+            # Gem-Balken dabei stabil.
+            self._show_leveling(name, self._character_items.get(name))
 
     def _xp_rate_age_note(self, name: str) -> str:
         """" (2m ago)" hinter der XP-Rate — leer, solange die Zahl frisch
@@ -4851,6 +4885,7 @@ class MainWindow(QMainWindow):
             self._zone_watcher.setParent(None)
             self._zone_watcher.deleteLater()
             self._zone_watcher = None
+        self._deaths = {}
         if not enabled:
             log.info("Zonen-Beobachtung deaktiviert (Settings > Zone Refresh).")
             return
@@ -4867,6 +4902,14 @@ class MainWindow(QMainWindow):
         self._zone_watcher = ZoneWatcher(resolved, self)
         self._zone_watcher.zone_changed.connect(self._on_zone_changed)
         self._zone_watcher.inventory_event.connect(self._on_inventory_event)
+        self._zone_watcher.death_seen.connect(self._on_death_seen)
+        # Heutige Tode aus der Datei nachladen, damit der Zaehler einen
+        # App-Neustart uebersteht — der Watcher selbst beginnt am Dateiende.
+        self._deaths = deaths_on(resolved, date.today())
+        if self._deaths:
+            log.info("Todes-Zaehler: %d Tode heute in der Client.txt (%s).",
+                     sum(len(zeiten) for zeiten in self._deaths.values()),
+                     ", ".join(sorted(self._deaths)))
 
     # Wie weit dürfen Ereignis-Trigger den regulären Takt vor sich her
     # schieben, ausgedrückt in ganzen Takt-Intervallen? Peter, 2026-08-10:

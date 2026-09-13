@@ -9971,3 +9971,31 @@ def test_a_collection_without_base_stats_gets_them_backfilled(qapp) -> None:
 
     win.worker.stop()
     win.worker.wait(5000)
+
+
+def test_deaths_today_filters_other_days(qapp) -> None:
+    """Der Zähler wird beim ANZEIGEN auf heute gefiltert — um Mitternacht
+    springt er damit von selbst auf null, ohne Aufräum-Code."""
+    from datetime import date, datetime, timedelta
+    win = MainWindow()
+    heute = datetime.combine(date.today(), datetime.min.time()).replace(hour=12)
+    gestern = heute - timedelta(days=1)
+    win._deaths = {"WitchOfPeter": [gestern, heute, heute.replace(hour=13)]}
+
+    assert len(win._deaths_today("WitchOfPeter")) == 2
+    assert win._deaths_today("Unbekannt") == []
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_a_seen_death_lands_in_the_counter(qapp) -> None:
+    from datetime import datetime
+    win = MainWindow()
+    win._on_death_seen("WitchOfPeter", datetime(2026, 9, 13, 19, 25, 16))
+    win._on_death_seen("WitchOfPeter", datetime(2026, 9, 13, 20, 48, 14))
+
+    assert len(win._deaths["WitchOfPeter"]) == 2
+
+    win.worker.stop()
+    win.worker.wait(5000)

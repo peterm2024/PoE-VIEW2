@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import logging
 import re
+from datetime import date, datetime
 from pathlib import Path
 
 from PySide6.QtCore import QFileSystemWatcher, QObject, QTimer, Signal
@@ -88,6 +89,56 @@ _INVENTORY_LINES = (
     re.compile(r": (\d+ Items? identified)\s*$"),
 )
 
+# Tod des Charakters. Reales Format aus Peters Client.txt (2026-09-13):
+# "2026/09/13 19:25:16 28758625 cffb065b [INFO Client 19976] :
+# KRN_LZ_COTA has been slain." — der Name steht in der Zeile selbst,
+# damit ist das Ereignis je Charakter zählbar (in einer Gruppe erscheinen
+# auch die Tode der Mitspieler in derselben Form; der Anzeige-Code filtert
+# ohnehin nach dem gerade gezeigten Charakter, fremde Namen stören nicht).
+# Anlass: Aus den XP-Deltas sind Tode NICHT zuverlässig ablesbar — ein
+# Tod in einem langen Messfenster verschwindet im Netto, real beobachtet
+# am 2026-09-13 (Tod 19:39:09 in einem 11,5-Minuten-Fenster mit netto
+# +1,9 Mio. XP). Die Client.txt ist die einzige verlässliche Quelle.
+_DEATH_LINE = re.compile(r": (.+) has been slain\.\s*$")
+
+# Zeitstempel am Zeilenanfang, lokale Zeit des Spiel-Clients.
+_LINE_STAMP = "%Y/%m/%d %H:%M:%S"
+
+
+def _line_time(line: str) -> datetime | None:
+    """Zeitpunkt aus dem Zeilenanfang — None bei fremdem Format (naiv,
+    lokale Zeit, wie PoE sie schreibt)."""
+    try:
+        return datetime.strptime(line[:19], _LINE_STAMP)
+    except ValueError:
+        return None
+
+
+def deaths_on(log_path: Path, day: date) -> dict[str, list[datetime]]:
+    """Alle "has been slain"-Zeilen EINES Tages: Charaktername → Zeitpunkte.
+
+    Volle Durchsicht der Datei statt Tail — der Todes-Zähler soll einen
+    App-Neustart überstehen, und die Client.txt hält die Historie ohnehin
+    vor (PoE hängt nur an; eine frische Datei nach einem PoE-Update
+    bedeutet schlicht: keine älteren Tode mehr belegbar). ~10 MB mit dem
+    billigen Substring-Filter vor der Regex sind einmalig beim Start
+    kein Thema."""
+    stichtag = f"{day.year:04d}/{day.month:02d}/{day.day:02d}"
+    gefunden: dict[str, list[datetime]] = {}
+    try:
+        raw = log_path.read_bytes()
+    except OSError:
+        log.warning("Todes-Zähler: Client.txt nicht lesbar: %s", log_path)
+        return gefunden
+    for line in raw.decode("utf-8", errors="replace").splitlines():
+        if " has been slain." not in line or not line.startswith(stichtag):
+            continue
+        match = _DEATH_LINE.search(line)
+        zeit = _line_time(line)
+        if match and zeit is not None:
+            gefunden.setdefault(match.group(1), []).append(zeit)
+    return gefunden
+
 
 def resolve_client_log_path(configured_path: str) -> Path | None:
     """Peter darf entweder direkt die Client.txt angeben oder nur den
@@ -129,6 +180,10 @@ class ZoneWatcher(QObject):
 
     zone_changed = Signal(str)
     inventory_event = Signal(str)
+    # Tod eines Charakters: (Name, Zeitpunkt aus der Log-Zeile). ``object``
+    # statt eines Qt-Datentyps, damit das naive lokale datetime unverändert
+    # durchgereicht wird (§_DEATH_LINE).
+    death_seen = Signal(str, object)
 
     def __init__(self, log_path: Path, parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -202,6 +257,12 @@ class ZoneWatcher(QObject):
             if match:
                 log.info("Zonenwechsel erkannt: %s", match.group(1))
                 self.zone_changed.emit(match.group(1))
+                continue
+            match = _DEATH_LINE.search(line)
+            if match:
+                zeit = _line_time(line) or datetime.now()
+                log.info("Tod erkannt: %s (%s)", match.group(1), zeit)
+                self.death_seen.emit(match.group(1), zeit)
                 continue
             for pattern in _INVENTORY_LINES:
                 match = pattern.search(line)

@@ -6,6 +6,20 @@ nach [SemVer](https://semver.org/lang/de/).
 
 ## [Unveröffentlicht]
 
+### Neu
+
+- **Death Counter.** Wird die Client.txt beobachtet (Settings > Zone
+  Refresh), zählt das Leveling-Feld die heutigen Tode des angezeigten
+  Charakters ("☠ 4 deaths today") und der XP-Graph markiert jeden
+  Todeszeitpunkt mit einer dünnen roten Linie — auch mitten in einem
+  grünen Balken. Denn aus den XP-Balken allein sind Tode nicht
+  ablesbar: Jeder Balken ist das Netto seines Zeitfensters, ein Tod in
+  einem langen Fenster mit gutem Fang verschwindet darin spurlos (real
+  passiert: vier Tode, nur drei erkennbar). Die Client.txt führt jeden
+  Tod einzeln auf; der Zähler übersteht App-Neustarts, weil er beim
+  Start aus der Datei nachgeladen wird, und springt um Mitternacht von
+  selbst auf null.
+
 ## [0.12.1] - 2026-09-09
 
 ### Behoben

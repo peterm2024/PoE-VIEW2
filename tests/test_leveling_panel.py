@@ -195,3 +195,29 @@ def test_ohne_gems_bleibt_die_tabelle_neben_dem_text(qapp) -> None:
     assert panel.favourites.y() <= panel._body.y()
 
     panel.close()
+
+
+# --- Death Counter in der Kopfzeile ------------------------------------ #
+
+def test_der_zaehler_zeigt_die_heutigen_tode(qapp) -> None:
+    panel = LevelingPanel()
+    panel.show_character("WitchOfPeter", level=74, experience=1000,
+                         rate_text="12.1M XP/h", age_note="",
+                         deaths_today=4)
+    assert "☠ 4 deaths today" in panel._body.text()
+
+
+def test_ein_einzelner_tod_steht_im_singular(qapp) -> None:
+    panel = LevelingPanel()
+    panel.show_character("WitchOfPeter", level=74, experience=1000,
+                         rate_text=None, age_note="", deaths_today=1)
+    assert "☠ 1 death today" in panel._body.text()
+
+
+def test_ohne_client_txt_fehlt_die_zeile_ganz(qapp) -> None:
+    """None heisst "keine Client.txt beobachtet" — eine 0 waere dann eine
+    Behauptung ohne Beleg."""
+    panel = LevelingPanel()
+    panel.show_character("WitchOfPeter", level=74, experience=1000,
+                         rate_text=None, age_note="", deaths_today=None)
+    assert "today" not in panel._body.text()

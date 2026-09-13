@@ -40,7 +40,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import NamedTuple, Sequence
 
-from PySide6.QtCore import QRectF, Qt
+from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import QSizePolicy, QWidget
 
@@ -144,6 +144,12 @@ class Layout:
     average: float = 0.0
     average_x: float = 0.0
     average_span_s: float = 0.0
+    # x-Positionen der Todes-Marker (§marks in ``graph_layout``): dünne
+    # rote Linien über die volle Plothöhe. Eigene Achsen-Ereignisse statt
+    # aus den Balken abgeleitet, denn aus den Balken sind Tode nicht
+    # ablesbar — ein Tod in einem langen Abschnitt verschwindet im Netto
+    # (real: Tod 19:39:09 in einem GRÜNEN 11,5-Minuten-Balken, 2026-09-13).
+    marks: list[float] = field(default_factory=list)
 
 
 def combined_rate(points: Sequence[XpPoint]) -> float:
@@ -263,17 +269,27 @@ def span_label(seconds: float) -> str:
 
 
 def graph_layout(points: Sequence[XpPoint], now: float, width: float, height: float,
-                 span_s: float = GRAPH_SPAN_S) -> Layout:
+                 span_s: float = GRAPH_SPAN_S,
+                 deaths: Sequence[float] = ()) -> Layout:
     """Balken für das Zeitfenster ``span_s``, rechts endend beim Jetzt.
 
     Die y-Achse skaliert auf die höchste sichtbare Rate — eine feste
     Obergrenze gibt es nicht, weil die sinnvolle Größenordnung zwischen
     einem Charakter in Akt 2 und einem in den Maps um Zehnerpotenzen
     auseinanderliegt. Negative Raten (ab Akt 5 kostet der Tod Erfahrung)
-    hängen unter der Null-Linie, statt herausgefiltert zu werden."""
-    shown = visible_points(points, now, span_s)
-    if not shown or width <= 0 or height <= 0:
+    hängen unter der Null-Linie, statt herausgefiltert zu werden.
+
+    ``deaths`` sind Todes-Zeitpunkte auf derselben Uhr wie ``now``
+    (``time.monotonic()``, der Aufrufer rechnet die Wanduhr-Zeiten aus der
+    Client.txt um). Sie werden unabhängig von den Balken platziert — auch
+    ein Graph ohne einen einzigen Abschnitt zeigt seine Tode."""
+    if width <= 0 or height <= 0:
         return Layout([], height, 0.0, 0.0)
+    marks = [width - (now - tod) / span_s * width
+             for tod in deaths if now - span_s < tod <= now]
+    shown = visible_points(points, now, span_s)
+    if not shown:
+        return Layout([], height, 0.0, 0.0, marks=marks)
 
     peak = max(0.0, max(p.rate for p in shown))
     trough = min(0.0, min(p.rate for p in shown))
@@ -315,7 +331,7 @@ def graph_layout(points: Sequence[XpPoint], now: float, width: float, height: fl
     average_x = max(0.0, min(width, width - (now - beginn) / span_s * width))
     return Layout(bars, zero_y, peak, trough, groups,
                   zero_y - average / spread * height, average,
-                  average_x, max(0.0, now - beginn))
+                  average_x, max(0.0, now - beginn), marks=marks)
 
 
 def axis_label(rate: float) -> str:
@@ -340,16 +356,20 @@ class XpGraph(QWidget):
         super().__init__()
         self._points: list[XpPoint] = []
         self._now = 0.0
+        self._deaths: list[float] = []
         self.setMinimumHeight(_MIN_HEIGHT)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
-    def set_points(self, points: Sequence[XpPoint], now: float) -> None:
+    def set_points(self, points: Sequence[XpPoint], now: float,
+                   deaths: Sequence[float] = ()) -> None:
         """``now`` kommt von außen mit, statt hier ``time.monotonic()`` zu
         rufen: Der Aufrufer hat es ohnehin gerade gelesen, und ein Widget,
         das seine eigene Uhr befragt, lässt sich nicht ohne Warten
-        prüfen."""
+        prüfen. ``deaths`` sind Todes-Zeitpunkte auf derselben Uhr
+        (§graph_layout)."""
         self._points = list(points)
         self._now = now
+        self._deaths = list(deaths)
         self.update()
 
     def clear(self) -> None:
@@ -365,7 +385,8 @@ class XpGraph(QWidget):
             caption_h = metrics.height()
             width = self.width()
             plot_h = max(0.0, self.height() - caption_h)
-            layout = graph_layout(self._points, self._now, width, plot_h)
+            layout = graph_layout(self._points, self._now, width, plot_h,
+                                  deaths=self._deaths)
 
             faint = dimmed_text(self.palette())
             painter.setPen(faint)
@@ -386,6 +407,20 @@ class XpGraph(QWidget):
                 # soll nicht wie ein magerer Gewinn aussehen.
                 painter.fillRect(QRectF(x, y, w, h),
                                  QColor(DASH_OK if rate >= 0 else DASH_BAD))
+
+            # Todes-Marker NACH den Balken, damit sie auch auf einem
+            # grünen Balken sichtbar sind — genau dort verstecken sich
+            # Tode ja (Netto-Gewinn trotz Strafe). Volle Plothöhe, dünn
+            # und halbtransparent: eine Ereignis-Markierung an der
+            # Zeitachse, kein zweiter Balken.
+            if layout.marks:
+                farbe = QColor(DASH_BAD)
+                farbe.setAlpha(170)
+                stift = QPen(farbe)
+                stift.setWidthF(1.5)
+                painter.setPen(stift)
+                for x in layout.marks:
+                    painter.drawLine(QPointF(x, 0.0), QPointF(x, plot_h))
 
             # Die Gesamtrate über alles Sichtbare als gestrichelte Linie.
             # Sie steht ruhig, während die einzelnen Abschnitte springen,

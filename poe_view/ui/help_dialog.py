@@ -310,6 +310,14 @@ on balance. Dying does that from act 5 onwards.</li>
 <li>A <b>dark green block behind several bars</b> means they are the
 same map: you left it and came back. Its height is the rate for the map
 as a whole, so you can see what the trip outside cost.</li>
+<li>A <b>thin red vertical line</b> marks a death, at the exact moment
+the game logged it — it can sit in the middle of a green bar, because a
+bar only shows the <i>net</i> of its stretch and a death inside a good
+run disappears in it. The line above the graph counts them: <b>☠ 2
+deaths today</b>, read from the game's own Client.txt, so it survives
+restarts and resets at midnight. Both need the Client.txt watch
+(<i>Settings &gt; Zone Refresh</i>); without it they stay hidden rather
+than claim a zero nobody verified.</li>
 <li>The <b>bar in front of a mod line</b> comes from your <b>mod
 collection</b>: it shows where this roll sits between the worst and the
 best you have ever seen of that mod, on items of the same rarity and

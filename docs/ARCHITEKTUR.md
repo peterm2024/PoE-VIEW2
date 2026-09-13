@@ -4520,6 +4520,53 @@ Hideout liefert jetzt eine Rate; die drei Gegenproben zu den
 Bedingungen oben; Verlauf wächst je Abschnitt, vergisst nach drei
 Stunden und kommt im Widget an).
 
+#### 4.40.2 Death Counter und Todes-Marker (Client.txt)
+
+Anlass (Peter, 2026-09-13): Vier Tode an einem Abend, aber aus den
+XP-Balken waren nur drei zu erahnen — und selbst die falsch verteilt.
+Die XP-Deltas sind NETTOWERTE je Messfenster: Ein Tod in einem
+11,5-Minuten-Fenster mit gutem Fang verschwand komplett im Grün (netto
++1,9 Mio.), während das Minus eines anderen Fensters wie ein Doppel-Tod
+aussah (FALLSTRICKE #83). Tode werden deshalb NICHT aus der Erfahrung
+abgeleitet, sondern aus der Client.txt gelesen — dort steht jede
+"`<Name> has been slain.`"-Zeile mit Zeitstempel und Charakternamen,
+zu 100 % zählbar.
+
+Bausteine:
+
+- **`zone_watcher._DEATH_LINE` + Signal `death_seen(name, datetime)`:**
+  Der laufende Watcher meldet jeden neuen Tod sofort (gleicher
+  Tail-Mechanismus wie Zonenwechsel). Der Zeitpunkt kommt aus der
+  Log-Zeile selbst, nicht von der Ankunft des Ereignisses.
+- **`zone_watcher.deaths_on(path, day)`:** Volle Durchsicht der Datei
+  für EINEN Tag, Name → Zeitpunkte. Läuft beim Anlegen des Watchers
+  (`_apply_zone_watcher_config`), damit der Zähler einen App-Neustart
+  übersteht — der Watcher selbst beginnt am Dateiende. ~10 MB mit
+  Substring-Vorfilter, einmalig, unkritisch.
+- **`MainWindow._deaths`** (Name → Zeitpunkte) mit
+  `_deaths_today(name)`: Gefiltert wird beim ANZEIGEN, nicht beim
+  Sammeln — um Mitternacht springt der Zähler von selbst auf null.
+  In einer Gruppe landen auch fremde Namen im Wörterbuch; sie stören
+  nicht, die Anzeige fragt nur nach dem gezeigten Charakter.
+- **Kopfzeile im Leveling-Feld:** "☠ 4 deaths today" unter der Rate.
+  `deaths_today=None` (keine Client.txt beobachtet) lässt die Zeile
+  ganz weg — eine "0" wäre eine Behauptung ohne Beleg.
+- **Marker im Graphen:** `graph_layout(..., deaths=...)` →
+  `Layout.marks`, gezeichnet als dünne halbtransparente rote Linien
+  (DASH_BAD, Alpha 170) über die volle Plothöhe, NACH den Balken —
+  gerade auf einem grünen Balken müssen sie sichtbar sein. Die
+  Wanduhr-Zeiten der Client.txt rechnet `_show_leveling` auf die
+  monotone Uhr des Graphen um (`now_mono - (now_wall - t)`); Marker
+  erscheinen auch ohne einen einzigen Balken.
+
+Getestet: `tests/test_zone_watcher.py` (Tag- und Namens-Zuordnung,
+fehlende Datei, Live-Ereignis mit Zeit aus der Zeile, kein Übersprechen
+auf Zonen-/Inventar-Signale), `tests/test_xp_graph.py` (Marker-Position,
+Fenster-Grenze, Marker ohne Balken), `tests/test_leveling_panel.py`
+(Zeile mit Singular/Plural, ohne Client.txt keine Zeile),
+`tests/test_main_window_helpers.py` (Heute-Filter, Ereignis landet im
+Zähler).
+
 ---
 
 ### 4.41 Verbindungs-LED in der Statuszeile
