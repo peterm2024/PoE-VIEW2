@@ -15,6 +15,20 @@ sondern läuft über die ganze Balkenhöhe. Innerhalb der Stufe wäre ihr
 Spielraum eine Zwanzigstel-Höhe, bei 60 px also 3 px — eine Linie, die
 sich nicht bewegt, ist Zierde.
 
+**Unter der Linie hängt seit 2026-09-16 ein gelbes Rechteck: der Gewinn
+dieser Sitzung.** Peter wollte "gelbe Rechtecke, welche die Erfahrung
+seit dem letzten Refresh widerspiegeln; falls es über ein Level
+rausgeht, von unten ganz auffüllen". Als Anker dient der SITZUNGSBEGINN
+(erstes Sehen des Gems in diesem Programmlauf, `_baseline`), nicht der
+letzte Abruf — an Peters Gem-XP-Mitschrift vom 2026-09-13 gemessen ist
+der Sprung je Veröffentlichung im Median 1 % (0,6 px), neun von zehn
+liegen unter 3,6 px, und 592 von 630 Abrufen ändern gar nichts. Ein
+Rechteck je Abruf wäre unsichtbar oder würde flackern. Seit
+Sitzungsbeginn wächst es dagegen über den Abend auf lesbare Höhe.
+Springt die Stufe, reicht das Rechteck vom Boden bis zur Linie
+(`gain_span`) — der alte Stand liegt dann in einer anderen Stufe und
+hat als Untergrenze keine Bedeutung mehr.
+
 **Die schwierigste Frage beantwortet GGG selbst.** "Ist das Gem fertig?"
 müsste man eigentlich aus Stufe, Gem-Art und Erfahrung herleiten — ein
 Awakened-Gem ist bei 5 fertig, ein normales bei 20, ein korrumpiertes
@@ -92,6 +106,12 @@ _LEVEL_SCALE = 20
 # Zusatz.
 _XP_LINE_H = 1
 
+# Deckkraft des Gewinn-Rechtecks. Halbdurchsichtig, damit die Stufen-
+# füllung darunter lesbar bleibt — die Stufe ist die Hauptaussage, der
+# Gewinn die Zugabe. Die Linie darüber bleibt voll gesättigt: Sie
+# markiert den aktuellen Stand, das Rechteck nur den Weg dorthin.
+_GAIN_ALPHA = 110
+
 # Höhe des Streifens. Peter schlug 75 px vor; 60 lassen dem Graphen
 # darunter mehr Luft, ohne dass ein Drittel-Fortschritt undeutlich wird
 # (bei 60 px ist ein Prozent noch 0,6 px, die Auflösung reicht also
@@ -127,14 +147,21 @@ class GemProgress(NamedTuple):
     level: str           # Klartext wie "19" oder "20 (Max)"
     maxed: bool
     ready: bool          # voll, aber nicht Max → wartet auf den Klick
+    gem_id: str = ""     # GGGs Item-ID des Gems — Schlüssel für den Sitzungs-Anker
 
-    @property
-    def tooltip(self) -> str:
+    def tooltip(self, gained: float | None = None) -> str:
+        """``gained`` ist der Fortschrittsgewinn dieser Sitzung (0…1),
+        wie ihn ``gain_span`` liefert — None, wenn es nichts zu sagen
+        gibt."""
         if self.maxed:
             return f"{self.name} — level {self.level}"
         if self.ready:
-            return f"{self.name} — level {self.level}, ready to level up"
-        return f"{self.name} — level {self.level}, {self.progress:.0%} to next"
+            text = f"{self.name} — level {self.level}, ready to level up"
+        else:
+            text = f"{self.name} — level {self.level}, {self.progress:.0%} to next"
+        if gained:
+            text += f" (+{gained:.0%} this session)"
+        return text
 
     @property
     def level_number(self) -> int:
@@ -212,8 +239,30 @@ def gem_progress_of(items: Sequence[Item]) -> list[GemProgress]:
                 progress=min(max(progress, 0.0), 1.0),
                 level=level,
                 maxed=maxed,
-                ready=bool(experience) and progress >= 1.0 and not maxed))
+                ready=bool(experience) and progress >= 1.0 and not maxed,
+                gem_id=str(gem.get("id") or "")))
     return gems
+
+
+def gain_span(baseline: tuple[int, float] | None,
+              gem: GemProgress) -> tuple[float, float] | None:
+    """Untere und obere Kante des Gewinn-Rechtecks als Fortschritt
+    (0…1) — oder None, wenn nichts zu zeichnen ist.
+
+    ``baseline`` ist (Stufe, Fortschritt) beim ersten Sehen des Gems in
+    dieser Sitzung. Ist die Stufe seither gestiegen, reicht das Rechteck
+    vom Boden bis zum aktuellen Stand (Peter: "einfach dann von unten
+    ganz auffüllen"); sonst vom alten zum neuen Stand. Fertige Gems
+    haben keine Erfahrung mehr, ohne Anker gibt es keinen Vergleich, und
+    ein Stand, der nicht gewachsen ist, ergibt kein Rechteck."""
+    if baseline is None or gem.maxed:
+        return None
+    stufe, stand = baseline
+    if gem.level_number > stufe:
+        return (0.0, gem.progress) if gem.progress > 0 else None
+    if gem.progress > stand:
+        return (stand, gem.progress)
+    return None
 
 
 def gem_colour(colour: str) -> str:
@@ -236,6 +285,12 @@ class GemProgressBar(QWidget):
     def __init__(self) -> None:
         super().__init__()
         self._gems: list[GemProgress] = []
+        # Sitzungs-Anker je Gem (§Modulkopf): (Stufe, Fortschritt) beim
+        # ersten Sehen in diesem Programmlauf. Lebt im Widget, weil es
+        # das einzige ist, was alle Charakterwechsel überdauert und die
+        # Balken kennt; ein Charakterwechsel löscht nichts — die Gem-ID
+        # ist kontoweit eindeutig.
+        self._baseline: dict[str, tuple[int, float]] = {}
         self.setFixedHeight(BAR_HEIGHT)
         # Waagerecht ``Fixed``: Die Breite ergibt sich aus der Zahl der
         # Gems, mehr Platz nützt nichts. Solange die Balken allein in
@@ -261,6 +316,9 @@ class GemProgressBar(QWidget):
 
     def set_gems(self, gems: Sequence[GemProgress]) -> None:
         self._gems = list(gems)
+        for gem in self._gems:
+            if gem.gem_id and not gem.maxed and gem.gem_id not in self._baseline:
+                self._baseline[gem.gem_id] = (gem.level_number, gem.progress)
         self.setVisible(bool(self._gems))
         self.updateGeometry()  # neue Breite anmelden, sonst bleibt die alte
         self.update()
@@ -272,6 +330,10 @@ class GemProgressBar(QWidget):
         index = int(x // (_BAR_W + _BAR_GAP))
         return self._gems[index] if 0 <= index < len(self._gems) else None
 
+    def gain_of(self, gem: GemProgress) -> tuple[float, float] | None:
+        """Gewinn-Rechteck dieses Gems seit Sitzungsbeginn (§gain_span)."""
+        return gain_span(self._baseline.get(gem.gem_id), gem)
+
     def event(self, event: QEvent) -> bool:
         """Tooltip je Balken. Ohne ihn wäre der Streifen zwar hübsch, aber
         stumm — bei dreißig Balken nebeneinander ist "welches Gem ist
@@ -279,7 +341,9 @@ class GemProgressBar(QWidget):
         if event.type() == QEvent.Type.ToolTip:
             gem = self._gem_at(event.pos().x())
             if gem is not None:
-                QToolTip.showText(event.globalPos(), gem.tooltip, self)
+                spanne = self.gain_of(gem)
+                gained = spanne[1] - spanne[0] if spanne else None
+                QToolTip.showText(event.globalPos(), gem.tooltip(gained), self)
             else:
                 QToolTip.hideText()
             return True
@@ -313,6 +377,17 @@ class GemProgressBar(QWidget):
                 # wegfallen zu lassen.
                 linie = min(max(height - round(height * gem.progress), 0),
                             height - _XP_LINE_H)
+                # Erst das Rechteck des Sitzungsgewinns (halbdurchsichtig,
+                # von der alten bis zur aktuellen Höhe), dann die Linie
+                # darüber — so bleibt der aktuelle Stand als scharfe
+                # Kante lesbar.
+                spanne = self.gain_of(gem)
+                if spanne:
+                    oben = height - round(height * spanne[1])
+                    unten = height - round(height * spanne[0])
+                    gelb = QColor(GEM_XP_LINE)
+                    gelb.setAlpha(_GAIN_ALPHA)
+                    painter.fillRect(QRectF(x, oben, _BAR_W, unten - oben), gelb)
                 painter.fillRect(QRectF(x, linie, _BAR_W, _XP_LINE_H),
                                  QColor(GEM_XP_LINE))
                 if gem.ready:

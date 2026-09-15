@@ -41,7 +41,7 @@ from dataclasses import dataclass, field
 from typing import NamedTuple, Sequence
 
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QPainter, QPen
+from PySide6.QtGui import QColor, QPainter, QPen, QPolygonF
 from PySide6.QtWidgets import QSizePolicy, QWidget
 
 from poe_view.ui.theme import DASH_BAD, DASH_OK, blend, dimmed_text
@@ -51,6 +51,12 @@ from poe_view.ui.theme import DASH_BAD, DASH_OK, blend, dimmed_text
 # sein, kann auch nur dunkelgrün sein"). Dunkel genug, dass die Balken
 # darauf lesbar bleiben, hell genug, um vom Hintergrund abzustechen.
 _GROUP_COLOR = blend(QColor(DASH_OK), QColor("#000000"), 0.55)
+
+# Maße des Todes-Markers (§paintEvent): breit genug, um auf 520 px
+# Graphbreite ins Auge zu fallen, flach genug, um keinen Balken zu
+# verdecken.
+_DEATH_MARK_W = 9.0
+_DEATH_MARK_H = 6.0
 
 # Die gestrichelte Gesamtrate. Bewusst nicht grün: Sie ist eine
 # Bezugslinie, kein weiterer Messwert.
@@ -144,8 +150,8 @@ class Layout:
     average: float = 0.0
     average_x: float = 0.0
     average_span_s: float = 0.0
-    # x-Positionen der Todes-Marker (§marks in ``graph_layout``): dünne
-    # rote Linien über die volle Plothöhe. Eigene Achsen-Ereignisse statt
+    # x-Positionen der Todes-Marker (§marks in ``graph_layout``): kleine
+    # rote Dreiecke an der Oberkante. Eigene Achsen-Ereignisse statt
     # aus den Balken abgeleitet, denn aus den Balken sind Tode nicht
     # ablesbar — ein Tod in einem langen Abschnitt verschwindet im Netto
     # (real: Tod 19:39:09 in einem GRÜNEN 11,5-Minuten-Balken, 2026-09-13).
@@ -408,20 +414,6 @@ class XpGraph(QWidget):
                 painter.fillRect(QRectF(x, y, w, h),
                                  QColor(DASH_OK if rate >= 0 else DASH_BAD))
 
-            # Todes-Marker NACH den Balken, damit sie auch auf einem
-            # grünen Balken sichtbar sind — genau dort verstecken sich
-            # Tode ja (Netto-Gewinn trotz Strafe). Volle Plothöhe, dünn
-            # und halbtransparent: eine Ereignis-Markierung an der
-            # Zeitachse, kein zweiter Balken.
-            if layout.marks:
-                farbe = QColor(DASH_BAD)
-                farbe.setAlpha(170)
-                stift = QPen(farbe)
-                stift.setWidthF(1.5)
-                painter.setPen(stift)
-                for x in layout.marks:
-                    painter.drawLine(QPointF(x, 0.0), QPointF(x, plot_h))
-
             # Die Gesamtrate über alles Sichtbare als gestrichelte Linie.
             # Sie steht ruhig, während die einzelnen Abschnitte springen,
             # und beantwortet damit die Frage, die ein einzelner Balken
@@ -466,5 +458,24 @@ class XpGraph(QWidget):
                              | Qt.AlignmentFlag.AlignVCenter, "3 h ago")
             painter.drawText(strip, Qt.AlignmentFlag.AlignRight
                              | Qt.AlignmentFlag.AlignVCenter, "now")
+
+            # Todes-Marker ZULETZT: ein kleines rotes Dreieck, das von der
+            # Oberkante herabhängt — wie eine Ereignismarke auf einer
+            # Zeitleiste. Die erste Fassung (v0.13.0) zog eine Linie über
+            # die volle Plothöhe; Peter, 2026-09-16: "das versaut die ganze
+            # Anzeige" — vier senkrechte Striche schnitten den Graphen in
+            # Stücke. Nach allem anderen gezeichnet, damit weder ein
+            # grüner Balken (in dessen Netto der Tod verschwunden ist)
+            # noch die Schnitt-Linie, die bei einem einzigen Balken genau
+            # an der Oberkante liegt, das Dreieck verdeckt.
+            if layout.marks:
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.setBrush(QColor(DASH_BAD))
+                for x in layout.marks:
+                    painter.drawPolygon(QPolygonF([
+                        QPointF(x - _DEATH_MARK_W / 2, 0.0),
+                        QPointF(x + _DEATH_MARK_W / 2, 0.0),
+                        QPointF(x, _DEATH_MARK_H)]))
+                painter.setBrush(Qt.BrushStyle.NoBrush)
         finally:
             painter.end()

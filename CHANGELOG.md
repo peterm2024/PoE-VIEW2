@@ -6,6 +6,19 @@ nach [SemVer](https://semver.org/lang/de/).
 
 ## [Unveröffentlicht]
 
+### Geändert
+
+- **Todes-Marker im XP-Graphen sind jetzt kleine rote Dreiecke an der
+  Oberkante** statt Linien über die volle Höhe — die zerschnitten den
+  Graphen in Stücke.
+- **Gem-Balken zeigen den Gewinn der Sitzung als gelbes Rechteck** unter
+  der Fortschrittslinie: von dem Stand, den das Gem beim Start von
+  PoE-VIEW2 hatte, bis zum aktuellen. Steigt ein Gem eine Stufe, füllt
+  das Rechteck von unten bis zum neuen Stand. Der Tooltip nennt den
+  Gewinn mit ("+12% this session"). Bewusst seit Sitzungsbeginn statt
+  seit dem letzten Abruf: Je Abruf wäre der Sprung im Median ein
+  Prozent, also unsichtbar.
+
 ## [0.13.0] - 2026-09-14
 
 ### Neu

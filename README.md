@@ -216,8 +216,8 @@ with the tiers you still miss left empty.
   empty it.
 - **Death counter**: with the `Client.txt` watch enabled, the levelling
   panel counts the shown character's deaths of the last 24 hours
-  ("☠ 4 deaths (24 h)") and the graph marks each death with a thin red
-  line — even in the middle of a green bar. The bars alone cannot show
+  ("☠ 4 deaths (24 h)") and the graph marks each death with a small red
+  triangle at the top edge — even above a green bar. The bars alone cannot show
   this: each bar is the net of its stretch, and a death inside a good
   run disappears in it. The count is read from the game's own log, so it
   survives restarts, and the rolling window means a session running past
@@ -234,7 +234,9 @@ with the tiers you still miss left empty.
   the gem's **level**, coloured by the attribute it needs — the strip
   reads as a profile of the character, so the short bars are the gems
   lagging behind. A thin yellow line inside each bar is the progress
-  towards the next level. A solid bar in a vivid colour marks a finished
+  towards the next level, and the translucent yellow block below it is
+  what the gem gained since the program started — after a level-up it
+  starts again from the bottom. A solid bar in a vivid colour marks a finished
   gem (level 20, or 21 corrupted). A yellow cap means the opposite: the
   bar is full but the gem is below its maximum — gems never level up on
   their own, so that is character power waiting to be claimed.

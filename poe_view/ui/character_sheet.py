@@ -78,7 +78,7 @@ def _gem_section(slot_label: str, item: Item | None) -> list[str]:
     for gem in gems:
         tag = _ATTRIBUTE_TAGS.get(gem.colour, "")
         praefix = f"[{tag}] " if tag else ""
-        lines.append(f"- {praefix}{gem.tooltip}")
+        lines.append(f"- {praefix}{gem.tooltip()}")
     lines.append("")
     return lines
 

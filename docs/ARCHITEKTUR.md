@@ -4556,12 +4556,17 @@ Bausteine:
   `recent_deaths=None` (keine Client.txt beobachtet) lässt die Zeile
   ganz weg — eine "0" wäre eine Behauptung ohne Beleg.
 - **Marker im Graphen:** `graph_layout(..., deaths=...)` →
-  `Layout.marks`, gezeichnet als dünne halbtransparente rote Linien
-  (DASH_BAD, Alpha 170) über die volle Plothöhe, NACH den Balken —
-  gerade auf einem grünen Balken müssen sie sichtbar sein. Die
-  Wanduhr-Zeiten der Client.txt rechnet `_show_leveling` auf die
-  monotone Uhr des Graphen um (`now_mono - (now_wall - t)`); Marker
-  erscheinen auch ohne einen einzigen Balken.
+  `Layout.marks`, gezeichnet als kleine rote Dreiecke (9 × 6 px,
+  DASH_BAD), die von der Oberkante herabhängen — als LETZTES im
+  `paintEvent`, damit weder ein grüner Balken (in dessen Netto der Tod
+  verschwunden ist) noch die Schnitt-Linie das Dreieck verdeckt; bei
+  einem einzigen Balken liegt die Schnitt-Linie genau an der Oberkante.
+  Die erste Fassung (v0.13.0) zog Linien über die volle Plothöhe;
+  Peter, 2026-09-16: "das versaut die ganze Anzeige" — vier senkrechte
+  Striche schnitten den Graphen in Stücke. Die Wanduhr-Zeiten der
+  Client.txt rechnet `_show_leveling` auf die monotone Uhr des Graphen
+  um (`now_mono - (now_wall - t)`); Marker erscheinen auch ohne einen
+  einzigen Balken.
 
 Getestet: `tests/test_zone_watcher.py` (Fenster- und Namens-Zuordnung,
 fehlende Datei, Live-Ereignis mit Zeit aus der Zeile, kein Übersprechen
@@ -4689,6 +4694,26 @@ der Stufe.** Innerhalb wäre ihr Spielraum eine Zwanzigstel-Höhe, bei
 die volle Höhe gelesen sagt sie dasselbe (Fortschritt in Prozent) und
 ist ablesbar. Bei 0 % und 100 % hält ein Anschlag sie im Balken, statt
 sie unten heraus- oder oben wegfallen zu lassen.
+
+**Unter der Linie: ein halbdurchsichtiges gelbes Rechteck für den
+Gewinn dieser Sitzung** (Peter, 2026-09-16: "gelbe Rechtecke, welche
+die Erfahrung seit dem letzten Refresh der Anzeige widerspiegeln; falls
+es über ein Level rausgeht, einfach dann von unten ganz auffüllen").
+Anker ist der SITZUNGSBEGINN, nicht der letzte Abruf: An Peters
+Gem-XP-Mitschrift vom 2026-09-13 gemessen ist der Sprung je
+Veröffentlichung im Median 1 % (0,6 px im 60-px-Balken), neun von zehn
+liegen unter 3,6 px, und 592 von 630 Abrufen ändern gar nichts — ein
+Rechteck je Abruf wäre unsichtbar oder würde flackern. Seit
+Sitzungsbeginn wächst es dagegen über den Abend auf lesbare Höhe. Der
+Anker (`GemProgressBar._baseline`, Gem-ID → (Stufe, Fortschritt)) wird
+beim ersten `set_gems` gesetzt, das ein Gem zeigt, und überdauert
+Charakterwechsel — die Gem-ID ist kontoweit eindeutig. `gain_span`
+liefert die Kanten: alter bis neuer Stand, oder vom Boden bis zum
+neuen Stand, wenn die Stufe gestiegen ist (der alte Stand liegt dann
+in einer anderen Stufe). Alpha 110, damit die Stufenfüllung darunter
+lesbar bleibt; die Linie darüber bleibt voll gesättigt als scharfe
+Kante des aktuellen Stands. Der Tooltip nennt den Gewinn mit
+("+12% this session").
 
 **Stufe/20 gilt stur, auch für Gems mit kleinerer Höchststufe.** Über
 Peters 6248 Gems gezählt gibt es solche zuhauf (Portal, Quickstep,

@@ -18,11 +18,13 @@ def _item_with(*gems: dict) -> Item:
 
 
 def _gem(name: str, level: str, colour: str = "S",
-         progress: float | None = None) -> dict:
+         progress: float | None = None, gem_id: str = "") -> dict:
     # ``frameType`` 4 ist GGGs Kennzeichen fuer ein Gem — ohne das ist
     # es ein Jewel und gehoert nicht in den Streifen.
     gem: dict = {"typeLine": name, "colour": colour, "frameType": 4,
                  "properties": [{"name": "Level", "values": [[level, 0]]}]}
+    if gem_id:
+        gem["id"] = gem_id
     if progress is not None:
         gem["additionalProperties"] = [
             {"name": "Experience", "values": [["1/2", 0]], "progress": progress}]
@@ -62,7 +64,7 @@ def test_a_full_bar_below_max_means_it_waits_for_a_click() -> None:
 
     assert wartend.ready is True
     assert wartend.maxed is False
-    assert "ready to level up" in wartend.tooltip
+    assert "ready to level up" in wartend.tooltip()
 
 
 def test_a_levelling_gem_carries_its_progress() -> None:
@@ -70,7 +72,7 @@ def test_a_levelling_gem_carries_its_progress() -> None:
 
     assert gem.progress == 0.93
     assert (gem.ready, gem.maxed) == (False, False)
-    assert "93% to next" in gem.tooltip
+    assert "93% to next" in gem.tooltip()
 
 
 def test_a_gem_without_any_evidence_stays_empty_instead_of_full() -> None:
@@ -418,3 +420,79 @@ def test_ein_leerer_balken_bleibt_sichtbar(qapp) -> None:
     assert oben.name() != "#2b2b2b", "leerer Balken verschwindet im Hintergrund"
     unten = QColor(bild.pixel(2, 59))        # der gefuellte Teil
     assert unten.name() != oben.name()       # und beide sind unterscheidbar
+
+
+# --- Gewinn-Rechteck seit Sitzungsbeginn (2026-09-16) ------------------ #
+
+def _progress(level: str, progress: float, gem_id: str = "g1"):
+    gem, = gem_progress_of([_item_with(_gem("Fire Trap", level, "I", progress, gem_id))])
+    return gem
+
+
+def test_gain_span_reaches_from_the_old_to_the_new_progress() -> None:
+    """Peter, 2026-09-16: "gelbe Rechtecke, welche die Erfahrung seit
+    dem letzten Refresh widerspiegeln". Anker ist der Sitzungsbeginn —
+    je Abruf waere der Sprung im Median 0,6 px (gemessen)."""
+    from poe_view.ui.gem_progress import gain_span
+
+    assert gain_span((10, 0.2), _progress("10", 0.6)) == (0.2, 0.6)
+
+
+def test_gain_span_fills_from_the_bottom_after_a_level_up() -> None:
+    """Peter: "Falls es ueber ein Level rausgeht, einfach dann von unten
+    ganz auffuellen." Der alte Stand liegt in einer anderen Stufe."""
+    from poe_view.ui.gem_progress import gain_span
+
+    assert gain_span((10, 0.9), _progress("11", 0.08)) == (0.0, 0.08)
+    assert gain_span((10, 0.9), _progress("11", 0.0)) is None
+
+
+def test_gain_span_is_none_without_growth_anchor_or_experience() -> None:
+    from poe_view.ui.gem_progress import gain_span
+
+    assert gain_span(None, _progress("10", 0.6)) is None
+    assert gain_span((10, 0.6), _progress("10", 0.6)) is None
+    assert gain_span((19, 0.9), _progress("20 (Max)", 1.0)) is None
+
+
+def test_the_strip_anchors_each_gem_on_first_sight(qapp) -> None:
+    """Der Anker entsteht beim ersten set_gems dieser Sitzung und bleibt
+    bei jedem weiteren stehen — auch ueber einen Charakterwechsel, die
+    Gem-ID ist kontoweit eindeutig."""
+    strip = GemProgressBar()
+    strip.set_gems([_progress("10", 0.2, "a"), _progress("5", 0.5, "b")])
+    strip.set_gems([_progress("10", 0.6, "a")])          # anderer Charakter, b fehlt
+    strip.set_gems([_progress("10", 0.7, "a"), _progress("5", 0.5, "b")])
+
+    assert strip.gain_of(_progress("10", 0.7, "a")) == (0.2, 0.7)
+    assert strip.gain_of(_progress("5", 0.5, "b")) is None   # nicht gewachsen
+
+
+def test_the_gain_is_painted_between_the_old_and_the_new_height(qapp) -> None:
+    """Gezeichnet wird das echte Widget: Zwischen alter und neuer Hoehe
+    unterscheidet sich die Pixelspalte von der eines Streifens OHNE
+    Anker, ausserhalb ist sie identisch — das Rechteck sitzt genau dort,
+    wo der Gewinn liegt, und nirgends sonst."""
+    from poe_view.ui.gem_progress import BAR_HEIGHT
+
+    def spalte(strip):
+        strip.resize(20, BAR_HEIGHT)
+        return _spalte(strip.grab().toImage())
+
+    mit = _auf_dunklem_grund(GemProgressBar())
+    mit.set_gems([_progress("10", 0.2)])
+    mit.set_gems([_progress("10", 0.6)])
+    ohne = _auf_dunklem_grund(GemProgressBar())
+    ohne.set_gems([_progress("10", 0.6)])
+
+    a, b = spalte(mit), spalte(ohne)
+    oben, unten = BAR_HEIGHT - round(BAR_HEIGHT * 0.6), BAR_HEIGHT - round(BAR_HEIGHT * 0.2)
+    assert a[oben + 1:unten] != b[oben + 1:unten]      # das Rechteck
+    assert a[:oben] == b[:oben] and a[unten:] == b[unten:]   # sonst nichts
+
+
+def test_the_tooltip_names_the_session_gain() -> None:
+    gem = _progress("10", 0.6)
+
+    assert "(+40% this session)" in gem.tooltip(0.4)
+    assert "session" not in gem.tooltip(None)

@@ -291,7 +291,10 @@ across restarts, and is never re-sorted by amount behind your back.</p>
 Read the strip as a profile of the character: the short bars are the
 gems lagging behind. Hover for the name, level and progress.</p>
 <p>The thin <b>yellow line</b> inside a bar is the progress towards the
-next level, read across the whole height of the bar.</p>
+next level, read across the whole height of the bar. The <b>translucent
+yellow block</b> hanging from it is what the gem gained since you
+started PoE-VIEW2 — it grows over the evening. When a gem levels up, the
+block starts again from the bottom. Hover a bar to read the numbers.</p>
 <p>A <b>solid bar in a vivid colour</b> — red, green, blue or white —
 means the gem is finished: level 20, or 21 if it is corrupted, or
 whatever its own maximum is. Nothing left to do there.</p>
@@ -310,9 +313,9 @@ on balance. Dying does that from act 5 onwards.</li>
 <li>A <b>dark green block behind several bars</b> means they are the
 same map: you left it and came back. Its height is the rate for the map
 as a whole, so you can see what the trip outside cost.</li>
-<li>A <b>thin red vertical line</b> marks a death, at the exact moment
-the game logged it — it can sit in the middle of a green bar, because a
-bar only shows the <i>net</i> of its stretch and a death inside a good
+<li>A <b>small red triangle at the top edge</b> marks a death, at the
+exact moment the game logged it — it can sit above a green bar, because
+a bar only shows the <i>net</i> of its stretch and a death inside a good
 run disappears in it. The line above the graph counts them: <b>☠ 2
 deaths (24 h)</b>, read from the game's own Client.txt, so it survives
 restarts. The window is a rolling 24 hours rather than "today", so a

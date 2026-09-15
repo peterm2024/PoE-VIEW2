@@ -409,3 +409,22 @@ def test_death_marks_survive_an_empty_graph() -> None:
                           deaths=[-1800.0])
     assert layout.bars == []
     assert layout.marks == pytest.approx([WIDTH * 5 / 6])
+
+
+def test_a_death_mark_hangs_from_the_top_and_leaves_the_bars_alone(qapp) -> None:
+    """Peter, 2026-09-16, zur Linie ueber die volle Hoehe aus v0.13.0:
+    "das versaut die ganze Anzeige". Jetzt ein kleines Dreieck an der
+    Oberkante: rot in den ersten Zeilen, darunter der Balken in seiner
+    eigenen Farbe."""
+    from PySide6.QtGui import QColor
+    from poe_view.ui.theme import DASH_BAD, DASH_OK
+
+    graph = XpGraph()
+    graph.resize(300, 120)
+    # Ein Balken ueber die volle Breite, der Tod mittendrin.
+    graph.set_points([_point(0, 3 * 3600, 1000.0)], 0.0, deaths=[-5400.0])
+    bild = graph.grab().toImage()
+    x = 150
+
+    assert QColor(bild.pixel(x, 1)).name() == QColor(DASH_BAD).name()
+    assert QColor(bild.pixel(x, 40)).name() == QColor(DASH_OK).name()
