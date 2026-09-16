@@ -77,7 +77,9 @@ from __future__ import annotations
 
 from typing import NamedTuple, Sequence
 
-from PySide6.QtCore import QEvent, QRectF, QSize, Qt
+from html import escape
+
+from PySide6.QtCore import QEvent, QPoint, QRectF, QSize, Qt
 from PySide6.QtGui import QColor, QPainter
 from PySide6.QtWidgets import QSizePolicy, QToolTip, QWidget
 
@@ -111,6 +113,19 @@ _XP_LINE_H = 1
 # Gewinn die Zugabe. Die Linie darüber bleibt voll gesättigt: Sie
 # markiert den aktuellen Stand, das Rechteck nur den Weg dorthin.
 _GAIN_ALPHA = 110
+
+# Der Tooltip ist seit 2026-09-16 eine Tabelle ALLER Gems, in der die
+# Zeile des Balkens unter der Maus hervorgehoben ist (Peter: "so dass man
+# auch den Namen des Gems und den aktuellen Stand lesen kann"). Bei
+# dreißig Balken nebeneinander beantwortet ein Einzel-Tooltip die Frage
+# "welches Gem ist das?" nur balkenweise; die Tabelle beantwortet sie auf
+# einen Blick, und die Hervorhebung wandert mit der Maus. Die Balken in
+# der Tabelle sind Blockzeichen — echte Rechtecke zeichnet Qts Rich Text
+# im Tooltip unsauber, Zeichen in fester Schrift sitzen zuverlässig.
+_TIP_BLOCKS = 10
+_TIP_FULL = "█"     # █
+_TIP_EMPTY = "░"    # ░
+_TIP_EMPTY_COLOR = "#666666"
 
 # Höhe des Streifens. Peter schlug 75 px vor; 60 lassen dem Graphen
 # darunter mehr Luft, ohne dass ein Drittel-Fortschritt undeutlich wird
@@ -291,6 +306,8 @@ class GemProgressBar(QWidget):
         # Balken kennt; ein Charakterwechsel löscht nichts — die Gem-ID
         # ist kontoweit eindeutig.
         self._baseline: dict[str, tuple[int, float]] = {}
+        self._hovered: int | None = None   # Zeile, die der Tooltip gerade hervorhebt
+        self.setMouseTracking(True)
         self.setFixedHeight(BAR_HEIGHT)
         # Waagerecht ``Fixed``: Die Breite ergibt sich aus der Zahl der
         # Gems, mehr Platz nützt nichts. Solange die Balken allein in
@@ -326,28 +343,91 @@ class GemProgressBar(QWidget):
     def clear(self) -> None:
         self.set_gems([])
 
-    def _gem_at(self, x: int) -> GemProgress | None:
-        index = int(x // (_BAR_W + _BAR_GAP))
-        return self._gems[index] if 0 <= index < len(self._gems) else None
-
     def gain_of(self, gem: GemProgress) -> tuple[float, float] | None:
         """Gewinn-Rechteck dieses Gems seit Sitzungsbeginn (§gain_span)."""
         return gain_span(self._baseline.get(gem.gem_id), gem)
 
+    def _gained(self, gem: GemProgress) -> float | None:
+        spanne = self.gain_of(gem)
+        return spanne[1] - spanne[0] if spanne else None
+
+    def table_html(self, hovered: int | None) -> str:
+        """Die Tabelle aller Gems für den Tooltip (§_TIP_BLOCKS): Farbpunkt,
+        Name, Stufe, Stufen-Balken (Stufe/20 in der Gem-Farbe), Fortschritt
+        zur nächsten Stufe und Sitzungsgewinn. Zeile ``hovered`` fett und
+        hinterlegt."""
+        hell = self.palette().highlight().color().name()
+        zeilen = []
+        for index, gem in enumerate(self._gems):
+            voll = round(gem.level_fill * _TIP_BLOCKS)
+            farbe = gem_colour_done(gem.colour) if gem.maxed else gem_colour(gem.colour)
+            balken = (f'<span style="font-family:monospace;color:{farbe}">'
+                      f'{_TIP_FULL * voll}</span>'
+                      f'<span style="font-family:monospace;color:{_TIP_EMPTY_COLOR}">'
+                      f'{_TIP_EMPTY * (_TIP_BLOCKS - voll)}</span>')
+            if gem.maxed:
+                stand = "max"
+            elif gem.ready:
+                stand = "ready to level up"
+            else:
+                stand = f"{gem.progress:.0%} to next"
+            gained = self._gained(gem)
+            zugabe = f"+{gained:.0%} this session" if gained else ""
+            # Geschützte Leerzeichen: Ein Rich-Text-Tooltip bekommt von Qt
+            # Zeilenumbruch, und der zerlegte "Raise Zombie" und "34% to
+            # next" auf zwei Zeilen (nativ geprüft, 2026-09-16).
+            zellen = tuple(z.replace(" ", "&nbsp;") for z in (
+                f'<span style="color:{farbe}">&#9632;</span> {escape(gem.name)}',
+                escape(gem.level), stand, zugabe))
+            zellen = zellen[:2] + (balken,) + zellen[2:]
+            if index == hovered:
+                zellen = tuple(f"<b>{z}</b>" for z in zellen)
+                attr = f' bgcolor="{hell}"'
+            else:
+                attr = ""
+            zeilen.append("<tr>" + "".join(f"<td{attr}>{z}&nbsp;&nbsp;</td>" for z in zellen)
+                          + "</tr>")
+        return '<table cellspacing="0" cellpadding="1">' + "".join(zeilen) + "</table>"
+
+    def _show_table(self, hovered: int | None) -> None:
+        """Den Tooltip an einem FESTEN Ort zeigen (unter dem Streifen),
+        damit er beim Wandern der Hervorhebung nicht mitspringt. Mit dem
+        Widget-Rechteck als Geltungsbereich bleibt er stehen, solange die
+        Maus über den Balken ist."""
+        anker = self.mapToGlobal(QPoint(0, self.height()))
+        QToolTip.showText(anker, self.table_html(hovered), self, self.rect())
+        self._hovered = hovered
+
     def event(self, event: QEvent) -> bool:
-        """Tooltip je Balken. Ohne ihn wäre der Streifen zwar hübsch, aber
-        stumm — bei dreißig Balken nebeneinander ist "welches Gem ist
-        das?" die erste Frage."""
+        """Tooltip als Tabelle aller Gems, hervorgehoben der Balken unter
+        der Maus. Ohne ihn wäre der Streifen zwar hübsch, aber stumm —
+        bei dreißig Balken nebeneinander ist "welches Gem ist das?" die
+        erste Frage."""
         if event.type() == QEvent.Type.ToolTip:
-            gem = self._gem_at(event.pos().x())
-            if gem is not None:
-                spanne = self.gain_of(gem)
-                gained = spanne[1] - spanne[0] if spanne else None
-                QToolTip.showText(event.globalPos(), gem.tooltip(gained), self)
+            if self._gems:
+                self._show_table(self._index_at(event.pos().x()))
             else:
                 QToolTip.hideText()
             return True
         return super().event(event)
+
+    def _index_at(self, x: int) -> int | None:
+        index = int(x // (_BAR_W + _BAR_GAP))
+        return index if 0 <= index < len(self._gems) else None
+
+    def mouseMoveEvent(self, event) -> None:  # noqa: N802 (Qt-Namensschema)
+        """Die Hervorhebung wandert mit der Maus, solange der Tooltip
+        steht — dafür ``setMouseTracking`` im Konstruktor, sonst kämen
+        Bewegungen nur mit gedrückter Taste an."""
+        if QToolTip.isVisible():
+            hovered = self._index_at(event.position().x())
+            if hovered != self._hovered:
+                self._show_table(hovered)
+        super().mouseMoveEvent(event)
+
+    def leaveEvent(self, event) -> None:  # noqa: N802 (Qt-Namensschema)
+        self._hovered = None
+        super().leaveEvent(event)
 
     def paintEvent(self, event) -> None:  # noqa: N802 (Qt-Namensschema)
         painter = QPainter(self)

@@ -4732,6 +4732,28 @@ lesbar bleibt; die Linie darüber bleibt voll gesättigt als scharfe
 Kante des aktuellen Stands. Der Tooltip nennt den Gewinn mit
 ("+12% this session").
 
+**Der Tooltip ist eine Tabelle ALLER Gems, die Zeile des Balkens unter
+der Maus hervorgehoben** (Peter, 2026-09-16: "die Gems mit Namen als
+Tabelle und Level-Completeness-Balken ... wenn ich mich mit der Maus
+über die einzelnen vertikalen Balken bewege, wird der entsprechende
+Gem auch im Tool-Tip hervorgehoben"). Bei dreißig Balken beantwortet
+ein Einzel-Tooltip "welches Gem ist das?" nur balkenweise; die Tabelle
+auf einen Blick. Je Zeile: Farbpunkt und Name, Stufe, Stufen-Balken
+(zehn Blockzeichen █░ nach Stufe/20 in der Gem-Farbe — echte Rechtecke
+zeichnet Qts Rich Text im Tooltip unsauber, Zeichen in fester Schrift
+sitzen zuverlässig), Fortschritt zur nächsten Stufe, Sitzungsgewinn
+(`GemProgressBar.table_html`). Die hervorgehobene Zeile ist fett und in
+der Palette-Highlight-Farbe hinterlegt. Der Tooltip steht an einem
+FESTEN Anker (unter dem Streifen) mit dem Widget-Rechteck als
+Geltungsbereich, damit er beim Wandern der Hervorhebung nicht
+mitspringt und stehen bleibt, solange die Maus über den Balken ist;
+`mouseMoveEvent` (mit `setMouseTracking`) tauscht den Text aus, sobald
+ein anderer Balken unter der Maus liegt. Zwei Dinge nur nativ zu
+sehen: Rich-Text-Tooltips bekommen von Qt Zeilenumbruch — deshalb
+geschützte Leerzeichen in allen Textzellen, sonst standen "Raise
+Zombie" und "34% to next" zweizeilig; und die Highlight-Farbe der
+Palette (blau) trägt fetten Text gut.
+
 **Stufe/20 gilt stur, auch für Gems mit kleinerer Höchststufe.** Über
 Peters 6248 Gems gezählt gibt es solche zuhauf (Portal, Quickstep,
 Convocation, Detonate Mines = 1; Empower/Enhance/Enlighten = 3; Brand

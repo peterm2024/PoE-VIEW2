@@ -496,3 +496,56 @@ def test_the_tooltip_names_the_session_gain() -> None:
 
     assert "(+40% this session)" in gem.tooltip(0.4)
     assert "session" not in gem.tooltip(None)
+
+
+# --- Tooltip als Tabelle aller Gems (2026-09-16) ------------------------ #
+
+def _strip_mit(*gems: dict) -> GemProgressBar:
+    strip = GemProgressBar()
+    strip.set_gems(gem_progress_of([_item_with(*gems)]))
+    return strip
+
+
+def test_the_table_lists_every_gem_with_its_level_bar(qapp) -> None:
+    """Peter, 2026-09-16: "die Gems mit Namen als Tabelle und
+    Level-Completeness-Balken". Zehn Bloecke je Gem, gefuellt nach
+    Stufe/20 — Stufe 10 sind fuenf volle."""
+    from poe_view.ui.gem_progress import _TIP_EMPTY, _TIP_FULL
+
+    html = _strip_mit(_gem("Fire Trap", "10", "I", 0.5),
+                      _gem("Empower", "20 (Max)", "S")).table_html(None)
+
+    assert "Fire&nbsp;Trap" in html and "Empower" in html   # geschuetzte Leerzeichen
+    assert _TIP_FULL * 5 + "</span>" in html and _TIP_EMPTY * 5 in html   # Stufe 10
+    assert _TIP_FULL * 10 in html                                        # fertig
+    assert "50%&nbsp;to&nbsp;next" in html and "max" in html
+
+
+def test_the_hovered_row_is_bold_and_highlighted(qapp) -> None:
+    """Peter: "wenn ich mich mit der Maus ueber die einzelnen vertikalen
+    Balken bewege, wird der entsprechende Gem auch im Tool-Tip
+    hervorgehoben"."""
+    strip = _strip_mit(_gem("Fire Trap", "10", "I", 0.5),
+                       _gem("Zealotry", "14", "D", 0.2))
+
+    ohne = strip.table_html(None)
+    mit = strip.table_html(1)
+
+    assert "<b>" not in ohne and "bgcolor" not in ohne
+    fire_trap, zealotry = mit.split("<tr>")[1:]
+    assert "<b>" not in fire_trap and "bgcolor" not in fire_trap
+    assert "<b>" in zealotry and zealotry.count("bgcolor") == 5   # alle fuenf Zellen
+
+
+def test_the_table_names_the_session_gain(qapp) -> None:
+    strip = GemProgressBar()
+    strip.set_gems([_progress("10", 0.2, "a")])
+    strip.set_gems([_progress("10", 0.6, "a")])
+
+    assert "+40%&nbsp;this&nbsp;session" in strip.table_html(None)
+
+
+def test_gem_names_are_html_escaped(qapp) -> None:
+    html = _strip_mit(_gem("Herald of <Ash>", "10", "I", 0.5)).table_html(None)
+
+    assert "Herald&nbsp;of&nbsp;&lt;Ash&gt;" in html

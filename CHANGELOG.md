@@ -23,6 +23,10 @@ nach [SemVer](https://semver.org/lang/de/).
   Gewinn mit ("+12% this session"). Bewusst seit Sitzungsbeginn statt
   seit dem letzten Abruf: Je Abruf wäre der Sprung im Median ein
   Prozent, also unsichtbar.
+- **Der Tooltip der Gem-Balken ist jetzt eine Tabelle aller Gems** —
+  Name, Stufe, Stufen-Balken, Fortschritt, Sitzungsgewinn —, in der die
+  Zeile des Balkens unter der Maus hervorgehoben ist; beim Wandern über
+  die Balken wandert die Hervorhebung mit.
 
 ## [0.13.0] - 2026-09-14
 

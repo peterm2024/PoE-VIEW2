@@ -294,7 +294,10 @@ gems lagging behind. Hover for the name, level and progress.</p>
 next level, read across the whole height of the bar. The <b>translucent
 yellow block</b> hanging from it is what the gem gained since you
 started PoE-VIEW2 — it grows over the evening. When a gem levels up, the
-block starts again from the bottom. Hover a bar to read the numbers.</p>
+block starts again from the bottom. Hover a bar and a table of all
+your gems opens — name, level, a level bar, progress and the session's
+gain — with the gem under the mouse highlighted; move along the bars
+and the highlight follows.</p>
 <p>A <b>solid bar in a vivid colour</b> — red, green, blue or white —
 means the gem is finished: level 20, or 21 if it is corrupted, or
 whatever its own maximum is. Nothing left to do there.</p>

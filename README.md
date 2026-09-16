@@ -237,7 +237,8 @@ with the tiers you still miss left empty.
   lagging behind. A thin yellow line inside each bar is the progress
   towards the next level, and the translucent yellow block below it is
   what the gem gained since the program started — after a level-up it
-  starts again from the bottom. A solid bar in a vivid colour marks a finished
+  starts again from the bottom. Hovering a bar opens a table of all
+  gems with the one under the mouse highlighted. A solid bar in a vivid colour marks a finished
   gem (level 20, or 21 corrupted). A yellow cap means the opposite: the
   bar is full but the gem is below its maximum — gems never level up on
   their own, so that is character power waiting to be claimed.
