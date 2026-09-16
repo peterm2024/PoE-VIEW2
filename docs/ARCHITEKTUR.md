@@ -4743,16 +4743,33 @@ auf einen Blick. Je Zeile: Farbpunkt und Name, Stufe, Stufen-Balken
 zeichnet Qts Rich Text im Tooltip unsauber, Zeichen in fester Schrift
 sitzen zuverlässig), Fortschritt zur nächsten Stufe, Sitzungsgewinn
 (`GemProgressBar.table_html`). Die hervorgehobene Zeile ist fett und in
-der Palette-Highlight-Farbe hinterlegt. Der Tooltip steht an einem
-FESTEN Anker (unter dem Streifen) mit dem Widget-Rechteck als
-Geltungsbereich, damit er beim Wandern der Hervorhebung nicht
-mitspringt und stehen bleibt, solange die Maus über den Balken ist;
-`mouseMoveEvent` (mit `setMouseTracking`) tauscht den Text aus, sobald
-ein anderer Balken unter der Maus liegt. Zwei Dinge nur nativ zu
-sehen: Rich-Text-Tooltips bekommen von Qt Zeilenumbruch — deshalb
-geschützte Leerzeichen in allen Textzellen, sonst standen "Raise
-Zombie" und "34% to next" zweizeilig; und die Highlight-Farbe der
-Palette (blau) trägt fetten Text gut.
+der Palette-Highlight-Farbe hinterlegt.
+
+**Kein `QToolTip`, sondern ein eigenes Fenster (`_GemTable`).** Die
+erste Fassung lief über `QToolTip.showText` und verschwand bei Peter
+sofort wieder: Bei dreißig Gems ist die Tabelle rund 500 px hoch,
+passt nicht mehr UNTER den Streifen, und Qt schiebt sie darüber —
+genau unter die Maus. Der Streifen bekommt ein Leave, Qts
+Tooltip-Mechanik blendet aus. Mit sechs Gems im Test passte sie
+darunter, dort fiel es nicht auf. `_GemTable` ist ein
+`Qt.ToolTip`-Fenster mit `WindowTransparentForInput`: Es kann unter
+der Maus liegen, ohne dem Streifen die Maus zu nehmen. Sichtbarkeit
+steuert allein der Streifen — Erscheinen beim `QEvent.ToolTip` (Qts
+Verweil-Verzögerung bleibt), Textwechsel in `mouseMoveEvent` (mit
+`setMouseTracking`), Verschwinden bei `leaveEvent`/`hideEvent` und
+über einen Anwendungs-Eventfilter bei Klick, Rad und Fensterwechsel
+(dieselben Anlässe wie bei Qts Tooltips). Platziert wird nur beim
+Erscheinen, bündig mit dem linken Rand des Streifens, darunter oder —
+wenn dort kein Platz ist — darüber; beim Wandern der Hervorhebung
+bleibt die Tabelle stehen. Aussehen wie ein Tooltip: Palette und
+Schrift von `QToolTip`, Rahmen per `PE_PanelTipLabel`.
+
+Zwei Dinge nur nativ zu sehen: Rich-Text-Tooltips und -Labels
+brechen um — deshalb geschützte Leerzeichen in allen Textzellen, sonst
+standen "Raise Zombie" und "34% to next" zweizeilig (und NUR im Text:
+Die erste Ersetzung traf auch das Leerzeichen im `<span style`-Tag des
+Farbpunkts, der dann grau blieb). Und die Highlight-Farbe der Palette
+(blau) trägt fetten Text gut.
 
 **Stufe/20 gilt stur, auch für Gems mit kleinerer Höchststufe.** Über
 Peters 6248 Gems gezählt gibt es solche zuhauf (Portal, Quickstep,

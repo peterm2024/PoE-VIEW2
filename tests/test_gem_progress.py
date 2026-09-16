@@ -11,6 +11,7 @@ from poe_view.api.models import Item
 from poe_view.ui.gem_progress import (GemProgressBar, gem_colour,
                                       gem_progress_of)
 from poe_view.ui.theme import GEM_COLORS, GEM_COLOR_OTHER
+from PySide6.QtCore import Qt
 
 
 def _item_with(*gems: dict) -> Item:
@@ -549,3 +550,37 @@ def test_gem_names_are_html_escaped(qapp) -> None:
     html = _strip_mit(_gem("Herald of <Ash>", "10", "I", 0.5)).table_html(None)
 
     assert "Herald&nbsp;of&nbsp;&lt;Ash&gt;" in html
+
+
+def test_the_colour_dot_keeps_its_span_intact(qapp) -> None:
+    """Im Bild gefunden: Die geschuetzten Leerzeichen hatten auch das
+    Leerzeichen IM span-Tag ersetzt, der Farbpunkt blieb grau."""
+    html = _strip_mit(_gem("Fire Trap", "10", "I", 0.5)).table_html(None)
+
+    assert f'<span style="color:{gem_colour("I")}">&#9632;</span>' in html
+    assert "<span&nbsp;" not in html
+
+
+def test_the_table_stays_while_the_mouse_walks_along_the_bars(qapp) -> None:
+    """Peters Fund (2026-09-16): "Die Tooltip-Tabelle verschwindet
+    leider sofort wieder" — QToolTip schob die 500-px-Tabelle ueber den
+    Streifen unter die Maus, Leave, weg. Jetzt ein eigenes, fuer
+    Eingaben durchsichtiges Fenster: Erscheint beim Tooltip-Anlass,
+    folgt der Maus, geht erst beim Verlassen des Streifens."""
+    from PySide6.QtCore import QEvent, QPoint, QPointF
+    from PySide6.QtGui import QHelpEvent, QMouseEvent
+
+    strip = _strip_mit(_gem("Fire Trap", "10", "I", 0.5), _gem("Zealotry", "14", "D", 0.2))
+    strip.show()
+    assert not strip.table_visible()
+
+    qapp.sendEvent(strip, QHelpEvent(QEvent.Type.ToolTip, QPoint(2, 30), strip.mapToGlobal(QPoint(2, 30))))
+    assert strip.table_visible() and strip._hovered == 0
+
+    zug = QMouseEvent(QEvent.Type.MouseMove, QPointF(9, 30), QPointF(9, 30),
+                      Qt.MouseButton.NoButton, Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier)
+    qapp.sendEvent(strip, zug)
+    assert strip.table_visible() and strip._hovered == 1
+
+    qapp.sendEvent(strip, QEvent(QEvent.Type.Leave))
+    assert not strip.table_visible()

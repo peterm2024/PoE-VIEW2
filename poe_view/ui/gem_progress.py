@@ -79,9 +79,11 @@ from typing import NamedTuple, Sequence
 
 from html import escape
 
-from PySide6.QtCore import QEvent, QPoint, QRectF, QSize, Qt
+from PySide6.QtCore import QEvent, QObject, QPoint, QRectF, QSize, Qt
 from PySide6.QtGui import QColor, QPainter
-from PySide6.QtWidgets import QSizePolicy, QToolTip, QWidget
+from PySide6.QtWidgets import (QApplication, QLabel, QSizePolicy, QStyle,
+                               QStyleOptionFrame, QStylePainter, QToolTip,
+                               QWidget)
 
 from poe_view.api.models import Item
 from poe_view.ui.theme import (DASH_WARN, GEM_COLOR_DONE_OTHER,
@@ -126,6 +128,9 @@ _TIP_BLOCKS = 10
 _TIP_FULL = "█"     # █
 _TIP_EMPTY = "░"    # ░
 _TIP_EMPTY_COLOR = "#666666"
+
+# Abstand der Tabelle zum Streifen (§_GemTable.place).
+_TABLE_GAP = 8
 
 # Höhe des Streifens. Peter schlug 75 px vor; 60 lassen dem Graphen
 # darunter mehr Luft, ohne dass ein Drittel-Fortschritt undeutlich wird
@@ -296,6 +301,59 @@ def gem_colour_done(colour: str) -> str:
     return GEM_COLORS_DONE.get(colour, GEM_COLOR_DONE_OTHER)
 
 
+class _GemTable(QLabel):
+    """Die Gem-Tabelle als eigenes Fenster statt als ``QToolTip``.
+
+    Die erste Fassung (2026-09-16, wenige Stunden alt) lief über
+    ``QToolTip.showText`` und verschwand bei Peter sofort wieder: Bei
+    dreißig Gems ist die Tabelle rund 500 px hoch, passt nicht mehr
+    UNTER den Streifen, und Qt schiebt sie darüber — genau unter die
+    Maus. Der Streifen bekommt ein Leave, und Qts Tooltip-Mechanik
+    blendet den Tipp aus. Mit sechs Gems im Test passte sie darunter,
+    deshalb fiel es dort nicht auf.
+
+    Dieses Fenster ist ``WindowTransparentForInput``: Es kann unter der
+    Maus liegen, ohne dem Streifen die Maus zu nehmen — Bewegungen gehen
+    durch das Fenster hindurch, Enter/Leave des Streifens bleiben
+    korrekt. Aussehen wie ein Tooltip (Palette, Schrift und Rahmen aus
+    dem Stil), Sichtbarkeit steuert allein der Streifen."""
+
+    def __init__(self, owner: QWidget) -> None:
+        super().__init__(owner, Qt.WindowType.ToolTip | Qt.WindowType.FramelessWindowHint
+                         | Qt.WindowType.WindowTransparentForInput
+                         | Qt.WindowType.WindowDoesNotAcceptFocus)
+        self.setTextFormat(Qt.TextFormat.RichText)
+        self.setForegroundRole(self.palette().ColorRole.ToolTipText)
+        self.setBackgroundRole(self.palette().ColorRole.ToolTipBase)
+        self.setPalette(QToolTip.palette())
+        self.setFont(QToolTip.font())
+        self.setMargin(self.style().pixelMetric(
+            QStyle.PixelMetric.PM_ToolTipLabelFrameWidth, None, self) + 2)
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
+
+    def paintEvent(self, event) -> None:  # noqa: N802 (Qt-Namensschema)
+        # Derselbe Rahmen, den Qts eigener Tooltip zeichnet.
+        painter = QStylePainter(self)
+        option = QStyleOptionFrame()
+        option.initFrom(self)
+        painter.drawPrimitive(QStyle.PrimitiveElement.PE_PanelTipLabel, option)
+        painter.end()
+        super().paintEvent(event)
+
+    def place(self, owner: QWidget) -> None:
+        """Unter den Streifen; passt es dort nicht auf den Bildschirm,
+        darüber. Beides bündig mit dem linken Rand des Streifens, damit
+        die Tabelle beim Wandern der Hervorhebung nicht springt."""
+        self.adjustSize()
+        schirm = owner.screen().availableGeometry()
+        oben_links = owner.mapToGlobal(QPoint(0, 0))
+        unten = oben_links.y() + owner.height() + _TABLE_GAP
+        if unten + self.height() > schirm.bottom():
+            unten = oben_links.y() - _TABLE_GAP - self.height()
+        x = min(max(oben_links.x(), schirm.left()), schirm.right() - self.width())
+        self.move(x, max(unten, schirm.top()))
+
+
 class GemProgressBar(QWidget):
     def __init__(self) -> None:
         super().__init__()
@@ -306,7 +364,8 @@ class GemProgressBar(QWidget):
         # Balken kennt; ein Charakterwechsel löscht nichts — die Gem-ID
         # ist kontoweit eindeutig.
         self._baseline: dict[str, tuple[int, float]] = {}
-        self._hovered: int | None = None   # Zeile, die der Tooltip gerade hervorhebt
+        self._hovered: int | None = None   # Zeile, die die Tabelle gerade hervorhebt
+        self._table: _GemTable | None = None   # erst beim ersten Zeigen gebaut
         self.setMouseTracking(True)
         self.setFixedHeight(BAR_HEIGHT)
         # Waagerecht ``Fixed``: Die Breite ergibt sich aus der Zahl der
@@ -339,6 +398,9 @@ class GemProgressBar(QWidget):
         self.setVisible(bool(self._gems))
         self.updateGeometry()  # neue Breite anmelden, sonst bleibt die alte
         self.update()
+        if self.table_visible():
+            self._show_table(self._hovered if self._hovered is not None
+                             and self._hovered < len(self._gems) else None)
 
     def clear(self) -> None:
         self.set_gems([])
@@ -376,10 +438,13 @@ class GemProgressBar(QWidget):
             # Geschützte Leerzeichen: Ein Rich-Text-Tooltip bekommt von Qt
             # Zeilenumbruch, und der zerlegte "Raise Zombie" und "34% to
             # next" auf zwei Zeilen (nativ geprüft, 2026-09-16).
-            zellen = tuple(z.replace(" ", "&nbsp;") for z in (
-                f'<span style="color:{farbe}">&#9632;</span> {escape(gem.name)}',
-                escape(gem.level), stand, zugabe))
-            zellen = zellen[:2] + (balken,) + zellen[2:]
+            # Ersetzt wird nur im Text — nicht im Farbpunkt-Tag, dessen
+            # eigenes Leerzeichen (``<span style``) sonst mit zerfiele
+            # und den Punkt grau ließe (im Bild gefunden, 2026-09-16).
+            name, stufe, stand, zugabe = (z.replace(" ", "&nbsp;") for z in (
+                escape(gem.name), escape(gem.level), stand, zugabe))
+            zellen = (f'<span style="color:{farbe}">&#9632;</span>&nbsp;{name}',
+                      stufe, balken, stand, zugabe)
             if index == hovered:
                 zellen = tuple(f"<b>{z}</b>" for z in zellen)
                 attr = f' bgcolor="{hell}"'
@@ -390,44 +455,74 @@ class GemProgressBar(QWidget):
         return '<table cellspacing="0" cellpadding="1">' + "".join(zeilen) + "</table>"
 
     def _show_table(self, hovered: int | None) -> None:
-        """Den Tooltip an einem FESTEN Ort zeigen (unter dem Streifen),
-        damit er beim Wandern der Hervorhebung nicht mitspringt. Mit dem
-        Widget-Rechteck als Geltungsbereich bleibt er stehen, solange die
-        Maus über den Balken ist."""
-        anker = self.mapToGlobal(QPoint(0, self.height()))
-        QToolTip.showText(anker, self.table_html(hovered), self, self.rect())
+        """Die Tabelle zeigen bzw. ihren Text austauschen. Platziert wird
+        nur beim Erscheinen — beim Wandern der Hervorhebung bleibt sie
+        stehen, sonst spränge sie mit jeder fett gesetzten Zeile."""
+        if self._table is None:
+            self._table = _GemTable(self)
+        self._table.setText(self.table_html(hovered))
         self._hovered = hovered
+        if not self._table.isVisible():
+            self._table.place(self)
+            self._table.show()
+            # Klick irgendwo, Rad, Fensterwechsel: Tabelle weg — dieselben
+            # Anlässe, bei denen Qt seine Tooltips schließt. Der Filter
+            # hängt NUR, solange die Tabelle steht: Ein dauerhafter Filter
+            # je Streifen summierte sich in der Testsuite (hunderte
+            # Hauptfenster) zu einem Lauf, der doppelt so lange dauerte.
+            QApplication.instance().installEventFilter(self)
+        else:
+            self._table.adjustSize()
+
+    def _hide_table(self) -> None:
+        self._hovered = None
+        if self._table is not None and self._table.isVisible():
+            self._table.hide()
+            QApplication.instance().removeEventFilter(self)
+
+    def table_visible(self) -> bool:
+        return self._table is not None and self._table.isVisible()
 
     def event(self, event: QEvent) -> bool:
-        """Tooltip als Tabelle aller Gems, hervorgehoben der Balken unter
-        der Maus. Ohne ihn wäre der Streifen zwar hübsch, aber stumm —
-        bei dreißig Balken nebeneinander ist "welches Gem ist das?" die
-        erste Frage."""
+        """Beim Verweilen (Qts Tooltip-Anlass, mit dessen Verzögerung) die
+        Tabelle aller Gems öffnen, hervorgehoben der Balken unter der
+        Maus. Ohne sie wäre der Streifen zwar hübsch, aber stumm — bei
+        dreißig Balken nebeneinander ist "welches Gem ist das?" die erste
+        Frage."""
         if event.type() == QEvent.Type.ToolTip:
             if self._gems:
                 self._show_table(self._index_at(event.pos().x()))
-            else:
-                QToolTip.hideText()
             return True
         return super().event(event)
+
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:  # noqa: N802
+        if self.table_visible() and event.type() in (
+                QEvent.Type.MouseButtonPress, QEvent.Type.Wheel,
+                QEvent.Type.WindowDeactivate):
+            self._hide_table()
+        return False
 
     def _index_at(self, x: int) -> int | None:
         index = int(x // (_BAR_W + _BAR_GAP))
         return index if 0 <= index < len(self._gems) else None
 
     def mouseMoveEvent(self, event) -> None:  # noqa: N802 (Qt-Namensschema)
-        """Die Hervorhebung wandert mit der Maus, solange der Tooltip
+        """Die Hervorhebung wandert mit der Maus, solange die Tabelle
         steht — dafür ``setMouseTracking`` im Konstruktor, sonst kämen
         Bewegungen nur mit gedrückter Taste an."""
-        if QToolTip.isVisible():
+        if self.table_visible():
             hovered = self._index_at(event.position().x())
             if hovered != self._hovered:
                 self._show_table(hovered)
         super().mouseMoveEvent(event)
 
     def leaveEvent(self, event) -> None:  # noqa: N802 (Qt-Namensschema)
-        self._hovered = None
+        self._hide_table()
         super().leaveEvent(event)
+
+    def hideEvent(self, event) -> None:  # noqa: N802 (Qt-Namensschema)
+        self._hide_table()
+        super().hideEvent(event)
 
     def paintEvent(self, event) -> None:  # noqa: N802 (Qt-Namensschema)
         painter = QPainter(self)
