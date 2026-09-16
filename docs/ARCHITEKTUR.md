@@ -4436,6 +4436,23 @@ Verschiebung wie beim Zeitstempel, und die Stelle, an der man sich
 vertut. Es ist eine DEBUG-Zeile: Fehlt sie, bleibt die Kennung leer und
 nichts wird gruppiert. Lieber nicht gruppieren als falsch gruppieren.
 
+**Verluste bekommen höchstens ein Viertel der Höhe (`NEGATIVE_SHARE`,
+2026-09-16).** Peter zu seinem Bild: "Durch die Länge dieser Striche
+wird der Graph ganz nach oben gedrückt und unleserlich." Ein Tod in
+einem 28-Sekunden-Fenster ergab −584 M/h gegen 86 M/h Spitze — der eine
+rote Balken nahm 87 % der Höhe, der ganze Verlauf saß auf einem
+schmalen Streifen darüber. Eine Verlust-RATE aus einem kurzen Fenster
+ist ohnehin ein Messartefakt: Die Strafe ist ein fester Betrag, die Rate
+hängt nur davon ab, wie kurz das Fenster war. Der Maßstab folgt deshalb
+dem Gewinn (Spitze = oberer Rand des Gewinn-Teils); passt das Tal in
+sein Viertel, bleibt alles wie zuvor, sonst endet der Balken am unteren
+Rand und trägt eine Bruchmarke (`Layout.clipped`, ein Spalt in
+Grundfarbe 4 px über dem Ende — das übliche Zeichen für "reicht weiter
+als gezeigt"). Die Schnitt-Linie rechnet mit demselben Maßstab. Mit
+einem halben Pixel Toleranz beim Kappen: Ohne Kappung endet das tiefste
+Tal rechnerisch GENAU am Rand, ein Rundungsrest machte daraus in der
+Gegenprobe eine falsche Bruchmarke.
+
 #### 4.40.1 Der Zeitraum, für den der Schnitt gilt (2026-08-23)
 
 Peter, mit einem Bild seines Leveling-Feldes: "Wenn ich mir den

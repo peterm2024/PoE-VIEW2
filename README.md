@@ -206,7 +206,8 @@ with the tiers you still miss left empty.
   map and coming back puts both visits on one dark block showing the
   rate for the map as a whole, so the cost of the trip outside is
   visible. An area that cost experience on balance hangs below the line
-  in red. A line across the graph marks your average rate and says which
+  in red, capped at a quarter of the height so one death cannot squash
+  the rest. A line across the graph marks your average rate and says which
   stretch it covers: it begins at your last level-up, or after a break of
   more than half an hour, whichever came later, and is drawn solid and
   green over exactly that stretch — dashed before it, where it is only a

@@ -8,9 +8,14 @@ nach [SemVer](https://semver.org/lang/de/).
 
 ### Geändert
 
+- **Verluste im XP-Graphen bekommen höchstens ein Viertel der Höhe.**
+  Ein Tod in einem kurzen Messfenster ergibt eine riesige
+  Verlust-*Rate* (−584 M/h aus 28 Sekunden gegen 86 M/h Spitze) und
+  drückte den ganzen Verlauf auf einen schmalen Streifen oben zusammen.
+  Der Maßstab folgt jetzt dem Gewinn; ein Verlust-Balken, der tiefer
+  reichte, endet am unteren Rand mit einer kleinen Bruchmarke.
 - **Todes-Marker im XP-Graphen sind jetzt kleine rote Dreiecke an der
-  Oberkante** statt Linien über die volle Höhe — die zerschnitten den
-  Graphen in Stücke.
+  Oberkante** statt Linien über die volle Höhe.
 - **Gem-Balken zeigen den Gewinn der Sitzung als gelbes Rechteck** unter
   der Fortschrittslinie: von dem Stand, den das Gem beim Start von
   PoE-VIEW2 hatte, bis zum aktuellen. Steigt ein Gem eine Stufe, füllt

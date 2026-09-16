@@ -309,7 +309,10 @@ different from a quick trial.</li>
 <li><b>Gaps are real.</b> Where nothing is drawn, no experience was
 made — town, stash, a break.</li>
 <li>A <b>red bar below the line</b> is an area that cost you experience
-on balance. Dying does that from act 5 onwards.</li>
+on balance. Dying does that from act 5 onwards. Losses get at most a
+quarter of the height — a death in a short stretch makes for a huge
+<i>rate</i> that would squash everything else — so a bar that would
+reach deeper is cut off at the bottom with a small gap.</li>
 <li>A <b>dark green block behind several bars</b> means they are the
 same map: you left it and came back. Its height is the rate for the map
 as a whole, so you can see what the trip outside cost.</li>

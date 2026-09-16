@@ -90,6 +90,24 @@ GRAPH_SPAN_S = 3 * 3600.0
 _MIN_BAR_W = 2.0
 _MIN_BAR_H = 1.0
 
+# Höchstens dieser Anteil der Plothöhe gehört den Verlusten. Peter,
+# 2026-09-16, zu seinem Bild: "Durch die Länge dieser Striche wird der
+# Graph ganz nach oben gedrückt und unleserlich." Ein Tod in einem
+# 28-Sekunden-Fenster ergab −584 M/h gegen 86 M/h Spitze — der eine
+# rote Balken nahm 87 % der Höhe, der ganze Verlauf saß auf einem
+# schmalen Streifen darüber. Eine Verlust-RATE aus einem kurzen Fenster
+# ist ohnehin ein Artefakt der Messung (die Strafe ist ein fester Betrag,
+# die Rate hängt nur davon ab, wie kurz das Fenster war); mehr als ein
+# Viertel der Höhe muss sie nicht bekommen. Was nicht hineinpasst, wird
+# gekappt und trägt eine Bruchmarke (``Layout.clipped``).
+NEGATIVE_SHARE = 0.25
+
+# Die Bruchmarke eines gekappten Balkens: ein Spalt in Hintergrundfarbe
+# kurz über dem unteren Rand — das übliche Zeichen für "hier geht es
+# weiter, als gezeigt".
+_CLIP_GAP_Y = 4.0
+_CLIP_GAP_H = 2.0
+
 # Untergrenze für die Höhe des Graphen. Darunter lohnt die Zeichnung
 # nicht mehr — das Leveling-Feld gibt bei der festen Panelhöhe aus §4.39
 # rund 180 px her, der Text darüber nimmt vier Zeilen.
@@ -156,6 +174,10 @@ class Layout:
     # ablesbar — ein Tod in einem langen Abschnitt verschwindet im Netto
     # (real: Tod 19:39:09 in einem GRÜNEN 11,5-Minuten-Balken, 2026-09-13).
     marks: list[float] = field(default_factory=list)
+    # Indizes in ``bars``, deren Verlust länger wäre, als der Verlust-
+    # Bereich hergibt (§NEGATIVE_SHARE) — sie enden am unteren Rand und
+    # bekommen eine Bruchmarke.
+    clipped: list[int] = field(default_factory=list)
 
 
 def combined_rate(points: Sequence[XpPoint]) -> float:
@@ -283,7 +305,9 @@ def graph_layout(points: Sequence[XpPoint], now: float, width: float, height: fl
     Obergrenze gibt es nicht, weil die sinnvolle Größenordnung zwischen
     einem Charakter in Akt 2 und einem in den Maps um Zehnerpotenzen
     auseinanderliegt. Negative Raten (ab Akt 5 kostet der Tod Erfahrung)
-    hängen unter der Null-Linie, statt herausgefiltert zu werden.
+    hängen unter der Null-Linie, statt herausgefiltert zu werden — aber
+    höchstens ``NEGATIVE_SHARE`` der Höhe tief: Der Maßstab kommt vom
+    Gewinn, ein Verlust, der tiefer reichte, wird gekappt (``clipped``).
 
     ``deaths`` sind Todes-Zeitpunkte auf derselben Uhr wie ``now``
     (``time.monotonic()``, der Aufrufer rechnet die Wanduhr-Zeiten aus der
@@ -300,7 +324,15 @@ def graph_layout(points: Sequence[XpPoint], now: float, width: float, height: fl
     peak = max(0.0, max(p.rate for p in shown))
     trough = min(0.0, min(p.rate for p in shown))
     spread = (peak - trough) or 1.0
+    # Pixel je Rate. Normalfall: Spitze bis Tal füllen die Höhe. Nimmt
+    # der Verlust dabei mehr als NEGATIVE_SHARE, bekommt er genau diesen
+    # Anteil, der Gewinn den Rest — und der Maßstab folgt dem Gewinn.
+    scale = height / spread
     zero_y = height * peak / spread
+    if peak > 0 and height - zero_y > height * NEGATIVE_SHARE:
+        zero_y = height * (1.0 - NEGATIVE_SHARE)
+        scale = zero_y / peak
+    verlust_tiefe = height - zero_y
 
     def spanne(point: XpPoint) -> tuple[float, float]:
         """Anfang und Ende eines Abschnitts in Widget-Koordinaten."""
@@ -309,10 +341,17 @@ def graph_layout(points: Sequence[XpPoint], now: float, width: float, height: fl
         return max(0.0, anfang), ende
 
     bars: list[tuple[float, float, float, float, float]] = []
+    clipped: list[int] = []
     for point in shown:
         x, end = spanne(point)
         w = max(end - x, _MIN_BAR_W)
-        h = max(abs(point.rate) / spread * height, _MIN_BAR_H)
+        h = max(abs(point.rate) * scale, _MIN_BAR_H)
+        # Mit einem halben Pixel Luft: Ohne Kappung endet das tiefste Tal
+        # rechnerisch GENAU am Rand, und ein Rundungsrest darf daraus
+        # keine Bruchmarke machen.
+        if point.rate < 0 and h > verlust_tiefe + 0.5:
+            h = verlust_tiefe
+            clipped.append(len(bars))
         bars.append((x, zero_y - h if point.rate >= 0 else zero_y, w, h, point.rate))
 
     # Flächen hinter den Balken: nur, wo wirklich mehrere Abschnitte zu
@@ -325,7 +364,9 @@ def graph_layout(points: Sequence[XpPoint], now: float, width: float, height: fl
         rate = combined_rate(gruppe)
         x, _ = spanne(gruppe[0])
         _, end = spanne(gruppe[-1])
-        h = max(abs(rate) / spread * height, _MIN_BAR_H)
+        h = max(abs(rate) * scale, _MIN_BAR_H)
+        if rate < 0:
+            h = min(h, verlust_tiefe)
         groups.append((x, zero_y - h if rate >= 0 else zero_y, max(end - x, _MIN_BAR_W), h))
 
     fenster = average_window(shown, now, span_s)
@@ -336,8 +377,8 @@ def graph_layout(points: Sequence[XpPoint], now: float, width: float, height: fl
     beginn = fenster[0].at - max(fenster[0].seconds, 0.0) if fenster else now
     average_x = max(0.0, min(width, width - (now - beginn) / span_s * width))
     return Layout(bars, zero_y, peak, trough, groups,
-                  zero_y - average / spread * height, average,
-                  average_x, max(0.0, now - beginn), marks=marks)
+                  zero_y - average * scale, average,
+                  average_x, max(0.0, now - beginn), marks=marks, clipped=clipped)
 
 
 def axis_label(rate: float) -> str:
@@ -407,12 +448,17 @@ class XpGraph(QWidget):
             for x, y, w, h in layout.groups:
                 painter.fillRect(QRectF(x, y, w, h), QColor(_GROUP_COLOR))
 
-            for x, y, w, h, rate in layout.bars:
+            for index, (x, y, w, h, rate) in enumerate(layout.bars):
                 # Grün nach oben, Rot nach unten: Ein Abschnitt, in dem
                 # unterm Strich Erfahrung verloren ging (Tod ab Akt 5),
                 # soll nicht wie ein magerer Gewinn aussehen.
                 painter.fillRect(QRectF(x, y, w, h),
                                  QColor(DASH_OK if rate >= 0 else DASH_BAD))
+                if index in layout.clipped:
+                    # Gekappt (§NEGATIVE_SHARE): ein Spalt in Grundfarbe
+                    # kurz über dem Ende sagt "reicht weiter als gezeigt".
+                    painter.fillRect(QRectF(x, y + h - _CLIP_GAP_Y, w, _CLIP_GAP_H),
+                                     self.palette().window().color())
 
             # Die Gesamtrate über alles Sichtbare als gestrichelte Linie.
             # Sie steht ruhig, während die einzelnen Abschnitte springen,

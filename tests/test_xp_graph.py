@@ -75,11 +75,11 @@ def test_a_deadly_section_hangs_below_the_zero_line() -> None:
     """Ab Akt 5 kostet der Tod Erfahrung. Ein Abschnitt mit Verlust darf
     nicht wie ein magerer Gewinn aussehen (dieselbe Entscheidung wie bei
     ``_format_xp_rate``, das das Vorzeichen ebenfalls stehen laesst)."""
-    layout = graph_layout([_point(30, 600, 100.0), _point(5, 600, -50.0)],
+    layout = graph_layout([_point(30, 600, 100.0), _point(5, 600, -25.0)],
                           0.0, WIDTH, HEIGHT)
     gewinn, verlust = layout.bars
 
-    assert layout.zero_y == pytest.approx(HEIGHT * 100 / 150)
+    assert layout.zero_y == pytest.approx(HEIGHT * 100 / 125)   # Verlust unter der Kappung
     assert gewinn[1] + gewinn[3] == pytest.approx(layout.zero_y)   # endet auf der Null-Linie
     assert verlust[1] == pytest.approx(layout.zero_y)              # beginnt dort und faellt
 
@@ -428,3 +428,61 @@ def test_a_death_mark_hangs_from_the_top_and_leaves_the_bars_alone(qapp) -> None
 
     assert QColor(bild.pixel(x, 1)).name() == QColor(DASH_BAD).name()
     assert QColor(bild.pixel(x, 40)).name() == QColor(DASH_OK).name()
+
+
+# --- Verluste bekommen hoechstens ein Viertel der Hoehe (2026-09-16) --- #
+
+def test_a_huge_loss_is_capped_and_marked_as_clipped() -> None:
+    """Peter, 2026-09-16: "Durch die Laenge dieser Striche wird der Graph
+    ganz nach oben gedrueckt und unleserlich." Ein Tod in einem
+    28-Sekunden-Fenster: -584M/h gegen 86M/h Spitze. Der Verlust bekommt
+    hoechstens NEGATIVE_SHARE der Hoehe, der Massstab folgt der Spitze."""
+    from poe_view.ui.xp_graph import NEGATIVE_SHARE
+
+    layout = graph_layout([_point(30, 600, 86e6), _point(5, 28, -584e6)],
+                          0.0, WIDTH, HEIGHT)
+    gewinn, verlust = layout.bars
+
+    assert layout.zero_y == pytest.approx(HEIGHT * (1 - NEGATIVE_SHARE))
+    assert gewinn[3] == pytest.approx(layout.zero_y)          # Spitze fuellt den Gewinn-Teil
+    assert verlust[1] + verlust[3] == pytest.approx(HEIGHT)   # endet am unteren Rand
+    assert layout.clipped == [1]
+
+
+def test_a_loss_within_the_share_is_not_clipped() -> None:
+    layout = graph_layout([_point(30, 600, 100.0), _point(5, 600, -20.0)],
+                          0.0, WIDTH, HEIGHT)
+
+    assert layout.clipped == []
+    assert layout.zero_y == pytest.approx(HEIGHT * 100 / 120)
+
+
+def test_the_average_line_follows_the_capped_scale() -> None:
+    """Der Schnitt liegt auf demselben Massstab wie die Balken — sonst
+    stuende die Linie nach der Kappung an einer falschen Hoehe."""
+    layout = graph_layout([_point(30, 600, 86e6), _point(5, 28, -584e6)],
+                          0.0, WIDTH, HEIGHT)
+    scale = layout.zero_y / 86e6
+
+    assert layout.average_y == pytest.approx(layout.zero_y - layout.average * scale)
+
+
+def test_a_clipped_bar_carries_a_gap_near_its_end(qapp) -> None:
+    """Die Bruchmarke: kurz ueber dem unteren Rand ein Spalt in
+    Grundfarbe — der Balken ist sichtbar gekappt, nicht bloss kurz."""
+    from PySide6.QtGui import QColor
+    from poe_view.ui.theme import DASH_BAD
+
+    graph = XpGraph()
+    graph.resize(300, 120)
+    graph.set_points([_point(150, 600, 86e6), _point(0, 3600, -584e6)], 0.0)
+    bild = graph.grab().toImage()
+    x = 250
+    rot = QColor(DASH_BAD).name()
+    spalte = [QColor(bild.pixel(x, y)).name() == rot for y in range(bild.height())]
+    ende = max(y for y, ist_rot in enumerate(spalte) if ist_rot)   # unterstes Rot
+
+    # Ueber dem Ende: erst Rot, dann der Spalt, darueber wieder Rot.
+    assert spalte[ende] and spalte[ende - 1]
+    assert not all(spalte[ende - 6:ende])                          # der Spalt
+    assert spalte[ende - 8]
