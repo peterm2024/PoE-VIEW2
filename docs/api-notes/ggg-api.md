@@ -130,6 +130,42 @@ jederzeit über den Rohdaten-Abzug im Konto-Menü (ARCHITEKTUR.md §4.43),
 der die Kontrollabrufe automatisch mitmacht und sein Urteil oben in den
 Text schreibt.
 
+## Was die API nicht liefert
+
+**Das Map Device.** Peter, 2026-09-23: "Mir ist gerade aufgefallen, dass
+das Inventar direkt am Map-Device nicht berücksichtigt wird." Es gibt
+dafür keine Daten, und zwar dreifach belegt (2026-09-23):
+
+- Über 17 abgerufene Charaktere kommen genau diese `inventoryId`-Werte
+  vor: `MainInventory`, `Stash1`, `Flask`, `PassiveJewels`, `Trinket`
+  und die Ausrüstungsplätze (`Weapon`, `Weapon2`, `Offhand`, `Offhand2`,
+  `Helm`, `BodyArmour`, `Gloves`, `Boots`, `Belt`, `Amulet`, `Ring`,
+  `Ring2`). Kein Platz für das Map Device.
+- Über sechs Ligen und rund 3.500 Fächer kommen 16 Fach-Typen vor
+  (`NormalStash`, `PremiumStash`, `QuadStash`, `CurrencyStash`,
+  `MapStash`, `UniqueStash`, `FragmentStash`, `DivinationCardStash`,
+  `EssenceStash`, `DelveStash`, `BlightStash`, `DeliriumStash`,
+  `UltimatumStash`, `FlaskStash`, `GemStash`, `Folder`). Keiner davon
+  ist das Map Device.
+- GGGs eigene Referenz nennt keinen Endpunkt dafür.
+
+Praktische Folge: Karten und Fragmente, die im Map Device liegen, fehlen
+in jeder Summe, die PoE-VIEW2 bildet (z. B. den beobachteten
+Stapelgrößen). Das ist keine Lücke im Programm, sondern in der
+Schnittstelle — und von außen nicht zu schließen.
+
+**Zwei Endpunkte, die es gibt und die wir nicht nutzen** (Stand
+2026-09-23, beide brauchen einen Scope, den unsere Client-Registrierung
+nicht hat — `SCOPES` in `config.py` führt nur `account:profile`,
+`account:stashes`, `account:characters`, `account:leagues`):
+
+| Endpunkt | Inhalt | Scope |
+|---|---|---|
+| `/league-account/<league>` | Atlas-Passivbäume, Söldner samt ihren Items | `account:league_accounts` |
+| `/guild/stash/<league>[/<id>]` | Gilden-Truhe | eigener Gilden-Scope |
+
+Beides wäre ein neuer Antrag bei GGG, kein reines Programmierthema.
+
 ## Spezial-Tabs: MapStash und UniqueStash
 
 Diese Tabs antworten am Einzel-Tab-Endpunkt mit `children` statt `items`

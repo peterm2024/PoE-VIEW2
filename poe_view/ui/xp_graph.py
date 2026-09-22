@@ -171,7 +171,11 @@ class Layout:
     ``average_x`` ist der linke Rand des Zeitraums, über den der Schnitt
     gerechnet ist (``average_window``), ``average_span_s`` seine Länge in
     Sekunden. Beides braucht die Zeichnung, um den Zeitraum kenntlich zu
-    machen, statt ihn nur zu behaupten."""
+    machen, statt ihn nur zu behaupten.
+
+    ``gross`` ist die Rate OHNE die verlustbehafteten Abschnitte
+    (§gross_rate) — nur gesetzt, wenn im Zeitraum überhaupt etwas
+    verloren ging. 0.0 heißt: nichts Zusätzliches zu sagen."""
 
     bars: list[tuple[float, float, float, float, float]]
     zero_y: float
@@ -182,6 +186,7 @@ class Layout:
     average: float = 0.0
     average_x: float = 0.0
     average_span_s: float = 0.0
+    gross: float = 0.0
     # x-Positionen der Todes-Marker (§marks in ``graph_layout``): kleine
     # rote Dreiecke an der Oberkante. Eigene Achsen-Ereignisse statt
     # aus den Balken abgeleitet, denn aus den Balken sind Tode nicht
@@ -204,6 +209,36 @@ def combined_rate(points: Sequence[XpPoint]) -> float:
     keine gebracht."""
     sekunden = sum(p.seconds for p in points)
     return sum(p.gain for p in points) / (sekunden / 3600) if sekunden > 0 else 0.0
+
+
+def gross_rate(points: Sequence[XpPoint]) -> float:
+    """Die Rate der Abschnitte OHNE Verlust — was hereinkäme, wenn nichts
+    verloren ginge.
+
+    Peter, 2026-09-23, vor einem Bild mit vier Toden: "Ich bin mir nicht
+    sicher, ob das was ich hier sehe, sinnvoll ist oder nützlich." Sein
+    Schnitt stand auf 89K/h bei 39 Mio. Spitze — rechnerisch richtig (in
+    23 Minuten blieben netto 28.647 XP übrig), aber ohne Bezug sieht es
+    nach einem Defekt aus. Neben dem Netto steht deshalb das Brutto: Der
+    Abstand der beiden Zahlen IST der Preis des Sterbens, und damit die
+    Antwort auf die Frage, die man sich vor dem Graphen wirklich stellt.
+
+    Abgegrenzt wird nach dem Vorzeichen des Abschnitts, nicht nach den
+    Toden: Ein Tod in einem Abschnitt, der unterm Strich noch Gewinn
+    brachte, bleibt drin. Das ist die vorsichtigere Seite — das Brutto ist
+    damit eher zu klein als zu groß, und was es sagt, ist belegt:
+    "so schnell kam Erfahrung herein, wenn nichts schiefging"."""
+    gewinne = [p for p in points if p.rate > 0]
+    return combined_rate(gewinne) if gewinne else 0.0
+
+
+def average_caption(average: float, gross: float, span_s: float) -> str:
+    """Die Zeile an der Schnitt-Linie. Als reine Funktion neben dem
+    Widget, damit sich der Wortlaut ohne Bildvergleich prüfen lässt."""
+    if gross > 0:
+        return (f"⌀ {axis_label(average)} net · {axis_label(gross)} gross"
+                f" · {span_label(span_s)}")
+    return f"⌀ {axis_label(average)} · {span_label(span_s)}"
 
 
 def group_by_instance(points: Sequence[XpPoint]) -> list[list[XpPoint]]:
@@ -391,6 +426,9 @@ def graph_layout(points: Sequence[XpPoint], now: float, width: float, height: fl
 
     fenster = average_window(shown, now, span_s)
     average = combined_rate(fenster)
+    # Das Brutto nur dann, wenn es etwas zu erklären gibt: Ohne Verlust im
+    # Zeitraum wäre es dieselbe Zahl zweimal.
+    gross = gross_rate(fenster) if any(p.rate < 0 for p in fenster) else 0.0
     # Der Zeitraum beginnt beim ANFANG des ersten Abschnitts, nicht bei
     # seiner Veröffentlichung: Gezeichnet werden soll die Strecke, die der
     # Schnitt abdeckt, und der erste Balken gehört ganz dazu.
@@ -398,8 +436,8 @@ def graph_layout(points: Sequence[XpPoint], now: float, width: float, height: fl
     average_x = max(0.0, min(width, width - (now - beginn) / span_s * width))
     return Layout(bars, zero_y, peak, trough, groups,
                   zero_y - average * scale, average,
-                  average_x, max(0.0, now - beginn), marks=marks, clipped=clipped,
-                  estimated=estimated)
+                  average_x, max(0.0, now - beginn), gross, marks=marks,
+                  clipped=clipped, estimated=estimated)
 
 
 def axis_label(rate: float) -> str:
@@ -479,45 +517,65 @@ class XpGraph(QWidget):
                     # (§_ESTIMATED_ALPHA): dieselbe Form, halbe Kraft.
                     farbe.setAlphaF(_ESTIMATED_ALPHA)
                 painter.fillRect(QRectF(x, y, w, h), farbe)
-                if index in layout.clipped:
-                    # Gekappt (§NEGATIVE_SHARE): ein Spalt in Grundfarbe
-                    # kurz über dem Ende sagt "reicht weiter als gezeigt".
-                    painter.fillRect(QRectF(x, y + h - _CLIP_GAP_Y, w, _CLIP_GAP_H),
-                                     self.palette().window().color())
 
             # Die Gesamtrate über alles Sichtbare als gestrichelte Linie.
             # Sie steht ruhig, während die einzelnen Abschnitte springen,
             # und beantwortet damit die Frage, die ein einzelner Balken
             # nicht kann: liege ich über oder unter meinem Schnitt?
-            if layout.average_y is not None and layout.average > 0:
+            # Auch ein NEGATIVER Schnitt wird gezeichnet: Dass unterm
+            # Strich Erfahrung verloren geht, ist die wichtigste Auskunft,
+            # die der Graph geben kann — sie darf nicht dadurch
+            # verschwinden, dass die Linie unter die Null-Linie rutscht.
+            if layout.average_y is not None and layout.average != 0:
                 y = round(layout.average_y)
                 beginn = round(layout.average_x)
+                # Ein stark negativer Schnitt liegt tiefer, als der
+                # gekappte Verlust-Bereich hergibt (§NEGATIVE_SHARE).
+                # Dann bleibt die LINIE weg — am Rand geklemmt zerschnitte
+                # sie den gekappten Balken und behauptete obendrein eine
+                # Höhe, die nicht stimmt. Die Zahl daneben sagt trotzdem,
+                # woran man ist; sie ist hier das Eigentliche.
+                im_bild = 0.0 <= layout.average_y <= plot_h
                 # Links vom Zeitraum bleibt es bei der dünnen gestrichelten
                 # Linie: Dort GILT der Schnitt nicht, dort ist er nur noch
                 # Vergleichsmaß für die älteren Balken.
-                if beginn > 0:
+                if beginn > 0 and im_bild:
                     stift = QPen(QColor(_AVERAGE_COLOR))
                     stift.setStyle(Qt.PenStyle.DashLine)
                     painter.setPen(stift)
                     painter.drawLine(0, y, beginn, y)
                 # Über seinem Zeitraum dick und durchgezogen — das ist die
                 # Strecke, für die die Zahl gerechnet ist.
-                spanne = QPen(QColor(_AVERAGE_SPAN_COLOR))
-                spanne.setWidth(_AVERAGE_SPAN_W)
-                painter.setPen(spanne)
-                painter.drawLine(beginn, y, width, y)
+                if im_bild:
+                    spanne = QPen(QColor(_AVERAGE_SPAN_COLOR))
+                    spanne.setWidth(_AVERAGE_SPAN_W)
+                    painter.setPen(spanne)
+                    painter.drawLine(beginn, y, width, y)
                 painter.setPen(QColor(_AVERAGE_COLOR))
                 # Beschriftung AN der Linie, nicht in der Ecke: Dort
                 # stand sie zuerst und verschwand prompt auf einem hohen
                 # Balken, weil ein gedämpftes Grau auf Grün nichts mehr
                 # hergibt. An der Linie ist sie ohnehin besser aufgehoben
                 # — sie erklärt genau diese eine Linie.
-                painter.drawText(QRectF(2, label_top(layout.average_y,
+                painter.drawText(QRectF(2, label_top(min(max(layout.average_y, 0.0),
+                                                         plot_h),
                                                      metrics.height(), plot_h),
                                         width - 4, metrics.height()),
                                  Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
-                                 f"⌀ {axis_label(layout.average)}"
-                                 f" · {span_label(layout.average_span_s)}")
+                                 average_caption(layout.average, layout.gross,
+                                                 layout.average_span_s))
+
+            # Die Bruchmarken NACH der Schnitt-Linie (§NEGATIVE_SHARE): ein
+            # Spalt in Grundfarbe kurz über dem Ende sagt "reicht weiter
+            # als gezeigt". Seit ein negativer Schnitt ebenfalls unter der
+            # Null-Linie liegen kann, käme die Linie dort sonst darüber zu
+            # liegen und machte aus dem gekappten Balken wieder einen
+            # ganzen — derselbe Grund, aus dem die Todes-Dreiecke zuletzt
+            # gezeichnet werden.
+            for index in layout.clipped:
+                x, y, w, h, _ = layout.bars[index]
+                painter.fillRect(QRectF(x, y + h - _CLIP_GAP_Y, w, _CLIP_GAP_H),
+                                 self.palette().window().color())
 
             painter.setPen(faint)
             if layout.peak > 0:

@@ -4551,6 +4551,59 @@ worauf die Linie zu liegen kommt): Hintergrund ΔE 32,5, Map-Fläche 11,9,
 Balken 21,4. Ein Schritt dunkler (Mischfaktor 0,45 statt 0,35)
 verschwände auf der Map-Fläche — ΔE 6,0.
 
+#### 4.40.3 Netto neben Brutto (2026-09-23)
+
+Peter, vor einem Bild mit vier Toden: "Ich bin mir nicht sicher, ob das
+was ich hier sehe, sinnvoll ist oder nützlich." Sein Schnitt stand auf
+89K/h bei 39 Mio. Spitze. Nachgerechnet war das richtig: Sein
+Erfahrungsstand war in 23 Minuten Spielzeit von 760.801.967 auf
+760.830.614 gestiegen — **28.647 XP, netto fast nichts**, weil drei Tode
+alles wieder auffraßen.
+
+Die Zahl war also die wertvollste im ganzen Feld und sah trotzdem nach
+einem Defekt aus, weil in derselben Anzeige oben fett "17.7M XP/h" stand
+(die Momentanrate des letzten 106-Sekunden-Abschnitts). Zwei richtige
+Zahlen, die sich zu widersprechen scheinen.
+
+Neben dem Netto steht deshalb das Brutto: die Rate über die Abschnitte
+OHNE Verlust (`gross_rate`), also "so schnell kam Erfahrung herein, wenn
+nichts schiefging". Der ABSTAND der beiden ist der Preis des Sterbens —
+und damit die Antwort auf die Frage, die man sich vor dem Graphen
+wirklich stellt: Lohnt die Map-Strategie noch, oder sterbe ich zu oft?
+Aus "⌀ 89K · 23 min" wird "⌀ 85K net · 34M gross · 22 min".
+
+Abgegrenzt wird nach dem VORZEICHEN des Abschnitts, nicht nach den Toden:
+Ein Tod in einem Abschnitt, der unterm Strich noch Gewinn brachte, bleibt
+im Brutto. Das ist die vorsichtigere Seite (das Brutto fällt eher zu
+klein aus) und bleibt belegbar — es ist gemessene Erfahrung pro
+gemessener Zeit, keine hochgerechnete Todesstrafe. Die Strafformel selbst
+ist dafür ausdrücklich nicht gut genug bekannt (ToDo.md, §4.34).
+
+Das Brutto erscheint nur, wenn im Zeitraum überhaupt etwas verloren ging
+— sonst stünde dieselbe Zahl zweimal in einer Zeile, die ohnehin knapp
+ist (nativ gemessen: der längste mögliche Wortlaut passt in Peters
+520 px).
+
+**Ein negativer Schnitt wird jetzt ebenfalls gezeichnet.** Vorher hing
+die Linie an `average > 0` und verschwand genau dann, wenn sie am
+meisten zu sagen hatte: Wer unterm Strich Erfahrung verliert, soll das
+sehen — die Linie rutscht dann unter die Null-Linie in den Verlust-
+Bereich.
+
+Passt sie dort nicht mehr hinein, bleibt die LINIE weg und nur die Zahl
+steht da. Der Verlust-Bereich hat ein Viertel der Höhe (§NEGATIVE_SHARE),
+ein Schnitt jenseits von einem Drittel der Spitze liegt darunter. Zuerst
+war sie am unteren Rand geklemmt — sie zerschnitt dann den gekappten
+Balken wie eine zweite Bruchmarke und behauptete obendrein eine Höhe, die
+nicht stimmt. Aus demselben Anlass werden die Bruchmarken jetzt NACH der
+Schnitt-Linie gezeichnet (wie die Todes-Dreiecke): Eine Linie, die über
+der Marke liegt, macht aus dem gekappten Balken wieder einen ganzen.
+
+Was bleibt: Bei einem Schnitt nahe null liegen Schnitt- und Null-Linie
+praktisch aufeinander, was wie ein Zeichenfehler aussieht. Mit der
+Beschriftung daneben ist wenigstens erklärt, warum die Linie dort liegt;
+sie zu versetzen wäre eine Lüge über ihre Höhe.
+
 **Was dafür an Daten dazukam:** `XpPoint.level`, die Stufe zum Zeitpunkt
 der Veröffentlichung. Ohne sie ließe sich der letzte Aufstieg im Verlauf
 nicht finden. Stufe 0 heißt "unbekannt" und trennt nie — lieber gar

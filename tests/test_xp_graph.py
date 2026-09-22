@@ -11,10 +11,10 @@ dem Auge zu finden.
 import pytest
 
 from poe_view.ui.xp_graph import (AVERAGE_PAUSE_S, GRAPH_SPAN_S, XpGraph,
-                                  XpPoint, average_window, axis_label,
-                                  combined_rate, graph_layout,
-                                  group_by_instance, label_top, span_label,
-                                  visible_points)
+                                  XpPoint, average_caption, average_window,
+                                  axis_label, combined_rate, graph_layout,
+                                  gross_rate, group_by_instance, label_top,
+                                  span_label, visible_points)
 
 WIDTH = 300.0
 HEIGHT = 100.0
@@ -542,3 +542,117 @@ def test_estimated_sections_still_count_towards_the_average() -> None:
 
     assert combined_rate(punkte) == pytest.approx(20e6)
     assert combined_rate(average_window(punkte, 0.0)) == pytest.approx(20e6)
+
+
+# --- Netto und Brutto am Schnitt (Peter, 2026-09-23) -------------------- #
+#
+# Sein Bild jenes Abends, Zahlen aus dem Log: fuenf Abschnitte, drei Tode
+# darin. Netto blieben in 23 Minuten 28.647 XP uebrig — 89K/h gegen eine
+# Spitze von 39 Mio. "Ich bin mir nicht sicher, ob das was ich hier sehe,
+# sinnvoll ist oder nuetzlich."
+
+_PETERS_ABEND = [XpPoint(at=-1116.0, seconds=195.0, rate=-67_600_000, level=78),
+                 XpPoint(at=-821.0, seconds=290.0, rate=39_500_000, level=78),
+                 XpPoint(at=-341.0, seconds=378.0, rate=-18_800_000, level=78),
+                 XpPoint(at=-107.0, seconds=196.0, rate=36_000_000, level=78),
+                 XpPoint(at=0.0, seconds=106.0, rate=17_700_000, level=78)]
+
+
+def test_the_gross_rate_leaves_the_losing_stretches_out() -> None:
+    """Was hereinkaeme, wenn nichts schiefginge — gerechnet ueber die
+    Abschnitte ohne Verlust, nicht ueber die Tode."""
+    brutto = gross_rate(_PETERS_ABEND)
+
+    gewinn = 39_500_000 * 290 + 36_000_000 * 196 + 17_700_000 * 106
+    assert brutto == pytest.approx(gewinn / (290 + 196 + 106))
+    assert round(brutto / 1e6) == 34          # gegen 89K netto
+
+
+def test_a_window_without_losses_says_nothing_about_gross() -> None:
+    """Sonst staende dieselbe Zahl zweimal in derselben Zeile."""
+    layout = graph_layout([_point(30, 600, 40e6), _point(5, 600, 20e6)],
+                          0.0, WIDTH, HEIGHT)
+
+    assert layout.gross == 0.0
+    assert average_caption(layout.average, layout.gross, 1800) == "⌀ 30M · 30 min"
+
+
+def test_losses_in_the_window_put_both_numbers_in_the_caption() -> None:
+    """Der Abstand der beiden Zahlen ist der Preis des Sterbens."""
+    layout = graph_layout(_PETERS_ABEND, 0.0, WIDTH, HEIGHT)
+
+    assert layout.gross > 0
+    beschriftung = average_caption(layout.average, layout.gross,
+                                   layout.average_span_s)
+    assert "net" in beschriftung and "gross" in beschriftung
+    assert beschriftung.startswith("⌀ ")
+    # Netto klein, Brutto gross — genau der Kontrast, um den es geht.
+    assert layout.average < layout.gross / 10
+
+
+def test_a_small_negative_average_is_drawn_below_the_zero_line(qapp) -> None:
+    """Wer unterm Strich Erfahrung verliert, soll das sehen. Vorher
+    verschwand die Linie, sobald der Schnitt unter null rutschte — die
+    wichtigste Auskunft des Graphen fiel damit genau dann aus, wenn sie am
+    meisten zaehlt."""
+    from PySide6.QtGui import QColor
+
+    from poe_view.ui.xp_graph import _AVERAGE_SPAN_COLOR
+
+    punkte = [XpPoint(at=-600.0, seconds=600.0, rate=30e6, level=78),
+              XpPoint(at=0.0, seconds=600.0, rate=-35e6, level=78)]
+    layout = graph_layout(punkte, 0.0, WIDTH, HEIGHT)
+
+    assert layout.average == pytest.approx(-2.5e6)
+    assert layout.average_y > layout.zero_y        # unter der Null-Linie
+
+    graph = XpGraph()
+    graph.resize(300, 120)
+    graph.set_points(punkte, 0.0)
+    bild = graph.grab().toImage()
+    treffer = [y for x in range(0, 300, 7) for y in range(bild.height())
+               if QColor(bild.pixel(x, y)).name() == QColor(_AVERAGE_SPAN_COLOR).name()]
+
+    assert treffer, "Schnitt-Linie fehlt im Bild"
+    graph_layout_y = graph_layout(punkte, 0.0, 300, 120 - 12).zero_y
+    assert min(treffer) > graph_layout_y
+
+
+def test_a_deep_negative_average_keeps_its_number_but_drops_the_line(qapp) -> None:
+    """Der Verlust-Bereich hat nur ein Viertel der Hoehe
+    (§NEGATIVE_SHARE) — ein Schnitt von -584M gegen 86M Spitze liegt weit
+    darunter. Am Rand geklemmt zerschnitte die Linie den gekappten Balken
+    und behauptete eine Hoehe, die nicht stimmt. Sie bleibt deshalb weg;
+    die Zahl steht trotzdem da."""
+    from PySide6.QtGui import QColor
+
+    from poe_view.ui.xp_graph import _AVERAGE_COLOR, _AVERAGE_SPAN_COLOR
+
+    punkte = [_point(150, 600, 86e6), _point(0, 3600, -584e6)]
+    layout = graph_layout(punkte, 0.0, WIDTH, HEIGHT)
+    assert layout.average_y > HEIGHT               # ausserhalb des Bildes
+
+    graph = XpGraph()
+    graph.resize(300, 120)
+    graph.set_points(punkte, 0.0)
+    bild = graph.grab().toImage()
+    farben = {QColor(bild.pixel(x, y)).name()
+              for x in range(0, 300, 3) for y in range(bild.height())}
+
+    assert QColor(_AVERAGE_SPAN_COLOR).name() not in farben     # keine Linie
+    assert QColor(_AVERAGE_COLOR).name() in farben              # aber die Zahl
+
+
+def test_the_caption_still_fits_the_panel(qapp) -> None:
+    """Die Zeile steht IM Graphen, nicht darunter. Gemessen statt
+    gezaehlt: der laengstmoegliche Wortlaut in der Schrift, die
+    ``paintEvent`` benutzt, gegen die Breite aus Peters Bild."""
+    from PySide6.QtGui import QFontMetrics
+
+    graph = XpGraph()
+    graph.resize(520, 150)
+    schrift = graph.font()
+    schrift.setPointSizeF(max(7.0, schrift.pointSizeF() - 1.5))
+
+    lang = average_caption(-89_000, 331_000_000, 3 * 3600)
+    assert QFontMetrics(schrift).horizontalAdvance(lang) < 520 - 4, lang

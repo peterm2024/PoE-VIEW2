@@ -18,6 +18,14 @@ nach [SemVer](https://semver.org/lang/de/).
   (2,4 statt 23,9 Mio./h am 12.09.); lagen mehrere Maps dazwischen,
   bekam die letzte den ganzen Zuwachs (63,6 statt 31,5 Mio./h am
   13.09.). Die übrigen 97 von 110 Fällen ändern sich nicht.
+- **Die Schnitt-Linie im XP-Graphen nennt Netto und Brutto**, sobald im
+  Zeitraum Erfahrung verloren ging: "⌀ 85K net · 34M gross · 22 min". Der
+  Abstand der beiden Zahlen ist der Preis des Sterbens. Anlass war ein
+  Abend mit vier Toden, an dem der Schnitt auf 89K/h stand (richtig
+  gerechnet: netto 28.647 XP in 23 Minuten) und dadurch wie ein Defekt
+  aussah. Ein negativer Schnitt wird jetzt ebenfalls gezeichnet — vorher
+  verschwand die Linie ausgerechnet dann, wenn unterm Strich Erfahrung
+  verloren ging.
 - **Ruhezonen erkennt PoE-VIEW2 an der Gebiets-Kennung der Client.txt**
   (`HideoutSlum`, `2_8_town`, …), nicht am angezeigten Namen. Führt ein
   Spiel-Log diese Zeilen nicht, bleibt es bei der bisherigen Rechnung.

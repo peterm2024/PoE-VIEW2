@@ -285,7 +285,10 @@ number means some tabs of this league have not been loaded yet, so there
 may be more than it says. An item you own none of shows <b>0</b> rather
 than disappearing — that is the answer you were looking for.
 <b>Drag a row</b> to move it: the list stays in the order you put it in,
-across restarts, and is never re-sorted by amount behind your back.</p>
+across restarts, and is never re-sorted by amount behind your back.
+Items lying in the <b>map device</b> are not counted — the official API
+does not expose its contents, so nothing outside the game can see
+them.</p>
 <p>Above the graph, <b>one narrow bar per socketed gem</b> shows its
 <b>level</b> as the filled height, coloured by the attribute it needs.
 Read the strip as a profile of the character: the short bars are the
@@ -323,6 +326,12 @@ on balance. Dying does that from act 5 onwards. Losses get at most a
 quarter of the height — a death in a short stretch makes for a huge
 <i>rate</i> that would squash everything else — so a bar that would
 reach deeper is cut off at the bottom with a small gap.</li>
+<li>The <b>line across the graph</b> is your average rate over the
+stretch it is drawn solid on. If you died in that stretch, it names two
+numbers — <b>⌀ 85K net · 34M gross</b>: what you kept after the deaths,
+and what came in while nothing went wrong. A long way between the two
+means the deaths, not the maps, decide your progress. The line is drawn
+below zero if you lost experience on balance.</li>
 <li>A <b>dark green block behind several bars</b> means they are the
 same map: you left it and came back. Its height is the rate for the map
 as a whole, so you can see what the trip outside cost.</li>

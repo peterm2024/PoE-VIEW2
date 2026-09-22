@@ -212,7 +212,10 @@ with the tiers you still miss left empty.
   more than half an hour, whichever came later, and is drawn solid and
   green over exactly that stretch — dashed before it, where it is only a
   yardstick for the older bars. How long the stretch is stands next to
-  the number. The rate counts only the time you spent in areas that give
+  the number. If you lost experience in that stretch, the line names two
+  rates — "⌀ 85K net · 34M gross · 22 min": what you actually kept, and
+  what came in while nothing went wrong. The distance between them is
+  what dying costs you. The rate counts only the time you spent in areas that give
   experience: hideout, town and the hubs stay out of it, and every map
   since the last update counts, not just the one you left last. The graph
   survives a restart: measured sections are stored per account and drawn
@@ -236,7 +239,9 @@ with the tiers you still miss left empty.
   size* to put it in a table filling the right-hand side of the levelling
   panel. It adds up every
   loaded stash tab and character of the league, so a glance tells you how
-  much Wild Crystallised Lifeforce you are sitting on. A `≥` marks a
+  much Wild Crystallised Lifeforce you are sitting on. Items left in the
+  map device are missing from the total: the official API does not
+  expose that inventory. A `≥` marks a
   total that is still missing unloaded tabs. Drag a row to reorder the
   list; it keeps the order you gave it across restarts and is never
   re-sorted by amount.
