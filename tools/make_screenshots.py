@@ -81,15 +81,18 @@ _RARES = [
     ("Two-Toned Boots", "Two-Toned Boots", 83,
      ["30% increased Movement Speed", "+40 to maximum Life"]),
     ("Stygian Vise", "Stygian Vise", 86,
-     ["+45 to Strength and Intelligence", "+12% to Chaos Resistance"]),
+     ["+45 to Strength and Intelligence", "+12% to Chaos Resistance"],
+     ["Has 1 Abyssal Socket"]),
     ("Hate Song", "Opal Sceptre", 85,
      ["+118 to maximum Life", "18% increased Cast Speed", "+1 to Level of all Fire Skills"]),
     ("Dread Veil", "Lion Pelt", 84,
      ["+96 to maximum Life", "+31% to Cold Resistance"]),
     ("Beast Coil", "Amethyst Ring", 86,
-     ["+38 to maximum Life", "+15% to Chaos Resistance", "Adds 12 to 19 Chaos Damage"]),
+     ["+38 to maximum Life", "+15% to Chaos Resistance", "Adds 12 to 19 Chaos Damage"],
+     ["+17% to Chaos Resistance"]),
     ("Rift Clasp", "Onyx Amulet", 83,
-     ["+21 to all Attributes", "+27% to Fire Resistance", "9% increased Attack Speed"]),
+     ["+21 to all Attributes", "+27% to Fire Resistance", "9% increased Attack Speed"],
+     ["+16 to all Attributes"]),
     ("Storm Bite", "Vaal Axe", 82,
      ["Adds 18 to 340 Lightning Damage", "24% increased Attack Speed"]),
 ]
@@ -123,10 +126,12 @@ _PRICES = {"Chaos Orb": 1.0, "Divine Orb": 171.2, "Orb of Alchemy": 0.08,
            "Storm Bite": 14.0, "Beast Coil": 6.5}
 
 
-def _rare(name: str, base: str, ilvl: int, mods: list[str], x: int, y: int) -> Item:
+def _rare(name: str, base: str, ilvl: int, mods: list[str], x: int, y: int,
+          implicits: list[str] | None = None) -> Item:
     return Item.model_validate({
         "id": f"rare-{name}", "name": name, "typeLine": base, "baseType": base,
         "frameType": 2, "ilvl": ilvl, "explicitMods": mods, "x": x, "y": y,
+        "implicitMods": implicits or [],
         "identified": True,
         "requirements": [{"name": "Level", "values": [[str(ilvl - 12), 0]]}],
     })
@@ -174,8 +179,8 @@ def _stashes() -> list[StashTab]:
 def _items_by_tab() -> dict[str, list[Item]]:
     return {
         "currency": [_currency(n, s, i % 4, i // 4) for i, (n, s) in enumerate(_CURRENCY)],
-        "rares": [_rare(n, b, lvl, mods, i % 5, i // 5)
-                  for i, (n, b, lvl, mods) in enumerate(_RARES)],
+        "rares": [_rare(n, b, lvl, mods, i % 5, i // 5, *rest)
+                  for i, (n, b, lvl, mods, *rest) in enumerate(_RARES)],
         "gems": [_gem(n, lv, q, i, 0) for i, (n, lv, q) in enumerate(_GEMS)],
         "maps": [_map_item(n, t, i, 0) for i, (n, t) in enumerate(_MAPS)],
     }
@@ -329,10 +334,10 @@ def _seed_mod_collection(win: MainWindow) -> None:
     absteigenden Rolls, damit die Balken eine Spanne haben und die Slots
     mehrere Sprossen treffen. Deterministisch, damit die Bilder bei jedem
     Lauf gleich ausfallen."""
-    for i, (name, base, ilvl, mods) in enumerate(_RARES):
+    for i, (name, base, ilvl, mods, *rest) in enumerate(_RARES):
         for k, faktor in enumerate((1.0, 0.85, 0.7, 0.55, 0.45, 0.35)):
             item = _rare(f"{name}-{k}", base, max(30, ilvl - 8 * k),
-                         [_scaled(m, faktor) for m in mods], 0, 0)
+                         [_scaled(m, faktor) for m in mods], 0, 0, *rest)
             item.league = LEAGUE
             win._mod_collection.observe_item(item)
     for item in _items_by_tab()["rares"]:

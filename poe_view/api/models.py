@@ -441,6 +441,29 @@ def all_extra_mod_pairs(item: "Item") -> list[tuple[str, str]]:
             for line in extra_mod_lines(item, field)]
 
 
+def mod_blocks(item: "Item") -> list[list[tuple[str, str]]]:
+    """Alle Mod-Zeilen eines Items als drei Blöcke, jede Zeile als
+    ``(Feld, Text)``: Verzauberung — implizite — explizite samt allen
+    übrigen Zusatzlisten. Leere Blöcke bleiben leer, sie fliegen erst
+    bei der Anzeige raus.
+
+    Das ist die Reihenfolge, in der das Spiel selbst ein Item anschreibt,
+    und sie stand bis hierher dreimal getrennt im Code (Detail-Panel,
+    Textexport, Charakterbogen). Die Item-Tabelle war die vierte Stelle,
+    die dieselbe Frage stellte — und die einzige, die sie falsch
+    beantwortete: Sie zeigte NUR ``explicitMods``, also bei knapp einem
+    Viertel aller Items nicht die wichtigste Zeile und bei Flaschen
+    (deren Wirkung komplett in ``utilityMods`` steht) gar nichts. Seither
+    steht die Aufteilung hier, einmal."""
+    return [
+        [(ENCHANT_MOD_FIELD, line)
+         for line in extra_mod_lines(item, ENCHANT_MOD_FIELD)],
+        [("implicitMods", line) for line in item.implicit_mods],
+        [("explicitMods", line) for line in item.explicit_mods]
+        + all_extra_mod_pairs(item),
+    ]
+
+
 def all_extra_mod_lines(item: "Item") -> list[str]:
     """Alle Zusatz-Mods AUSSER der Verzauberung, in der Reihenfolge von
     ``EXTRA_MOD_FIELDS``. Die Verzauberung bleibt bewusst außen vor: Sie

@@ -1627,3 +1627,39 @@ geprüft, ob sie denselben Zeitraum meinen — und zwar an echten Daten,
 nicht im Kopf: Die zwei Muster steckten hier in 12 % der Messungen und
 fielen im Alltag nie auf, weil die Zahl plausibel aussah.
 
+## 85. Die Mods-Spalte zeigte nur explicitMods — bei jedem vierten Item fehlte die wichtigste Zeile
+
+**Symptom (Peter, 2026-09-23):** "Mir ist gerade aufgefallen, dass in
+der Item-Liste die Implicits der Items fehlen."
+
+**Befund an echten Daten:** `ItemTableModel._precompute` baute die Zelle
+aus `" · ".join(item.explicit_mods)`, der Tooltip aus
+`"\n".join(item.explicit_mods)`. In Peters Bestand (59.499 Items)
+tragen 14.004 Items einen impliziten Mod, 2.278 eine Verzauberung und
+2.131 einen `utilityMods`-Eintrag. Flaschen traf es doppelt: Ihre
+gesamte Wirkung steht in `utilityMods`, ihre Mods-Spalte blieb also
+LEER. Nach dem Umbau zeigen 17.647 Zellen mehr, 3.298 davon hatten
+vorher gar keinen Inhalt.
+
+**Was den Fehler so zäh machte:** Die Suche kannte die Implicits längst
+— `_build_haystack` nahm sie mit, samt Test
+(`test_filter_matches_implicit_mods`, "Implicits fehlten bisher im
+Suchindex"). Dieselbe Lücke war für die Suche schon einmal geschlossen
+worden, ohne dass die Anzeige nachzog. Ein Treffer ohne sichtbaren Grund
+sieht nicht nach einem Fehler aus, sondern nach einem seltsamen Item.
+Und `models.py` warnt bei `EXTRA_MOD_FIELDS` wörtlich: "Genau EINE davon
+zu vergessen ist der Fehler, den es zu verhindern gilt — beide taten es
+zunächst." Gemeint waren Detail-Panel und Textexport; die Item-Tabelle
+war die dritte Stelle, die genau das tat, und niemand hatte sie beim
+Schreiben dieser Warnung mitgezählt.
+
+**Fix:** `models.mod_blocks()` ist jetzt die eine Stelle, an der die
+Reihenfolge steht (Verzauberung, implizit, explizit + Rest, als
+`(Feld, Zeile)`-Paare). Tabelle, Tooltip, Suchindex und Detail-Panel
+holen sie von dort. ARCHITEKTUR §4.55.
+
+**Lehre:** Wird eine Lücke an EINER Stelle geschlossen, gehört die
+Gegenfrage dazu, wer dieselben Daten sonst noch anfasst. Hier hätte der
+Suchindex-Fix die Anzeige mitnehmen müssen — und ein "die Suche findet
+etwas, das die Zeile nicht zeigt" ist ein Widerspruch, den man messen
+kann, statt auf ihn zu warten.

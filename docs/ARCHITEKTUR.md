@@ -7269,6 +7269,66 @@ Nenner im laufenden Betrieb.
 
 ---
 
+### 4.55 Eine Mods-Spalte, die alle Mod-Listen zeigt (`models.mod_blocks`)
+
+Peter, 2026-09-23: "Mir ist gerade aufgefallen, dass in der Item-Liste
+die Implicits der Items fehlen."
+
+Die Spalte baute sich seit jeher aus `" · ".join(item.explicit_mods)`,
+der Tooltip aus `"\n".join(item.explicit_mods)`. Gemessen an Peters
+Bestand (59.499 Items) hieß das:
+
+| Mod-Liste | Items damit | war sichtbar |
+|---|---|---|
+| explicitMods | 45.518 | ja |
+| implicitMods | 14.004 | nein |
+| enchantMods | 2.278 | nein |
+| utilityMods | 2.131 | nein |
+
+Nach dem Umbau zeigen 17.647 Zellen mehr als vorher, und 3.298 vorher
+LEERE Zellen haben überhaupt erst einen Inhalt — die Flaschen vor allem,
+deren Wirkung komplett in `utilityMods` steht.
+
+**Warum das lange nicht auffiel:** Die SUCHE kannte die Implicits
+bereits (`_build_haystack`, Test `test_filter_matches_implicit_mods` mit
+dem Kommentar "Implicits fehlten bisher im Suchindex"). Derselbe Fehler
+war dort also schon einmal behoben worden, ohne dass die Anzeige
+nachzog. Wer nach "Fire and Lightning" suchte, bekam den richtigen Ring
+und sah in der Zeile nicht, warum er passt.
+
+**Die Reihenfolge steht jetzt an einer Stelle.** `models.mod_blocks()`
+liefert drei Blöcke aus `(Feld, Zeile)`-Paaren: Verzauberung — implizit
+— explizit samt allen übrigen Zusatzlisten. Genau diese Aufteilung
+stand bis hierher dreimal getrennt im Code (Detail-Panel §4.52.8,
+Textexport §4.38, Charakterbogen), und die Item-Tabelle war die vierte
+Stelle, die dieselbe Frage stellte — die einzige, die sie falsch
+beantwortete. Das Detail-Panel ist auf die neue Funktion umgestellt, die
+beiden Text-Erzeuger behalten ihre eigene Abschnittsbildung: PoBs Format
+verlangt `--------`-Trenner an genau definierten Stellen, der
+Charakterbogen will bewusst gar keine Blöcke.
+
+Das Feld muss in den Paaren mitreisen, weil das Detail-Panel seine
+Mod-Balken (§4.52.2) und Tier-Etiketten daran hängt: Dieselbe Zeile
+bedeutet als Flaschen-Mod etwas anderes als als Affix. Leere Blöcke
+bleiben in der Rückgabe stehen; wer sie anzeigt, filtert selbst.
+
+**Die Blockgrenze muss im Text stehen** (`" | "` zwischen den Blöcken,
+`" · "` innerhalb). Die Spalte ist eine Zeile hoch und 320 px breit —
+ohne Trenner läse sich ein impliziter Widerstand wie ein weiterer Affix.
+Der Tooltip trennt dieselben Blöcke durch eine Leerzeile und liefert
+`None`, wenn das Item gar keinen Mod trägt; ein leerer gelber Kasten
+unter dem Mauszeiger wäre schlechter als keiner.
+
+**Nebenwirkung, gewollt:** Weil der Implicit vorn steht, ist er auch der
+Teil, der bei 320 px Spaltenbreite übrig bleibt, wenn Qt den Rest
+abschneidet. Genau die Zeile, wegen der man einen Ring trägt.
+
+Der Suchindex hat die Zusatzlisten bei der Gelegenheit mitbekommen: Was
+die Spalte zeigt, muss die Suche finden — bisher fand sie explizite und
+implizite Mods, aber keine Verzauberung und keinen Flaschen-Mod.
+
+---
+
 ## 8. Entwicklungsstand
 
 Die ursprünglich geplanten Meilensteine (Grundgerüst, Authentifizierung,

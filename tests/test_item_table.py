@@ -54,7 +54,9 @@ def test_name_column_unaffected_by_tab_column_insertion(qapp) -> None:
 
 
 def test_mods_column_joins_explicit_mods(qapp) -> None:
-    """gerade bei Maps sind die Modifikatoren interessant."""
+    """gerade bei Maps sind die Modifikatoren interessant. Maps tragen nur
+    explizite Mods — hier bleibt die Zelle also unverändert eine Kette mit
+    " · ", ohne Blocktrenner."""
     model = ItemTableModel()
     map_item = make_item("Beach Map", mods=["Monsters deal 90% extra Damage as Fire",
                                             "Players are Cursed with Vulnerability"])
@@ -67,6 +69,80 @@ def test_mods_column_joins_explicit_mods(qapp) -> None:
     assert model.data(idx, Qt.ItemDataRole.ToolTipRole) == \
         "Monsters deal 90% extra Damage as Fire\nPlayers are Cursed with Vulnerability"
     assert model.data(model.index(1, MODS_COL), Qt.ItemDataRole.DisplayRole) == ""
+
+
+def test_mods_column_shows_implicit_before_explicit(qapp) -> None:
+    """Die Spalte zeigte lange NUR ``explicitMods``. In Peters Bestand
+    tragen 14.004 von 59.499 Items einen impliziten Mod — bei einem Ring
+    ist das oft die Zeile, wegen der man ihn überhaupt trägt. Der
+    Blocktrenner muss sichtbar sein, sonst liest sich der Implicit wie ein
+    weiterer Affix."""
+    model = ItemTableModel()
+    ring = Item.model_validate({
+        "typeLine": "Two-Stone Ring",
+        "implicitMods": ["+15% to Fire and Lightning Resistances"],
+        "explicitMods": ["Adds 1 to 5 Lightning Damage to Attacks", "+42 to maximum Life"],
+    })
+    model.set_items([ring], ["Rings"])
+
+    idx = model.index(0, MODS_COL)
+    assert model.data(idx, Qt.ItemDataRole.DisplayRole) == (
+        "+15% to Fire and Lightning Resistances"
+        " | Adds 1 to 5 Lightning Damage to Attacks · +42 to maximum Life")
+    # Tooltip: dieselben Blöcke, zeilenweise und durch eine Leerzeile getrennt
+    assert model.data(idx, Qt.ItemDataRole.ToolTipRole) == (
+        "+15% to Fire and Lightning Resistances\n"
+        "\nAdds 1 to 5 Lightning Damage to Attacks\n+42 to maximum Life")
+
+
+def test_mods_column_shows_enchant_first_and_utility_with_the_explicits(qapp) -> None:
+    """Eine Flasche hat gar keine ``explicitMods``-only-Zelle verdient:
+    Ihre Wirkung steht komplett in ``utilityMods``, ihre Mods-Spalte blieb
+    deshalb LEER (2.131 Items in Peters Bestand). Die Verzauberung gehört
+    im Spiel über die impliziten Mods, die übrigen Zusatzlisten zu den
+    expliziten — dieselbe Aufteilung wie im Detail-Panel."""
+    model = ItemTableModel()
+    flask = Item.model_validate({
+        "typeLine": "Amethyst Flask",
+        "implicitMods": ["Used when Charges reach full"],
+        "utilityMods": ["+35% to Chaos Resistance"],
+        "enchantMods": ["Instilled"],
+        "explicitMods": ["59% increased Armour during Effect"],
+    })
+    model.set_items([flask], ["Flasks"])
+
+    assert model.data(model.index(0, MODS_COL), Qt.ItemDataRole.DisplayRole) == (
+        "Instilled | Used when Charges reach full"
+        " | 59% increased Armour during Effect · +35% to Chaos Resistance")
+
+
+def test_mods_column_stays_empty_without_any_mod(qapp) -> None:
+    """Kein Mod, keine Zelle und KEIN Tooltip — ein leerer gelber Kasten
+    unter dem Mauszeiger wäre schlechter als gar keiner."""
+    model = ItemTableModel()
+    model.set_items([make_item("Chaos Orb")], ["Currency"])
+    idx = model.index(0, MODS_COL)
+    assert model.data(idx, Qt.ItemDataRole.DisplayRole) == ""
+    assert model.data(idx, Qt.ItemDataRole.ToolTipRole) is None
+
+
+def test_filter_matches_utility_mods(qapp) -> None:
+    """Was die Spalte zeigt, muss die Suche auch finden: Der Suchindex
+    kannte bis hierher nur explizite und implizite Mods, die Zusatzlisten
+    nicht."""
+    model = ItemTableModel()
+    flask = Item.model_validate({
+        "typeLine": "Amethyst Flask",
+        "utilityMods": ["+35% to Chaos Resistance"],
+    })
+    model.set_items([flask, make_item("Quicksilver Flask")], ["Flasks", "Flasks"])
+    proxy = ItemFilterProxy()
+    proxy.setSourceModel(model)
+
+    proxy.setFilterFixedString("chaos resistance")
+
+    assert proxy.rowCount() == 1
+    assert proxy.data(proxy.index(0, 3), Qt.ItemDataRole.DisplayRole) == "Amethyst Flask"
 
 
 def test_filter_matches_explicit_mods(qapp) -> None:

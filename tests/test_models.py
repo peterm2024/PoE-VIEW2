@@ -7,7 +7,7 @@ festgehaltenen Beobachtungen.
 from poe_view.api.models import (Character, Item, ItemProperty, StashTab,
                                  dominant_category, gem_level, gem_quality,
                                  get_property_value, item_category,
-                                 markup_segments)
+                                 markup_segments, mod_blocks)
 
 
 def test_max_links_is_the_largest_socket_group() -> None:
@@ -466,3 +466,42 @@ def test_property_with_fewer_values_than_placeholders_stays_readable() -> None:
     prop = ItemProperty.model_validate(
         {"name": "Consumes {0} of {1} Charges on use", "values": [["35", 0]]})
     assert prop.display_text == "Consumes 35 of {1} Charges on use"
+
+
+def test_mod_blocks_keeps_the_game_order_and_the_field_names() -> None:
+    """``mod_blocks`` ist die eine Stelle, an der die Reihenfolge steht:
+    Verzauberung, implizit, explizit samt allen übrigen Zusatzlisten. Das
+    Feld muss mitkommen — das Detail-Panel hängt seine Mod-Balken daran."""
+    item = Item.model_validate({
+        "typeLine": "Hubris Circlet",
+        "enchantMods": ["Frostbolt fires 2 additional Projectiles"],
+        "implicitMods": ["+20 to maximum Energy Shield"],
+        "explicitMods": ["+70 to maximum Life"],
+        "fracturedMods": ["+30% to Cold Resistance"],
+    })
+
+    assert mod_blocks(item) == [
+        [("enchantMods", "Frostbolt fires 2 additional Projectiles")],
+        [("implicitMods", "+20 to maximum Energy Shield")],
+        [("explicitMods", "+70 to maximum Life"),
+         ("fracturedMods", "+30% to Cold Resistance")],
+    ]
+
+
+def test_mod_blocks_returns_three_empty_blocks_for_a_plain_item() -> None:
+    """Leere Blöcke bleiben stehen, statt zu verschwinden: Wer sie
+    anzeigt, filtert selbst — so kann keine Anzeige aus Versehen die
+    Blockgrenzen verschieben."""
+    assert mod_blocks(Item.model_validate({"typeLine": "Chaos Orb"})) == [[], [], []]
+
+
+def test_mod_blocks_strips_the_colour_markup_of_the_extra_lists() -> None:
+    """Nur ``explicitMods``/``implicitMods`` sind deklarierte Felder mit
+    aufbereitetem Text; alles Übrige kommt roh durch und trägt GGGs
+    Färbungs-Markup noch mit sich."""
+    item = Item.model_validate({
+        "typeLine": "Sanctified Life Flask",
+        "utilityMods": ["<default>{Grants }<magic>{Immunity to Bleeding}"],
+    })
+
+    assert mod_blocks(item)[2] == [("utilityMods", "Grants Immunity to Bleeding")]

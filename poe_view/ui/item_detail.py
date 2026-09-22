@@ -27,9 +27,8 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout
 
-from poe_view.api.models import (ENCHANT_MOD_FIELD, Item, all_extra_mod_pairs,
-                                 extra_mod_lines, item_category, req_attribute,
-                                 req_level)
+from poe_view.api.models import (Item, item_category, mod_blocks,
+                                 req_attribute, req_level)
 from poe_view.services.mod_collection import BASE_STAT_KIND, base_stat_line
 from poe_view.ui import mod_bar
 from poe_view.ui.theme import RARITY_COLORS
@@ -250,20 +249,15 @@ def _item_blocks(item: Item,
             requirements.append(f"Req. {label} {value}")
 
     # Verzauberung über den impliziten Mods, die übrigen Zusatzlisten bei
-    # den expliziten — dieselbe Aufteilung wie im Item-Textexport
-    # (§4.38), damit Anzeige und Zwischenablage nicht auseinanderlaufen.
-    def markiert(feld: str, zeilen) -> list[Line]:
-        return [Line(zeile, mark(feld, zeile), tail(feld, zeile)) for zeile in zeilen]
-
+    # den expliziten: ``models.mod_blocks`` — dieselbe Aufteilung wie im
+    # Item-Textexport (§4.38) und in der Mods-Spalte der Item-Tabelle,
+    # damit Anzeige, Tabelle und Zwischenablage nicht auseinanderlaufen.
     return [
         [Line(zeile) for zeile in kind],
         properties,
         [Line(" · ".join(requirements))] if requirements else [],
-        markiert(ENCHANT_MOD_FIELD, extra_mod_lines(item, ENCHANT_MOD_FIELD)),
-        markiert("implicitMods", item.implicit_mods),
-        markiert("explicitMods", item.explicit_mods)
-        + [Line(zeile, mark(feld, zeile), tail(feld, zeile))
-           for feld, zeile in all_extra_mod_pairs(item)],
+        *[[Line(zeile, mark(feld, zeile), tail(feld, zeile))
+           for feld, zeile in block] for block in mod_blocks(item)],
     ]
 
 

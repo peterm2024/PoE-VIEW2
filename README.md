@@ -83,7 +83,10 @@ with the tiers you still miss left empty.
 - **Item table** with icon, source tab, position (tab number and grid
   coordinate, distinguishing tabs with the same name), name, base type,
   level, quality, stack size, item level, requirements (level, Str,
-  Dex, Int), mods, and value.
+  Dex, Int), mods, and value. The mods cell lists every mod the item
+  has, in the order the game writes them — enchant, implicit, explicit —
+  with `|` between the groups; hover for the full text on separate
+  lines.
 - **Configurable columns**: which columns are shown and in what order is
   set either in the settings dialog (checkboxes and drag & drop) or via
   a quick toggle in the header's right-click menu. The choice is saved

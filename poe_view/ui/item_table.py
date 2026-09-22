@@ -75,7 +75,7 @@ from PySide6.QtGui import (QBrush, QColor, QFont, QGuiApplication, QPalette,
                            QPixmap)
 
 from poe_view.api.models import (Item, gem_level, gem_quality, map_tier,
-                                 req_attribute, req_level)
+                                 mod_blocks, req_attribute, req_level)
 from poe_view.api.ninja import PriceIndex
 from poe_view.ui.theme import (OTHER_TYPE, RARITY_COLORS, ROW_CHANGED_COLOR,
                                ROW_GEM_LEVELED_COLOR, blend, dimmed_text)
@@ -159,6 +159,36 @@ def _first_number(text: str) -> float | None:
 # BEIDEN Suchpfaden ohne eine Zeile Extralogik — und "ilvl:8" findet
 # nicht versehentlich alles von 80 bis 89.
 _SEARCH_FIELDS = ("ilvl", "tier")
+
+# Trennzeichen INNERHALB eines Mod-Blocks und ZWISCHEN den Blöcken. Die
+# Spalte hat nur eine Zeile, die Grenze zwischen Verzauberung, Implizitem
+# und Explizitem muss also im Text stehen — sonst liest sich ein
+# impliziter Widerstand wie ein weiterer Affix.
+_MOD_SEPARATOR = " · "
+_MOD_BLOCK_SEPARATOR = " | "
+
+
+def _mods_cell(item: Item) -> str:
+    """Die Mods-Spalte: alle Mod-Zeilen des Items, Blöcke durch ``|``
+    getrennt (``Enchant | implizit | explizit + Rest``).
+
+    Vorher stand hier nur ``explicitMods``. Gemessen an Peters Bestand
+    (59.499 Items) fehlte damit bei 14.004 Items der implizite Mod und
+    bei 2.131 Flaschen der gesamte Zelleninhalt — die Suche fand sie
+    längst, die Anzeige nicht."""
+    return _MOD_BLOCK_SEPARATOR.join(
+        _MOD_SEPARATOR.join(line for _, line in block)
+        for block in mod_blocks(item) if block)
+
+
+def _mods_tooltip(item: Item) -> str | None:
+    """Dasselbe zeilenweise, Blöcke durch eine Leerzeile getrennt —
+    ``None``, wenn das Item keinen einzigen Mod trägt (Qt zeigt dann gar
+    keinen Tooltip statt eines leeren Kastens)."""
+    bloecke = ["\n".join(line for _, line in block)
+               for block in mod_blocks(item) if block]
+    return "\n\n".join(bloecke) or None
+
 
 def _field_tokens(item: Item) -> str:
     """"ilvl:84 tier:6" — die durchsuchbaren Marken eines Items.
@@ -279,7 +309,7 @@ class ItemTableModel(QAbstractTableModel):
                 req_attribute(item, "Str") or "–",
                 req_attribute(item, "Dex") or "–",
                 req_attribute(item, "Int") or "–",
-                " · ".join(item.explicit_mods))  # v. a. Map-Modifikatoren
+                _mods_cell(item))
 
     def content_signature(self) -> int:
         """Kennzahl über den ANGEZEIGTEN Inhalt — gleiche Zahl bedeutet
@@ -319,7 +349,7 @@ class ItemTableModel(QAbstractTableModel):
             if isinstance(gem, dict))
         return (f"{item.display_name} {item.typeLine} {item.baseType} "
                f"{item.rarity} {source} {item.socket_string} "
-               f"{' '.join(item.explicit_mods)} {' '.join(item.implicit_mods)} "
+               f"{' '.join(line for block in mod_blocks(item) for _, line in block)} "
                f"{prop_text} {gem_names} {_field_tokens(item)}").lower()
 
     def set_price_index(self, index: PriceIndex | None) -> None:
@@ -450,7 +480,7 @@ class ItemTableModel(QAbstractTableModel):
             return text.lower()
         if role == Qt.ItemDataRole.ToolTipRole and col == MODS_COL:
             # Mods können lang werden — Tooltip zeigt sie zeilenweise komplett.
-            return "\n".join(item.explicit_mods) or None
+            return _mods_tooltip(item)
         if role == Qt.ItemDataRole.DecorationRole and col == ICON_COL:
             pm = self._pixmaps.get(item.icon)
             if pm:

@@ -6,6 +6,17 @@ nach [SemVer](https://semver.org/lang/de/).
 
 ## [Unveröffentlicht]
 
+### Behoben
+
+- **Die Mods-Spalte der Item-Liste zeigt alle Mod-Listen statt nur der
+  expliziten.** Implizite Mods fehlten bisher ganz (in Peters Bestand
+  14.004 von 59.499 Items), ebenso Verzauberungen und die Wirkung der
+  Flaschen — deren Zelle blieb dadurch komplett leer. Die Blöcke stehen
+  in der Reihenfolge des Spiels und sind durch `|` getrennt
+  (`Verzauberung | implizit | explizit`), der Tooltip trennt sie durch
+  eine Leerzeile. Die Suche findet jetzt ebenfalls Verzauberungen und
+  Flaschen-Mods; Implicits kannte sie schon.
+
 ## [0.15.0] - 2026-09-23
 
 ### Geändert
