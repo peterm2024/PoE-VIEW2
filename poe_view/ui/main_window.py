@@ -13,6 +13,7 @@ import time
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Iterator
 
 from PySide6.QtCore import QSettings, Qt, QTimer, QUrl, Signal
@@ -35,7 +36,8 @@ from poe_view.services import (cache_backup, cache_writer, data_cache, gem_xp_lo
                                poe2_probe, price_cache, xp_history)
 from poe_view.services.instance_lock import InstanceLock
 from poe_view.services.zone_watcher import (ZoneWatcher, deaths_since,
-                                              resolve_client_log_path)
+                                              is_rest_area,
+                                              resolve_client_log_path, zone_stays)
 from poe_view.services.api_worker import (ApiWorker, BootstrapJob,
                                           BulkProgress, FetchAllItemsJob,
                                           FetchCharacterItemsJob,
@@ -206,6 +208,28 @@ class _PublishWatch:
 
 
 @dataclass
+class _ZoneStay:
+    """Ein Aufenthalt in einer Zone, auf der Uhr des Programms
+    (``time.monotonic()``) — das laufende Gegenstück zu
+    ``zone_watcher.ZoneStay``, das dasselbe aus der Client.txt liest.
+
+    ``until`` ist ``None``, solange der Charakter noch drin ist.
+    ``area_id`` ist die technische Gebiets-Kennung; ohne sie (fehlende
+    DEBUG-Zeile im Spiel-Log) gilt der Aufenthalt als Kampfzone, siehe
+    ``zone_watcher.is_rest_area``."""
+
+    at: float
+    until: float | None
+    name: str
+    area_id: str
+    instance: str
+
+    @property
+    def resting(self) -> bool:
+        return is_rest_area(self.area_id)
+
+
+@dataclass
 class _XpWatch:
     """Erfahrungs-Fortschritt EINES Charakters für die XP/h-Anzeige (Peter,
     2026-08-10, direkt aus der §4.33-Diagnose entstanden: GGGs Antwort auf
@@ -252,11 +276,35 @@ class _XpWatch:
     10,4, und damit genau die Größenordnung, um die seine Anzeige daneben
     lag.
 
-    **Als Nenner zählt die Zeit in der zuletzt verlassenen Zone.** Eine
-    Veröffentlichung folgt 1–3 Sekunden auf einen Zonenwechsel und trägt
-    die Erfahrung, die in der gerade verlassenen Zone verdient wurde. Also
-    ist der Nenner genau die Verweildauer dort: vom vorletzten bis zum
-    letzten Zonenwechsel.
+    **Als Nenner zählt die Zeit in KAMPFZONEN seit der vorigen
+    Veröffentlichung** (Peter, 2026-09-22, nach einem Abgleich über 110
+    Veröffentlichungen gegen seine Client.txt: "vor allem die client.txt
+    beachten, da diese 100% zuverlässig die Verweildauer in den Maps
+    zurückliefert"). Hideout, Stadt und die Hubs zählen nicht mit — dort
+    steht die Erfahrung still, ihre Zeit gehört in keine Rate.
+
+    Der Abgleich zeigte, wo die Regel davor ("die Verweildauer in der
+    zuletzt verlassenen Zone, höchstens bis zur vorigen
+    Veröffentlichung") danebenlag. Sie traf 97 von 110 Fällen; die
+    übrigen 13 verteilten sich auf zwei Muster, die beide aus derselben
+    Verengung auf EINE Zone stammen:
+
+    - **Zu niedrig**, wenn die Veröffentlichung nicht zu einem
+      Zonenwechsel gehörte (Händler, Identifizieren im Hideout, §4.36):
+      Dann teilte sie durch das volle Intervall inklusive Standzeit.
+      Real am 2026-09-12 16:58: 2,4 Mio./h angezeigt, 626 s gespielt,
+      also 23,9 Mio./h. Faktor 10.
+    - **Zu hoch**, wenn zwischen zwei Veröffentlichungen MEHRERE Maps
+      lagen: Der ganze Zuwachs fiel der zuletzt verlassenen zu. Real am
+      2026-09-13 20:32: 63,6 statt 31,5 Mio./h.
+
+    Beides verschwindet, wenn nicht eine Zone den Nenner stellt, sondern
+    die gespielte Zeit im Fenster (``MainWindow._active_seconds``). Die
+    alte Regel bleibt als Rückfall, falls die Client.txt keine
+    Gebiets-Kennungen führt (sie stehen in DEBUG-Zeilen, siehe
+    ``zone_watcher._AREA_LINE``): Ohne sie ließen sich Ruhezonen nicht
+    erkennen, und Hideout-Zeit im Nenner wäre schlechter als die
+    bisherige Verengung.
 
     Ein Zwischenstand, der falsch war und den Peter binnen einer Runde
     entlarvt hat ("Hatte gerade 1.53B XP/h"): Zuerst startete die Uhr beim
@@ -297,6 +345,10 @@ class _XpWatch:
 
     since: float                # time.monotonic() des ersten Abrufs dieser Sitzung
     since_experience: int
+    # Wann galt ``current_experience`` zuletzt? Das ist der Anker, den die
+    # nächste Sitzung braucht (§4.54): Der Zuwachs SEIT diesem Zeitpunkt
+    # gehört in die Maps, die danach gelaufen sind.
+    last_snapshot_at: float = 0.0
     level: int = 0
     current_experience: int = 0
     # Die letzten ZWEI beobachteten Änderungen — mehr braucht die Rate über
@@ -310,10 +362,11 @@ class _XpWatch:
     # einmal festgehalten, damit die Anzeige nicht bei jedem Aufruf neu
     # entscheiden muss, welche Regel gegriffen hat.
     interval_seconds: float | None = None
-    # Kam der Nenner aus der Verweildauer in der verlassenen Zone (True)
-    # oder aus dem vollen Intervall seit der vorigen Veröffentlichung?
-    # Nur fürs Log — die Anzeige unterscheidet das nicht.
-    interval_from_zone: bool = False
+    # Woher der Nenner kam: "in Kampfzonen" (Regelfall,
+    # §_active_seconds), "in der verlassenen Zone" (Rückfall ohne
+    # Gebiets-Kennungen) oder "(volles Intervall)". Nur fürs Log — die
+    # Anzeige unterscheidet das nicht.
+    interval_source: str = "(volles Intervall)"
     # War der Vorgänger dieses Intervalls der Sitzungs-Startwert statt
     # einer echten vorigen Veröffentlichung? Gilt nur für die allererste
     # beobachtete Änderung und nur unter engen Bedingungen, siehe
@@ -695,6 +748,11 @@ class MainWindow(QMainWindow):
         self._last_zone_instance = ""
         self._previous_zone_instance = ""
         self._last_zone_name = ""
+        # Die Aufenthalte des laufenden Betriebs (§_ZoneStay): Aus ihnen
+        # kommt der Nenner der XP-Rate — die Zeit in KAMPFZONEN seit der
+        # vorigen Veröffentlichung (§_active_seconds). Begrenzt auf das
+        # Graph-Fenster; ältere Aufenthalte kann keine Rate mehr brauchen.
+        self._zone_stays: list[_ZoneStay] = []
         self._publish_watch: dict[str, _PublishWatch] = {}
         self._xp_watch: dict[str, _XpWatch] = {}
         # Aus der Datei geholte Verläufe (§4.44), erst beim ersten
@@ -702,6 +760,14 @@ class MainWindow(QMainWindow):
         # damit ein fehlender Stand nicht bei jedem Charakter erneut
         # einen Dateizugriff auslöst.
         self._restored_xp_history: dict[str, list[XpPoint]] | None = None
+        # Der zuletzt gesehene Erfahrungsstand der VORIGEN Sitzung, Anker
+        # des Rückblicks (§_estimated_points). ``None`` = noch nicht
+        # gelesen, wie beim Verlauf darüber.
+        self._last_seen: dict[str, tuple[int, float]] | None = None
+        # Die Client.txt, aus der der Rückblick die Map-Zeiten holt —
+        # dieselbe Datei, die der Watcher live liest. ``None``, solange
+        # die Zonen-Beobachtung aus ist (dann gibt es keinen Rückblick).
+        self._client_log_path: Path | None = None
         # Charakter-Item-Verlauf (Peter, 2026-08-02): letzte 120 Items, die
         # neu im Inventar aufgetaucht oder daraus verschwunden sind — über
         # ALLE Charaktere hinweg, unabhängig davon, welcher gerade angezeigt
@@ -3884,19 +3950,25 @@ class MainWindow(QMainWindow):
         # geradezieht.
         self._apply_level_to_character_list(name, level)
         watch = self._xp_watch.get(name)
+        now = time.monotonic()
         if watch is None:
             # Der Verlauf kommt aus der vorigen Sitzung zurück (§4.44),
             # die BASIS ausdrücklich nicht — siehe ``_XpWatch``.
-            self._xp_watch[name] = _XpWatch(since=time.monotonic(), since_experience=experience,
+            self._xp_watch[name] = _XpWatch(since=now, since_experience=experience,
                                             level=level, current_experience=experience,
+                                            last_snapshot_at=now,
                                             history=self._history_from_disk(name))
+            self._add_estimated_points(name, level, experience, now)
+            # Den Anker sofort auf diesen Stand setzen: Bräche das
+            # Programm gleich wieder ab, stünde sonst der Stand der
+            # vorletzten Sitzung in der Datei und der Rückblick würde
+            # denselben Zeitraum ein zweites Mal verteilen.
+            self._persist_xp_history()
             return
         watch.level = level
+        watch.last_snapshot_at = now
         if experience != watch.current_experience:
-            now = time.monotonic()
-            zone_seconds = self._zone_dwell_seconds(now)
-            watch.interval_from_baseline = self._baseline_starts_the_interval(
-                watch, zone_seconds)
+            watch.interval_from_baseline = self._baseline_starts_the_interval(watch, now)
             if watch.interval_from_baseline:
                 watch.previous_change_at = watch.since
                 watch.previous_change_experience = watch.since_experience
@@ -3905,16 +3977,29 @@ class MainWindow(QMainWindow):
                 watch.previous_change_experience = watch.last_change_experience
             watch.last_change_at = now
             watch.last_change_experience = experience
-            watch.interval_from_zone = zone_seconds is not None
-            watch.interval_instance = (self._previous_zone_instance
-                                       if zone_seconds is not None else "")
             seit_vorher = (now - watch.previous_change_at
                            if watch.previous_change_at is not None else None)
-            watch.interval_seconds = self._interval_seconds(zone_seconds, seit_vorher)
+            # Regelfall: die gespielte Zeit im Fenster. Nur wenn die
+            # Client.txt keine Gebiets-Kennungen führt, bleibt es bei der
+            # alten Verengung auf die zuletzt verlassene Zone (§_XpWatch).
+            aktiv = (self._active_seconds(watch.previous_change_at, now)
+                     if watch.previous_change_at is not None else None)
+            if aktiv is not None:
+                watch.interval_seconds, watch.interval_instance = aktiv
+                watch.interval_source = "in Kampfzonen"
+            else:
+                zone_seconds = self._zone_dwell_seconds(now)
+                watch.interval_seconds = self._interval_seconds(zone_seconds, seit_vorher)
+                watch.interval_instance = (self._previous_zone_instance
+                                           if zone_seconds is not None else "")
+                watch.interval_source = ("in der verlassenen Zone" if zone_seconds is not None
+                                         else "(volles Intervall)")
             self._record_xp_point(watch, now)
-            self._persist_xp_history()
             self._log_xp_publication(name, watch)
-        watch.current_experience = experience
+            # ERST den Stand fortschreiben, dann speichern: In die Datei
+            # gehört der Stand, der jetzt gilt, nicht der davor.
+            watch.current_experience = experience
+            self._persist_xp_history()
 
     @staticmethod
     def _interval_seconds(zone_seconds: float | None,
@@ -3952,8 +4037,7 @@ class MainWindow(QMainWindow):
             return zone_seconds
         return min(zone_seconds, since_previous)
 
-    def _baseline_starts_the_interval(self, watch: _XpWatch,
-                                      zone_seconds: float | None) -> bool:
+    def _baseline_starts_the_interval(self, watch: _XpWatch, now: float) -> bool:
         """Darf der Sitzungs-Startwert als Vorgänger der ERSTEN
         beobachteten Änderung dienen?
 
@@ -3973,7 +4057,12 @@ class MainWindow(QMainWindow):
         dieser Sitzung verdient, und gegen die Zeit seit Programmstart
         gerechnet ergäbe das eine erfundene Rate.
 
-        Diese drei Bedingungen schließen genau das aus:
+        Mit Gebiets-Kennungen ist die Frage direkt zu beantworten: Jede
+        Kampfzone des Fensters muss NACH dem Startwert betreten worden
+        sein (plus Auslöse-Fenster). Lief beim Start schon eine Map, ist
+        unbekannt, wie viel davon vorher verdient wurde.
+
+        Ohne Kennungen bleibt es bei den drei Bedingungen von vorher:
 
         - Der Nenner kommt aus der Verweildauer in der verlassenen Zone,
           nicht aus dem vollen Intervall. Ohne Zonen-Beobachtung bleibt
@@ -3988,11 +4077,107 @@ class MainWindow(QMainWindow):
           Zonenwechsel und seiner Veröffentlichung, ist der Startwert noch
           der Stand VOR der letzten Zone. Dann gehörte ein Teil des
           Zuwachses dorthin."""
-        if watch.last_change_at is not None or zone_seconds is None:
+        if watch.last_change_at is not None:
             return False
-        if self._previous_zone_at is None:
+        stays = self._stays_since(watch.since, now)
+        if any(stay.area_id for stay in stays):
+            kampf = [stay for stay in stays if not stay.resting]
+            return bool(kampf) and all(
+                stay.at >= watch.since + self._XP_ZONE_TRIGGER_WINDOW_S
+                for stay in kampf)
+        if self._zone_dwell_seconds(now) is None or self._previous_zone_at is None:
             return False
         return watch.since + self._XP_ZONE_TRIGGER_WINDOW_S <= self._previous_zone_at
+
+    def _add_estimated_points(self, name: str, level: int, experience: int,
+                              now: float) -> None:
+        """Den Verlauf um die Maps ergänzen, die zwischen dem letzten
+        bekannten Erfahrungsstand und dem Programmstart liefen (§4.54).
+
+        Peter, 2026-09-22: "Auch wenn das Tool noch nicht geladen wurde
+        können wir aus den Zeitpunkten der client.txt die Verweildauer in
+        den Maps seit dem letzten Tool-Start holen und die geschätzten
+        XP/h darauf aufteilen. Das ist auf alle Fälle besser als ein
+        alleinstehender Peak." Genau das war sein Bild vom selben Abend:
+        acht Minuten Cage vor dem Start, dann ein einzelner 70-Sekunden-
+        Balken im sonst leeren Drei-Stunden-Fenster.
+
+        Was hier SICHER ist und was geschätzt: Die Verweildauern kommen
+        auf die Sekunde genau aus der Client.txt, und der Zuwachs ist die
+        Differenz zweier tatsächlich beobachteter Stände. Geschätzt ist
+        allein die Verteilung — alle Maps bekommen dieselbe Rate. Deshalb
+        werden die Balken blasser gezeichnet (``XpPoint.estimated``).
+
+        Grenzen, bewusst eng gezogen:
+
+        - Nur mit lückenlosem Anker (Peters Wahl): Ist der gespeicherte
+          Stand älter als das Graph-Fenster, wird nicht geschätzt
+          (``xp_history.load_last_seen``).
+        - Nur ABGESCHLOSSENE Kampfzonen vor dem Programmstart. Die Map,
+          die gerade läuft, hat ihre Erfahrung noch gar nicht
+          veröffentlicht — ihre Zeit dürfte den Zuwachs nicht mit
+          verdünnen.
+        - Nur ein Zuwachs. Ein Rückgang (Tod in der Programmpause) ließe
+          sich nicht sinnvoll verteilen; er steckt dann stillschweigend
+          im nächsten gemessenen Abschnitt."""
+        punkte = self._estimated_points(name, level, experience, now)
+        if not punkte:
+            return
+        watch = self._xp_watch[name]
+        watch.history = sorted([*watch.history, *punkte], key=lambda p: p.at)
+        log.info("XP-Rückblick %s: %d Maps aus der Client.txt, %+d XP auf "
+                 "%.0fs verteilt — %.1f Mio. XP/h.",
+                 name, len(punkte), round(sum(p.gain for p in punkte)),
+                 sum(p.seconds for p in punkte), punkte[0].rate / 1_000_000)
+
+    def _estimated_points(self, name: str, level: int, experience: int,
+                          now: float) -> list[XpPoint]:
+        """Die rekonstruierten Abschnitte selbst (§_add_estimated_points)."""
+        stand = self._last_seen_for(name)
+        if stand is None or self._client_log_path is None:
+            return []
+        vorheriger_stand, vorher_wall = stand
+        gain = experience - vorheriger_stand
+        if gain <= 0:
+            return []
+        now_wall = time.time()
+        seit = datetime.fromtimestamp(vorher_wall)
+        bis = datetime.fromtimestamp(now_wall)
+        abschnitte = []
+        for stay in zone_stays(self._client_log_path, seit):
+            if stay.left is None or stay.resting:
+                continue
+            anfang, ende = max(stay.entered, seit), min(stay.left, bis)
+            dauer = (ende - anfang).total_seconds()
+            # Auf die Uhr des Programms umrechnen, wie beim geladenen
+            # Verlauf (§xp_history) — der Graph rechnet in monotonic.
+            at = now - (now_wall - ende.timestamp())
+            if dauer > 0 and at > now - GRAPH_SPAN_S:
+                abschnitte.append((at, dauer, stay.instance))
+        gesamt = sum(dauer for _, dauer, _ in abschnitte)
+        if gesamt <= 0:
+            return []
+        rate = gain / (gesamt / 3600)
+        return [XpPoint(at=at, seconds=dauer, rate=rate, instance=instance,
+                        level=level, estimated=True)
+                for at, dauer, instance in abschnitte]
+
+    def _last_seen_for(self, name: str) -> tuple[int, float] | None:
+        """Der Anker aus der Datei, beim ersten Gebrauch gelesen."""
+        if self._last_seen is None:
+            self._last_seen = self._read_last_seen()
+        return self._last_seen.get(name)
+
+    def _read_last_seen(self) -> dict[str, tuple[int, float]]:
+        if not self._account_name:
+            return {}
+        try:
+            return xp_history.load_last_seen(
+                xp_history.path_for(self._account_name),
+                max_age_s=GRAPH_SPAN_S, now_wall=time.time())
+        except OSError:
+            log.warning("Anker für den XP-Rückblick nicht lesbar.", exc_info=True)
+            return {}
 
     def _history_from_disk(self, name: str) -> list[XpPoint]:
         """Den gespeicherten Verlauf dieses Charakters holen (§4.44).
@@ -4033,7 +4218,10 @@ class MainWindow(QMainWindow):
             xp_history.save({name: watch.history
                              for name, watch in self._xp_watch.items()},
                             xp_history.path_for(self._account_name),
-                            now_mono=time.monotonic(), now_wall=time.time())
+                            now_mono=time.monotonic(), now_wall=time.time(),
+                            last_seen={name: (watch.current_experience,
+                                              watch.last_snapshot_at)
+                                       for name, watch in self._xp_watch.items()})
         except OSError:
             # Der Verlauf ist Komfort. Ein fehlgeschlagenes Speichern
             # darf die laufende Messung nicht stören.
@@ -4066,6 +4254,62 @@ class MainWindow(QMainWindow):
     # eintrudelnde Händler-Veröffentlichung (§4.36) fälschlich einer Zone
     # zugerechnet würde.
     _XP_ZONE_TRIGGER_WINDOW_S = 10.0
+
+    def _note_zone_stay(self, zone_name: str, now: float) -> None:
+        """Den vorigen Aufenthalt schließen und den neuen eröffnen.
+
+        Die Liste reicht nur so weit zurück wie der Graph: Was älter ist
+        als sein Fenster, kann in keiner Rate mehr auftauchen."""
+        if self._zone_stays:
+            self._zone_stays[-1].until = now
+        self._zone_stays.append(_ZoneStay(
+            at=now, until=None, name=zone_name,
+            area_id=self._zone_watcher.last_area_id if self._zone_watcher else "",
+            instance=self._last_zone_instance))
+        cutoff = now - GRAPH_SPAN_S
+        while len(self._zone_stays) > 1 and (self._zone_stays[0].until or now) <= cutoff:
+            self._zone_stays.pop(0)
+
+    def _stays_since(self, since: float, now: float) -> list[_ZoneStay]:
+        """Die Aufenthalte, die im Fenster ``(since, now]`` noch liefen."""
+        return [stay for stay in self._zone_stays if (stay.until or now) > since]
+
+    def _active_seconds(self, since: float, now: float) -> tuple[float, str] | None:
+        """Zeit in Kampfzonen im Fenster ``(since, now]`` und die Instanz
+        der letzten davon — der Nenner der XP-Rate und die Gruppierung im
+        Graphen (§_XpWatch).
+
+        ``None`` heißt "diese Rechnung trägt hier nicht", und zwar in
+        zwei Fällen:
+
+        - Kein einziger Aufenthalt im Fenster trägt eine Gebiets-Kennung.
+          Dann lässt sich Ruhezeit nicht von Spielzeit trennen, und der
+          Aufrufer fällt auf die alte Regel zurück (Verweildauer in der
+          zuletzt verlassenen Zone).
+        - Es kam Erfahrung dazu, ohne dass eine Kampfzone im Fenster lag.
+          Das ist ein Widerspruch (Quest-Belohnung im Hideout, verpasster
+          Zonenwechsel) — durch null zu teilen wäre die schlechteste
+          Antwort darauf.
+
+        Aufenthalte werden am Fenster ZUGESCHNITTEN, nicht als Ganzes
+        gezählt: Veröffentlicht GGG mitten in einer Map (rund 5 % der
+        Fälle, `poe-verhalten.md` §1), ist der vordere Teil dieser Map
+        schon abgerechnet. Dieselbe Erfahrung zweimal zu verteilen wäre
+        derselbe Fehler, den die alte Kappung verhindert hat."""
+        stays = self._stays_since(since, now)
+        if not any(stay.area_id for stay in stays):
+            return None
+        aktiv = 0.0
+        instance = ""
+        for stay in stays:
+            if stay.resting:
+                continue
+            anfang = max(stay.at, since)
+            ende = min(stay.until if stay.until is not None else now, now)
+            if ende > anfang:
+                aktiv += ende - anfang
+                instance = stay.instance
+        return (aktiv, instance) if aktiv > 0 else None
 
     def _zone_dwell_seconds(self, now: float) -> float | None:
         """Verweildauer in der zuletzt verlassenen Zone — der Nenner der
@@ -4100,8 +4344,7 @@ class MainWindow(QMainWindow):
         rate = gain / (seconds / 3600) if seconds > 0 else 0.0
         log.info("Erfahrung %s: %+d in %.0fs %s (Stufe %d) — %.1f Mio. XP/h; "
                  "seit %s sind %.0fs vergangen.",
-                 name, gain, seconds,
-                 "in der verlassenen Zone" if watch.interval_from_zone else "(volles Intervall)",
+                 name, gain, seconds, watch.interval_source,
                  watch.level, rate / 1_000_000,
                  "dem Sitzungs-Startwert" if watch.interval_from_baseline
                  else "der vorigen Veröffentlichung", gesamt)
@@ -4892,6 +5135,7 @@ class MainWindow(QMainWindow):
             self._zone_watcher.deleteLater()
             self._zone_watcher = None
         self._deaths = {}
+        self._client_log_path = None
         if not enabled:
             log.info("Zonen-Beobachtung deaktiviert (Settings > Zone Refresh).")
             return
@@ -4905,6 +5149,7 @@ class MainWindow(QMainWindow):
             log.warning("Zonen-Beobachtung: Pfad %r ergibt keine existierende "
                         "Client.txt — keine Beobachtung aktiv.", path)
             return
+        self._client_log_path = resolved
         self._zone_watcher = ZoneWatcher(resolved, self)
         self._zone_watcher.zone_changed.connect(self._on_zone_changed)
         self._zone_watcher.inventory_event.connect(self._on_inventory_event)
@@ -5009,8 +5254,10 @@ class MainWindow(QMainWindow):
         self._previous_zone_instance = self._last_zone_instance
         self._last_zone_instance = (self._zone_watcher.last_instance_id
                                     if self._zone_watcher else "")
-        self._last_zone_at = time.monotonic()
+        jetzt = time.monotonic()
+        self._last_zone_at = jetzt
         self._last_zone_name = zone_name
+        self._note_zone_stay(zone_name, jetzt)
         if self._event_refresh_blocked() or self._trigger_budget_spent():
             return
         if self._refresh_current_view():

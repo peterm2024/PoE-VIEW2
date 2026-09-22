@@ -212,9 +212,18 @@ with the tiers you still miss left empty.
   more than half an hour, whichever came later, and is drawn solid and
   green over exactly that stretch — dashed before it, where it is only a
   yardstick for the older bars. How long the stretch is stands next to
-  the number. The graph survives a restart: measured sections are stored
-  per account and drawn again next time, so closing the program does not
-  empty it.
+  the number. The rate counts only the time you spent in areas that give
+  experience: hideout, town and the hubs stay out of it, and every map
+  since the last update counts, not just the one you left last. The graph
+  survives a restart: measured sections are stored per account and drawn
+  again next time, so closing the program does not empty it.
+- **The maps you ran before starting PoE-VIEW2** show up as well, drawn
+  fainter than the measured ones. Their length comes from the game's own
+  `Client.txt` and is exact; the experience gained while the program was
+  closed is spread across them evenly, which is an estimate — hence the
+  fainter bars. This needs the `Client.txt` watch, and it only happens
+  when the last stored experience is still within the three-hour window;
+  after a longer break the graph starts empty as before.
 - **Death counter**: with the `Client.txt` watch enabled, the levelling
   panel counts the shown character's deaths of the last 24 hours
   ("☠ 4 deaths (24 h)") and the graph marks each death with a small red

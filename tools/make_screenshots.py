@@ -530,7 +530,7 @@ def _demo_leveling(win: MainWindow) -> None:
     watch = _XpWatch(since=jetzt - 3 * 3600, since_experience=stand - 300_000_000,
                      level=92, current_experience=stand)
     watch.interval_seconds = abschnitte[-1][1]
-    watch.interval_from_zone = True
+    watch.interval_source = "in Kampfzonen"
     watch.last_change_at = jetzt - abschnitte[-1][0] * 60
     watch.last_change_experience = stand
     watch.previous_change_at = watch.last_change_at - watch.interval_seconds

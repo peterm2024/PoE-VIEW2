@@ -310,7 +310,14 @@ finished area:</p>
 <li>The <b>width</b> is how long you were in there, so a long map looks
 different from a quick trial.</li>
 <li><b>Gaps are real.</b> Where nothing is drawn, no experience was
-made — town, stash, a break.</li>
+made — town, stash, a break. Time spent there is left out of the rate
+too: only areas that give experience count towards it, and all of them
+since the last update, not just the one you left last.</li>
+<li><b>Fainter bars</b> are maps you ran before PoE-VIEW2 was started,
+reconstructed from the game's Client.txt. Their length is exact; the
+experience you made while the program was closed is spread across them
+evenly, so the height is an estimate. They only appear if the program
+was last open within the three hours the graph covers.</li>
 <li>A <b>red bar below the line</b> is an area that cost you experience
 on balance. Dying does that from act 5 onwards. Losses get at most a
 quarter of the height — a death in a short stretch makes for a huge

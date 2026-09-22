@@ -19,7 +19,7 @@ from poe_view.services.api_worker import (FetchModKnowledgeJob, FetchPricesJob,
                                           FetchStashListJob, LOGIN_EXPIRED,
                                           LOGIN_NO_TOKEN)
 from poe_view.services.poe2_probe import Probe, ProbeCall
-from poe_view.ui import external_tools, mod_bar
+from poe_view.ui import external_tools, mod_bar, xp_graph
 from poe_view.ui.item_table import CONFIGURABLE_COLUMNS
 from poe_view.ui.main_window import MainWindow, _stable_item_dump, _XpWatch
 
@@ -8266,6 +8266,395 @@ def test_without_zone_watching_the_whole_interval_counts(qapp, monkeypatch) -> N
     win.worker.wait(5000)
 
 
+# --- Nenner aus den Kampfzonen der Client.txt (Peter, 2026-09-22) ------ #
+
+class _KennungsWatcher:
+    """Ein ZoneWatcher-Ersatz mit den beiden Kennungen, die
+    ``_on_zone_changed`` von ihm liest. Ohne Datei und ohne Timer: Die
+    Kennungen sind das Einzige, worauf es fuer den Nenner ankommt."""
+
+    def __init__(self) -> None:
+        self.last_instance_id = ""
+        self.last_area_id = ""
+
+
+def _betritt(win, name: str, area_id: str, instance: str = "") -> None:
+    """Einen Zonenwechsel MIT Gebiets-Kennung melden, wie ihn der echte
+    Watcher aus der Client.txt liest."""
+    if not isinstance(win._zone_watcher, _KennungsWatcher):
+        win._zone_watcher = _KennungsWatcher()
+    win._zone_watcher.last_area_id = area_id
+    win._zone_watcher.last_instance_id = instance
+    win._on_zone_changed(name)
+
+
+def test_the_rate_ignores_time_spent_in_rest_areas(qapp, monkeypatch) -> None:
+    """Muster A aus Peters Abgleich vom 2026-09-22: Die Veroeffentlichung
+    kommt beim Haendler, lange nach der Map. Die alte Regel teilte durch
+    das volle Intervall und zeigte am 2026-09-12 um 16:58 2,4 Mio./h fuer
+    626 gespielte Sekunden — Faktor 10 daneben."""
+    fake_now = [1000.0]
+    monkeypatch.setattr("poe_view.ui.main_window.time.monotonic", lambda: fake_now[0])
+
+    win = MainWindow()
+    win._on_character_snapshot("WitchOfPeter", 87, 1_000_000)
+    _betritt(win, "Backstreet Hideout", "HideoutSlum", "1")
+    fake_now[0] += 30.0
+    _betritt(win, "Cage", "MapWorldsCage", "2")
+    fake_now[0] += 200.0
+    _betritt(win, "Backstreet Hideout", "HideoutSlum", "3")
+    fake_now[0] += 300.0                      # Truhen sortieren, verkaufen
+    win._on_character_snapshot("WitchOfPeter", 87, 3_000_000)
+
+    watch = win._xp_watch["WitchOfPeter"]
+    assert watch.interval_seconds == pytest.approx(200.0)
+    assert watch.interval_source == "in Kampfzonen"
+    assert win._xp_per_hour("WitchOfPeter") == pytest.approx(2_000_000 / (200 / 3600))
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_every_map_between_two_publications_counts(qapp, monkeypatch) -> None:
+    """Muster B: Liegen mehrere Maps zwischen zwei Veroeffentlichungen,
+    fiel der ganze Zuwachs frueher der zuletzt verlassenen zu — am
+    2026-09-13 um 20:32 waren das 63,6 statt 31,5 Mio./h."""
+    fake_now = [1000.0]
+    monkeypatch.setattr("poe_view.ui.main_window.time.monotonic", lambda: fake_now[0])
+
+    win = MainWindow()
+    win._on_character_snapshot("WitchOfPeter", 87, 1_000_000)
+    _betritt(win, "Cage", "MapWorldsCage", "1")
+    fake_now[0] += 300.0
+    _betritt(win, "Backstreet Hideout", "HideoutSlum", "2")
+    fake_now[0] += 1.0
+    win._on_character_snapshot("WitchOfPeter", 87, 2_000_000)   # erste Map
+    fake_now[0] += 59.0
+    _betritt(win, "Strand", "MapWorldsStrand", "3")
+    fake_now[0] += 300.0
+    _betritt(win, "Backstreet Hideout", "HideoutSlum", "4")
+    fake_now[0] += 60.0
+    _betritt(win, "Port", "MapWorldsPort", "5")
+    fake_now[0] += 200.0
+    _betritt(win, "Backstreet Hideout", "HideoutSlum", "6")
+    fake_now[0] += 1.0
+    win._on_character_snapshot("WitchOfPeter", 87, 6_000_000)   # zwei Maps auf einmal
+
+    watch = win._xp_watch["WitchOfPeter"]
+    assert watch.interval_seconds == pytest.approx(500.0)       # nicht nur die 200
+    # Gruppiert wird nach der ZULETZT gespielten Map, nicht nach dem
+    # Hideout, in dem die Zahl eintraf.
+    assert watch.interval_instance == "5"
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_a_publication_inside_a_map_does_not_bill_its_time_twice(
+        qapp, monkeypatch) -> None:
+    """Rund 5 % der Veroeffentlichungen kommen mitten in einer Zone
+    (`poe-verhalten.md` §1). Der vordere Teil der Map ist dann schon
+    abgerechnet — er darf im naechsten Abschnitt nicht noch einmal
+    auftauchen. Peters Fall vom 2026-08-13, 18:38:52: rund zwei Minuten,
+    nicht 582 Sekunden.
+
+    Die alte Regel kam hier auf 119 s (bis zur Veroeffentlichung), die
+    neue auf 116 s (bis zum Verlassen der Map) — die drei Sekunden, die
+    der Server braucht, verbringt der Charakter schon im Hideout."""
+    fake_now = [1000.0]
+    monkeypatch.setattr("poe_view.ui.main_window.time.monotonic", lambda: fake_now[0])
+
+    win = MainWindow()
+    win._on_character_snapshot("WitchOfPeter", 87, 1_000_000)
+    _betritt(win, "Backstreet Hideout", "HideoutSlum", "1")
+    fake_now[0] += 20.0
+    _betritt(win, "Burial Chambers", "MapWorldsBurialChambers", "2")   # 18:29:07
+    fake_now[0] += 466.0
+    win._on_character_snapshot("WitchOfPeter", 87, 15_550_145)         # 18:36:53
+    fake_now[0] += 116.0
+    _betritt(win, "Backstreet Hideout", "HideoutSlum", "3")            # 18:38:49
+    fake_now[0] += 3.0
+    win._on_character_snapshot("WitchOfPeter", 87, 21_717_616)         # 18:38:52
+
+    assert win._xp_watch["WitchOfPeter"].interval_seconds == pytest.approx(116.0)
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_experience_without_any_fighting_zone_falls_back(qapp, monkeypatch) -> None:
+    """Erfahrung ohne eine einzige Kampfzone im Fenster ist ein
+    Widerspruch (Quest-Belohnung in der Stadt, verpasster Zonenwechsel).
+    Durch null zu teilen waere die schlechteste Antwort darauf — es bleibt
+    beim vollen Intervall."""
+    fake_now = [1000.0]
+    monkeypatch.setattr("poe_view.ui.main_window.time.monotonic", lambda: fake_now[0])
+
+    win = MainWindow()
+    win._on_character_snapshot("WitchOfPeter", 87, 1_000_000)
+    _betritt(win, "Cage", "MapWorldsCage", "1")
+    fake_now[0] += 200.0
+    _betritt(win, "Backstreet Hideout", "HideoutSlum", "2")
+    fake_now[0] += 2.0
+    win._on_character_snapshot("WitchOfPeter", 87, 2_000_000)   # normale Map
+    fake_now[0] += 58.0
+    _betritt(win, "The Sarn Encampment", "2_8_town", "3")       # nur Stadt
+    fake_now[0] += 300.0
+    win._on_character_snapshot("WitchOfPeter", 87, 2_500_000)
+
+    watch = win._xp_watch["WitchOfPeter"]
+    assert watch.interval_source == "(volles Intervall)"
+    assert watch.interval_seconds == pytest.approx(358.0)
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_a_map_already_running_at_startup_yields_no_rate_yet(
+        qapp, monkeypatch) -> None:
+    """Der Sitzungs-Startwert taugt nur als Vorgaenger, wenn JEDE
+    Kampfzone des Fensters nach ihm betreten wurde. Lief beim Start schon
+    eine Map, ist unbekannt, wie viel davon vorher verdient wurde — dann
+    lieber noch keine Rate als eine erfundene."""
+    fake_now = [1000.0]
+    monkeypatch.setattr("poe_view.ui.main_window.time.monotonic", lambda: fake_now[0])
+
+    win = MainWindow()
+    win._zone_watcher = _KennungsWatcher()
+    _betritt(win, "Cage", "MapWorldsCage", "1")          # Map laeuft schon
+    fake_now[0] += 120.0
+    win._on_character_snapshot("WitchOfPeter", 87, 1_000_000)   # Programmstart
+    fake_now[0] += 180.0
+    _betritt(win, "Backstreet Hideout", "HideoutSlum", "2")
+    fake_now[0] += 2.0
+    win._on_character_snapshot("WitchOfPeter", 87, 4_000_000)
+
+    assert win._xp_per_hour("WitchOfPeter") is None
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_a_map_started_after_the_baseline_already_yields_a_rate(
+        qapp, monkeypatch) -> None:
+    """Der Gegenfall, weiterhin gueltig (Peter, 2026-08-13): Wurde die
+    Map erst nach dem Startwert betreten, gehoert alles Dazugekommene in
+    sie — dann gibt es die Rate schon bei der ersten Veroeffentlichung."""
+    fake_now = [1000.0]
+    monkeypatch.setattr("poe_view.ui.main_window.time.monotonic", lambda: fake_now[0])
+
+    win = MainWindow()
+    win._on_character_snapshot("WitchOfPeter", 87, 1_000_000)
+    _betritt(win, "Backstreet Hideout", "HideoutSlum", "1")
+    fake_now[0] += 30.0
+    _betritt(win, "Cage", "MapWorldsCage", "2")
+    fake_now[0] += 600.0
+    _betritt(win, "Backstreet Hideout", "HideoutSlum", "3")
+    fake_now[0] += 2.0
+    win._on_character_snapshot("WitchOfPeter", 87, 11_000_000)
+
+    assert win._xp_per_hour("WitchOfPeter") == pytest.approx(10_000_000 / (600 / 3600))
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_stays_older_than_the_graph_window_are_dropped(qapp, monkeypatch) -> None:
+    """Die Aufenthaltsliste waechst nicht unbegrenzt: Was aelter ist als
+    das Graph-Fenster, kann in keiner Rate mehr auftauchen."""
+    fake_now = [1000.0]
+    monkeypatch.setattr("poe_view.ui.main_window.time.monotonic", lambda: fake_now[0])
+
+    win = MainWindow()
+    for i in range(5):
+        _betritt(win, f"Cage {i}", "MapWorldsCage", str(i))
+        fake_now[0] += 120.0
+    fake_now[0] += xp_graph.GRAPH_SPAN_S
+    _betritt(win, "Backstreet Hideout", "HideoutSlum", "spaet")
+
+    assert [stay.name for stay in win._zone_stays] == ["Cage 4", "Backstreet Hideout"]
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+# --- Rueckblick auf die Maps vor dem Programmstart (§4.45) ------------- #
+
+def _client_log(pfad, wall_now: float, abschnitte) -> None:
+    """Eine Client.txt schreiben. ``abschnitte`` sind Tupel
+    (Sekunden vor jetzt, Gebiets-Kennung, Instanz, Name)."""
+    zeilen = []
+    for vor_sekunden, area, instance, name in abschnitte:
+        stempel = datetime.fromtimestamp(wall_now - vor_sekunden).strftime(
+            "%Y/%m/%d %H:%M:%S")
+        zeilen.append(f'{stempel} 1 11869d8b [DEBUG Client 1] '
+                      f'Client-Safe Instance ID = {instance}\n'
+                      f'{stempel} 1 1186a8a3 [DEBUG Client 1] '
+                      f'Generating level 70 area "{area}" with seed 1\n'
+                      f'{stempel} 1 cffb065b [INFO Client 1] '
+                      f': You have entered {name}.\n')
+    pfad.write_text("".join(zeilen), encoding="utf-8")
+
+
+def _zwei_sitzungen(tmp_path, monkeypatch, *, erster_stand, zweiter_stand,
+                    abschnitte, pause_s=1800.0):
+    """Erste Sitzung setzt den Anker, dann Pause, dann zweite Sitzung mit
+    einer Client.txt, die die Zeit dazwischen protokolliert."""
+    monkeypatch.setattr("poe_view.config.APP_DATA_DIR", tmp_path / "appdata")
+    wall = [1_790_000_000.0]
+    mono = [10_000.0]
+    monkeypatch.setattr("poe_view.ui.main_window.time.monotonic", lambda: mono[0])
+    monkeypatch.setattr("poe_view.ui.main_window.time.time", lambda: wall[0])
+
+    erste = MainWindow()
+    erste._account_name = "TestAccount#1234"
+    erste._on_character_snapshot("WitchOfPeter", 78, erster_stand)
+    erste.worker.stop()
+    erste.worker.wait(5000)
+
+    wall[0] += pause_s
+    mono[0] += pause_s
+    log = tmp_path / "Client.txt"
+    _client_log(log, wall[0], abschnitte)
+
+    zweite = MainWindow()
+    zweite._account_name = "TestAccount#1234"
+    zweite._client_log_path = log
+    zweite._on_character_snapshot("WitchOfPeter", 78, zweiter_stand)
+    return zweite
+
+
+def test_maps_before_the_start_become_estimated_bars(qapp, tmp_path, monkeypatch):
+    """Peters Bild vom 2026-09-22: acht Minuten Cage vor dem Programmstart,
+    danach ein einzelner 70-Sekunden-Balken allein im Drei-Stunden-Fenster.
+    Die Client.txt kennt die Map-Zeiten auf die Sekunde — der Zuwachs seit
+    dem letzten bekannten Stand wird darauf verteilt."""
+    win = _zwei_sitzungen(
+        tmp_path, monkeypatch, erster_stand=1_000_000, zweiter_stand=4_000_000,
+        abschnitte=[(1700, "HideoutSlum", "1", "Backstreet Hideout"),
+                    (1600, "MapWorldsCage", "2", "Cage"),        # 600 s Map
+                    (1000, "HideoutSlum", "3", "Backstreet Hideout"),
+                    (900, "MapWorldsPort", "4", "Port"),         # 300 s Map
+                    (600, "HideoutSlum", "5", "Backstreet Hideout")])
+
+    punkte = win._xp_watch["WitchOfPeter"].history
+    assert [p.seconds for p in punkte] == [600.0, 300.0]
+    assert all(p.estimated for p in punkte)
+    # Dieselbe Rate fuer beide, zusammen genau der beobachtete Zuwachs.
+    assert punkte[0].rate == pytest.approx(punkte[1].rate)
+    assert sum(p.gain for p in punkte) == pytest.approx(3_000_000)
+    assert [p.instance for p in punkte] == ["2", "4"]
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_time_in_the_hideout_does_not_dilute_the_estimate(qapp, tmp_path,
+                                                          monkeypatch):
+    """Nur Kampfzonen tragen den Zuwachs. Zaehlte die Standzeit mit, waere
+    die geschaetzte Rate genau der Fehler, den die neue Rechnung im
+    laufenden Betrieb gerade behebt."""
+    win = _zwei_sitzungen(
+        tmp_path, monkeypatch, erster_stand=0, zweiter_stand=1_000_000,
+        abschnitte=[(1700, "MapWorldsCage", "1", "Cage"),          # 500 s Map
+                    (1200, "HideoutSlum", "2", "Backstreet Hideout"),
+                    (300, "MapWorldsCage", "3", "Cage")])          # laeuft noch
+
+    punkte = win._xp_watch["WitchOfPeter"].history
+    assert [p.seconds for p in punkte] == [500.0]
+    assert punkte[0].rate == pytest.approx(1_000_000 / (500 / 3600))
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_a_map_still_running_at_the_start_is_not_estimated(qapp, tmp_path,
+                                                           monkeypatch):
+    """Ihre Erfahrung ist noch gar nicht veroeffentlicht — ihre Zeit
+    duerfte den Zuwachs also nicht verduennen. Sie steckt im Test oben
+    schon als dritter Abschnitt drin; hier ohne jede fertige Map davor:
+    dann gibt es gar keinen Rueckblick."""
+    win = _zwei_sitzungen(
+        tmp_path, monkeypatch, erster_stand=0, zweiter_stand=1_000_000,
+        abschnitte=[(1700, "HideoutSlum", "1", "Backstreet Hideout"),
+                    (600, "MapWorldsCage", "2", "Cage")])          # noch drin
+
+    assert win._xp_watch["WitchOfPeter"].history == []
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_no_estimate_without_a_fresh_anchor(qapp, tmp_path, monkeypatch):
+    """Peters Wahl 2026-09-22: schaetzen nur, wenn lueckenlos. Nach einer
+    Pause laenger als das Graph-Fenster stammt der Zuwachs groesstenteils
+    aus Runden, die gar nicht mehr im Bild liegen."""
+    win = _zwei_sitzungen(
+        tmp_path, monkeypatch, erster_stand=1_000_000, zweiter_stand=4_000_000,
+        pause_s=xp_graph.GRAPH_SPAN_S + 60,
+        abschnitte=[(1700, "MapWorldsCage", "2", "Cage"),
+                    (1000, "HideoutSlum", "3", "Backstreet Hideout")])
+
+    assert win._xp_watch["WitchOfPeter"].history == []
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_a_loss_during_the_break_is_not_spread_over_the_maps(qapp, tmp_path,
+                                                             monkeypatch):
+    """Ein Rueckgang (Tod in der Programmpause) liesse sich nicht sinnvoll
+    verteilen — er bekaeme in jeder Map einen Anteil, obwohl er an einer
+    Stelle passiert ist."""
+    win = _zwei_sitzungen(
+        tmp_path, monkeypatch, erster_stand=5_000_000, zweiter_stand=4_000_000,
+        abschnitte=[(1700, "MapWorldsCage", "2", "Cage"),
+                    (1000, "HideoutSlum", "3", "Backstreet Hideout")])
+
+    assert win._xp_watch["WitchOfPeter"].history == []
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_estimated_bars_survive_the_next_restart(qapp, tmp_path, monkeypatch):
+    """Sie landen im gespeicherten Verlauf wie gemessene Abschnitte — und
+    bleiben dabei als geschaetzt gekennzeichnet."""
+    win = _zwei_sitzungen(
+        tmp_path, monkeypatch, erster_stand=1_000_000, zweiter_stand=4_000_000,
+        abschnitte=[(1700, "MapWorldsCage", "2", "Cage"),
+                    (1000, "HideoutSlum", "3", "Backstreet Hideout")])
+    assert win._xp_watch["WitchOfPeter"].history, "Vorbedingung: ein Rueckblick"
+    win.worker.stop()
+    win.worker.wait(5000)
+
+    dritte = MainWindow()
+    dritte._account_name = "TestAccount#1234"
+    dritte._on_character_snapshot("WitchOfPeter", 78, 4_000_000)
+
+    assert [p.estimated for p in dritte._xp_watch["WitchOfPeter"].history] == [True]
+
+    dritte.worker.stop()
+    dritte.worker.wait(5000)
+
+
+def test_the_client_log_path_comes_from_the_zone_watcher_settings(qapp, tmp_path):
+    """Der Rueckblick liest dieselbe Datei wie die laufende Beobachtung —
+    und gar keine, solange die Beobachtung aus ist."""
+    log = tmp_path / "Client.txt"
+    log.write_text("", encoding="utf-8")
+
+    win = MainWindow()
+    win._apply_zone_watcher_config(True, str(log))
+    assert win._client_log_path == log
+
+    win._apply_zone_watcher_config(False, str(log))
+    assert win._client_log_path is None
+
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
 def test_the_very_first_map_of_a_session_already_yields_a_rate(
         qapp, monkeypatch) -> None:
     """Peter, 2026-08-13: "Ich habe eine Anfangs-XP im Tool gehabt und bin
@@ -8659,13 +9048,11 @@ def test_a_map_visited_twice_keeps_one_instance_id_in_the_history(
 
     win = MainWindow()
 
-    class _Watcher:
-        last_instance_id = ""
-    win._zone_watcher = _Watcher()
-
     def betreten(instanz: str, zone: str) -> None:
-        win._zone_watcher.last_instance_id = instanz
-        win._on_zone_changed(zone)
+        # Die Kennung entscheidet, ob der Aufenthalt in den Nenner zaehlt
+        # (§_active_seconds) — das Hideout dazwischen tut es nicht.
+        kennung = "HideoutSlum" if "Hideout" in zone else "MapWorldsBrambleValley"
+        _betritt(win, zone, kennung, instanz)
 
     win._on_character_snapshot("WitchOfPeter", 90, 1_993_000_000)
     fake_now[0] += 60.0
@@ -8684,6 +9071,9 @@ def test_a_map_visited_twice_keeps_one_instance_id_in_the_history(
     verlauf = win._xp_watch["WitchOfPeter"].history
     assert [p.instance for p in verlauf] == ["2308728564", "2308728564"]
     assert [round(p.rate / 1_000_000, 1) for p in verlauf] == [145.6, 22.1]
+    # Gemessen wird die Zeit IN der Map, nicht bis zur Veroeffentlichung:
+    # die zwei Sekunden im Hideout gehoeren nicht dazu.
+    assert [p.seconds for p in verlauf] == [362.0, 112.0]
 
     win.worker.stop()
     win.worker.wait(5000)

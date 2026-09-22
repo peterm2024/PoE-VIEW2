@@ -4,7 +4,10 @@ direkt aufgerufen statt auf ein echtes, zeitlich unvorhersehbares
 Datei-Ereignis zu warten — deterministisch und schnell, wie der Rest der
 Suite (kein echter Timer/Wait)."""
 
-from poe_view.services.zone_watcher import ZoneWatcher, resolve_client_log_path
+from datetime import datetime
+
+from poe_view.services.zone_watcher import (ZoneWatcher, is_rest_area,
+                                            resolve_client_log_path, zone_stays)
 
 _ZONE_LINE = ('2026/08/01 21:44:37 15181671 cffb0658 [INFO Client 18604] '
              ': You have entered The Coast.\n')
@@ -370,3 +373,117 @@ def test_a_death_line_is_no_zone_or_inventory_event(tmp_path, qapp) -> None:
     watcher.check_now()
 
     assert zonen == [] and inventar == []
+
+
+# --- Gebiets-Kennung: Kampfzone oder Ruhezone? ------------------------- #
+
+def _stay_lines(stamp: str, area: str, instance: str, name: str) -> str:
+    """Der Dreisatz, mit dem PoE jeden Zonenwechsel protokolliert."""
+    return (f'{stamp} 1 11869d8b [DEBUG Client 1] '
+            f'Client-Safe Instance ID = {instance}\n'
+            f'{stamp} 1 1186a8a3 [DEBUG Client 1] '
+            f'Generating level 70 area "{area}" with seed 1\n'
+            f'{stamp} 1 cffb065b [INFO Client 1] : You have entered {name}.\n')
+
+
+def test_rest_areas_are_recognised_by_their_area_id() -> None:
+    """Ausgezaehlt an Peters echter Client.txt (2026-09-22): Hideouts,
+    Staedte (auch die Endgame-Stadt), die Hubs und die Labyrinth-Vorhalle
+    bringen keine Erfahrung."""
+    for kennung in ("HideoutSlum", "HideoutTemplarLab", "1_1_town", "2_8_town",
+                    "2_11_endgame_town", "HeistHub", "DeepwaterHub", "MavenHub",
+                    "Menagerie_Hub", "Labyrinth_Airlock", "KalguuranSettlersLeague"):
+        assert is_rest_area(kennung), kennung
+
+
+def test_fighting_areas_are_not_rest_areas() -> None:
+    """Und ausdruecklich NICHT pauschal alles mit "Labyrinth": Die
+    Labyrinth-Gebiete selbst sind Kampfzonen, nur die Vorhalle nicht."""
+    for kennung in ("MapWorldsCage", "Delve_Main", "3_Labyrinth_boss_2",
+                    "EndGame_Labyrinth_OH_straight", "1_3_17_1", "MapSideArea4_1"):
+        assert not is_rest_area(kennung), kennung
+
+
+def test_an_unknown_area_id_counts_as_a_fighting_area() -> None:
+    """Ohne Kennung bleibt es beim Verhalten von vorher: Der Aufenthalt
+    zaehlt. Eine uebersehene Kampfzone verfaelscht die Rate staerker als
+    eine mitgezaehlte Ruhepause."""
+    assert not is_rest_area("")
+    assert not is_rest_area("   ")
+
+
+# --- zone_stays: Verweildauern aus der Client.txt ---------------------- #
+
+_STAY_LOG = (
+    _stay_lines("2026/09/22 22:20:37", "HideoutSlum", "111", "Backstreet Hideout")
+    + _stay_lines("2026/09/22 22:21:23", "MapWorldsCage", "222", "Cage")
+    + _stay_lines("2026/09/22 22:29:17", "HideoutSlum", "333", "Backstreet Hideout")
+    + _stay_lines("2026/09/22 22:29:53", "MapWorldsCage", "222", "Cage")
+    + _stay_lines("2026/09/22 22:31:03", "HideoutSlum", "444", "Backstreet Hideout"))
+
+
+def test_zone_stays_returns_each_visit_with_its_duration(tmp_path) -> None:
+    """Peters echter Ablauf vom 2026-09-22, Sekunde fuer Sekunde: 474 s
+    in der Map, 36 s Hideout, nochmal 70 s in DERSELBEN Instanz."""
+    log = tmp_path / "Client.txt"
+    _write(log, _STAY_LOG)
+
+    stays = zone_stays(log, datetime(2026, 9, 22, 22, 0))
+
+    assert [(s.name, s.seconds, s.resting) for s in stays] == [
+        ("Backstreet Hideout", 46.0, True),
+        ("Cage", 474.0, False),
+        ("Backstreet Hideout", 36.0, True),
+        ("Cage", 70.0, False),
+        ("Backstreet Hideout", 0.0, True)]     # noch drin
+    assert stays[-1].left is None
+    assert [s.instance for s in stays if not s.resting] == ["222", "222"]
+
+
+def test_zone_stays_keeps_a_visit_that_started_before_the_window(tmp_path) -> None:
+    """Sonst fiele genau die Map heraus, die beim Start des Fensters
+    schon lief — der Aufrufer schneidet sie selbst zu."""
+    log = tmp_path / "Client.txt"
+    _write(log, _STAY_LOG)
+
+    stays = zone_stays(log, datetime(2026, 9, 22, 22, 25))
+
+    assert [s.name for s in stays] == ["Cage", "Backstreet Hideout", "Cage",
+                                       "Backstreet Hideout"]
+    assert stays[0].entered == datetime(2026, 9, 22, 22, 21, 23)
+
+
+def test_zone_stays_does_not_inherit_the_area_id_of_the_previous_zone(tmp_path) -> None:
+    """Fehlt die DEBUG-Zeile, ist die Kennung UNBEKANNT — nicht die der
+    Zone davor. Sonst gaelte ein Aufenthalt nach einem Hideout-Besuch
+    stillschweigend als Ruhezone und fiele aus der Rechnung."""
+    log = tmp_path / "Client.txt"
+    _write(log, _stay_lines("2026/09/22 22:20:37", "HideoutSlum", "111", "Backstreet Hideout")
+           + '2026/09/22 22:21:23 1 cffb065b [INFO Client 1] : You have entered Cage.\n'
+           + _stay_lines("2026/09/22 22:29:17", "HideoutSlum", "333", "Backstreet Hideout"))
+
+    stays = zone_stays(log, datetime(2026, 9, 22, 22, 0))
+
+    assert [(s.name, s.area_id, s.resting) for s in stays] == [
+        ("Backstreet Hideout", "HideoutSlum", True),
+        ("Cage", "", False),
+        ("Backstreet Hideout", "HideoutSlum", True)]
+
+
+def test_zone_stays_returns_empty_for_a_missing_file(tmp_path) -> None:
+    assert zone_stays(tmp_path / "nope.txt", datetime(2026, 9, 22)) == []
+
+
+def test_the_watcher_picks_up_the_area_id_with_the_zone(tmp_path, qapp) -> None:
+    """Live dieselbe Kennung wie im Rueckblick — sonst rechnete der
+    laufende Betrieb mit anderen Zonen als der Start."""
+    log = tmp_path / "Client.txt"
+    _write(log, "")
+    watcher = ZoneWatcher(log)
+    gesehen = []
+    watcher.zone_changed.connect(lambda zone: gesehen.append((zone, watcher.last_area_id)))
+
+    _write(log, _stay_lines("2026/09/22 22:21:23", "MapWorldsCage", "222", "Cage"))
+    watcher.check_now()
+
+    assert gesehen == [("Cage", "MapWorldsCage")]

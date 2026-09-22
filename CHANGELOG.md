@@ -6,6 +6,40 @@ nach [SemVer](https://semver.org/lang/de/).
 
 ## [Unveröffentlicht]
 
+### Geändert
+
+- **Die XP/h-Rate rechnet jetzt mit der Zeit in Kampfzonen statt mit der
+  Verweildauer in einer einzelnen Zone.** Hideout, Stadt und die Hubs
+  zählen nicht mehr in den Nenner, dafür jede Map seit der vorigen
+  Veröffentlichung. Ein Abgleich über 110 Veröffentlichungen aus zehn
+  Tagen gegen die Client.txt zeigte zwei Muster, in denen die alte Regel
+  danebenlag: Kam die Veröffentlichung beim Händler statt bei einem
+  Zonenwechsel, teilte sie durch das volle Intervall inklusive Standzeit
+  (2,4 statt 23,9 Mio./h am 12.09.); lagen mehrere Maps dazwischen,
+  bekam die letzte den ganzen Zuwachs (63,6 statt 31,5 Mio./h am
+  13.09.). Die übrigen 97 von 110 Fällen ändern sich nicht.
+- **Ruhezonen erkennt PoE-VIEW2 an der Gebiets-Kennung der Client.txt**
+  (`HideoutSlum`, `2_8_town`, …), nicht am angezeigten Namen. Führt ein
+  Spiel-Log diese Zeilen nicht, bleibt es bei der bisherigen Rechnung.
+
+### Neu
+
+- **Der Graph zeigt die Maps, die vor dem Programmstart liefen.** Aus dem
+  zuletzt gespeicherten Erfahrungsstand, dem ersten Stand der neuen
+  Sitzung und den Map-Zeiten der Client.txt rekonstruiert PoE-VIEW2 die
+  Runden der Programmpause und verteilt den Zuwachs auf sie. Diese Balken
+  werden blasser gezeichnet: Ihre Dauer ist exakt, die Aufteilung der
+  Erfahrung auf sie ist eine Annahme. Geschätzt wird nur, wenn der
+  gespeicherte Stand noch im Drei-Stunden-Fenster liegt — sonst bliebe es
+  Raterei.
+
+### Hinweis
+
+- Der gespeicherte XP-Verlauf bekommt einen neuen Dateiaufbau (Version 3,
+  er führt jetzt den Erfahrungsstand mit). Der alte Stand wird beim
+  ersten Start verworfen: Der Graph beginnt einmalig leer, ab der
+  zweiten Sitzung ist alles wie gewohnt.
+
 ## [0.14.0] - 2026-09-16
 
 ### Geändert

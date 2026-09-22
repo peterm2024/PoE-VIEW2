@@ -1592,3 +1592,38 @@ ARCHITEKTUR §4.40.2.
 **Lehre:** Ein Integral verrät nicht, was unterwegs passiert ist. Wer
 Ereignisse zählen will, braucht die Ereignis-Quelle — nicht die
 Summenkurve, durch die sie hindurchgelaufen sind.
+
+## 84. Die XP/h-Rate lag in 13 von 110 Fällen daneben — Zähler und Nenner meinten verschiedene Zeiträume
+
+**Symptom:** Peter, 2026-09-22, mit einem Screenshot: "Schau dir doch
+nochmal die XP Berechnung an und vergleiche das mit den Infos aus der
+client.txt." Der Abgleich (Tool-Log gegen Client.txt, 110
+Veröffentlichungen aus zehn Tagen) traf im Median genau — und wich in
+13 Fällen deutlich ab, bis zum Faktor 10 nach unten und Faktor 2 nach
+oben.
+
+**Ursache:** Der Zähler war der Zuwachs seit der vorigen
+Veröffentlichung, der Nenner die Verweildauer in EINER Zone. Zwei
+Zeiträume, die meistens, aber eben nicht immer dasselbe meinen:
+
+- Kam die Veröffentlichung beim Händler statt bei einem Zonenwechsel,
+  gab es keinen Zonenbezug, und die Rechnung nahm das volle Intervall —
+  inklusive der Minuten im Hideout. 12.09., 16:58: 2,4 Mio./h angezeigt
+  für 626 s echte Spielzeit, richtig wären 23,9 gewesen.
+- Lagen mehrere Maps zwischen zwei Veröffentlichungen, bekam die zuletzt
+  verlassene den Zuwachs aller. 13.09., 20:32: 63,6 statt 31,5 Mio./h.
+
+**Lösung:** Beide Enden auf dasselbe Fenster legen. Der Nenner ist jetzt
+die Summe der Zeit in Kampfzonen zwischen den beiden Veröffentlichungen,
+die Aufenthalte am Fensterrand zugeschnitten
+(`MainWindow._active_seconds`). Ruhezonen erkennt die Gebiets-Kennung
+aus der Client.txt (`zone_watcher.is_rest_area`), nicht der lokalisierte
+Name. Ohne Kennungen im Spiel-Log bleibt es bei der alten Regel — sie
+ist dort das kleinere Übel. ARCHITEKTUR §4.34.
+
+**Lehre:** Eine Rate ist eine Aussage über einen Zeitraum, nicht über
+eine Zone. Stammen Zähler und Nenner aus verschiedenen Quellen, gehört
+geprüft, ob sie denselben Zeitraum meinen — und zwar an echten Daten,
+nicht im Kopf: Die zwei Muster steckten hier in 12 % der Messungen und
+fielen im Alltag nie auf, weil die Zahl plausibel aussah.
+

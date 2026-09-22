@@ -3615,6 +3615,45 @@ Veröffentlichung im Log, ein Rückgang durch Tod, Formatierung).
 Gegenproben gefahren: Mit der Spannen-Rechnung schlägt Peters
 Zahlenbeispiel fehl, ohne die Verweildauer-Regel sein 1,53-Mrd.-Fall.
 
+**Dritter Anlauf, 2026-09-22: die Zeit in KAMPFZONEN seit der vorigen
+Veröffentlichung** (`MainWindow._active_seconds`). Anlass war Peters
+Bitte, die Rechnung einmal gegen die Client.txt zu halten. Der Abgleich
+über 110 Veröffentlichungen aus zehn Tagen (Tool-Log gegen Client.txt,
+Nenner gegen die tatsächlich in Kampfzonen verbrachte Zeit im selben
+Fenster) fiel im Kern gut aus — Median 1,00, 97 von 110 zwischen 0,8 und
+1,25 — und zeigte genau zwei Muster, in denen die Verweildauer-Regel
+danebenlag:
+
+| Fall | Datum | angezeigt | gespielt | richtig |
+|---|---|---|---|---|
+| Veröffentlichung beim Händler, nicht bei einem Zonenwechsel | 12.09. 16:58 | 2,4 Mio./h | 626 s | 23,9 Mio./h |
+| dasselbe, kürzer | 13.09. 21:09 | 5,1 Mio./h | 89 s | 39,3 Mio./h |
+| zwei Maps zwischen zwei Veröffentlichungen | 13.09. 20:32 | 63,6 Mio./h | 691 s | 31,5 Mio./h |
+
+Beide Muster stammen aus derselben Verengung auf EINE Zone: Fehlt der
+Zonenbezug, fiel die Rechnung auf das volle Intervall inklusive
+Standzeit zurück (Rate zu niedrig); lagen mehrere Maps dazwischen, bekam
+die letzte den ganzen Zuwachs (Rate zu hoch). Der Nenner ist deshalb
+jetzt die Summe der Zeit in Kampfzonen im Fenster *(vorige
+Veröffentlichung, jetzt]*, die Aufenthalte am Fensterrand zugeschnitten.
+Die Kappung von oben (`_interval_seconds`) wird dadurch überflüssig —
+außerhalb des Fensters wird gar nichts mehr gezählt.
+
+**Ruhezonen erkennt die Gebiets-Kennung**, nicht der Name: Die
+Client.txt schreibt vor jedem Zonenwechsel `Generating level 70 area
+"MapWorldsCage"`, und daran hängt `zone_watcher.is_rest_area` —
+`Hideout*`, `*_town`, `*Hub`, `Labyrinth_Airlock`,
+`KalguuranSettlersLeague`. Ausgezählt an Peters Client.txt: 514 von 514
+Eintritten seit dem 01.09. hatten eine frische Kennung. Der angezeigte
+Name taugt dafür nicht — er ist lokalisiert und bei Hideouts frei
+gewählt.
+
+Es ist eine DEBUG-Zeile. Führt ein Log sie nicht, bleibt die Kennung
+leer, und die Rechnung fällt auf die Verweildauer-Regel von oben zurück
+(mitsamt Kappung): Ohne Kennungen ließe sich Ruhezeit nicht von
+Spielzeit trennen, und Hideout-Zeit im Nenner wäre schlechter als die
+alte Verengung. Beide Wege stehen weiter unter Test.
+
 **Offen für eine Fortsetzung:** Gem-XP/h pro Gem (kein Stellvertreter),
 ein echter Zeitreihen-Speicher fürs Diagramm selbst, die Stufe-20-
 Benachrichtigung, sowie die von Peter zusätzlich
@@ -4595,6 +4634,29 @@ landet im Zähler).
 
 ---
 
+**Geschätzte Abschnitte werden blasser gezeichnet** (`XpPoint.estimated`,
+`_ESTIMATED_ALPHA = 0.45`). Sie stammen nicht aus einer eigenen Messung,
+sondern aus dem Rückblick in die Client.txt (§4.54). Peters Wahl unter
+drei Vorschlägen (2026-09-22): "blasser, sonst gleich" — eine Schraffur
+wird bei drei Pixel schmalen Balken unruhig, ein Umriss frisst den
+Balken ganz auf. Echte Transparenz statt einer vorgemischten Farbe, weil
+ein Balken auch über einer Gruppenfläche liegen kann.
+
+Nativ nachgemessen (CIEDE2000, nicht offscreen): Der blasse Balken
+(`#425e39`) steht mit ΔE 29,8 gegen den gemessenen und mit ΔE 26,3 gegen
+den Hintergrund — beides eindeutig. Liegt er auf einer Gruppenfläche,
+hebt er sich mit ΔE 14,8 davon ab. Der einzige knappe Abstand ist der zur
+Gruppenfläche NEBEN ihm (ΔE 5,4): Zwei abgeschwächte Grüntöne, die
+Verschiedenes bedeuten. Das ist hinnehmbar, weil eine Gruppenfläche nur
+bei mehreren Abschnitten derselben Map entsteht und dann ohnehin einen
+Balken trägt.
+
+Im Schnitt zählen sie mit: Die gespielte Zeit ist exakt, der Zuwachs
+gemessen — geschätzt ist allein die Aufteilung. Eine Linie über Balken
+zu ziehen, die nicht mitzählen, wäre die unehrlichere Variante.
+
+---
+
 ### 4.41 Verbindungs-LED in der Statuszeile
 
 Peter, 2026-08-13, unmittelbar nach der Wartungs-Auswertung (§4.12):
@@ -4993,6 +5055,16 @@ beobachteten Veröffentlichung (oder mit der ersten, wenn
 `_baseline_starts_the_interval` greift). Die Lücke zwischen altem und
 neuem Balken ist die Programmpause und wird als solche gezeichnet — wie
 jede andere Pause im Graphen auch (§4.40).
+
+**Seit dem 2026-09-22 steht der zuletzt gesehene Erfahrungsstand
+daneben** (`last_seen`, Dateiversion 3: Erfahrung plus der Zeitpunkt, zu
+dem sie galt — nicht der des Speicherns). Er ist keine Anzeige, sondern
+der Anker des Rückblicks (§4.54): Die Differenz zum ersten Stand der
+nächsten Sitzung ist der Zuwachs der Programmpause, und die Client.txt
+weiß, in welchen Maps er verdient wurde. Geschrieben wird er bei jeder
+beobachteten Änderung und beim ersten Abruf eines Charakters — Letzteres
+ausdrücklich, damit ein Absturz kurz nach dem Start nicht dazu führt,
+dass der nächste Start denselben Zeitraum ein zweites Mal verteilt.
 
 **Die Zeitstempel müssen umgerechnet werden.** Die Punkte laufen intern
 auf `time.monotonic()`, einer Uhr ohne festen Nullpunkt: Nach einem
@@ -7088,6 +7160,61 @@ statt sich zwischen die Lücken zu mischen. Zwei Rollen statt einer
 mit zwei Richtungen, genau deshalb — eine einzige Zahl kann "unbekannt"
 nicht in beiden Richtungen ans Ende legen. Beide folgen dem Liga-Filter
 wie die Slots. Vier Gegenproben, alle rissen.
+
+### 4.54 Rückblick auf die Maps vor dem Programmstart (`_estimated_points`)
+
+Peter, 2026-09-22, mit einem Bild seines Leveling-Felds: "Auch wenn das
+Tool noch nicht geladen wurde können wir aus den Zeitpunkten der
+client.txt die Verweildauer in den Maps seit dem letzten Tool-Start
+holen und die geschätzten XP/h darauf aufteilen. Das ist auf alle Fälle
+besser als ein alleinstehender Peak."
+
+Sein Bild an jenem Abend, aus beiden Protokollen rekonstruiert:
+
+| Zeit | laut Client.txt | im Graphen |
+|---|---|---|
+| 22:21:23–22:29:17 | Cage, 474 s | nichts (Tool lief noch nicht) |
+| 22:29:19 | PoE-VIEW2 startet, liest 744.393.041 XP | Startwert |
+| 22:29:53–22:31:03 | Cage, 70 s | ein Balken, 11,3 Mio./h |
+
+Die dicke Runde fiel unter den Tisch, die 70-Sekunden-Stippvisite in die
+schon leergeräumte Instanz stand allein im Drei-Stunden-Fenster.
+
+**Was den Rückblick möglich macht**, ist der Anker in der Verlaufsdatei
+(§4.44): der zuletzt gesehene Erfahrungsstand mit seinem Zeitpunkt. Die
+Differenz zum ersten Stand der neuen Sitzung ist der Zuwachs der
+Programmpause; die Client.txt sagt sekundengenau, in welchen Maps er
+verdient wurde (`zone_watcher.zone_stays`). Verteilt wird proportional
+zur Dauer — alle Maps der Pause bekommen dieselbe Rate.
+
+**Was sicher ist und was geschätzt:** Die Verweildauern sind exakt, der
+Zuwachs ist die Differenz zweier tatsächlich beobachteter Stände.
+Geschätzt ist allein die Aufteilung. Deshalb werden die Balken blasser
+gezeichnet (§4.40) — sie behaupten nicht, gemessen zu sein.
+
+**Vier Grenzen, bewusst eng:**
+
+- **Nur mit lückenlosem Anker.** Peters Wahl zwischen "nur wenn
+  lückenlos" und "immer schätzen": Ist der gespeicherte Stand älter als
+  das Graph-Fenster, wird nicht geschätzt. Sonst verteilte man einen
+  Zuwachs von vorgestern auf die Maps der letzten drei Stunden.
+- **Nur abgeschlossene Kampfzonen vor dem Programmstart.** Die Map, die
+  beim Start gerade läuft, hat ihre Erfahrung noch gar nicht
+  veröffentlicht; ihre Zeit dürfte den Zuwachs nicht verdünnen. Aus
+  demselben Grund zählen Hideout und Stadt nicht mit (§4.34).
+- **Nur ein Zuwachs.** Ein Rückgang (Tod in der Pause) ließe sich nicht
+  sinnvoll verteilen — jede Map bekäme einen Anteil an etwas, das an
+  einer Stelle passiert ist.
+- **Nur mit eingeschalteter Zonen-Beobachtung**, denn ohne sie gibt es
+  keine Client.txt zu lesen.
+
+Der Anschluss an die laufende Messung bleibt dabei sauber: Die
+Schätzung endet beim Programmstart, der erste gemessene Abschnitt
+beginnt dort. Die Aufenthalte werden am Fensterrand zugeschnitten, damit
+kein Stück Spielzeit zweimal gezählt wird — derselbe Gedanke wie beim
+Nenner im laufenden Betrieb.
+
+---
 
 ## 8. Entwicklungsstand
 

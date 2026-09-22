@@ -26,6 +26,7 @@ class P(NamedTuple):
     rate: float
     instance: str = ""
     level: int = 0
+    estimated: bool = False
 
 
 def _hin_und_zurueck(punkte, *, mono_save=1000.0, wall_save=50_000.0,
@@ -240,3 +241,50 @@ def test_speichern_legt_das_verzeichnis_an(tmp_path, monkeypatch):
     xp_history.save({"Held": [P(at=1.0, seconds=1.0, rate=1.0)]}, pfad,
                     now_mono=1.0, now_wall=1.0)
     assert pfad.exists()
+
+
+# --- Der zuletzt gesehene Stand (Anker fuer den Rueckblick) ------------- #
+
+def test_der_letzte_stand_wird_mitgespeichert_und_gelesen(tmp_path):
+    """Aus ihm und dem ersten Stand der naechsten Sitzung ergibt sich der
+    Zuwachs, den die Client.txt dann auf die Maps verteilt."""
+    pfad = tmp_path / "xp.json"
+    xp_history.save({"Held": [P(at=900.0, seconds=300.0, rate=1.0)]}, pfad,
+                    now_mono=1000.0, now_wall=50_000.0,
+                    last_seen={"Held": (744_393_041, 950.0)})
+
+    stand = xp_history.load_last_seen(pfad, max_age_s=SPAN, now_wall=50_000.0)
+
+    # 50 s vor dem Speichern gesehen (1000 - 950) — nicht der Zeitpunkt
+    # des Speicherns, sondern der, zu dem der Stand galt.
+    assert stand == {"Held": (744_393_041, 49_950.0)}
+
+
+def test_ein_zu_alter_stand_taugt_nicht_mehr_als_anker(tmp_path):
+    """Peters Vorgabe 2026-09-22: schaetzen nur, wenn lueckenlos. Ein
+    Stand von vorgestern wuerde einen Zuwachs auf Maps verteilen, in
+    denen er gar nicht verdient wurde."""
+    pfad = tmp_path / "xp.json"
+    xp_history.save({}, pfad, now_mono=1000.0, now_wall=50_000.0,
+                    last_seen={"Held": (100, 1000.0)})
+
+    assert xp_history.load_last_seen(pfad, max_age_s=SPAN,
+                                     now_wall=50_000.0 + SPAN + 1) == {}
+
+
+def test_ohne_stand_in_der_datei_gibt_es_keinen_anker(tmp_path):
+    pfad = tmp_path / "xp.json"
+    xp_history.save({}, pfad, now_mono=1000.0, now_wall=50_000.0)
+
+    assert xp_history.load_last_seen(pfad, max_age_s=SPAN, now_wall=50_000.0) == {}
+    assert xp_history.load_last_seen(tmp_path / "fehlt.json", max_age_s=SPAN,
+                                     now_wall=50_000.0) == {}
+
+
+def test_geschaetzte_punkte_bleiben_beim_neustart_geschaetzt():
+    """Sonst saehe ein rekonstruierter Balken nach dem naechsten Start
+    aus wie eine Messung."""
+    zurueck = _hin_und_zurueck([P(at=900.0, seconds=300.0, rate=1.0, estimated=True),
+                                P(at=950.0, seconds=50.0, rate=2.0)])
+
+    assert [z["estimated"] for z in zurueck["Held"]] == [True, False]

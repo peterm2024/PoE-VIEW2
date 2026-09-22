@@ -13,6 +13,15 @@ während einer Pause vor dem Sitzungsstart würde als absurd hohe Rate
 ausgewiesen. Der Verlauf ist Vergangenheit, die Basis wäre eine
 Behauptung über die Gegenwart.
 
+**Was seit dem 2026-09-22 zusätzlich drinsteht: der zuletzt gesehene
+Erfahrungsstand je Charakter** (``last_seen``, mit dem Zeitpunkt, zu dem
+er galt). Er ist keine Anzeige, sondern der Anker für den Rückblick beim
+Start: Aus ihm und dem ersten Stand der neuen Sitzung ergibt sich der
+Zuwachs, der in der Zwischenzeit angefallen ist, und die Client.txt sagt,
+in welchen Maps er verdient wurde (``MainWindow._estimated_points``, §4.54).
+Ohne ihn stünde nach jedem Programmstart ein einzelner Balken allein im
+leeren Graphen, obwohl vorher eine Stunde gespielt wurde.
+
 **Warum die Zeitstempel umgerechnet werden.** Im Programm laufen die
 Punkte auf ``time.monotonic()`` — einer Uhr, die beim Start bei einem
 beliebigen Wert beginnt und deren Nullpunkt sich mit jedem Neustart
@@ -43,7 +52,8 @@ log = logging.getLogger(__name__)
 # letzten Levelaufstieg enden kann (``xp_graph.average_window``). Ein
 # Stand ohne die Stufe würde den Zeitraum über einen Aufstieg hinweg
 # ziehen — lieber einmal ohne Verlauf starten.
-VERSION = 2
+# 3 (2026-09-22): ``estimated`` je Zeile und der Block ``last_seen``.
+VERSION = 3
 
 # Zeitstempel, die weiter als das in der Zukunft liegen, gelten als
 # kaputt (Sommerzeit, gestellte Uhr, kopierte Datei von einem anderen
@@ -64,6 +74,7 @@ class _Point(Protocol):
     rate: float
     instance: str
     level: int
+    estimated: bool
 
 
 def path_for(account_name: str) -> Path:
@@ -77,19 +88,30 @@ def path_for(account_name: str) -> Path:
 
 
 def to_payload(histories: dict[str, Sequence[_Point]], *,
-               now_mono: float, now_wall: float) -> dict:
-    """Verläufe in die speicherbare Form bringen (Wanduhrzeit)."""
+               now_mono: float, now_wall: float,
+               last_seen: dict[str, tuple[int, float]] | None = None) -> dict:
+    """Verläufe in die speicherbare Form bringen (Wanduhrzeit).
+
+    ``last_seen`` ist je Charakter der zuletzt gesehene Erfahrungsstand
+    mit dem Zeitpunkt (``time.monotonic()``), zu dem er galt — nicht der
+    Zeitpunkt des Speicherns: Was zwischen beiden liegt, ist Zuwachs, der
+    beim nächsten Start verteilt werden soll."""
     characters: dict[str, list[dict]] = {}
     for name, points in histories.items():
         zeilen = [{"at": now_wall - (now_mono - p.at),
                    "seconds": p.seconds,
                    "rate": p.rate,
                    "instance": p.instance,
-                   "level": p.level}
+                   "level": p.level,
+                   "estimated": bool(p.estimated)}
                   for p in points]
         if zeilen:
             characters[name] = zeilen
-    return {"version": VERSION, "saved_at": now_wall, "characters": characters}
+    stand = {name: {"experience": int(experience),
+                    "at": now_wall - (now_mono - at)}
+             for name, (experience, at) in (last_seen or {}).items()}
+    return {"version": VERSION, "saved_at": now_wall, "characters": characters,
+            "last_seen": stand}
 
 
 def from_payload(payload: dict, *, now_mono: float, now_wall: float,
@@ -136,16 +158,64 @@ def _restore_row(row: object, now_mono: float, now_wall: float,
             "seconds": seconds,
             "rate": rate,
             "instance": instance if isinstance(instance, str) else "",
-            "level": level if isinstance(level, int) else 0}
+            "level": level if isinstance(level, int) else 0,
+            "estimated": bool(row.get("estimated"))}
 
 
 def save(histories: dict[str, Sequence[_Point]], path: Path, *,
-         now_mono: float, now_wall: float) -> None:
+         now_mono: float, now_wall: float,
+         last_seen: dict[str, tuple[int, float]] | None = None) -> None:
     """Verläufe ablegen. Klein genug, um bei jedem neuen Punkt zu laufen:
     Bei rund acht Veröffentlichungen pro Stunde (§4.35) sind drei Stunden
     zwei Dutzend Zeilen je Charakter."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    write_json(path, to_payload(histories, now_mono=now_mono, now_wall=now_wall))
+    write_json(path, to_payload(histories, now_mono=now_mono, now_wall=now_wall,
+                                last_seen=last_seen))
+
+
+def load_last_seen(path: Path, *, max_age_s: float,
+                   now_wall: float) -> dict[str, tuple[int, float]]:
+    """Der zuletzt gesehene Erfahrungsstand je Charakter: Name →
+    (Erfahrung, Wanduhrzeit).
+
+    Anders als die Verläufe bleibt hier die WANDUHRZEIT stehen: Der
+    einzige Abnehmer vergleicht sie mit Zeitstempeln aus der Client.txt,
+    und die schreibt lokale Uhrzeit.
+
+    ``max_age_s`` wirft alles Ältere weg (Peters Vorgabe, 2026-09-22:
+    schätzen nur, "wenn lückenlos"). Ein Stand von vorgestern ließe sich
+    nicht mehr sauber auf die Maps der letzten Stunden verteilen — der
+    Zuwachs stammt dann größtenteils aus Runden, die gar nicht mehr im
+    Fenster liegen.
+
+    Liest die Datei ein zweites Mal statt sie mit ``load`` zu teilen: Sie
+    ist ein paar Kilobyte groß, wird genau einmal beim ersten Charakter
+    gelesen, und zwei schlanke Funktionen sind leichter zu prüfen als
+    eine mit zwei Rückgabewerten."""
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return {}
+    except (OSError, json.JSONDecodeError):
+        log.warning("XP-Verlauf %s nicht lesbar — kein Rückblick.", path, exc_info=True)
+        return {}
+    if not isinstance(payload, dict) or payload.get("version") != VERSION:
+        return {}
+    roh = payload.get("last_seen")
+    if not isinstance(roh, dict):
+        return {}
+    gefunden: dict[str, tuple[int, float]] = {}
+    for name, zeile in roh.items():
+        if not isinstance(name, str) or not isinstance(zeile, dict):
+            continue
+        try:
+            experience = int(zeile["experience"])
+            at = float(zeile["at"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if 0 <= now_wall - at <= max_age_s:
+            gefunden[name] = (experience, at)
+    return gefunden
 
 
 def load(path: Path, *, now_mono: float, now_wall: float,

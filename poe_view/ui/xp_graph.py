@@ -85,6 +85,12 @@ AVERAGE_PAUSE_S = 30 * 60.0
 # acht Pixel für fünf Minuten).
 GRAPH_SPAN_S = 3 * 3600.0
 
+# Deckkraft der geschätzten Balken (§XpPoint.estimated). Peters Wahl,
+# 2026-09-22: "blasser, sonst gleich" — gleiche Farbe und Form wie eine
+# Messung, nur halb so kräftig. Echte Transparenz statt einer gemischten
+# Farbe, weil ein Balken auch über einer Gruppenfläche liegen kann.
+_ESTIMATED_ALPHA = 0.45
+
 # Mindestmaße, damit ein sehr kurzer Abschnitt oder eine sehr kleine Rate
 # nicht auf null Pixel zusammenfällt und dadurch unsichtbar wird.
 _MIN_BAR_W = 2.0
@@ -127,13 +133,21 @@ class XpPoint(NamedTuple):
 
     ``level`` ist die Stufe, die der Charakter bei dieser
     Veröffentlichung hatte — sie begrenzt den Zeitraum des Schnitts
-    (``average_window``). 0 heißt "unbekannt" und trennt nie."""
+    (``average_window``). 0 heißt "unbekannt" und trennt nie.
+
+    ``estimated`` markiert einen Abschnitt, den PoE-VIEW2 nicht selbst
+    gemessen, sondern aus der Client.txt REKONSTRUIERT hat: die Maps, die
+    zwischen dem letzten bekannten Erfahrungsstand und dem Programmstart
+    liefen (``MainWindow._estimated_points``). Ihre Dauer ist exakt, die
+    Verteilung der Erfahrung auf sie ist eine Annahme — deshalb werden
+    sie blasser gezeichnet."""
 
     at: float
     seconds: float
     rate: float
     instance: str = ""
     level: int = 0
+    estimated: bool = False
 
     @property
     def gain(self) -> float:
@@ -178,6 +192,9 @@ class Layout:
     # Bereich hergibt (§NEGATIVE_SHARE) — sie enden am unteren Rand und
     # bekommen eine Bruchmarke.
     clipped: list[int] = field(default_factory=list)
+    # Indizes in ``bars``, die aus der Client.txt rekonstruiert sind
+    # (§XpPoint.estimated) — sie werden blasser gezeichnet.
+    estimated: list[int] = field(default_factory=list)
 
 
 def combined_rate(points: Sequence[XpPoint]) -> float:
@@ -342,6 +359,7 @@ def graph_layout(points: Sequence[XpPoint], now: float, width: float, height: fl
 
     bars: list[tuple[float, float, float, float, float]] = []
     clipped: list[int] = []
+    estimated: list[int] = []
     for point in shown:
         x, end = spanne(point)
         w = max(end - x, _MIN_BAR_W)
@@ -352,6 +370,8 @@ def graph_layout(points: Sequence[XpPoint], now: float, width: float, height: fl
         if point.rate < 0 and h > verlust_tiefe + 0.5:
             h = verlust_tiefe
             clipped.append(len(bars))
+        if point.estimated:
+            estimated.append(len(bars))
         bars.append((x, zero_y - h if point.rate >= 0 else zero_y, w, h, point.rate))
 
     # Flächen hinter den Balken: nur, wo wirklich mehrere Abschnitte zu
@@ -378,7 +398,8 @@ def graph_layout(points: Sequence[XpPoint], now: float, width: float, height: fl
     average_x = max(0.0, min(width, width - (now - beginn) / span_s * width))
     return Layout(bars, zero_y, peak, trough, groups,
                   zero_y - average * scale, average,
-                  average_x, max(0.0, now - beginn), marks=marks, clipped=clipped)
+                  average_x, max(0.0, now - beginn), marks=marks, clipped=clipped,
+                  estimated=estimated)
 
 
 def axis_label(rate: float) -> str:
@@ -452,8 +473,12 @@ class XpGraph(QWidget):
                 # Grün nach oben, Rot nach unten: Ein Abschnitt, in dem
                 # unterm Strich Erfahrung verloren ging (Tod ab Akt 5),
                 # soll nicht wie ein magerer Gewinn aussehen.
-                painter.fillRect(QRectF(x, y, w, h),
-                                 QColor(DASH_OK if rate >= 0 else DASH_BAD))
+                farbe = QColor(DASH_OK if rate >= 0 else DASH_BAD)
+                if index in layout.estimated:
+                    # Aus der Client.txt rekonstruiert, nicht gemessen
+                    # (§_ESTIMATED_ALPHA): dieselbe Form, halbe Kraft.
+                    farbe.setAlphaF(_ESTIMATED_ALPHA)
+                painter.fillRect(QRectF(x, y, w, h), farbe)
                 if index in layout.clipped:
                     # Gekappt (§NEGATIVE_SHARE): ein Spalt in Grundfarbe
                     # kurz über dem Ende sagt "reicht weiter als gezeigt".

@@ -486,3 +486,59 @@ def test_a_clipped_bar_carries_a_gap_near_its_end(qapp) -> None:
     assert spalte[ende] and spalte[ende - 1]
     assert not all(spalte[ende - 6:ende])                          # der Spalt
     assert spalte[ende - 8]
+
+
+# --- Geschaetzte Abschnitte aus der Client.txt (Peter, 2026-09-22) ------ #
+
+def test_estimated_sections_are_marked_in_the_layout() -> None:
+    """Die Zeichnung muss sie unterscheiden koennen, ohne die Punkte
+    selbst noch einmal durchzugehen — wie bei den gekappten Balken."""
+    layout = graph_layout([XpPoint(at=-1800.0, seconds=600.0, rate=40e6, estimated=True),
+                           XpPoint(at=-600.0, seconds=300.0, rate=40e6, estimated=True),
+                           XpPoint(at=-60.0, seconds=200.0, rate=20e6)],
+                          0.0, WIDTH, HEIGHT)
+
+    assert layout.estimated == [0, 1]
+    assert len(layout.bars) == 3
+
+
+def test_an_estimated_bar_is_drawn_fainter_than_a_measured_one(qapp) -> None:
+    """Peters Wahl 2026-09-22: "blasser, sonst gleich". Gleiche Farbe,
+    gleiche Form, halbe Deckkraft — bei drei Pixel schmalen Balken
+    traegt eine Schraffur nicht, ein Umriss frisst den Balken auf."""
+    from PySide6.QtGui import QColor
+
+    from poe_view.ui.theme import DASH_OK
+    from poe_view.ui.xp_graph import _ESTIMATED_ALPHA
+
+    graph = XpGraph()
+    graph.resize(300, 120)
+    # Zwei gleich hohe Balken nebeneinander: links geschaetzt, rechts
+    # gemessen. Gleiche Rate, damit nur die Deckkraft sie unterscheidet.
+    graph.set_points([XpPoint(at=-5400.0, seconds=5400.0, rate=1000.0, estimated=True),
+                      XpPoint(at=0.0, seconds=5400.0, rate=1000.0)], 0.0)
+    bild = graph.grab().toImage()
+
+    gemessen = QColor(bild.pixel(250, 40))
+    geschaetzt = QColor(bild.pixel(50, 40))
+
+    assert gemessen.name() == QColor(DASH_OK).name()
+    assert geschaetzt.name() != gemessen.name()
+    # Halb durchsichtig auf dem Hintergrund: jeder Kanal liegt zwischen
+    # Grund und voller Farbe, und zwar in der Naehe des Mischwerts.
+    grund = QColor(graph.palette().window().color())
+    for kanal in ("red", "green", "blue"):
+        erwartet = (getattr(gemessen, kanal)() * _ESTIMATED_ALPHA
+                    + getattr(grund, kanal)() * (1 - _ESTIMATED_ALPHA))
+        assert abs(getattr(geschaetzt, kanal)() - erwartet) <= 2, kanal
+
+
+def test_estimated_sections_still_count_towards_the_average() -> None:
+    """Sie sind echte Spielzeit mit echtem Zuwachs — nur ihre Aufteilung
+    ist geschaetzt. Aus dem Schnitt herauszuhalten hiesse, eine Linie
+    ueber Balken zu ziehen, die nicht mitzaehlen."""
+    punkte = [XpPoint(at=-1200.0, seconds=600.0, rate=10e6, estimated=True),
+              XpPoint(at=-60.0, seconds=600.0, rate=30e6)]
+
+    assert combined_rate(punkte) == pytest.approx(20e6)
+    assert combined_rate(average_window(punkte, 0.0)) == pytest.approx(20e6)

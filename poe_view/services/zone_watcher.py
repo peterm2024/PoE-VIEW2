@@ -33,6 +33,7 @@ import logging
 import re
 from datetime import datetime
 from pathlib import Path
+from typing import NamedTuple
 
 from PySide6.QtCore import QFileSystemWatcher, QObject, QTimer, Signal
 
@@ -69,6 +70,51 @@ _ZONE_LINE = re.compile(r": You have entered (.+)\.\s*$")
 # Kennung leer und alles verhält sich wie zuvor: jeder Aufenthalt zählt
 # für sich.
 _INSTANCE_LINE = re.compile(r"Client-Safe Instance ID = (\d+)")
+
+# Die technische Gebiets-Kennung, unmittelbar vor jedem "You have
+# entered" (dieselbe Stelle wie ``_INSTANCE_LINE``):
+#
+#   22:29:52 Client-Safe Instance ID = 1656541918
+#   22:29:52 Generating level 70 area "MapWorldsCage" with seed 2136429196
+#   22:29:53 : You have entered Cage.
+#
+# Sie ist das, woran sich eine Zone OHNE Erfahrung (Hideout, Stadt)
+# erkennen lässt — am angezeigten Namen nicht, der ist lokalisiert und
+# bei Hideouts frei benannt. In Peters Client.txt hatte jeder der 514
+# Eintritte seit dem 01.09. eine frische Kennung davor.
+_AREA_LINE = re.compile(r'Generating level \d+ area "([^"]+)" with seed')
+
+# Woran eine Ruhezone zu erkennen ist — ausgezählt an Peters Client.txt
+# (alle vorkommenden Kennungen, 2026-09-22):
+#
+#   HideoutSlum, HideoutRacetrack, HideoutShapersRealm, HideoutTemplarLab
+#   1_1_town … 2_9_town, 2_11_endgame_town
+#   HeistHub (Rogue Harbour), DeepwaterHub, MavenHub, Menagerie_Hub
+#   Labyrinth_Airlock (Aspirants' Plaza), KalguuranSettlersLeague
+#
+# Ausdrücklich NICHT pauschal alles mit "Labyrinth": Die Labyrinth-
+# Gebiete selbst (``3_Labyrinth_*``, ``EndGame_Labyrinth_*``) sind
+# Kampfzonen, nur die Vorhalle ist es nicht.
+_REST_AREA_PREFIXES = ("hideout",)
+_REST_AREA_SUFFIXES = ("_town", "hub")
+_REST_AREA_IDS = ("labyrinth_airlock", "kalguuransettlersleague")
+
+
+def is_rest_area(area_id: str) -> bool:
+    """Eine Zone, in der es keine Erfahrung zu holen gibt (§_AREA_LINE).
+
+    Ohne Kennung (leerer String) gilt eine Zone als Kampfzone: Das ist
+    das Verhalten von vor dieser Unterscheidung, und eine übersehene
+    Kampfzone verfälscht die XP-Rate stärker als eine mitgezählte
+    Ruhepause — in einer Ruhezone steht die Erfahrung ohnehin still, die
+    Veröffentlichung davor gehört also der Zone davor."""
+    kennung = area_id.strip().lower()
+    if not kennung:
+        return False
+    return (kennung.startswith(_REST_AREA_PREFIXES)
+            or kennung.endswith(_REST_AREA_SUFFIXES)
+            or kennung in _REST_AREA_IDS)
+
 
 # Peter, 2026-08-10: "Die Interaktion mit einem Händler, Verkaufen,
 # Identifizieren, ... triggert auch das Senden der neuesten Items von
@@ -144,6 +190,82 @@ def deaths_since(log_path: Path, cutoff: datetime) -> dict[str, list[datetime]]:
     return gefunden
 
 
+class ZoneStay(NamedTuple):
+    """Ein Aufenthalt in einer Zone: betreten, verlassen (``None`` =
+    noch drin), angezeigter Name, Gebiets-Kennung und Instanz.
+
+    Zeiten sind naive lokale ``datetime`` wie in der Client.txt."""
+
+    entered: datetime
+    left: datetime | None
+    name: str
+    area_id: str
+    instance: str
+
+    @property
+    def seconds(self) -> float:
+        """Verweildauer; 0, solange der Aufenthalt noch läuft."""
+        return (self.left - self.entered).total_seconds() if self.left else 0.0
+
+    @property
+    def resting(self) -> bool:
+        return is_rest_area(self.area_id)
+
+
+def zone_stays(log_path: Path, since: datetime) -> list[ZoneStay]:
+    """Alle Zonen-Aufenthalte, die nach ``since`` noch andauerten.
+
+    Das Gegenstück zu ``deaths_since`` für die XP-Rechnung: Wie lange
+    war der Charakter WIRKLICH in Gebieten, in denen Erfahrung fällt?
+    Die Client.txt weiß das auf die Sekunde, auch für die Zeit, bevor
+    PoE-VIEW2 überhaupt lief (Peter, 2026-09-22: "vor allem die
+    client.txt beachten, da diese 100% zuverlässig die Verweildauer in
+    den Maps zurückliefert").
+
+    Ein Aufenthalt, der vor ``since`` begann und danach endete, ist
+    dabei — der Aufrufer schneidet ihn auf sein Fenster zu. Der letzte
+    Aufenthalt bleibt offen (``left is None``): Er läuft noch.
+
+    Volle Durchsicht der Datei mit billigem Substring-Filter vor jeder
+    Regex, dieselbe Begründung wie bei ``deaths_since``."""
+    try:
+        raw = log_path.read_bytes()
+    except OSError:
+        log.warning("Zonen-Verlauf: Client.txt nicht lesbar: %s", log_path)
+        return []
+    stays: list[ZoneStay] = []
+    offen: ZoneStay | None = None
+    area = instance = ""
+    for line in raw.decode("utf-8", errors="replace").splitlines():
+        if "Client-Safe Instance ID = " in line:
+            treffer = _INSTANCE_LINE.search(line)
+            if treffer:
+                instance = treffer.group(1)
+            continue
+        if "Generating level " in line:
+            treffer = _AREA_LINE.search(line)
+            if treffer:
+                area = treffer.group(1)
+            continue
+        if " You have entered " not in line:
+            continue
+        treffer = _ZONE_LINE.search(line)
+        zeit = _line_time(line)
+        if treffer is None or zeit is None:
+            continue
+        if offen is not None:
+            stays.append(offen._replace(left=zeit))
+        offen = ZoneStay(entered=zeit, left=None, name=treffer.group(1),
+                         area_id=area, instance=instance)
+        # Kennung und Instanz gelten für GENAU diesen einen Eintritt.
+        # Stehen sie beim nächsten nicht in der Datei, ist sie unbekannt
+        # — dann lieber leer als von der Zone davor geerbt.
+        area = instance = ""
+    if offen is not None:
+        stays.append(offen)
+    return [s for s in stays if s.left is None or s.left > since]
+
+
 def resolve_client_log_path(configured_path: str) -> Path | None:
     """Peter darf entweder direkt die Client.txt angeben oder nur den
     PoE-Installationsordner — beides wird akzeptiert (erst die Datei
@@ -197,6 +319,9 @@ class ZoneWatcher(QObject):
         # Emittieren also schon gesetzt, und alle vorhandenen Anschlüsse
         # an ``zone_changed`` bleiben unverändert.
         self.last_instance_id = ""
+        # Dasselbe für die Gebiets-Kennung (§_AREA_LINE): Sie sagt, ob
+        # die gerade betretene Zone überhaupt Erfahrung bringen kann.
+        self.last_area_id = ""
         self._log_path = log_path
         self._position = log_path.stat().st_size
         self._watcher = QFileSystemWatcher([str(log_path)], self)
@@ -256,6 +381,10 @@ class ZoneWatcher(QObject):
             instance = _INSTANCE_LINE.search(line)
             if instance:
                 self.last_instance_id = instance.group(1)
+                continue
+            area = _AREA_LINE.search(line)
+            if area:
+                self.last_area_id = area.group(1)
                 continue
             match = _ZONE_LINE.search(line)
             if match:
