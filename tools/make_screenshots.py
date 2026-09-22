@@ -504,9 +504,15 @@ def _demo_leveling(win: MainWindow) -> None:
 
     Erfunden wie alles hier, aber in den Größenordnungen, die ein
     Charakter dieser Stufe wirklich liefert (`poe-verhalten.md` §3): Maps
-    zwischen vier und elf Minuten, 90–160 Mio. XP/h, eine Pause und ein
-    Tod. Ohne diesen Vorrat zeigte das Bild eine leere Achse — richtig,
-    aber nicht das, was das Feld kann."""
+    zwischen vier und elf Minuten, 90–160 Mio. XP/h, eine Pause und zwei
+    Tode. Ohne diesen Vorrat zeigte das Bild eine leere Achse — richtig,
+    aber nicht das, was das Feld kann.
+
+    Die drei ältesten Abschnitte sind als GESCHÄTZT markiert (§4.54): So
+    zeigt das Bild auch die blassen Balken, mit denen PoE-VIEW2 die Maps
+    vor dem Programmstart aus der Client.txt rekonstruiert. Der zweite
+    Tod liegt bewusst nach dem Aufstieg, also im Zeitraum der
+    Schnitt-Linie — nur dann nennt sie Netto und Brutto (§4.40.3)."""
     jetzt = time.monotonic()
     # (Minuten her, Dauer in s, XP/h, Instanz, Stufe) — gleiche Instanz
     # heißt eine Map, die zwischendurch verlassen wurde (§4.40); die Stufe
@@ -521,11 +527,15 @@ def _demo_leveling(win: MainWindow) -> None:
         # Aufstieg auf 92 — ab hier gilt die Schnitt-Linie, davor ist sie
         # nur noch gestrichelte Bezugslinie.
         (53, 540, 109_000_000, "m8", 92), (42, 420, 151_000_000, "m9", 92),
+        (36, 180, -31_000_000, "m9b", 92),   # zweiter Tod, diesmal im Schnitt
         (30, 300, 128_000_000, "m10", 92),
         # Eine Map mit Verkaufspause: zwei Aufenthalte, EINE Instanz —
         # dahinter erscheint die dunkelgrüne Fläche.
         (18, 600, 134_000_000, "m11", 92), (7, 367, 41_000_000, "m11", 92),
     ]
+    # Die ältesten drei stammen aus dem Rückblick in die Client.txt und
+    # werden blasser gezeichnet (§4.54).
+    geschaetzt = {"m1", "m2", "m3"}
     stand = 2_006_431_775
     watch = _XpWatch(since=jetzt - 3 * 3600, since_experience=stand - 300_000_000,
                      level=92, current_experience=stand)
@@ -537,7 +547,8 @@ def _demo_leveling(win: MainWindow) -> None:
     watch.previous_change_experience = stand - round(
         abschnitte[-1][2] * abschnitte[-1][1] / 3600)
     watch.history = [XpPoint(at=jetzt - minuten * 60, seconds=dauer, rate=rate,
-                             instance=instanz, level=stufe)
+                             instance=instanz, level=stufe,
+                             estimated=instanz in geschaetzt)
                      for minuten, dauer, rate, instanz, stufe in abschnitte]
     win._xp_watch["Demo Ranger"] = watch
 

@@ -6,6 +6,8 @@ nach [SemVer](https://semver.org/lang/de/).
 
 ## [Unveröffentlicht]
 
+## [0.15.0] - 2026-09-23
+
 ### Geändert
 
 - **Die XP/h-Rate rechnet jetzt mit der Zeit in Kampfzonen statt mit der
@@ -1261,7 +1263,8 @@ Erste veröffentlichte Version.
 Die technischen Hintergründe einzelner Entscheidungen stehen in
 [FALLSTRICKE_UND_WORKAROUNDS.md](FALLSTRICKE_UND_WORKAROUNDS.md).
 
-[Unveröffentlicht]: https://github.com/peterm2024/PoE-VIEW2/compare/v0.14.0...HEAD
+[Unveröffentlicht]: https://github.com/peterm2024/PoE-VIEW2/compare/v0.15.0...HEAD
+[0.15.0]: https://github.com/peterm2024/PoE-VIEW2/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/peterm2024/PoE-VIEW2/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/peterm2024/PoE-VIEW2/compare/v0.12.1...v0.13.0
 [0.12.1]: https://github.com/peterm2024/PoE-VIEW2/compare/v0.12.0...v0.12.1
