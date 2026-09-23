@@ -125,6 +125,10 @@ when several tabs share the same name.</p>
 <p><b>iLvl</b> is the item level (relevant for crafting),
 <b>Req.Lvl</b> the character level required to equip it. <b>Stack</b> is
 filled only for stackable items.</p>
+<p><b>Mods</b> holds every mod the item has, in the order the game
+writes them: enchant, implicit, then explicit and the rest, with
+<code>|</code> between the groups. Hover over the cell to read all of
+them on separate lines — the column shows as much as fits.</p>
 <p><b>Columns</b> can be shown, hidden and reordered — either in
 Settings, or quickly via right-click on a column header.</p>
 <p><b>Column filters</b> also live in that right-click menu. They accept
