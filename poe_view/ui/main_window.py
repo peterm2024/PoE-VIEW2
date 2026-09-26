@@ -33,8 +33,8 @@ from poe_view.api.models import (Character, Item, StashTab,
 from poe_view.api.ninja import PriceIndex
 from poe_view.services import (cache_backup, cache_writer, data_cache, gem_xp_log,
                                icon_cache, mod_collection, mod_knowledge,
-                               poe2_probe, price_cache, season_log,
-                               xp_history, zone_catalog)
+                               league_log, poe2_probe, price_cache,
+                               season_log, xp_history, zone_catalog)
 from poe_view.services.experience import penalty_caption
 from poe_view.services.instance_lock import InstanceLock
 from poe_view.services.zone_watcher import (ZoneWatcher, deaths_since,
@@ -3963,6 +3963,12 @@ class MainWindow(QMainWindow):
         # kurz nach dem Programmstart einen veralteten Listenstand
         # geradezieht.
         self._apply_level_to_character_list(name, level)
+        # Wer JETZT spielt, steht damit fest — und wird mitgeschrieben,
+        # damit die Zonen-Tabelle die Aufenthalte später der richtigen
+        # Liga zuordnen kann (§league_log). Die Marken aus der Client.txt
+        # (Tode, Aufstiege) decken nur 92 % ab und sind interpoliert;
+        # dieses Protokoll ist genau.
+        league_log.record_seen(name, datetime.now())
         watch = self._xp_watch.get(name)
         now = time.monotonic()
         if watch is None:
@@ -5325,16 +5331,43 @@ class MainWindow(QMainWindow):
                 "fills itself from your game log, including everything you "
                 "played before.")
             return
-        # Die Season-Historie bestimmt, welchem Atlas ein Aufenthalt
-        # zugerechnet wird (§season_log) — sie kommt aus dem Liga-Abruf
-        # und wächst mit jeder Season, die das Programm erlebt.
-        seasons = season_log.load()
-        records = zone_catalog.refresh_from_log(pfad, konto, seasons)
+        records = zone_catalog.refresh_from_log(
+            pfad, konto, self._league_lookup(pfad),
+            [zeit for zeiten in deaths_since(pfad, datetime.min).values()
+             for zeit in zeiten])
         self._zone_table_dialog = ZoneTableDialog(
             sorted(records.values(), key=lambda r: (r.category, r.name)),
             self, character_level=self._active_character_level(),
-            account_name=konto, season=season_log.newest(seasons))
+            account_name=konto, league=self._current_league_of_play(records))
         self._zone_table_dialog.show()
+
+    def _league_lookup(self, log_path: Path):
+        """Eine Funktion "Zeitpunkt → Liga" (§league_log).
+
+        Zwei Quellen, in dieser Reihenfolge zusammengelegt: das live
+        mitgeschriebene Protokoll (genau, aber erst ab heute) und die
+        Zeitmarken aus der Client.txt (Tode und Aufstiege, decken 92 %
+        der Zonen-Eintritte ab, aber interpoliert). Vor dem Beginn der
+        laufenden Season ist beides wertlos — dort sind die Charaktere
+        längst in die permanente Liga gewandert —, deshalb die Grenze."""
+        marken = sorted(league_log.load_sessions()
+                        + league_log.marks_from_log(log_path))
+        ligen = {c.name: c.league for c in self._all_characters if c.league}
+        seasons = season_log.load()
+        grenze = max((s.start for s in seasons), default=None)
+        return lambda zeit: league_log.league_at(zeit, marken, ligen, grenze)
+
+    def _current_league_of_play(self, records) -> str | None:
+        """Die Liga, in der zuletzt gespielt wurde — die Vorauswahl der
+        Tabelle. Aus dem Katalog selbst, nicht aus der Liga-Auswahl des
+        Viewers: Wer gerade die Standard-Truhe eines alten Charakters
+        durchsieht, meint trotzdem die Liga, in der er spielt."""
+        zuletzt: dict[str, str] = {}
+        for record in records.values():
+            for name, werte in record.leagues.items():
+                zuletzt[name] = max(zuletzt.get(name, ""), werte.last_seen)
+        echte = {n: z for n, z in zuletzt.items() if n != league_log.UNKNOWN}
+        return max(echte, key=lambda n: echte[n]) if echte else None
 
     def _open_help_dialog(self) -> None:
         """Bewusst nicht modal (``show()`` statt ``exec()``): Die Hilfe soll

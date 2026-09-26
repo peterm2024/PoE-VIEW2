@@ -423,7 +423,26 @@ observed while the program was running.
 the log, all 170 before the switch belong to characters that today sit
 in "SSF Ruthless": when a season ends, its characters migrate to the
 permanent league. A character's league says where it is now, not where
-it was played.
+it was played. What survives the migration is the *game mode* — a
+character in "SSF Ruthless" today played Ruthless back then too.
+
+### The log names the character, but only now and then
+
+Two line types carry a character name:
+
+```
+: Name (Chieftain) is now level 83
+: Name has been slain.
+```
+
+256 and 226 of them in the same log, 482 marks across 5.5 months.
+Assigning each zone entry to the character of the nearest mark covers
+84 % of entries within one hour, 92 % within six, 94 % within twelve.
+That is enough to tell the leagues of one season apart — of ten Vaal
+side areas visited, nine matched a character and **all nine were in the
+non-Ruthless league**, which is where they exist. It is interpolation,
+though: a character swap with no death and no level-up in between is
+invisible.
 
 ---
 

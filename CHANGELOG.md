@@ -25,6 +25,19 @@ nach [SemVer](https://semver.org/lang/de/).
   die Orte ohne Monster, durchsuchbar und als CSV exportierbar. Peters
   Spiel-Log lieferte dafür auf Anhieb 381 Gebiete. Der Katalog behält
   sie auch dann, wenn das Spiel seine Logdatei kürzt.
+- **Die Zonen-Tabelle trennt nach Liga** (nicht nur nach Season) und
+  zeigt Tier, Tode und durchschnittliche Verweildauer. Die Ligen einer
+  Season unterscheiden sich im Inhalt: Von zehn besuchten
+  Vaal-Side-Areas lagen alle in der normalen Liga, keine in Ruthless.
+  Wer wann gespielt hat, verrät die `Client.txt` über Aufstiege und
+  Tode (482 Marken, 92 % Abdeckung); ab jetzt schreibt das Programm es
+  bei jeder Erfahrungs-Veröffentlichung genau mit. Zeiten vor der
+  laufenden Season tragen ein "(earlier)", weil Charaktere nach
+  Season-Ende in die permanente Liga wandern — die Spielart bleibt
+  lesbar, die Zahlen bleiben getrennt.
+- **Eigene Gruppen für Side Areas, Delve und Labyrinth.** Vaal-Side-Areas
+  sind keine Karten und verfälschten die Karten-Liste; das Labyrinth ist
+  mit 82 Kennungen zu groß für "Special".
 - **Season-Filter in der Zonen-Tabelle.** Path of Exile baut den Atlas
   mit jeder Season um: Über den Wechsel am 24.07. hinweg trugen 44 von
   233 Gebieten danach einen anderen Level (Chateau 76 → 68, Atoll

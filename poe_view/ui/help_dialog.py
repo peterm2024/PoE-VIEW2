@@ -138,12 +138,20 @@ the level of the map you actually rolled, not just of the area. Sorted
 by group it reads story, maps, special areas, then the places without
 monsters; the search box and the group box narrow it down, and
 <b>Export CSV</b> saves whatever is on screen.</p>
-<p>The <b>season box</b> matters more than it looks: the atlas is rebuilt
+<p>The <b>league box</b> matters more than it looks: the atlas is rebuilt
 every season, so the same map sits at a different level in each one —
-across the last switch, 44 of 233 areas changed. The table therefore
-opens on the season you are playing. Pick <i>All seasons</i> to see the
-whole range instead, with the tooltip naming which season contributed
-which level.
+across the last switch, 44 of 233 areas changed — and the leagues of one
+season differ in content, with Vaal side areas absent from Ruthless
+entirely. The table therefore opens on the league you played last. Pick
+<i>All leagues</i> to see the whole range instead, with the tooltip
+naming which league contributed which level. Which league a zone visit
+belonged to is worked out from the character named in level-up and death
+lines; times before the running season are marked <i>(earlier)</i>,
+because characters move to the permanent league once a season ends.</p>
+<p><b>Tier</b>, <b>Deaths</b> and <b>Avg. time</b> come from the same
+log. A stay longer than an hour counts as a visit but not towards the
+average — the game writes nothing when you quit, so the last zone of an
+evening would otherwise run until the next start.
 The zone display next to it names the level of the zone you are in, and
 once the experience penalty bites, the share you still get there.</p>
 <p><b>Column filters</b> also live in that right-click menu. They accept

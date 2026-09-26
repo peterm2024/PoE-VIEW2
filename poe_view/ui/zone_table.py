@@ -30,33 +30,45 @@ from PySide6.QtWidgets import (QComboBox, QDialog, QFileDialog, QHBoxLayout,
 
 from poe_view.services.csv_export import sanitize_filename
 from poe_view.services.experience import experience_multiplier
-from poe_view.services.season_log import EARLIER
+from poe_view.services.league_log import UNKNOWN
 from poe_view.services.zone_catalog import CATEGORIES, ZoneRecord
 
 
-def _season_choices(records: list[ZoneRecord]) -> list[str]:
-    """Die Seasons, die im Katalog wirklich vorkommen — jüngste zuerst,
-    ``EARLIER`` ganz unten.
+def _dauer_text(sekunden: float) -> str:
+    """"7:12" oder "42 s" — Minuten:Sekunden, solange es Minuten gibt.
+    Leer bei 0: Eine Zone, die nur einmal betreten und nie verlassen
+    wurde, hat keine gemessene Dauer, und "0:00" wäre eine Behauptung."""
+    if sekunden <= 0:
+        return ""
+    if sekunden < 60:
+        return f"{round(sekunden)} s"
+    return f"{int(sekunden // 60)}:{round(sekunden % 60):02d}"
 
-    Nicht die Liste aus ``season_log``: Eine Season, in der dieses Konto
-    nie gespielt hat, wäre ein Eintrag, der immer auf eine leere Tabelle
-    führt. Sortiert wird nach dem Namen absteigend, weil die Namen selbst
-    keine Ordnung tragen ("Allflame" vor "Mirage"?) — was zählt, ist das
-    jüngste Datum, und das steht in den Zahlen."""
+
+def _league_choices(records: list[ZoneRecord]) -> list[str]:
+    """Die Ligen, die im Katalog wirklich vorkommen — zuletzt gespielte
+    zuerst, ``UNKNOWN`` ganz unten.
+
+    Nicht die Liga-Liste aus der API: Eine Liga, in der dieses Konto nie
+    gespielt hat, wäre ein Eintrag, der immer auf eine leere Tabelle
+    führt. Sortiert wird nach dem jüngsten Besuch, weil die Namen selbst
+    keine Ordnung tragen ("Allflame" vor "SSF R Allflame"?)."""
     zuletzt: dict[str, str] = {}
     for record in records:
-        for name, werte in record.seasons.items():
+        for name, werte in record.leagues.items():
             zuletzt[name] = max(zuletzt.get(name, ""), werte.last_seen)
-    ohne_earlier = sorted((n for n in zuletzt if n != EARLIER),
-                          key=lambda n: zuletzt[n], reverse=True)
-    return ohne_earlier + ([EARLIER] if EARLIER in zuletzt else [])
+    ohne_unbekannt = sorted((n for n in zuletzt if n != UNKNOWN),
+                            key=lambda n: zuletzt[n], reverse=True)
+    return ohne_unbekannt + ([UNKNOWN] if UNKNOWN in zuletzt else [])
 
 # Spalten. "Monster Level" trägt bewusst den Namen, unter dem Peter
 # gefragt hat, obwohl in der Client.txt "area level" steht: Für
 # gewöhnliche Monster ist es dasselbe, und "Gebietslevel" beantwortet die
 # Frage nicht, die jemand hat, der auf die Spalte schaut.
-COLUMNS = ("Group", "Zone", "Monster Level", "Visits", "Last seen", "Area id")
-_GROUP_COL, _NAME_COL, _LEVEL_COL, _VISITS_COL, _SEEN_COL, _ID_COL = range(6)
+COLUMNS = ("Group", "Zone", "Tier", "Monster Level", "Visits", "Deaths",
+           "Avg. time", "Last seen", "Area id")
+(_GROUP_COL, _NAME_COL, _TIER_COL, _LEVEL_COL, _VISITS_COL, _DEATHS_COL,
+ _TIME_COL, _SEEN_COL, _ID_COL) = range(9)
 
 # Sortierrolle wie in der Item-Tabelle: "70–77" ist als Text sinnlos
 # sortierbar, als Zahl (höchster gesehener Level) nicht.
@@ -65,25 +77,25 @@ NUMERIC_SORT_ROLE = Qt.ItemDataRole.UserRole + 1
 
 class ZoneTableModel(QAbstractTableModel):
     def __init__(self, records: list[ZoneRecord], character_level: int = 0,
-                 season: str | None = None) -> None:
+                 league: str | None = None) -> None:
         super().__init__()
         self._records = records
         self._character_level = character_level
-        # ``None`` heißt "alle Seasons zusammen". Sonst zeigt die Tabelle
-        # NUR die Level dieser Season — der Atlas baut sich mit jeder um
-        # (§season_log), Chateau stand vor dem 24.07. auf 76 und danach
-        # auf 68.
-        self._season = season
+        # ``None`` heißt "alle Ligen zusammen". Sonst zeigt die Tabelle
+        # NUR die Zahlen dieser Liga — der Atlas baut sich mit jeder
+        # Season um, und die Ligen einer Season unterscheiden sich im
+        # Inhalt (Vaal-Side-Areas gibt es in Ruthless nicht).
+        self._league = league
 
-    def set_season(self, season: str | None) -> None:
-        if season == self._season:
+    def set_league(self, league: str | None) -> None:
+        if league == self._league:
             return
         self.beginResetModel()
-        self._season = season
+        self._league = league
         self.endResetModel()
 
-    def season(self) -> str | None:
-        return self._season
+    def league(self) -> str | None:
+        return self._league
 
     def set_character_level(self, level: int) -> None:
         """Färbt die Level-Spalte danach ein, was dort noch zu holen ist
@@ -113,20 +125,37 @@ class ZoneTableModel(QAbstractTableModel):
     def data(self, index: QModelIndex, role):
         record = self._records[index.row()]
         col = index.column()
-        zahlen = record.stats(self._season)
+        zahlen = record.stats(self._league)
+        tier = record.tier(self._league)
         if role == Qt.ItemDataRole.DisplayRole:
             return (record.category, record.name or "–",
-                    record.level_text(self._season),
-                    str(zahlen.visits), zahlen.last_seen.replace("T", " "),
+                    str(tier) if tier else "",
+                    record.level_text(self._league),
+                    str(zahlen.visits),
+                    str(zahlen.deaths) if zahlen.deaths else "",
+                    _dauer_text(zahlen.average_seconds),
+                    zahlen.last_seen.replace("T", " "),
                     record.area_id)[col]
         if role == NUMERIC_SORT_ROLE:
+            # Leere Zellen ganz nach unten statt vorne: Eine Karte ohne
+            # Tier ist keine Karte mit Tier 0.
+            if col == _TIER_COL:
+                return tier if tier else -1
             if col == _LEVEL_COL:
-                return record.max_level(self._season)
+                return record.max_level(self._league)
             if col == _VISITS_COL:
                 return zahlen.visits
+            if col == _DEATHS_COL:
+                return zahlen.deaths
+            if col == _TIME_COL:
+                return zahlen.average_seconds
             return self.data(index, Qt.ItemDataRole.DisplayRole).lower()
         if role == Qt.ItemDataRole.ToolTipRole and col == _LEVEL_COL:
             return self._level_tooltip(record)
+        if role == Qt.ItemDataRole.ToolTipRole and col == _TIME_COL:
+            return (f"{zahlen.visits} visits, "
+                    f"{_dauer_text(zahlen.seconds) or '0 s'} in total"
+                    if zahlen.seconds else None)
         return None
 
     def _level_tooltip(self, record: ZoneRecord) -> str | None:
@@ -135,20 +164,20 @@ class ZoneTableModel(QAbstractTableModel):
         Werten ist das die einzig lesbare Form, die Einzelwerte sind aber
         genau das, was man bei einer Spanne wissen will.
 
-        Über alle Seasons hinweg steht zusätzlich, welcher Level aus
-        welcher Season stammt: Eine Spanne "68–76" ist dort meist gar
-        keine Spanne, sondern ein Atlas-Umbau."""
-        levels = record.stats(self._season).levels
+        Über alle Ligen hinweg steht zusätzlich, welcher Level aus
+        welcher Liga stammt: Eine Spanne "68–76" ist dort meist gar
+        keine Spanne, sondern ein Atlas-Umbau zwischen zwei Seasons."""
+        levels = record.stats(self._league).levels
         if not levels:
             return None
         zeilen = ["Levels seen: " + ", ".join(str(x) for x in sorted(levels))]
-        if self._season is None and len(record.seasons) > 1:
+        if self._league is None and len(record.leagues) > 1:
             zeilen += [f"  {name}: "
                        + ", ".join(str(x) for x in sorted(werte.levels))
-                       for name, werte in sorted(record.seasons.items())
+                       for name, werte in sorted(record.leagues.items())
                        if werte.levels]
         if self._character_level:
-            hoechster = record.max_level(self._season)
+            hoechster = record.max_level(self._league)
             anteil = experience_multiplier(self._character_level, hoechster)
             zeilen.append(f"At character level {self._character_level}, level "
                           f"{hoechster} yields {anteil:.1%} experience")
@@ -189,14 +218,14 @@ class ZoneFilterProxy(QSortFilterProxyModel):
         eins, zwei = model.record_at(left.row()), model.record_at(right.row())
         if eins is None or zwei is None:
             return super().lessThan(left, right)
-        season = model.season()
-        return self._group_key(eins, season) < self._group_key(zwei, season)
+        liga = model.league()
+        return self._group_key(eins, liga) < self._group_key(zwei, liga)
 
     @staticmethod
-    def _group_key(record: ZoneRecord, season: str | None) -> tuple[int, int, str]:
+    def _group_key(record: ZoneRecord, league: str | None) -> tuple[int, int, str]:
         reihenfolge = (CATEGORIES.index(record.category)
                        if record.category in CATEGORIES else len(CATEGORIES))
-        return (reihenfolge, record.max_level(season), record.name.lower())
+        return (reihenfolge, record.max_level(league), record.name.lower())
 
     def set_group(self, group: str) -> None:
         # begin/endFilterChange statt invalidateFilter — Letzteres ist
@@ -211,60 +240,65 @@ class ZoneFilterProxy(QSortFilterProxyModel):
         record = model.record_at(row)
         if record is None:
             return False
-        # Eine Zone, die es in dieser Season nicht gab, gehört nicht in
-        # die Tabelle — sonst stünde eine leere Level-Spalte da und sähe
-        # aus wie ein Fehler.
-        if not record.seen_in(model.season()):
+        # Eine Zone, die in dieser Liga nie betreten wurde, gehört nicht
+        # in die Tabelle — sonst stünde eine leere Level-Spalte da und
+        # sähe aus wie ein Fehler. Genau das ist Peters Fall: In SSF
+        # Ruthless gibt es keine Vaal-Side-Areas.
+        if not record.seen_in(model.league()):
             return False
         if self._group and record.category != self._group:
             return False
         if not self._words:
             return True
         heuhaufen = f"{record.name} {record.area_id} {record.category} " \
-                    f"{record.level_text(model.season())}".lower()
+                    f"{record.level_text(model.league())}".lower()
         return all(wort in heuhaufen for wort in self._words)
 
 
 def export_zones(path: str, records: list[ZoneRecord],
-                 season: str | None = None) -> None:
+                 league: str | None = None) -> None:
     """Die Zonen als CSV — Semikolon und UTF-8-BOM wie beim Item-Export
     (``services/csv_export``), damit Excel sie unter deutscher Locale
     ohne Text-Import öffnet.
 
     Anders als die Anzeige schreibt die Datei die Level EINZELN
-    (``68;70;77``) statt als Spanne: Eine Tabellenkalkulation soll damit
-    rechnen können, und "70–77" ist dort Text.
+    (``68;70;77``) statt als Spanne und die Dauer in Sekunden statt als
+    "7:12": Eine Tabellenkalkulation soll damit rechnen können.
 
-    Über alle Seasons hinweg (``season=None``) bekommt jede Season ihre
+    Über alle Ligen hinweg (``league=None``) bekommt jede Liga ihre
     EIGENE Zeile statt einer zusammengeworfenen: Der Atlas baut sich mit
     jeder Season um, eine Zeile "Chateau 68–76" gäbe einen Wert wieder,
     den es nie gab."""
     with open(path, "w", encoding="utf-8-sig", newline="") as datei:
         schreiber = csv.writer(datei, delimiter=";")
-        schreiber.writerow(["Season", "Group", "Zone", "Area id",
+        schreiber.writerow(["League", "Group", "Zone", "Area id", "Tier",
                             "Monster level (min)", "Monster level (max)",
-                            "All levels seen", "Visits", "Last seen"])
+                            "All levels seen", "Visits", "Deaths",
+                            "Total seconds", "Average seconds", "Last seen"])
         for record in records:
-            namen = [season] if season is not None else sorted(record.seasons)
+            namen = [league] if league is not None else sorted(record.leagues)
             for name in namen:
                 zahlen = record.stats(name)
                 schreiber.writerow([
                     name, record.category, record.name, record.area_id,
+                    record.tier(name) or "",
                     min(zahlen.levels) if zahlen.levels else "",
                     max(zahlen.levels) if zahlen.levels else "",
                     " ".join(str(x) for x in sorted(zahlen.levels)),
-                    zahlen.visits, zahlen.last_seen.replace("T", " "),
+                    zahlen.visits, zahlen.deaths, round(zahlen.seconds),
+                    round(zahlen.average_seconds),
+                    zahlen.last_seen.replace("T", " "),
                 ])
 
 
 class ZoneTableDialog(QDialog):
     def __init__(self, records: list[ZoneRecord], parent: QWidget | None = None,
                  character_level: int = 0, account_name: str = "",
-                 season: str | None = None) -> None:
-        """``season`` ist die Vorauswahl — die laufende Season, denn wer
-        die Tabelle öffnet, meint den Atlas, den er gerade spielt (Peter,
-        2026-09-26: "die Zonen hier [hängen] auch von der aktuellen
-        Season ab. Die Map-Zuordnung ändert sich hier mit jeder
+                 league: str | None = None) -> None:
+        """``league`` ist die Vorauswahl — die zuletzt gespielte Liga,
+        denn wer die Tabelle öffnet, meint den Atlas, auf dem er gerade
+        steht (Peter, 2026-09-26: "die Zonen hier [hängen] auch von der
+        aktuellen Season ab", und dann: "Wir machen Liga, statt
         Season")."""
         super().__init__(parent)
         self.setWindowTitle("Zones")
@@ -276,7 +310,7 @@ class ZoneTableDialog(QDialog):
                             | Qt.WindowType.WindowMinimizeButtonHint)
         self._account_name = account_name
 
-        self._model = ZoneTableModel(records, character_level, season)
+        self._model = ZoneTableModel(records, character_level, league)
         self._proxy = ZoneFilterProxy()
         self._proxy.setSourceModel(self._model)
 
@@ -285,23 +319,23 @@ class ZoneTableDialog(QDialog):
         self._search.textChanged.connect(self._proxy.setFilterFixedString)
         self._search.textChanged.connect(self._update_count)
 
-        # Die Seasons, die im Katalog wirklich vorkommen, jüngste zuerst.
-        # ``EARLIER`` sammelt alles vor der ersten Season, deren Beginn
-        # wir kennen (§season_log) — es steht unten, weil es die älteste
-        # Schicht ist.
-        self._season_combo = QComboBox()
-        self._season_combo.setToolTip(
-            "Path of Exile rebuilds the atlas every season, so the same "
-            "map zone has a different monster level in each. This picks "
-            "which season's levels the table shows.")
-        for name in _season_choices(records):
-            self._season_combo.addItem(
-                "Earlier (before the first known season)"
-                if name == EARLIER else name, name)
-        self._season_combo.addItem("All seasons", None)
-        if season is not None and self._season_combo.findData(season) >= 0:
-            self._season_combo.setCurrentIndex(self._season_combo.findData(season))
-        self._season_combo.currentIndexChanged.connect(self._on_season_changed)
+        # Die Ligen, die im Katalog wirklich vorkommen, zuletzt gespielte
+        # zuerst. ``UNKNOWN`` sammelt die Zeit, für die sich kein
+        # Charakter zuordnen ließ (§league_log) — es steht unten.
+        self._league_combo = QComboBox()
+        self._league_combo.setToolTip(
+            "The atlas is rebuilt every season, and the leagues of one "
+            "season differ in content — Vaal side areas do not exist in "
+            "Ruthless at all. This picks which league's zones and levels "
+            "the table shows.")
+        for name in _league_choices(records):
+            self._league_combo.addItem(
+                "Unknown (no character could be matched)"
+                if name == UNKNOWN else name, name)
+        self._league_combo.addItem("All leagues", None)
+        if league is not None and self._league_combo.findData(league) >= 0:
+            self._league_combo.setCurrentIndex(self._league_combo.findData(league))
+        self._league_combo.currentIndexChanged.connect(self._on_league_changed)
 
         self._group_combo = QComboBox()
         self._group_combo.addItem("All groups", "")
@@ -316,7 +350,7 @@ class ZoneTableDialog(QDialog):
         self._export_button.clicked.connect(self._export)
 
         kopf = QHBoxLayout()
-        kopf.addWidget(self._season_combo)
+        kopf.addWidget(self._league_combo)
         kopf.addWidget(self._group_combo)
         kopf.addWidget(self._search, 1)
         kopf.addWidget(self._count_label)
@@ -333,7 +367,8 @@ class ZoneTableDialog(QDialog):
         kopfzeile = self._view.horizontalHeader()
         kopfzeile.setSectionResizeMode(_NAME_COL, QHeaderView.ResizeMode.Stretch)
         kopfzeile.setSectionResizeMode(_ID_COL, QHeaderView.ResizeMode.Stretch)
-        for spalte in (_GROUP_COL, _LEVEL_COL, _VISITS_COL, _SEEN_COL):
+        for spalte in (_GROUP_COL, _TIER_COL, _LEVEL_COL, _VISITS_COL,
+                       _DEATHS_COL, _TIME_COL, _SEEN_COL):
             kopfzeile.setSectionResizeMode(spalte,
                                            QHeaderView.ResizeMode.ResizeToContents)
 
@@ -346,12 +381,12 @@ class ZoneTableDialog(QDialog):
         self._proxy.set_group(self._group_combo.currentData() or "")
         self._update_count()
 
-    def _on_season_changed(self) -> None:
-        """Die Season wechselt die Level UND die Zeilen: Zonen, die es
-        damals nicht gab, verschwinden. Nach dem Modell-Reset muss die
+    def _on_league_changed(self) -> None:
+        """Die Liga wechselt die Zahlen UND die Zeilen: Zonen, die es
+        dort nicht gab, verschwinden. Nach dem Modell-Reset muss die
         Sortierung neu angewandt werden, sonst steht die Tabelle in der
         Reihenfolge des Katalogs da."""
-        self._model.set_season(self._season_combo.currentData())
+        self._model.set_league(self._league_combo.currentData())
         self._view.sortByColumn(self._view.horizontalHeader().sortIndicatorSection(),
                                 self._view.horizontalHeader().sortIndicatorOrder())
         self._update_count()
@@ -376,10 +411,10 @@ class ZoneTableDialog(QDialog):
         return gefunden
 
     def _export(self) -> None:
-        # Die Season steht im Dateinamen: Wer zwei Seasons vergleichen
-        # will, exportiert zweimal und hätte sonst zweimal "zones.csv".
-        season = self._model.season()
-        teile = ["zones", self._account_name, season or "all-seasons"]
+        # Die Liga steht im Dateinamen: Wer zwei Ligen vergleichen will,
+        # exportiert zweimal und hätte sonst zweimal "zones.csv".
+        liga = self._model.league()
+        teile = ["zones", self._account_name, liga or "all-leagues"]
         vorschlag = sanitize_filename("-".join(t for t in teile if t), "zones")
         pfad, _ = QFileDialog.getSaveFileName(
             self, "Export zones as CSV", str(Path.home() / f"{vorschlag}.csv"),
@@ -387,6 +422,6 @@ class ZoneTableDialog(QDialog):
         if not pfad:
             return
         try:
-            export_zones(pfad, self.visible_records(), season)
+            export_zones(pfad, self.visible_records(), liga)
         except OSError as fehler:
             QMessageBox.warning(self, "Export failed", str(fehler))

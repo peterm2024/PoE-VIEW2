@@ -10,7 +10,7 @@ from datetime import datetime
 import pytest
 
 from poe_view.services import zone_catalog as zk
-from poe_view.services.season_log import EARLIER, Season
+from poe_view.services.league_log import UNKNOWN
 from poe_view.services.zone_watcher import ZoneStay
 
 
@@ -26,10 +26,11 @@ def stay(area_id: str, name: str = "Zone", level: int = 68,
     ("1_SideArea5_3_2", zk.STORY),
     ("2_7_2b", zk.STORY),
     ("MapWorldsChateau", zk.MAP),
-    ("MapSideArea4_2", zk.MAP),
-    ("Delve_Main", zk.SPECIAL),
-    ("3_Labyrinth_boss_2", zk.SPECIAL),
-    ("EndGame_Labyrinth_trials_spikes", zk.SPECIAL),
+    ("Delve_Main", zk.DELVE),
+    ("MapSideArea4_2", zk.SIDE_AREA),
+    ("MapSideAreaIceForest", zk.SIDE_AREA),
+    ("3_Labyrinth_boss_2", zk.LABYRINTH),
+    ("EndGame_Labyrinth_trials_spikes", zk.LABYRINTH),
     ("SanctumCellar", zk.SPECIAL),
     ("AbyssLeagueBoss2", zk.SPECIAL),
     ("HideoutSlum", zk.REST),
@@ -41,12 +42,53 @@ def test_categories_match_the_area_ids_seen_in_the_real_log(area_id, gruppe) -> 
     assert zk.categorise(area_id) == gruppe
 
 
-def test_the_labyrinth_is_special_although_its_id_starts_like_a_story_area() -> None:
+def test_the_labyrinth_wins_over_the_story_pattern() -> None:
     """``1_Labyrinth_OH_branch`` sieht aus wie Akt 1, ist aber
-    Endspiel-Inhalt. Die Ausnahme steht in ``_STORY_RE`` und ist der
-    einzige Grund, warum die Regel nicht einfach "Zahl am Anfang" heißt."""
-    assert zk.categorise("1_Labyrinth_OH_branch") == zk.SPECIAL
+    Endspiel-Inhalt — mit 82 Kennungen die drittgrößte Gruppe in Peters
+    Log. Die Reihenfolge der Prüfungen in ``categorise`` ist die
+    Aussage."""
+    assert zk.categorise("1_Labyrinth_OH_branch") == zk.LABYRINTH
     assert zk.categorise("1_4_3_3") == zk.STORY
+
+
+def test_a_side_area_is_not_a_map() -> None:
+    """Peter, 2026-09-26: "MapSideArea sind keine eigenen Maps, das sind
+    meistens Vaal-Side-Areas." Unter ``Map`` verfälschten sie die
+    Karten-Liste mit neun Einträgen, die keine Karte sind."""
+    assert zk.categorise("MapSideAreaIceValley") == zk.SIDE_AREA
+    assert zk.categorise("MapWorldsAtoll") == zk.MAP
+
+
+def test_the_map_tier_comes_from_the_lowest_level_seen() -> None:
+    """Peter: "Hier zählt natürlich nur die niedrigmöglichste Tier der
+    Map." Tier 1 ist Level 68, Tier 16 ist 83."""
+    records: dict[str, zk.ZoneRecord] = {}
+    zk.merge_stays(records, [stay("MapWorldsAtoll", "Atoll", 77),
+                             stay("MapWorldsAtoll", "Atoll", 70, minute=10)])
+    assert records["MapWorldsAtoll"].tier() == 3           # 70 - 67
+
+    zk.merge_stays(records, [stay("2_9_1", "The Blood Aqueduct", 61)])
+    assert records["2_9_1"].tier() is None                 # keine Karte
+
+    # Der Fall, der die Gegenprobe zunaechst durchgelassen hat: ein
+    # Gebiet, dessen Level MITTEN im Tier-Bereich liegt, das aber keine
+    # Karte ist. Peters Labyrinth steht auf 68 — ohne die
+    # Kategorie-Pruefung stuende dort "T1".
+    zk.merge_stays(records, [stay("3_Labyrinth_boss_2", "Aspirant's Trial", 68)])
+    assert records["3_Labyrinth_boss_2"].category == zk.LABYRINTH
+    assert records["3_Labyrinth_boss_2"].tier() is None
+    assert zk.map_tier_from_level(68) == 1                 # der Level allein schon
+
+
+def test_levels_outside_the_tier_range_have_no_tier() -> None:
+    """Story-Gebiete, Delve-Tiefen und Hideouts tragen einen Level, aber
+    keine Tier — eine ausgerechnete wäre erfunden."""
+    assert zk.map_tier_from_level(68) == 1
+    assert zk.map_tier_from_level(83) == 16
+    assert zk.map_tier_from_level(84) == 17
+    assert zk.map_tier_from_level(85) is None
+    assert zk.map_tier_from_level(60) is None
+    assert zk.map_tier_from_level(0) is None
 
 
 def test_an_unknown_id_becomes_special_rather_than_disappearing() -> None:
@@ -59,27 +101,28 @@ def test_an_unknown_id_becomes_special_rather_than_disappearing() -> None:
 def test_a_zone_collects_every_level_it_was_ever_seen_with() -> None:
     """Innerhalb EINER Season sammelt ein Gebiet trotzdem mehrere Level:
     ``Delve_Main`` wandert mit der Tiefe. Ohne Season-Historie landet
-    alles unter ``EARLIER``."""
+    alles unter ``UNKNOWN``."""
     records: dict[str, zk.ZoneRecord] = {}
     zk.merge_stays(records, [stay("Delve_Main", "Azurite Mine", 70),
                              stay("Delve_Main", "Azurite Mine", 77, minute=10)])
 
     eintrag = records["Delve_Main"]
-    assert eintrag.stats(EARLIER).levels == {70, 77}
+    assert eintrag.stats(UNKNOWN).levels == {70, 77}
     assert eintrag.level_text() == "70–77"
     assert eintrag.max_level() == 77
     assert eintrag.stats(None).visits == 2
 
 
-def test_the_same_zone_in_two_seasons_stays_apart() -> None:
-    """Der Grund fuer das ganze Season-Modell (Peter, 2026-09-26): Der
-    Atlas baut sich um, Atoll stand in der vorigen Season auf 70 und in
+def test_the_same_zone_in_two_leagues_stays_apart() -> None:
+    """Der Grund fuer die Liga-Trennung (Peter, 2026-09-26): Der Atlas
+    baut sich mit jeder Season um, Atoll stand vorher auf 70 und in
     Allflame auf 77. Zusammengeworfen ergaebe das die Spanne "70–77",
-    die es nie gab."""
-    seasons = [Season("Mirage", datetime(2026, 4, 1)),
-               Season("Allflame", datetime(2026, 7, 24, 22, 0))]
-    records: dict[str, zk.ZoneRecord] = {}
+    die es nie gab. Und Peters zweiter Punkt liegt darunter: Die Ligen
+    EINER Season unterscheiden sich im Inhalt."""
+    def liga_von(zeit):
+        return "SSF Ruthless (earlier)" if zeit < datetime(2026, 7, 24)             else "SSF R Allflame"
 
+    records: dict[str, zk.ZoneRecord] = {}
     zk.merge_stays(records, [
         ZoneStay(entered=datetime(2026, 7, 1, 12, 0),
                  left=datetime(2026, 7, 1, 12, 5), name="Atoll",
@@ -87,28 +130,74 @@ def test_the_same_zone_in_two_seasons_stays_apart() -> None:
         ZoneStay(entered=datetime(2026, 9, 1, 12, 0),
                  left=datetime(2026, 9, 1, 12, 5), name="Atoll",
                  area_id="MapWorldsAtoll", instance="2", level=77),
-    ], seasons)
+    ], liga_von)
 
     eintrag = records["MapWorldsAtoll"]
-    assert eintrag.level_text("Mirage") == "70"
-    assert eintrag.level_text("Allflame") == "77"
+    assert eintrag.level_text("SSF Ruthless (earlier)") == "70"
+    assert eintrag.level_text("SSF R Allflame") == "77"
     assert eintrag.level_text(None) == "70–77"
-    assert eintrag.seen_in("Mirage") and eintrag.seen_in("Allflame")
+    assert eintrag.tier("SSF R Allflame") == 10          # 77 - 67
+    assert eintrag.seen_in("SSF R Allflame")
+    assert not eintrag.seen_in("Allflame")
 
 
-def test_a_stay_before_the_first_known_season_lands_in_earlier() -> None:
-    """Die API vergisst beendete Ligen; fuer die Zeit davor wissen wir
-    den Namen schlicht nicht. ``EARLIER`` ist ehrlicher als ein
-    geratener."""
-    seasons = [Season("Allflame", datetime(2026, 7, 24, 22, 0))]
+def test_a_stay_without_a_league_lands_in_unknown() -> None:
+    """Ohne zuordenbaren Charakter wissen wir die Liga nicht.
+    ``UNKNOWN`` ist ehrlicher als ein geratener Name — und als Auswahl
+    in der Tabelle sichtbar."""
     records: dict[str, zk.ZoneRecord] = {}
 
     zk.merge_stays(records, [
         ZoneStay(entered=datetime(2026, 5, 1, 12, 0),
                  left=datetime(2026, 5, 1, 12, 5), name="Atoll",
-                 area_id="MapWorldsAtoll", instance="1", level=70)], seasons)
+                 area_id="MapWorldsAtoll", instance="1", level=70)],
+        lambda zeit: "")
 
-    assert set(records["MapWorldsAtoll"].seasons) == {EARLIER}
+    assert set(records["MapWorldsAtoll"].leagues) == {UNKNOWN}
+
+
+def test_deaths_and_dwell_time_land_in_the_right_zone() -> None:
+    """Peter, 2026-09-26: "Wir koennten hier auch die Tode in eine Spalte
+    nehmen und auch die durchschnittliche Dauer der Zone." Die Tode
+    stehen mit Zeitstempel in derselben Client.txt; zugeordnet wird, in
+    welchen Aufenthalt sie fallen."""
+    records: dict[str, zk.ZoneRecord] = {}
+    zk.merge_stays(records, [
+        ZoneStay(entered=datetime(2026, 9, 26, 12, 0),
+                 left=datetime(2026, 9, 26, 12, 10), name="Atoll",
+                 area_id="MapWorldsAtoll", instance="1", level=77),
+        ZoneStay(entered=datetime(2026, 9, 26, 12, 10),
+                 left=datetime(2026, 9, 26, 12, 12), name="Hideout",
+                 area_id="HideoutSlum", instance="2", level=60),
+        ZoneStay(entered=datetime(2026, 9, 26, 12, 12),
+                 left=datetime(2026, 9, 26, 12, 32), name="Atoll",
+                 area_id="MapWorldsAtoll", instance="3", level=77),
+    ], None, [datetime(2026, 9, 26, 12, 5),      # im ersten Atoll
+              datetime(2026, 9, 26, 12, 20),     # im zweiten Atoll
+              datetime(2026, 9, 26, 12, 25)])    # auch dort
+
+    atoll = records["MapWorldsAtoll"].stats(None)
+    assert atoll.deaths == 3
+    assert atoll.visits == 2
+    assert atoll.seconds == 600 + 1200
+    assert atoll.average_seconds == 900          # 15 min im Schnitt
+    assert records["HideoutSlum"].stats(None).deaths == 0
+
+
+def test_a_running_stay_gets_no_deaths_and_no_time() -> None:
+    """Der letzte Aufenthalt der Datei laeuft noch: Er ist nach oben
+    offen, ein Tod danach gehoerte zur naechsten Zone, und eine Dauer
+    von 0 s duerfte den Schnitt nicht druecken."""
+    records: dict[str, zk.ZoneRecord] = {}
+    zk.merge_stays(records, [
+        ZoneStay(entered=datetime(2026, 9, 26, 12, 0), left=None, name="Atoll",
+                 area_id="MapWorldsAtoll", instance="1", level=77)],
+        None, [datetime(2026, 9, 26, 12, 5)])
+
+    zahlen = records["MapWorldsAtoll"].stats(None)
+    assert zahlen.deaths == 0
+    assert zahlen.seconds == 0
+    assert zahlen.average_seconds == 0
 
 
 def test_a_single_level_is_shown_without_a_range() -> None:
@@ -144,7 +233,7 @@ def test_a_saved_catalog_comes_back_unchanged(tmp_path) -> None:
 
     zurueck = zk.load(pfad)
     assert set(zurueck) == {"MapWorldsAtoll", "2_8_town"}
-    assert zurueck["MapWorldsAtoll"].stats(EARLIER).levels == {70, 77}
+    assert zurueck["MapWorldsAtoll"].stats(UNKNOWN).levels == {70, 77}
     assert zurueck["MapWorldsAtoll"].stats(None).visits == 2
     assert zurueck["2_8_town"].category == zk.REST
 

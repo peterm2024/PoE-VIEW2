@@ -7485,7 +7485,18 @@ Liga-Angabe sagt, wo ein Charakter jetzt ist, nicht wo er gespielt
 wurde. "Mirage" wäre geraten gewesen, und die Tabelle soll nicht
 behaupten, was sie nicht belegen kann.
 
-**In der Oberfläche** steht die Season-Box links vor der Gruppen-Box,
+**Nachtrag 2026-09-27: getrennt wird nach LIGA, nicht nach Season**
+(Peter: "Wir machen Liga, statt Season"). Der Anlass war ein zweiter
+Unterschied, den die Season-Ebene nicht erfasst: "MapSideArea sind keine
+eigenen Maps, das sind meistens Vaal-Side-Areas. Diese kommen aber in
+SSF Ruthless nicht vor." Die Ligen EINER Season unterscheiden sich also
+im Inhalt, nicht nur zwischen Seasons. Liga-Namen tragen die Season
+ohnehin in sich ("SSF R Allflame" gegen "SSF R Mirage"), die
+Liga-Trennung ist damit die feinere und kostet keine zweite Ebene.
+``season_log`` bleibt trotzdem: Es liefert die Grenze, ab der die
+Liga-Angabe der Charaktere überhaupt vertrauenswürdig ist (§4.56.4).
+
+**In der Oberfläche** steht die Liga-Box links vor der Gruppen-Box,
 vorbelegt mit der laufenden Season: Wer die Tabelle öffnet, meint den
 Atlas, den er gerade spielt. Sie listet nur Seasons, die im Katalog
 wirklich vorkommen (eine Season ohne eigene Daten wäre ein Eintrag, der
@@ -7499,6 +7510,82 @@ Der CSV-Export folgt derselben Logik: eine Zeile je Season statt einer
 zusammengeworfenen, und die Season steht im vorgeschlagenen Dateinamen —
 wer zwei Seasons vergleichen will, exportiert zweimal und hätte sonst
 zweimal "zones.csv".
+
+#### 4.56.4 Wer hat wann gespielt (`services/league_log.py`)
+
+Peter, 2026-09-26: "Können wir eigentlich den gespielten Char über die
+client.txt herausfinden?"
+
+**Ja, punktuell.** Zwei Zeilenarten nennen ihn: `… is now level 83` und
+`… has been slain.` — in Peters Log 256 und 226 Stück, zusammen 482
+Zeitmarken über 5,5 Monate. Rechnet man jeden Zonen-Eintritt dem
+Charakter der nächstgelegenen Marke zu, deckt das bei einem Fenster von
+einer Stunde 84 % ab, bei sechs Stunden 92 %, bei zwölf 94 %. Gewählt
+sind sechs: Sie sind enger als ein Schlaf und kosten gegenüber zwölf nur
+zwei Punkte.
+
+**Der Beleg, dass die Zuordnung trägt:** Von Peters zehn
+Vaal-Side-Areas ließen sich neun zuordnen — alle neun in "Allflame",
+keine in "SSF R Allflame". Genau die Unterscheidung, um die er gebeten
+hat. Über die ganze Season stehen 1.050 Eintritte in Allflame gegen 951
+in SSF R Allflame; zusammengeworfen wäre die halbe Tabelle falsch.
+
+**Ab jetzt genau statt interpoliert:** Bei jeder Erfahrungs-
+Veröffentlichung steht fest, welcher Charakter spielt
+(`_on_character_snapshot`) — das wird mitgeschrieben, verdichtet auf
+eine Marke je Charakter und Viertelstunde. Die Marken aus dem Log füllen
+nur die Zeit davor.
+
+**Die Halbwahrheit, die trotzdem nützt:** Nach dem Season-Ende wandern
+Charaktere in die permanente Liga; ihr heutiger Name sagt nicht mehr, in
+welcher SEASON sie spielten — wohl aber, in welcher SPIELART. Ein
+Charakter, der heute in "SSF Ruthless" steht, hat auch damals Ruthless
+gespielt, und genau darauf zielte die Frage. Zeiten vor der laufenden
+Season bekommen deshalb `" (earlier)"` angehängt statt `UNKNOWN`: Die
+Spielart bleibt lesbar, die alten Zahlen bleiben von den heutigen
+getrennt. An Peters Daten hebt das die Zuordnung von 40 % auf 91 %
+(2.574 Besuche als "SSF Ruthless (earlier)", 434 bleiben unbekannt).
+
+#### 4.56.5 Tier, Tode, Verweildauer — und die Grenze der Messbarkeit
+
+Peter, 2026-09-26: "Bitte nimm auch die Tier der Maps als Spalte auf.
+Hier zählt natürlich nur die niedrigmöglichste Tier der Map. Wir könnten
+hier auch die Tode in eine Spalte nehmen und auch die durchschnittliche
+Dauer der Zone."
+
+- **Tier** = Gebietslevel − 67 (Tier 1 ist Level 68), aus dem
+  NIEDRIGSTEN gesehenen Level und nur für Karten und Side Areas.
+  Alles außerhalb von Tier 1–17 bleibt leer: Ein Story-Gebiet hat keine
+  Tier, und eine ausgerechnete wäre erfunden.
+- **Tode** kommen aus derselben Client.txt (`deaths_since`) und werden
+  dem Aufenthalt zugeordnet, in den ihr Zeitstempel fällt. Peters
+  Spitzenreiter: 14 Tode in der Azurite Mine, 10 in Bramble Valley bei
+  24 Besuchen.
+- **Verweildauer** summiert `ZoneStay.seconds`, der Schnitt teilt durch
+  die Besuche MIT Dauer. Der Grund für die Unterscheidung steht in den
+  Daten: Die Client.txt schreibt beim Spielende nichts, der letzte
+  Aufenthalt endet erst beim nächsten Start. Über Peters 1.108
+  abgeschlossene Map-Aufenthalte liegt der Median bei 2,4 min, das 99.
+  Perzentil bei 21,8 min — und das Maximum bei 1.175 min, also 19,6
+  Stunden. Aufenthalte über einer Stunde (7 Stück, 0,6 %) zählen
+  deshalb als Besuch, aber nicht im Schnitt.
+
+**Die Gruppen sind feiner geworden** (Peter: "Wir machen eine extra
+Gruppe 'Side Area', auch 'Delve' und 'Labyrinth' extra"): Story 145,
+Map 115, Labyrinth 82, Rest 21, Side Area 9, Special 8, Delve 1. Die
+Reihenfolge der Prüfungen in `categorise` ist dabei die Aussage —
+Ruhezonen zuerst, dann Labyrinth vor Story (`1_Labyrinth_…` fängt mit
+einer Aktnummer an), dann Side Area vor Map (`MapSideArea…` fängt mit
+"Map" an).
+
+**Noch offen: die Lukrativität** ("evtl. sogar die Lukrativität der Zone
+[...] anhand des Loots"). Die Bausteine lägen bereit — der Item-Verlauf
+protokolliert Neuzugänge mit Zeitstempel (§4.21), poe.ninja liefert
+Preise (§4.14) —, aber der Zusammenhang "dieses Item fiel in dieser
+Zone" ist keiner: Was zwischen zwei Abrufen ins Inventar kommt, kann
+gedroppt, gekauft, gehandelt oder aus der Truhe geholt sein, und die
+API veröffentlicht nur alle paar Minuten. Bevor das gebaut wird, gehört
+gemessen, wie viel davon überhaupt übrig bleibt.
 
 ---
 

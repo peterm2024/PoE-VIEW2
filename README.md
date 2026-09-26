@@ -94,8 +94,9 @@ with the tiers you still miss left empty.
   which names the area level on every single zone entry, and it keeps
   what it has seen even after the game truncates that log. Because the
   atlas is rebuilt every season — across the last switch, 44 of 233
-  areas changed level — the table starts on the season you are playing
-  and can be switched to an earlier one, or to all of them at once.
+  areas changed level — the table separates the leagues you played in,
+  starting on the most recent one. Columns: group, map tier, monster
+  level, visits, deaths and the average time you spent there.
 - **Configurable columns**: which columns are shown and in what order is
   set either in the settings dialog (checkboxes and drag & drop) or via
   a quick toggle in the header's right-click menu. The choice is saved
