@@ -1756,3 +1756,46 @@ zugrunde liegende Messung über einen Bruch hinweg (Season, Patch,
 Liga), ist die Spanne keine Spanne, sondern zwei Zustände in einer
 Zelle.
 
+
+## 88. Die Beute einer Map steht im Hideout — wer sie der aktuellen Zone zurechnet, misst seine Ruhezone
+
+**Symptom (vermieden, nicht erlitten).** Für die Lukrativität je Zone
+(Peter, 2026-09-27: "Einfach mal beobachten") lag die naheliegende
+Verdrahtung auf der Hand: Kommen neue Items an, gehören sie der Zone,
+in der der Charakter gerade steht. Das wäre in Peters Fall zu einer
+Tabelle geworden, in der das **Backstreet Hideout** mit weitem Abstand
+die ertragreichste Zone ist.
+
+**Ursache.** GGG veröffentlicht das Inventar beim Zonenwechsel — und
+zwar, wenn die Map VERLASSEN wird. Zum Zeitpunkt der Veröffentlichung
+steht der Charakter also schon woanders. An Peters Programmlog
+nachgezählt (287 Inventar-Änderungen über vier Logdateien): 66 % aller
+Änderungen fallen mit einem Zonenwechsel zusammen, und von den 108
+Zuwächsen unmittelbar danach landeten **95 im Hideout**, sieben in Sarn.
+
+Der Zufall, der das sichtbar gemacht hat, war der Zonenname in der
+Log-Zeile. Die Verteilung "66 % fallen mit einem Zonenwechsel zusammen"
+allein hätte die Vermutung bestätigt und zur falschen Verdrahtung
+geführt; erst die Frage "in WELCHE Zone denn?" drehte die Aussage um.
+
+**Lösung.** Dieselbe Regel, die die XP-Rate schon benutzt (§_XpWatch):
+Eine Veröffentlichung kurz nach einem Zonenwechsel berichtet über die
+Zone, die gerade verlassen wurde. Sie nimmt die Gegenrichtung gratis
+mit — wer aus dem Hideout in die Map portet und dabei einen Zuwachs
+veröffentlicht, hat ihn aus der Truhe geholt, und eine Ruhezone droppt
+nichts.
+
+**Der zweite Strick daneben.** Items und Erfahrung kommen als ZWEI
+Signale derselben Veröffentlichung (`character_items_loaded`, dann
+`character_snapshot_loaded`). Die Mitschrift legt den Zuwachs beim
+ersten bereit und schreibt ihn beim zweiten weg. Würden die beiden
+`emit`-Zeilen im Worker je vertauscht, stünde in jeder Zeile die Beute
+des VORIGEN Abrufs neben der Erfahrung dieses — beides plausible
+Zahlen, kein Fehler, keine Ausnahme. Deshalb prüft ein eigener Test in
+`test_api_worker.py` nur die Reihenfolge.
+
+**Lehre:** Eine Verteilung sagt, WIE OFT etwas zusammenfällt, nicht WAS
+zusammenfällt. Solange die Kategorie daneben nicht ausgezählt ist, ist
+eine bestätigte Vermutung bloß eine unwidersprochene. Und: Wo zwei
+Signale zusammen eine Aussage ergeben, ist ihre Reihenfolge Teil der
+Schnittstelle und gehört getestet, nicht kommentiert.

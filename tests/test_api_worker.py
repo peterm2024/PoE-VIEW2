@@ -132,6 +132,26 @@ def test_character_items_dispatch_also_emits_level_and_experience(qapp, monkeypa
     worker.client.close()
 
 
+def test_the_items_are_emitted_before_the_snapshot(qapp, monkeypatch) -> None:
+    """Die Reihenfolge ist nicht beliebig: Die Beute-Mitschrift legt beim
+    Item-Signal den Zuwachs bereit und schreibt ihn beim Snapshot-Signal
+    mitsamt der Erfahrung weg (§zone_loot_log, ``_pending_loot``). Wären
+    beide vertauscht, stünde in jeder Zeile die Beute des VORIGEN Abrufs
+    neben der Erfahrung dieses — und zwar still, weil beide Werte
+    plausibel aussehen."""
+    worker = ApiWorker()
+    monkeypatch.setattr(worker.client, "get_character_items", lambda name: (87, 123, []))
+
+    folge: list[str] = []
+    worker.character_items_loaded.connect(lambda *_: folge.append("items"))
+    worker.character_snapshot_loaded.connect(lambda *_: folge.append("snapshot"))
+
+    worker._dispatch(FetchCharacterItemsJob("WitchOfPeter"))
+
+    assert folge == ["items", "snapshot"]
+    worker.client.close()
+
+
 def test_run_emits_busy_changed_around_each_job(qapp, monkeypatch) -> None:
     """run() direkt (synchron, kein echter QThread) aufgerufen — deterministisch testbar."""
     worker = ApiWorker()

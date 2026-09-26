@@ -37,6 +37,7 @@ from poe_view.services import (cache_backup, cache_writer, data_cache, gem_xp_lo
                                season_log, xp_history, zone_catalog)
 from poe_view.services.experience import penalty_caption
 from poe_view.services.instance_lock import InstanceLock
+from poe_view.services import zone_loot_log
 from poe_view.services.zone_watcher import (ZoneWatcher, deaths_since,
                                               is_rest_area,
                                               resolve_client_log_path, zone_stays)
@@ -226,6 +227,13 @@ class _ZoneStay:
     name: str
     area_id: str
     instance: str
+    # Der Monsterlevel aus derselben Client.txt-Zeile wie ``area_id``
+    # (``zone_watcher._AREA_LINE``). Hier festgehalten statt beim
+    # Auswerten nachgeschlagen: Die Beute-Mitschrift schreibt ihn einem
+    # Aufenthalt zu, der beim Schreiben oft schon der VORIGE ist
+    # (§zone_loot_log) — der Beobachter steht dann längst in der
+    # nächsten Zone und kennt deren Level, nicht mehr diesen.
+    level: int = 0
 
     @property
     def resting(self) -> bool:
@@ -756,6 +764,13 @@ class MainWindow(QMainWindow):
         # vorigen Veröffentlichung (§_active_seconds). Begrenzt auf das
         # Graph-Fenster; ältere Aufenthalte kann keine Rate mehr brauchen.
         self._zone_stays: list[_ZoneStay] = []
+        # Der Zuwachs des laufenden Abrufs, zwischen den beiden Signalen
+        # abgelegt: ``character_items_loaded`` kennt die Items,
+        # ``character_snapshot_loaded`` die Erfahrung — und beide
+        # gehören zu EINER Veröffentlichung (§zone_loot_log). Die
+        # Reihenfolge ist fest (``ApiWorker`` sendet sie unmittelbar
+        # nacheinander), ein ``None`` heißt "nichts Verwertbares".
+        self._pending_loot: dict[str, zone_loot_log.Tally | None] = {}
         self._publish_watch: dict[str, _PublishWatch] = {}
         self._xp_watch: dict[str, _XpWatch] = {}
         # Aus der Datei geholte Verläufe (§4.44), erst beim ersten
@@ -3987,6 +4002,11 @@ class MainWindow(QMainWindow):
             return
         watch.level = level
         watch.last_snapshot_at = now
+        # VOR dem Fortschreiben von ``current_experience``: Der Zuwachs
+        # ist die Differenz zum zuletzt veröffentlichten Stand, und die
+        # Beute des Abrufs liegt seit ``_on_character_items`` bereit
+        # (§zone_loot_log).
+        self._log_zone_loot(name, experience, experience - watch.current_experience)
         if experience != watch.current_experience:
             watch.interval_from_baseline = self._baseline_starts_the_interval(watch, now)
             if watch.interval_from_baseline:
@@ -4285,7 +4305,8 @@ class MainWindow(QMainWindow):
         self._zone_stays.append(_ZoneStay(
             at=now, until=None, name=zone_name,
             area_id=self._zone_watcher.last_area_id if self._zone_watcher else "",
-            instance=self._last_zone_instance))
+            instance=self._last_zone_instance,
+            level=self._zone_watcher.last_area_level if self._zone_watcher else 0))
         cutoff = now - GRAPH_SPAN_S
         while len(self._zone_stays) > 1 and (self._zone_stays[0].until or now) <= cutoff:
             self._zone_stays.pop(0)
@@ -4453,6 +4474,7 @@ class MainWindow(QMainWindow):
                           gem_stand.level if gem_stand else 0,
                           gem_stand.current_experience if gem_stand else 0)
         self._log_character_item_history(name, previous_items, items, stale_baseline)
+        self._note_pending_loot(name, previous_items, items, stale_baseline)
         self._persist_cache()
         # Auch Charakter-Inventare zählen in die beobachteten Mengen
         # (§4.45) — Währung liegt oft im Rucksack, nicht nur im Fach.
@@ -4811,6 +4833,81 @@ class MainWindow(QMainWindow):
         self._publish_watch[name] = _PublishWatch(
             since=time.monotonic(), zone_changes_at=self._zone_changes,
             from_session_start=False)
+
+    def _note_pending_loot(self, name: str, previous_items: list[Item] | None,
+                           items: list[Item], stale_baseline: bool) -> None:
+        """Den Zuwachs dieses Abrufs für die Beute-Mitschrift bereitlegen
+        (§zone_loot_log). Geschrieben wird er erst, wenn gleich darauf die
+        Erfahrung eintrifft — sie gehört zur selben Veröffentlichung.
+
+        ``stale_baseline`` legt ``None`` ab statt nichts: Der erste Abruf
+        eines Charakters vergleicht gegen einen womöglich wochenalten
+        Stand, sein "Zuwachs" wäre das halbe Inventar. Derselbe Grund wie
+        beim Item-Verlauf (``_log_character_item_history``)."""
+        if stale_baseline:
+            self._pending_loot[name] = None
+            return
+        added_ids, _changed_ids, _removed = self._diff_character_items(previous_items, items)
+        liga = self._league_of_character(name)
+        self._pending_loot[name] = zone_loot_log.tally(
+            [item for item in items if item.id in added_ids],
+            self._stack_size_changes(previous_items, items),
+            self._price_indexes.get(liga))
+
+    def _league_of_character(self, name: str) -> str:
+        """Die Liga aus der Charakterliste — live und damit exakt, anders
+        als die rückwirkende Zuordnung über die Client.txt (§league_log)."""
+        for character in self._all_characters:
+            if character.name == name:
+                return character.league or ""
+        return ""
+
+    def _loot_zone(self, now: float) -> tuple[_ZoneStay, str] | None:
+        """Welcher Zone gehört, was gerade veröffentlicht wurde?
+
+        **Eine Veröffentlichung kurz nach einem Zonenwechsel berichtet
+        über die Zone, die gerade VERLASSEN wurde** — dieselbe Regel, mit
+        der schon die XP-Rate rechnet (§_XpWatch), und an Peters Log
+        belegt: Von 108 Zuwächsen unmittelbar nach einem Wechsel landeten
+        95 im Hideout (§zone_loot_log). Die Beute stammt dann aus der Map
+        davor, nicht aus dem Hideout.
+
+        Dieselbe Regel deckt die Gegenrichtung mit ab: Wer aus dem
+        Hideout in die Map portet und dabei einen Zuwachs veröffentlicht,
+        hat ihn aus der Truhe geholt — er fällt der Ruhezone zu und damit
+        aus der Mitschrift heraus."""
+        if not self._zone_stays:
+            return None
+        if (self._last_zone_at is not None
+                and now - self._last_zone_at <= self._XP_ZONE_TRIGGER_WINDOW_S
+                and len(self._zone_stays) >= 2):
+            return self._zone_stays[-2], "zone change"
+        return self._zone_stays[-1], "in zone"
+
+    def _log_zone_loot(self, name: str, experience: int, gain: int) -> None:
+        """Eine Zeile der Beute-Mitschrift, sofern es etwas zu sagen gibt.
+
+        Nichts geschrieben wird bei einer Ruhezone (dort droppt nichts,
+        siehe ``_loot_zone``) und bei einer Veröffentlichung ohne Beute
+        UND ohne Erfahrung — das ist ein Abruf, keine Veröffentlichung.
+        Eine Zone, die Erfahrung gebracht hat, aber keine Items, bekommt
+        dagegen ihre Zeile: Das ist eine Aussage über die Itemdichte,
+        keine fehlende Messung."""
+        beute = self._pending_loot.pop(name, None)
+        if beute is None or (beute.empty and not gain):
+            return
+        zugeordnet = self._loot_zone(time.monotonic())
+        if zugeordnet is None:
+            return
+        stay, trigger = zugeordnet
+        if stay.resting:
+            return
+        zone_loot_log.append(zone_loot_log.Row(
+            character=name, league=self._league_of_character(name),
+            zone=stay.name, area_id=stay.area_id, instance=stay.instance,
+            level=stay.level, trigger=trigger,
+            seconds=(stay.until or time.monotonic()) - stay.at,
+            experience=experience, experience_gain=gain), beute)
 
     def _show_character_items(self, name: str, items: list[Item],
                               previous_items: list[Item] | None = None) -> None:

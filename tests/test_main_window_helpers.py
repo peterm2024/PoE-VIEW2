@@ -3,6 +3,7 @@
 CSV-Dateiname-Vorschlag (Filtertext bzw. Tab-/Aggregat-Name).
 """
 
+import csv
 import json
 import re
 import time
@@ -14,14 +15,15 @@ from PySide6.QtWidgets import QMenu
 
 from poe_view.api.models import Character, Item, StashTab
 from poe_view.api.ninja import PriceIndex
-from poe_view.services import mod_knowledge, price_cache
+from poe_view.services import mod_knowledge, price_cache, zone_loot_log
 from poe_view.services.api_worker import (FetchModKnowledgeJob, FetchPricesJob,
                                           FetchStashListJob, LOGIN_EXPIRED,
                                           LOGIN_NO_TOKEN)
 from poe_view.services.poe2_probe import Probe, ProbeCall
 from poe_view.ui import external_tools, mod_bar, xp_graph
 from poe_view.ui.item_table import CONFIGURABLE_COLUMNS
-from poe_view.ui.main_window import MainWindow, _stable_item_dump, _XpWatch
+from poe_view.ui.main_window import (MainWindow, _stable_item_dump, _XpWatch,
+                                    _ZoneStay)
 
 NESTED = [
     {"id": "root1", "name": "#", "type": "QuadStash", "metadata": {}},
@@ -10459,6 +10461,251 @@ def test_the_penalty_follows_the_character_that_published_last(qapp) -> None:
         win._on_character_snapshot("WitchOfPeter", 96, 3_000_000)
 
         assert win._active_character_level() == 96
+    finally:
+        win.worker.stop()
+        win.worker.wait(5000)
+
+
+# --- Beute-Mitschrift: welcher Zone gehoert, was gerade veroeffentlicht
+# wurde (Peter, 2026-09-27: "Einfach mal beobachten") ------------------ #
+
+MAP_STAY = dict(name="Chateau", area_id="MapWorldsChateau", instance="77", level=79)
+HIDEOUT_STAY = dict(name="Backstreet Hideout", area_id="HideoutSlum",
+                    instance="78", level=0)
+
+
+def _with_stays(win, *stays) -> None:
+    """Die Aufenthalte setzen, als haette der Zonen-Beobachter sie
+    gemeldet. Der letzte ist der laufende, sein Beginn gilt als der
+    letzte Zonenwechsel."""
+    jetzt = time.monotonic()
+    win._zone_stays = []
+    for i, (angaben, alter) in enumerate(stays):
+        bis = None if i == len(stays) - 1 else jetzt - stays[i + 1][1]
+        win._zone_stays.append(_ZoneStay(at=jetzt - alter, until=bis, **angaben))
+    win._last_zone_at = jetzt - stays[-1][1]
+
+
+def test_a_publication_right_after_a_zone_change_belongs_to_the_zone_left(qapp) -> None:
+    """An Peters echtem Log gemessen: Von 108 Zuwaechsen unmittelbar nach
+    einem Wechsel landeten 95 im Hideout. Die Beute stammt aus der Map
+    davor — sonst stuende Peters ganze Ausbeute unter "Hideout"."""
+    win = MainWindow()
+    try:
+        _with_stays(win, (MAP_STAY, 300.0), (HIDEOUT_STAY, 2.0))
+
+        stay, trigger = win._loot_zone(time.monotonic())
+        assert stay.name == "Chateau"
+        assert trigger == "zone change"
+    finally:
+        win.worker.stop()
+        win.worker.wait(5000)
+
+
+def test_a_later_publication_belongs_to_the_running_zone(qapp) -> None:
+    """Real gemessen: +16 Items 408 s nach dem Betreten von
+    Phantasmagoria — mitten in der Map aufgesammelt, nicht davor."""
+    win = MainWindow()
+    try:
+        _with_stays(win, (HIDEOUT_STAY, 900.0), (MAP_STAY, 408.0))
+
+        stay, trigger = win._loot_zone(time.monotonic())
+        assert stay.name == "Chateau"
+        assert trigger == "in zone"
+    finally:
+        win.worker.stop()
+        win.worker.wait(5000)
+
+
+def test_without_any_zone_there_is_nothing_to_attribute(qapp) -> None:
+    win = MainWindow()
+    try:
+        assert win._loot_zone(time.monotonic()) is None
+    finally:
+        win.worker.stop()
+        win.worker.wait(5000)
+
+
+def _publish(win, name, items, experience, level=96):
+    """Eine Veroeffentlichung, wie der Worker sie sendet: erst die Items,
+    dann der Charakter-Stand (``ApiWorker`` emittiert sie in genau dieser
+    Reihenfolge)."""
+    win._on_character_items(name, items, False)
+    win._on_character_snapshot(name, level, experience)
+
+
+def _rows():
+    pfad = zone_loot_log.log_path()
+    if not pfad.exists():
+        return []
+    return list(csv.DictReader(pfad.open(encoding="utf-8")))
+
+
+def test_loot_published_in_the_hideout_is_credited_to_the_map(qapp) -> None:
+    """Der volle Weg durchs Fenster: Map verlassen, Zuwachs kommt im
+    Hideout an, Zeile traegt die Map."""
+    win = MainWindow()
+    try:
+        win._all_characters = [make_char("WitchOfPeter", "Allflame")]
+        _with_stays(win, (MAP_STAY, 300.0), (HIDEOUT_STAY, 2.0))
+        basis = Item.model_validate({"id": "belt", "typeLine": "Belt", "frameType": 2})
+        _publish(win, "WitchOfPeter", [basis], 4_200_000_000)
+
+        beute = Item.model_validate({"id": "drop", "typeLine": "Chaos Orb",
+                                     "frameType": 5, "stackSize": 3})
+        _publish(win, "WitchOfPeter", [basis, beute], 4_200_050_000)
+
+        zeilen = _rows()
+        assert len(zeilen) == 1
+        assert zeilen[0]["zone"] == "Chateau"
+        assert zeilen[0]["league"] == "Allflame"
+        assert zeilen[0]["level"] == "79"
+        assert zeilen[0]["currency"] == "3"
+        assert zeilen[0]["experience_gain"] == "50000"
+        assert zeilen[0]["trigger"] == "zone change"
+        # Die Dauer ist die des ABGESCHLOSSENEN Aufenthalts (300 s betreten,
+        # 2 s vor jetzt verlassen), nicht die Zeit bis zum Schreiben.
+        assert zeilen[0]["seconds"] == "298"
+    finally:
+        win.worker.stop()
+        win.worker.wait(5000)
+
+
+def test_what_comes_out_of_the_stash_is_not_map_loot(qapp) -> None:
+    """Die Gegenrichtung, die dieselbe Regel gratis mitnimmt: Wer aus dem
+    Hideout in die Map portet und dabei einen Zuwachs veroeffentlicht,
+    hat ihn aus der Truhe geholt. Eine Ruhezone droppt nichts."""
+    win = MainWindow()
+    try:
+        win._all_characters = [make_char("WitchOfPeter", "Allflame")]
+        _with_stays(win, (HIDEOUT_STAY, 300.0), (MAP_STAY, 2.0))
+        basis = Item.model_validate({"id": "belt", "typeLine": "Belt", "frameType": 2})
+        _publish(win, "WitchOfPeter", [basis], 4_200_000_000)
+
+        geholt = Item.model_validate({"id": "flask", "typeLine": "Life Flask",
+                                      "frameType": 1})
+        _publish(win, "WitchOfPeter", [basis, geholt], 4_200_050_000)
+
+        assert _rows() == []
+    finally:
+        win.worker.stop()
+        win.worker.wait(5000)
+
+
+def test_the_first_fetch_of_a_character_writes_nothing(qapp) -> None:
+    """Der erste Abruf vergleicht gegen einen womoeglich wochenalten
+    Stand — sein "Zuwachs" waere das halbe Inventar (derselbe Grund wie
+    beim Item-Verlauf, ``stale_baseline``)."""
+    win = MainWindow()
+    try:
+        win._all_characters = [make_char("WitchOfPeter", "Allflame")]
+        _with_stays(win, (MAP_STAY, 300.0), (HIDEOUT_STAY, 2.0))
+        alles = [Item.model_validate({"id": f"i{n}", "typeLine": "Ring", "frameType": 2})
+                 for n in range(20)]
+        _publish(win, "WitchOfPeter", alles, 4_200_000_000)
+
+        assert _rows() == []
+    finally:
+        win.worker.stop()
+        win.worker.wait(5000)
+
+
+def test_experience_without_loot_is_still_a_measurement(qapp) -> None:
+    """"Sozusagen Itemdichte und Monsterdichte" — eine Zone, die
+    Erfahrung gebracht hat, aber kein Item, ist eine Aussage ueber die
+    Itemdichte, keine fehlende Messung."""
+    win = MainWindow()
+    try:
+        win._all_characters = [make_char("WitchOfPeter", "Allflame")]
+        _with_stays(win, (HIDEOUT_STAY, 900.0), (MAP_STAY, 400.0))
+        basis = Item.model_validate({"id": "belt", "typeLine": "Belt", "frameType": 2})
+        _publish(win, "WitchOfPeter", [basis], 4_200_000_000)
+        _publish(win, "WitchOfPeter", [basis], 4_201_000_000)
+
+        zeilen = _rows()
+        assert len(zeilen) == 1
+        assert zeilen[0]["rare"] == "0"
+        assert zeilen[0]["experience_gain"] == "1000000"
+        assert zeilen[0]["seconds"] == "400"
+    finally:
+        win.worker.stop()
+        win.worker.wait(5000)
+
+
+def test_a_fetch_that_brought_nothing_at_all_writes_no_row(qapp) -> None:
+    """Der Auto-Refresh fragt alle ~56 s. Ohne diese Bremse stuenden in
+    der Mitschrift tausend leere Zeilen pro Spielabend, und die Frage
+    "wie oft hat GGG etwas geliefert" waere aus ihr nicht mehr zu
+    beantworten."""
+    win = MainWindow()
+    try:
+        win._all_characters = [make_char("WitchOfPeter", "Allflame")]
+        _with_stays(win, (HIDEOUT_STAY, 900.0), (MAP_STAY, 400.0))
+        basis = Item.model_validate({"id": "belt", "typeLine": "Belt", "frameType": 2})
+        _publish(win, "WitchOfPeter", [basis], 4_200_000_000)
+        _publish(win, "WitchOfPeter", [basis], 4_200_000_000)
+
+        assert _rows() == []
+    finally:
+        win.worker.stop()
+        win.worker.wait(5000)
+
+
+class _FakeZoneWatcher:
+    """Nur die drei Angaben, die ``_note_zone_stay`` liest."""
+
+    last_area_id = "MapWorldsChateau"
+    last_area_level = 79
+    last_instance_id = "77"
+
+
+def test_a_new_stay_remembers_the_monster_level(qapp) -> None:
+    """Der Level muss AM AUFENTHALT haengen, nicht beim Schreiben
+    nachgeschlagen werden: Die Beute-Mitschrift ordnet sie oft dem
+    VORIGEN Aufenthalt zu (§zone_loot_log) — der Beobachter steht dann
+    laengst in der naechsten Zone und kennt nur noch deren Level.
+
+    Diese Luecke hat die Gegenprobe gefunden: Alle uebrigen Tests bauen
+    ``_ZoneStay`` von Hand und kamen an ``_note_zone_stay`` nie vorbei."""
+    win = MainWindow()
+    try:
+        win._zone_watcher = _FakeZoneWatcher()
+        win._last_zone_instance = "77"
+        win._note_zone_stay("Chateau", time.monotonic())
+
+        stay = win._zone_stays[-1]
+        assert stay.level == 79
+        assert stay.area_id == "MapWorldsChateau"
+    finally:
+        win.worker.stop()
+        win.worker.wait(5000)
+
+
+def test_the_first_fetch_after_an_account_switch_writes_nothing(qapp) -> None:
+    """Der Kontowechsel leert ``_session_fetched_chars``, ``_xp_watch``
+    dagegen NICHT (``_clear_account_data``). Der naechste Abruf vergleicht
+    also gegen einen fremden Stand, waehrend die Erfahrungs-Basis noch
+    steht — ohne die ``stale_baseline``-Sperre landete das halbe Inventar
+    als Zuwachs einer Zone in der Mitschrift.
+
+    Der Test davor (``..._first_fetch_of_a_character_...``) faengt das
+    nicht: Dort fehlt auch die Erfahrungs-Basis, und der Snapshot kehrt
+    schon vorher um. Genau diese Maskierung hat die Gegenprobe gezeigt."""
+    win = MainWindow()
+    try:
+        win._all_characters = [make_char("WitchOfPeter", "Allflame")]
+        _with_stays(win, (MAP_STAY, 300.0), (HIDEOUT_STAY, 2.0))
+        basis = Item.model_validate({"id": "belt", "typeLine": "Belt", "frameType": 2})
+        _publish(win, "WitchOfPeter", [basis], 4_200_000_000)   # Basis
+        _publish(win, "WitchOfPeter", [basis], 4_200_010_000)   # eine echte Zeile
+        assert len(_rows()) == 1
+
+        win._session_fetched_chars.clear()                      # Kontowechsel
+        fremd = [Item.model_validate({"id": f"f{n}", "typeLine": "Ring", "frameType": 2})
+                 for n in range(20)]
+        _publish(win, "WitchOfPeter", [basis, *fremd], 4_200_020_000)
+
+        assert len(_rows()) == 1
     finally:
         win.worker.stop()
         win.worker.wait(5000)

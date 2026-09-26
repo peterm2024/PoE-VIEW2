@@ -7578,14 +7578,79 @@ Ruhezonen zuerst, dann Labyrinth vor Story (`1_Labyrinth_…` fängt mit
 einer Aktnummer an), dann Side Area vor Map (`MapSideArea…` fängt mit
 "Map" an).
 
-**Noch offen: die Lukrativität** ("evtl. sogar die Lukrativität der Zone
-[...] anhand des Loots"). Die Bausteine lägen bereit — der Item-Verlauf
-protokolliert Neuzugänge mit Zeitstempel (§4.21), poe.ninja liefert
-Preise (§4.14) —, aber der Zusammenhang "dieses Item fiel in dieser
-Zone" ist keiner: Was zwischen zwei Abrufen ins Inventar kommt, kann
-gedroppt, gekauft, gehandelt oder aus der Truhe geholt sein, und die
-API veröffentlicht nur alle paar Minuten. Bevor das gebaut wird, gehört
-gemessen, wie viel davon überhaupt übrig bleibt.
+**Die Lukrativität** ("evtl. sogar die Lukrativität der Zone [...]
+anhand des Loots") bekommt zunächst eine Mitschrift statt einer Spalte
+— siehe §4.56.6.
+
+#### 4.56.6 Beute je Zone (`services/zone_loot_log.py`)
+
+Peter, 2026-09-27, auf die Rückfrage, woran sich die Lukrativität
+überhaupt messen ließe: "Ich denke aus der Sicht eines typischen
+PoE-Spielers wird die Lukrativität in Chaos gemessen. Aus meiner Sicht,
+SSF Ruthless, wird die Lukrativität in Währung, Blue- und Yellow-Items
+gemessen. Natürlich auch in XP/h. Sozusagen Itemdichte und
+Monsterdichte. Aber beides hängt von vielem ab. **Einfach mal
+beobachten.**"
+
+Genau das ist gebaut: eine CSV, kein Feature. Eine Zeile je
+Veröffentlichung, mit der Zone daneben — Zählungen nach Seltenheit
+(`currency`/`magic`/`rare` sind Peters drei, die übrigen kosten nichts),
+die Währung im Klartext, der Chaos-Wert für die geläufige Sicht und der
+Erfahrungs-Zuwachs für die Monsterdichte. Welche Kennzahl daraus wird,
+entscheidet die Auswertung in ein paar Wochen.
+
+**Die Zuordnung ist die eigentliche Arbeit.** Peters Ausgangspunkt: "Wir
+bekommen ja unmittelbar nach dem Auftauchen aus der Map die
+Zonenwechsel-Aktualisierung von GGG, evtl. können wir das auch benutzen.
+Aber ist trotzdem nicht zu 100 % sicher." An seinem Programmlog
+nachgezählt (287 beobachtete Inventar-Änderungen über vier Logdateien):
+66 % aller Änderungen fallen mit einem Zonenwechsel zusammen, 78 %
+liegen höchstens eine Minute dahinter.
+
+Die Vermutung stimmt also — mit einem Haken, den erst die Zonennamen
+zeigen: **Von den 108 Zuwächsen unmittelbar nach einem Wechsel landeten
+95 im Hideout**, sieben in Sarn. Die Beute taucht fast nie in der Zone
+auf, die sie geliefert hat.
+
+Daraus folgt die Regel, und es ist dieselbe, mit der die XP-Rate schon
+rechnet (§_XpWatch): *Eine Veröffentlichung kurz nach einem Zonenwechsel
+berichtet über die Zone, die gerade VERLASSEN wurde; eine spätere über
+die aktuelle.* Sie deckt beide Richtungen ohne Sonderfall ab:
+
+| Beobachtet | Zugerechnet |
+|---|---|
+| Map → Hideout, Zuwachs gleichzeitig | der Map |
+| Hideout → Map, Zuwachs gleichzeitig | der Ruhezone → fällt heraus |
+| +16 Items 408 s nach Betreten von Phantasmagoria | der laufenden Map |
+
+Der zweite Fall ist der Grund, warum die Regel nichts kostet: Wer aus
+dem Hideout in die Map portet und dabei einen Zuwachs veröffentlicht,
+hat ihn aus der Truhe geholt. Eine Ruhezone droppt nichts, also
+schreibt die Mitschrift nichts.
+
+**Was unsicher bleibt, wird nicht weggerechnet, sondern markiert.** Die
+knapp 26 % Zuwächse ohne Zonenwechsel in der Nähe fallen der laufenden
+Zone zu, obwohl ein Teil davon Handel oder Truhe sein dürfte; die Spalte
+`trigger` hält beide Fälle auseinander. Und der Chaos-Wert ist eine
+UNTERGRENZE: In Ruthless kennt poe.ninja die halbe Liga nicht, ein
+unbekannter Preis ist kein Wert von 0 (FALLSTRICKE #39). Verlässlich
+sind die Zählungen daneben.
+
+**Zwei Signale, eine Veröffentlichung.** `character_items_loaded` kennt
+die Items, `character_snapshot_loaded` die Erfahrung, und der Worker
+sendet sie unmittelbar nacheinander. Der Zuwachs wird deshalb beim
+ersten Signal berechnet und abgelegt (`_pending_loot`), beim zweiten
+geschrieben — sonst stünde entweder die Beute ohne XP oder die XP ohne
+Beute in der Zeile. Der erste Abruf eines Charakters schreibt gar
+nichts: Er vergleicht gegen einen womöglich wochenalten Stand, sein
+"Zuwachs" wäre das halbe Inventar (derselbe Grund wie beim Item-Verlauf,
+§4.21).
+
+Die Mitschrift läuft — anders als die Gem-Mitschrift (§gem_xp_log) —
+auch in der ausgelieferten .exe: Sie ist die Datengrundlage eines
+künftigen Features, nicht unser Messwerkzeug, und sie kostet rund 200
+Bytes je Veröffentlichung. Bei fünf Megabyte legt sie sich selbst
+beiseite.
 
 ---
 

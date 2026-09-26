@@ -71,6 +71,38 @@ hideout into a map does not change the experience, so there is nothing
 to report. Practical consequence: every experience publication belongs
 to exactly one zone in which something happened — the one just left.
 
+### Where the loot appears is not where it dropped
+
+Re-counted on a larger sample in 2026-09 (287 logged inventory changes
+across four log files), the picture from the 91 above holds:
+
+| Distance from the last zone change | All changes | Gains only |
+|---|---|---|
+| simultaneous (0 s) | 66 % | 62 % |
+| within 60 s | 78 % | 74 % |
+| within 300 s | 89 % | 83 % |
+
+The new part is the zone *name*. Of the 108 gains that arrived within
+15 seconds of a zone change, **95 landed in a hideout** and seven in
+Sarn — because the publication is triggered by leaving the map, and by
+then the character is already somewhere else. Loot almost never shows up
+in the zone that produced it.
+
+The same event seen from the other side: entering a map right after
+stash use publishes a gain too, and that one is not loot at all. Both
+cases follow one rule — *a publication shortly after a zone change
+describes the zone just left* — which is the same rule experience
+already obeys (above).
+
+A real sequence from the log, the whole cycle in four lines:
+
+```
+14:07:20  +13 items   0s after entering Backstreet Hideout   ← the map paid out
+14:08:00  -13 items   0s after entering Chateau              ← dumped into the stash
+14:11:37  +14 items   0s after entering Backstreet Hideout
+14:20:50  -14 items   0s after entering Chateau
+```
+
 ### The Azurite Mine (Delve) is a blind spot
 
 Travelling back to the vendor in Delve produces **no** entry in
