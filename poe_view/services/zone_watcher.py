@@ -82,7 +82,17 @@ _INSTANCE_LINE = re.compile(r"Client-Safe Instance ID = (\d+)")
 # erkennen lässt — am angezeigten Namen nicht, der ist lokalisiert und
 # bei Hideouts frei benannt. In Peters Client.txt hatte jeder der 514
 # Eintritte seit dem 01.09. eine frische Kennung davor.
-_AREA_LINE = re.compile(r'Generating level \d+ area "([^"]+)" with seed')
+#
+# **Die Zahl davor ist der Gebietslevel und damit der Monsterlevel**
+# (Peter, 2026-09-26: "Können wir irgendwie den Monster-Level der
+# aktuellen Zone rausfinden?"). Sie stand von Anfang an in dieser Zeile,
+# wurde bis dahin aber weggeworfen. Gegen die volle Client.txt geprüft
+# (5.001 Generierungen vom 12.04. bis 26.09., 381 Gebiete): ALLE 5.000
+# Zonen-Eintritte haben eine solche Zeile unmittelbar davor, und die
+# Zahl hängt an der INSTANZ, nicht am Gebiet — ``MapWorldsAtoll`` steht
+# je nach eingelegter Karte auf 70 oder 77, ``Delve_Main`` auf 34
+# verschiedenen Werten je nach Tiefe. Genau das braucht man.
+_AREA_LINE = re.compile(r'Generating level (\d+) area "([^"]+)" with seed')
 
 # Woran eine Ruhezone zu erkennen ist — ausgezählt an Peters Client.txt
 # (alle vorkommenden Kennungen, 2026-09-22):
@@ -192,7 +202,8 @@ def deaths_since(log_path: Path, cutoff: datetime) -> dict[str, list[datetime]]:
 
 class ZoneStay(NamedTuple):
     """Ein Aufenthalt in einer Zone: betreten, verlassen (``None`` =
-    noch drin), angezeigter Name, Gebiets-Kennung und Instanz.
+    noch drin), angezeigter Name, Gebiets-Kennung, Instanz und
+    Gebietslevel (0 = unbekannt, siehe ``_AREA_LINE``).
 
     Zeiten sind naive lokale ``datetime`` wie in der Client.txt."""
 
@@ -201,6 +212,7 @@ class ZoneStay(NamedTuple):
     name: str
     area_id: str
     instance: str
+    level: int = 0
 
     @property
     def seconds(self) -> float:
@@ -236,6 +248,7 @@ def zone_stays(log_path: Path, since: datetime) -> list[ZoneStay]:
     stays: list[ZoneStay] = []
     offen: ZoneStay | None = None
     area = instance = ""
+    level = 0
     for line in raw.decode("utf-8", errors="replace").splitlines():
         if "Client-Safe Instance ID = " in line:
             treffer = _INSTANCE_LINE.search(line)
@@ -245,7 +258,7 @@ def zone_stays(log_path: Path, since: datetime) -> list[ZoneStay]:
         if "Generating level " in line:
             treffer = _AREA_LINE.search(line)
             if treffer:
-                area = treffer.group(1)
+                level, area = int(treffer.group(1)), treffer.group(2)
             continue
         if " You have entered " not in line:
             continue
@@ -256,11 +269,12 @@ def zone_stays(log_path: Path, since: datetime) -> list[ZoneStay]:
         if offen is not None:
             stays.append(offen._replace(left=zeit))
         offen = ZoneStay(entered=zeit, left=None, name=treffer.group(1),
-                         area_id=area, instance=instance)
-        # Kennung und Instanz gelten für GENAU diesen einen Eintritt.
-        # Stehen sie beim nächsten nicht in der Datei, ist sie unbekannt
-        # — dann lieber leer als von der Zone davor geerbt.
+                         area_id=area, instance=instance, level=level)
+        # Kennung, Instanz und Level gelten für GENAU diesen einen
+        # Eintritt. Stehen sie beim nächsten nicht in der Datei, sind sie
+        # unbekannt — dann lieber leer als von der Zone davor geerbt.
         area = instance = ""
+        level = 0
     if offen is not None:
         stays.append(offen)
     return [s for s in stays if s.left is None or s.left > since]
@@ -322,6 +336,9 @@ class ZoneWatcher(QObject):
         # Dasselbe für die Gebiets-Kennung (§_AREA_LINE): Sie sagt, ob
         # die gerade betretene Zone überhaupt Erfahrung bringen kann.
         self.last_area_id = ""
+        # ... und für den Gebietslevel aus derselben Zeile, den die
+        # Anzeige als Monsterlevel zeigt (0 = noch keine Zeile gesehen).
+        self.last_area_level = 0
         self._log_path = log_path
         self._position = log_path.stat().st_size
         self._watcher = QFileSystemWatcher([str(log_path)], self)
@@ -384,7 +401,8 @@ class ZoneWatcher(QObject):
                 continue
             area = _AREA_LINE.search(line)
             if area:
-                self.last_area_id = area.group(1)
+                self.last_area_level = int(area.group(1))
+                self.last_area_id = area.group(2)
                 continue
             match = _ZONE_LINE.search(line)
             if match:

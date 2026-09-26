@@ -6,6 +6,26 @@ nach [SemVer](https://semver.org/lang/de/).
 
 ## [Unveröffentlicht]
 
+### Neu
+
+- **Der Monsterlevel der aktuellen Zone steht in der Kopfzeile**
+  (`Chateau (Lv 68)`). Path of Exile schreibt ihn bei jedem Zonenwechsel
+  in seine `Client.txt` — an allen 5.000 Eintritten in Peters Log war er
+  vorhanden. Er gehört zur Instanz, nicht zum Gebiet: Dieselbe Map-Zone
+  erscheint je nach eingelegter Karte mit verschiedenen Leveln.
+- **Die Erfahrungs-Strafe daneben**, sobald sie zubeißt
+  (`Chateau (Lv 68 · 14% XP)`). Das ist der Anteil der Erfahrung, der
+  bei diesem Abstand zwischen Charakter- und Gebietslevel noch ankommt.
+  Die zugrunde liegende Formel stammt aus der Community, nicht aus
+  eigenen Messungen — sie ist als Schätzung gekennzeichnet, und die
+  Gem-Mitschrift führt jetzt die Charakter-Erfahrung mit, damit sich die
+  Strafe künftig nachrechnen lässt.
+- **Zonen-Tabelle** (Werkzeugleiste "🗺 Zones"): alle je betretenen
+  Gebiete mit ihrem Monsterlevel, gruppiert in Story, Map, Special und
+  die Orte ohne Monster, durchsuchbar und als CSV exportierbar. Peters
+  Spiel-Log lieferte dafür auf Anhieb 381 Gebiete. Der Katalog behält
+  sie auch dann, wenn das Spiel seine Logdatei kürzt.
+
 ## [0.15.1] - 2026-09-23
 
 ### Behoben

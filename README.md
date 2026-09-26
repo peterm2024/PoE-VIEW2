@@ -87,6 +87,14 @@ with the tiers you still miss left empty.
   has, in the order the game writes them — enchant, implicit, explicit —
   with `|` between the groups; hover for the full text on separate
   lines.
+- **Zone table** (toolbar button "🗺 Zones"): every zone you have ever
+  entered, with the monster level the game generated it at — grouped
+  into story, maps, special areas and the places without monsters, and
+  exportable as CSV. It is built from Path of Exile's own `Client.txt`,
+  which names the area level on every single zone entry, and it keeps
+  what it has seen even after the game truncates that log. Maps show a
+  range (`70–77`) because the level belongs to the map you rolled, not
+  to the area.
 - **Configurable columns**: which columns are shown and in what order is
   set either in the settings dialog (checkboxes and drag & drop) or via
   a quick toggle in the header's right-click menu. The choice is saved

@@ -366,7 +366,36 @@ per-event figure, not as a typical length.
 
 ---
 
-## 7. Unconfirmed
+## 7. The zone level is in the client log, on every single entry
+
+The line that carries the area id carries the area level with it:
+
+```
+2026/09/26 13:48:46 ... Generating level 68 area "MapWorldsChateau" with seed 1234
+```
+
+Measured against the full `Client.txt` (5,001 generations between
+2026-04-12 and 2026-09-26, 381 distinct areas):
+
+- **All 5,000 zone entries** had such a line immediately before them.
+  There was no entry without one.
+- The number belongs to the **instance, not the area**. `MapWorldsAtoll`
+  appears at 70 and at 77 depending on the map rolled into it;
+  `Delve_Main` covers 34 different values by depth; `MapWorldsPort`
+  showed 69 and 71 within the same league. A static area table cannot
+  express this, which is why PoE-VIEW2 builds its zone catalogue from
+  the log instead of shipping a list.
+- Towns and hideouts carry a level too, and a fixed one — Backstreet
+  Hideout sat at 60 across 908 visits, The Sarn Encampment at 60, Karui
+  Shores at 69. It is an area level like any other, just without
+  content.
+
+For ordinary monsters the area level **is** the monster level; bosses
+sit one or two above it. [wiki]
+
+---
+
+## 8. Unconfirmed
 
 What was looked for and **not** found. Do not read as "does not exist",
 read as "not demonstrable with these means".
@@ -381,6 +410,16 @@ read as "not demonstrable with these means".
   that rests on the wiki's 10 %, which our own data cannot confirm
   independently. Deriving it would need a character low enough to have
   no penalty at all, where the ratio should read exactly 10 %.
+  **Update 2026-09-26: the missing half is no longer the zone level.**
+  It now comes out of the `Client.txt` for every zone entered (§7), so
+  the pairing character level / zone level / measured penalty is finally
+  available. A first attempt over eleven days of logs yielded only three
+  usable points, spread between 25 % and 221 % where the formula said
+  "no penalty at all" — not because the game is unpredictable, but
+  because the gem log did not carry the character's experience, so the
+  two had to be matched across files by timestamp and only 19 of 122
+  publications lined up. That column exists as of this date; the
+  question should be answerable after a few evenings of play.
 - **The size of the death penalty.** That experience is lost on death is
   no longer unconfirmed — see §3, first observed 2026-08-13. How *much*
   still is: what the API publishes per zone is the net of everything
@@ -390,7 +429,7 @@ read as "not demonstrable with these means".
 
 ---
 
-## 8. Disproven
+## 9. Disproven
 
 Plausible assumptions that turned out to be wrong. They are here so they
 do not come back.
@@ -436,7 +475,7 @@ do not come back.
 
 ---
 
-## 9. What PoE-VIEW2 makes of it
+## 10. What PoE-VIEW2 makes of it
 
 Signposts only — the reasoning lives in each place:
 
@@ -450,3 +489,4 @@ Signposts only — the reasoning lives in each place:
 | Experience arrives in bursts, zone by zone | XP/h over dwell time, §4.34 |
 | Gem states, attribute lower bound | gem recording, §4.35 |
 | Maintenance answers 400 as well | offline detection, §4.12 |
+| Every zone entry logs its area level | zone catalogue and monster level, §4.56 |

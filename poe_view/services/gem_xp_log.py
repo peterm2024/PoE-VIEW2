@@ -90,8 +90,18 @@ def enabled() -> bool:
         return override.strip().lower() not in _OFF_VALUES
     return not config.RUNNING_AS_EXE
 
+# ``character_level``/``character_experience`` kamen 2026-09-26 dazu und
+# sind der Grund, warum die Mitschrift ueberhaupt noch laeuft: Das
+# Verhaeltnis aus Gem-Zuwachs (10 % der Monster-XP, OHNE Strafe) und
+# Charakter-Zuwachs (nach Strafe) misst die Erfahrungs-Strafe direkt
+# (poe-verhalten.md §4). Bis hierher stand die Charakter-Erfahrung
+# nirgends neben den Gem-Werten — ein Abgleich gegen das Programmlog
+# ergab ueber elf Tage nur drei brauchbare Vergleichspunkte, und die
+# streuten von 25 % bis 221 %. Mit diesen beiden Spalten liefert JEDE
+# Veroeffentlichung einen Punkt.
 FIELDNAMES = [
-    "timestamp", "character", "slot", "gem_id", "gem", "support",
+    "timestamp", "character", "character_level", "character_experience",
+    "slot", "gem_id", "gem", "support",
     "level", "quality", "experience", "experience_max", "progress",
     "waiting_for_levelup", "requirement_met", "next_level_requirements",
     "attribute_floor",
@@ -268,7 +278,8 @@ def _gem_rows(character: str, timestamp: str, item: Item,
     return rows
 
 
-def append(character: str, items: list[Item]) -> None:
+def append(character: str, items: list[Item], character_level: int = 0,
+           character_experience: int = 0) -> None:
     """Ein Messpunkt: eine Zeile pro Sockel-Gem über alle Items von
     ``character`` (Ausrüstung UND Rucksack — Letzterer hat schlicht nie
     ``socketedItems``, kein Sonderfall nötig). Läuft für JEDEN
@@ -282,7 +293,12 @@ def append(character: str, items: list[Item]) -> None:
     die Prüfung sitzt bewusst hier und nicht an der Aufrufstelle in
     ``_on_character_items``: Wer die Mitschrift ausschalten will, soll das
     an EINER Stelle finden, und ein künftiger zweiter Aufrufer erbt die
-    Entscheidung, ohne sie zu kennen."""
+    Entscheidung, ohne sie zu kennen.
+
+    ``character_level``/``character_experience`` duerfen 0 bleiben (dann
+    bleiben die Spalten leer): Beim allerersten Abruf eines Charakters
+    ist der Stand noch nicht bekannt, und eine 0 in der Spalte waere eine
+    Behauptung, keine Messung."""
     if not enabled():
         return
     timestamp = datetime.now(timezone.utc).isoformat()
@@ -290,6 +306,9 @@ def append(character: str, items: list[Item]) -> None:
     rows: list[dict] = []
     for item in items:
         rows.extend(_gem_rows(character, timestamp, item, floor))
+    for row in rows:
+        row["character_level"] = character_level or ""
+        row["character_experience"] = character_experience or ""
     if not rows:
         return
     path = log_path()

@@ -1663,3 +1663,46 @@ Gegenfrage dazu, wer dieselben Daten sonst noch anfasst. Hier hätte der
 Suchindex-Fix die Anzeige mitnehmen müssen — und ein "die Suche findet
 etwas, das die Zeile nicht zeigt" ist ein Widerspruch, den man messen
 kann, statt auf ihn zu warten.
+
+## 86. Elf Tage Messdaten, drei brauchbare Punkte — der Mitschrift fehlte die eine Spalte, um die sie gebaut wurde
+
+**Anlass:** Peter fragte nach dem Monsterlevel der aktuellen Zone. Der
+steht in der Client.txt und war schnell da. Interessant wird er aber
+erst zusammen mit der Erfahrungs-Strafe — und deren Formel stammt aus
+der Community, nicht aus eigenen Messungen. Also: nachrechnen.
+
+**Die Methode stand längst bereit** (`poe-verhalten.md` §4): Gems
+bekommen 10 % der Monster-Erfahrung OHNE Strafe, der Charakter bekommt
+sie MIT. Das Verhältnis der beiden Zuwächse IST die Strafe. Die
+Gem-Mitschrift (`services/gem_xp_log.py`) läuft seit August mit, 29 MB,
+163 Gem-Zeitreihen. Der Zonenlevel kam jetzt dazu. Alles da.
+
+**Ergebnis: drei verwertbare Vergleichspunkte über elf Tage** — und die
+streuten von 25 % bis 221 %, wo die Formel für alle drei "keine Strafe"
+sagte. 221 % ist nicht einmal physikalisch möglich.
+
+**Ursache:** Die Mitschrift schreibt alles über die Gems und nichts über
+den Charakter, dem sie gehören. Die Charakter-Erfahrung stand nur im
+Programmlog (`poe-view2.log`, als Zuwachs je Veröffentlichung). Beide
+mussten also über Zeitstempel zweier getrennter Dateien zusammengeführt
+werden — und deren Schnappschüsse lagen nur bei **19 von 122**
+Veröffentlichungen nah genug beieinander. Was übrig blieb, war ein
+Abgleich von Größen, die verschiedene Zeitfenster meinten: derselbe
+Fehler wie bei der XP-Rate in #84, nur diesmal zwischen zwei Dateien
+statt zwischen Zähler und Nenner.
+
+**Fix:** `gem_xp_log` führt seit 2026-09-26 die Spalten
+`character_level` und `character_experience` mit. Damit trägt jede
+einzelne Zeile beide Hälften der Rechnung, und jede Veröffentlichung
+liefert einen Vergleichspunkt statt jede sechste.
+
+**Lehre:** Eine Mitschrift, die für eine bestimmte Frage angelegt wird,
+muss alle Größen dieser Frage enthalten — auch die, die zum Zeitpunkt
+des Schreibens anderswo schon dastehen. "Steht ja im Programmlog" heißt
+in der Auswertung: über Zeitstempel zusammenfügen, mit Toleranzen,
+Zeitzonen und Verlusten. Der Wert kostet beim Schreiben eine Spalte und
+beim Auswerten sonst die halbe Messung. Bis genug Daten zusammenkommen,
+bleibt die Formel in `poe-verhalten.md` unter *Unconfirmed* und die
+Anzeige nennt sie Schätzung — was eine ungeprüfte Zahl ist, soll auch so
+dastehen.
+

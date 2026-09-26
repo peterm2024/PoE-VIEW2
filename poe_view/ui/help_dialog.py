@@ -131,6 +131,15 @@ writes them: enchant, implicit, then explicit and the rest, with
 them on separate lines — the column shows as much as fits.</p>
 <p><b>Columns</b> can be shown, hidden and reordered — either in
 Settings, or quickly via right-click on a column header.</p>
+<p>The <b>Zones</b> button in the toolbar opens every zone you have
+entered, with its <b>monster level</b>. Path of Exile writes that level
+into its <code>Client.txt</code> on every zone entry, so the table knows
+the level of the map you actually rolled, not just of the area — which
+is why maps show a range. Sorted by group it reads story, maps, special
+areas, then the places without monsters; the search box and the group
+box narrow it down, and <b>Export CSV</b> saves whatever is on screen.
+The zone display next to it names the level of the zone you are in, and
+once the experience penalty bites, the share you still get there.</p>
 <p><b>Column filters</b> also live in that right-click menu. They accept
 comparisons, so <code>&gt;=20</code> on Quality or <code>&lt;45</code>
 on iLvl work as expected. A filtered column is marked with 🔍. While you

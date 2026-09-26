@@ -286,3 +286,27 @@ def test_a_disabled_log_does_not_touch_an_existing_file(log_dir, monkeypatch) ->
 
     assert vorhanden.read_text(encoding="utf-8").startswith("timestamp,character,capped")
     assert list(log_dir.iterdir()) == [vorhanden]
+
+
+def test_the_log_carries_the_character_level_and_experience(log_dir) -> None:
+    """Der Grund, warum die Mitschrift ueberhaupt noch laeuft: Gem-Zuwachs
+    (10 % der Monster-XP, OHNE Strafe) neben Charakter-Zuwachs (nach
+    Strafe) misst die Erfahrungs-Strafe direkt. Ohne diese beiden Spalten
+    stand die Charakter-Erfahrung nirgends neben den Gem-Werten."""
+    gem_xp_log.append("WitchOfPeter", [_helm(_LEVELING_GEM)], 87, 1_234_567)
+
+    with open(gem_xp_log.log_path(), encoding="utf-8", newline="") as f:
+        row = next(csv.DictReader(f))
+    assert row["character_level"] == "87"
+    assert row["character_experience"] == "1234567"
+
+
+def test_an_unknown_character_state_leaves_the_columns_empty(log_dir) -> None:
+    """Beim allerersten Abruf eines Charakters ist der Stand noch nicht
+    bekannt. Eine 0 in der Spalte waere eine Behauptung, keine Messung."""
+    gem_xp_log.append("WitchOfPeter", [_helm(_LEVELING_GEM)])
+
+    with open(gem_xp_log.log_path(), encoding="utf-8", newline="") as f:
+        row = next(csv.DictReader(f))
+    assert row["character_level"] == ""
+    assert row["character_experience"] == ""

@@ -396,7 +396,12 @@ def _build_window() -> MainWindow:
 
     # Zonenanzeige und Rate-Limit-Dashboard sind Teil der Oberfläche und
     # sollen deshalb gefüllt sein — beides ohne Netzwerk, direkt gesetzt.
-    win._zone_label.setText("The Demo Sands")
+    # Mit Monsterlevel und Erfahrungs-Anteil (§4.56) — so steht im Bild,
+    # was die Anzeige seit v0.16.0 kann.
+    # Die Zahl ist die, die ``experience.penalty_caption`` fuer den
+    # Demo-Ranger (Stufe 96) in einer Zone auf Level 79 ausrechnet —
+    # ein Bild soll nicht behaupten, was das Programm nicht sagen wuerde.
+    win._zone_label.setText("The Demo Sands (Lv 79 · 18% XP)")
     win.worker.rate_limiter.update_from_headers({
         "X-Rate-Limit-Policy": "stash-request-limit",
         "X-Rate-Limit-Rules": "Account",

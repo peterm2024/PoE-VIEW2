@@ -7329,6 +7329,115 @@ implizite Mods, aber keine Verzauberung und keinen Flaschen-Mod.
 
 ---
 
+### 4.56 Der Monsterlevel der Zone (`zone_watcher`, `services/experience.py`, `ui/zone_table.py`)
+
+Peter, 2026-09-26: "Können wir irgendwie den Monster-Level der aktuellen
+Zone rausfinden?"
+
+**Die Antwort stand seit v0.15.0 im Code, eine Klammer zu weit weg.** Die
+Zeile, aus der die Gebiets-Kennung kommt, lautet vollständig:
+
+```
+Generating level 68 area "MapWorldsChateau" with seed 1234
+```
+
+`_AREA_LINE` fing sie als `r'Generating level \d+ area "([^"]+)"'` ab —
+die Zahl wurde gelesen und weggeworfen. Jetzt ist sie eine Gruppe.
+
+**Gegen die volle Client.txt geprüft** (5.001 Generierungen vom 12.04.
+bis 26.09., 381 Gebiete):
+
+- **5.000 von 5.000 Zonen-Eintritten** haben so eine Zeile unmittelbar
+  davor. Keine Lücke.
+- Die Zahl hängt an der **Instanz**, nicht am Gebiet: `MapWorldsAtoll`
+  steht je nach eingelegter Karte auf 70 oder 77, `Delve_Main` auf 34
+  verschiedenen Werten je nach Tiefe. Eine statische Gebietsliste könnte
+  das nicht leisten — der eigentliche Grund, warum die Client.txt hier
+  die bessere Quelle ist als eine mitgelieferte Tabelle.
+
+Für gewöhnliche Monster IST der Gebietslevel der Monsterlevel; Bosse
+liegen ein bis zwei darüber. Die Anzeige nennt ihn deshalb "Monster
+Level", obwohl im Log "area level" steht: Unter diesem Namen fragt
+danach, wer auf die Spalte schaut.
+
+#### 4.56.1 Was die Zahl wert ist: die Erfahrungs-Strafe
+
+Der Gebietslevel allein ist Trivia. Interessant wird er mit dem
+Charakterlevel daneben — `services/experience.py` rechnet daraus den
+Anteil der Erfahrung, der überhaupt noch ankommt, und die Zonen-Anzeige
+zeigt ihn an: `Chateau (Lv 68 · 14% XP)`.
+
+**Die Formel ist Community-Wissen und ausdrücklich als solches
+gekennzeichnet.** GGG hat sie nie veröffentlicht. Der Versuch, sie an
+Peters eigenen Daten zu bestätigen, ist gescheitert — und zwar so, dass
+sich daraus etwas ergab:
+
+Die Methode stand bereit (`poe-verhalten.md` §4: Gems bekommen 10 % der
+Monster-Erfahrung OHNE Strafe, der Charakter bekommt sie MIT — ihr
+Verhältnis ist die Strafe). Über elf Tage, 122 Veröffentlichungen im
+Programmlog und eine 29 MB große Gem-Mitschrift blieben am Ende **drei**
+brauchbare Vergleichspunkte übrig, und die streuten von 25 % bis 221 %,
+wo die Formel für alle drei "keine Strafe" sagte. Die Ursache ist keine
+Eigenschaft des Spiels, sondern eine der Mitschrift: **Sie schrieb die
+Charakter-Erfahrung nicht mit.** Der Abgleich musste deshalb über die
+Zeitstempel zweier getrennter Dateien laufen, und deren Schnappschüsse
+liegen nur bei 19 von 122 Veröffentlichungen nah genug beieinander.
+
+Konsequenz: `gem_xp_log` führt seit 2026-09-26 die Spalten
+`character_level` und `character_experience` mit. Damit liefert jede
+Veröffentlichung einen Vergleichspunkt statt jede sechste, und die Frage
+ist nach ein paar Spielabenden beantwortbar. Bis dahin bleibt sie in
+`poe-verhalten.md` unter *Unconfirmed* — die Anzeige zeigt eine
+Schätzung, und die Doku sagt das.
+
+#### 4.56.2 Die Zonen-Tabelle
+
+Peter, 2026-09-26: "einen Menüpunkt 'Zones', wo eine Tabelle öffnet,
+unterteilt nach Story, Map und Special-Maps, wo alle Zonen aufgeführt
+werden und deren Monster-Level. [...] Die Zonen sollte man auch als csv
+exportieren können."
+
+**Der Katalog wächst mit** (`services/zone_catalog.py`): PoE kürzt die
+Client.txt irgendwann; der Katalog liegt daneben in `APP_DATA_DIR` und
+behält, was einmal gesehen wurde. Peters Log reichte beim Bau 5,5 Monate
+zurück und enthielt 381 Gebiete — die Tabelle ist also vom ersten Öffnen
+an voll. Aufgefrischt wird bei jedem Öffnen (0,1 s für 11 MB Log),
+gezählt wird nur, was seit dem letzten Lauf dazukam.
+
+**Die vier Gruppen**, ausgezählt an denselben 381 Gebieten:
+
+| Gruppe | Zahl | Beispiele |
+|---|---|---|
+| Story | 145 | `1_2_5`, `1_SideArea5_3_2` |
+| Map | 124 | `MapWorldsChateau`, `MapSideArea4_2` |
+| Special | 91 | Labyrinth, `Delve_Main`, Heist, Sanctum, Abyss |
+| Rest | 21 | `HideoutSlum`, `2_8_town`, `HeistHub` |
+
+Peter hat drei genannt; die vierte ist die Ruhezonen-Gruppe, und sie
+kommt NICHT aus einer eigenen Regel, sondern aus
+`zone_watcher.is_rest_area` — derselben Unterscheidung, mit der die
+XP-Rate ihren Nenner bildet (§4.34). Sie zweimal zu treffen hieße, sie
+zweimal falsch treffen zu können. Deshalb steht Sarn Encampment dort und
+nicht bei der Story, obwohl seine Kennung wie eine Story-Kennung
+aussieht: Was zählt, ist "hier fallen keine Monster".
+
+**Sortiert wird beim Öffnen nach Gruppe** — und "nach Gruppe" heißt
+Story, Map, Special, Rest in dieser Reihenfolge, innerhalb jeder Gruppe
+nach Level (`ZoneFilterProxy.lessThan`). Alphabetisch stünde da "Map,
+Rest, Special, Story": richtig sortiert und trotzdem verkehrt herum. So
+liest sich die Tabelle beim Öffnen wie die bestellte Unterteilung, ohne
+Zwischenüberschriften, die der erste Klick auf einen Spaltenkopf
+zerreißen würde.
+
+Die Level-Spalte zeigt eine **Spanne**, wo ein Gebiet mehrere Level
+hatte (`70–77`); der Tooltip nennt die Einzelwerte und, sofern ein
+Charakter bekannt ist, was dort noch zu holen wäre. Der CSV-Export
+schreibt die Level dagegen einzeln in eigene Spalten: Eine
+Tabellenkalkulation soll damit rechnen können, und `70–77` ist dort
+Text.
+
+---
+
 ## 8. Entwicklungsstand
 
 Die ursprünglich geplanten Meilensteine (Grundgerüst, Authentifizierung,

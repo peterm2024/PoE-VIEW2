@@ -33,7 +33,9 @@ from poe_view.api.models import (Character, Item, StashTab,
 from poe_view.api.ninja import PriceIndex
 from poe_view.services import (cache_backup, cache_writer, data_cache, gem_xp_log,
                                icon_cache, mod_collection, mod_knowledge,
-                               poe2_probe, price_cache, xp_history)
+                               poe2_probe, price_cache, xp_history,
+                               zone_catalog)
+from poe_view.services.experience import penalty_caption
 from poe_view.services.instance_lock import InstanceLock
 from poe_view.services.zone_watcher import (ZoneWatcher, deaths_since,
                                               is_rest_area,
@@ -58,6 +60,7 @@ from poe_view.ui.gem_progress import gem_progress_of
 from poe_view.ui.leveling_panel import LevelingPanel
 from poe_view.ui.mod_album import ModAlbumDialog
 from poe_view.ui.xp_graph import GRAPH_SPAN_S, XpPoint
+from poe_view.ui.zone_table import ZoneTableDialog
 from poe_view.ui.item_table import (COLUMNS, CONFIGURABLE_COLUMNS, ICON_COL,
                                     MODS_COL, POSITION_COL, TAB_COL,
                                     VALUE_COL, ItemFilterProxy, ItemTableModel,
@@ -1323,6 +1326,13 @@ class MainWindow(QMainWindow):
         self._mod_album_action.triggered.connect(self._open_mod_album)
         toolbar.addAction(self._mod_album_action)
 
+        self._zones_action = QAction("🗺 Zones", self)
+        self._zones_action.setToolTip(
+            "Every zone you have entered, with its monster level — "
+            "story, maps, special areas; exportable as CSV")
+        self._zones_action.triggered.connect(self._open_zone_table)
+        toolbar.addAction(self._zones_action)
+
         self._help_action = QAction("❓ Help", self)
         self._help_action.setToolTip("What the columns, filters and modes mean")
         self._help_action.triggered.connect(self._open_help_dialog)
@@ -1345,7 +1355,11 @@ class MainWindow(QMainWindow):
             "Last zone change detected in Client.txt — confirms the zone "
             "watcher is actually reacting, independent of whether a "
             "refresh follows. Stays empty if the zone watcher is disabled "
-            "or the log shows no activity (Settings > Zone Refresh).")
+            "or the log shows no activity (Settings > Zone Refresh).\n\n"
+            "The number in brackets is the zone's monster level, straight "
+            "from the log. Behind it, once the experience penalty bites, "
+            "the share of experience a character of your level still "
+            "gets there.")
         toolbar.addWidget(self._zone_label)
 
         # Uhr ganz rechts außen (Peter, 2026-08-04: "dann sieht man im
@@ -4425,7 +4439,13 @@ class MainWindow(QMainWindow):
         watch.fetches += 1
         self._character_items[name] = items
         self._character_items_loaded[name] = datetime.now(timezone.utc).isoformat()
-        gem_xp_log.append(name, items)
+        # Mit dem Charakter-Stand, sofern schon bekannt (§gem_xp_log):
+        # Erst Gem-Zuwachs UND Charakter-Zuwachs nebeneinander ergeben die
+        # Erfahrungs-Strafe.
+        gem_stand = self._xp_watch.get(name)
+        gem_xp_log.append(name, items,
+                          gem_stand.level if gem_stand else 0,
+                          gem_stand.current_experience if gem_stand else 0)
         self._log_character_item_history(name, previous_items, items, stale_baseline)
         self._persist_cache()
         # Auch Charakter-Inventare zählen in die beobachteten Mengen
@@ -5234,7 +5254,7 @@ class MainWindow(QMainWindow):
         den Zonenwechsel ein Loch in genau der Grenze, die sie zieht —
         wer zwischen Hideout und Map hin- und herportet, löst sonst
         beliebig viele Abrufe aus."""
-        self._zone_label.setText(zone_name)
+        self._zone_label.setText(self._zone_caption(zone_name))
         # VOR den Abbruchbedingungen: Für die Messung zählt, dass ein
         # Zonenwechsel stattgefunden hat — nicht, ob daraufhin ein
         # Refresh lief (§_PublishWatch, gleiche Begründung wie beim
@@ -5262,6 +5282,55 @@ class MainWindow(QMainWindow):
             return
         if self._refresh_current_view():
             self._on_status(f"Zone changed to {zone_name!r} — refreshing current view")
+
+    def _zone_caption(self, zone_name: str) -> str:
+        """"Chateau (Lv 68 · 14% XP)" — was in der Toolbar steht.
+
+        Der Level kommt aus derselben Client.txt-Zeile wie die
+        Gebiets-Kennung (``zone_watcher._AREA_LINE``), die Strafe aus
+        ``services/experience``. Beide Zusätze fallen weg, sobald sie
+        nichts zu sagen haben: kein Level im Log, kein Charakterlevel
+        bekannt, oder schlicht keine Strafe. Eine Anzeige, die immer
+        etwas zeigt, wird nicht mehr gelesen."""
+        level = self._zone_watcher.last_area_level if self._zone_watcher else 0
+        if not level:
+            return zone_name
+        strafe = penalty_caption(self._active_character_level(), level)
+        return f"{zone_name} (Lv {level}{' · ' + strafe if strafe else ''})"
+
+    def _active_character_level(self) -> int:
+        """Der Level des Charakters, der gerade spielt — das ist der mit
+        der JÜNGSTEN Veröffentlichung, nicht der gerade angezeigte: Wer
+        beim Mappen in die Truhe eines anderen Charakters schaut, meint
+        trotzdem die Map, in der er steht. 0, solange kein Charakter
+        Erfahrung veröffentlicht hat."""
+        watches = [w for w in self._xp_watch.values() if w.level]
+        if not watches:
+            return 0
+        return max(watches, key=lambda w: w.last_snapshot_at).level
+
+    def _open_zone_table(self) -> None:
+        """Die Zonen-Tabelle (§4.56). Wie das Mod-Album eine neue Instanz
+        je Klick: Sie soll den Stand von jetzt zeigen, und der Katalog
+        wird beim Öffnen aus der Client.txt aufgefrischt — das kostet auf
+        Peters 11-MB-Log ein Zehntel einer Sekunde."""
+        pfad = self._client_log_path
+        konto = self._account_name or ""
+        if pfad is None:
+            QMessageBox.information(
+                self, "Zones",
+                "The zone table is built from Path of Exile's Client.txt, "
+                "and the zone watcher is currently off.\n\n"
+                "Turn it on under Settings > Zone Refresh; the table then "
+                "fills itself from your game log, including everything you "
+                "played before.")
+            return
+        records = zone_catalog.refresh_from_log(pfad, konto)
+        self._zone_table_dialog = ZoneTableDialog(
+            sorted(records.values(), key=lambda r: (r.category, r.name)),
+            self, character_level=self._active_character_level(),
+            account_name=konto)
+        self._zone_table_dialog.show()
 
     def _open_help_dialog(self) -> None:
         """Bewusst nicht modal (``show()`` statt ``exec()``): Die Hilfe soll

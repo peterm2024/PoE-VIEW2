@@ -8276,6 +8276,8 @@ class _KennungsWatcher:
     def __init__(self) -> None:
         self.last_instance_id = ""
         self.last_area_id = ""
+        # Seit §4.56 liest die Zonen-Beschriftung auch den Gebietslevel.
+        self.last_area_level = 0
 
 
 def _betritt(win, name: str, area_id: str, instance: str = "") -> None:
@@ -10392,3 +10394,71 @@ def test_a_seen_death_lands_in_the_counter(qapp) -> None:
 
     win.worker.stop()
     win.worker.wait(5000)
+
+
+# --- Monsterlevel der aktuellen Zone (Peter, 2026-09-26) --------------- #
+
+def test_the_zone_label_names_the_monster_level(qapp) -> None:
+    """Peters Frage: "Können wir irgendwie den Monster-Level der
+    aktuellen Zone rausfinden?" — die Zahl steht in derselben
+    Client.txt-Zeile wie die Gebiets-Kennung."""
+    win = MainWindow()
+    try:
+        win._zone_watcher = _KennungsWatcher()
+        win._zone_watcher.last_area_id = "MapWorldsChateau"
+        win._zone_watcher.last_area_level = 68
+
+        win._on_zone_changed("Chateau")
+
+        assert win._zone_label.text() == "Chateau (Lv 68)"
+    finally:
+        win.worker.stop()
+        win.worker.wait(5000)
+
+
+def test_the_zone_label_adds_the_experience_penalty_once_it_bites(qapp) -> None:
+    """Ein Charakter auf Stufe 85 holt in einer Tier-1-Map noch 14 % —
+    das ist die Zahl, wegen der man ueberhaupt nach dem Level fragt."""
+    win = MainWindow()
+    try:
+        win._on_character_snapshot("WitchOfPeter", 85, 1_000_000)
+        win._zone_watcher = _KennungsWatcher()
+        win._zone_watcher.last_area_id = "MapWorldsCells"
+        win._zone_watcher.last_area_level = 68
+
+        win._on_zone_changed("Cells")
+
+        assert win._zone_label.text() == "Cells (Lv 68 · 14% XP)"
+    finally:
+        win.worker.stop()
+        win.worker.wait(5000)
+
+
+def test_the_zone_label_stays_plain_without_a_level_in_the_log(qapp) -> None:
+    """Ein Log ohne DEBUG-Zeilen liefert keinen Level. Dann steht da der
+    Zonenname wie eh und je, statt eines erfundenen "(Lv 0)"."""
+    win = MainWindow()
+    try:
+        win._zone_watcher = _KennungsWatcher()
+
+        win._on_zone_changed("Cage")
+
+        assert win._zone_label.text() == "Cage"
+    finally:
+        win.worker.stop()
+        win.worker.wait(5000)
+
+
+def test_the_penalty_follows_the_character_that_published_last(qapp) -> None:
+    """Wer beim Mappen in die Truhe eines anderen Charakters schaut,
+    meint trotzdem die Map, in der er steht — es zaehlt der juengste
+    Schnappschuss, nicht die gerade offene Ansicht."""
+    win = MainWindow()
+    try:
+        win._on_character_snapshot("PeterM", 72, 500_000)
+        win._on_character_snapshot("WitchOfPeter", 96, 3_000_000)
+
+        assert win._active_character_level() == 96
+    finally:
+        win.worker.stop()
+        win.worker.wait(5000)

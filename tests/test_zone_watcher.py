@@ -487,3 +487,63 @@ def test_the_watcher_picks_up_the_area_id_with_the_zone(tmp_path, qapp) -> None:
     watcher.check_now()
 
     assert gesehen == [("Cage", "MapWorldsCage")]
+
+
+# --- Der Gebietslevel aus derselben Zeile (§4.56) ---------------------- #
+
+def _level_lines(stamp: str, area: str, level: int, name: str) -> str:
+    return (f'{stamp} 1 11869d8b [DEBUG Client 1] '
+            f'Client-Safe Instance ID = 1\n'
+            f'{stamp} 1 1186a8a3 [DEBUG Client 1] '
+            f'Generating level {level} area "{area}" with seed 1\n'
+            f'{stamp} 1 cffb065b [INFO Client 1] : You have entered {name}.\n')
+
+
+def test_zone_stays_carries_the_area_level(tmp_path) -> None:
+    """Die Zahl stand immer schon in der Zeile — sie wurde nur
+    weggeworfen. Peters Log am 26.09.: Chateau auf 68, davor Atoll auf
+    77."""
+    log = tmp_path / "Client.txt"
+    log.write_text(_level_lines("2026/09/26 13:00:00", "MapWorldsAtoll", 77, "Atoll")
+                   + _level_lines("2026/09/26 13:10:00", "MapWorldsChateau", 68,
+                                  "Chateau"),
+                   encoding="utf-8")
+
+    stays = zone_stays(log, datetime(2026, 9, 26))
+
+    assert [(s.area_id, s.level) for s in stays] == [
+        ("MapWorldsAtoll", 77), ("MapWorldsChateau", 68)]
+
+
+def test_a_stay_without_a_generating_line_has_level_zero(tmp_path) -> None:
+    """Ein Log ohne DEBUG-Zeilen (anderer Log-Umfang) darf den Level der
+    Zone davor NICHT erben — 0 heisst "unbekannt", und die Anzeige sagt
+    dann nichts."""
+    log = tmp_path / "Client.txt"
+    log.write_text(
+        _level_lines("2026/09/26 13:00:00", "MapWorldsAtoll", 77, "Atoll")
+        + "2026/09/26 13:10:00 1 cffb065b [INFO Client 1] : You have entered Cage.\n",
+        encoding="utf-8")
+
+    stays = zone_stays(log, datetime(2026, 9, 26))
+
+    assert [(s.name, s.level) for s in stays] == [("Atoll", 77), ("Cage", 0)]
+
+
+def test_the_watcher_remembers_the_level_of_the_zone_just_entered(tmp_path) -> None:
+    """``last_area_level`` neben ``last_area_id``: Die Zeile steht immer
+    VOR dem "You have entered", der Wert ist beim Emittieren also schon
+    gesetzt (dieselbe Begruendung wie bei der Instanz-Kennung)."""
+    log = tmp_path / "Client.txt"
+    log.write_text("", encoding="utf-8")
+    watcher = ZoneWatcher(log)
+    gesehen = []
+    watcher.zone_changed.connect(
+        lambda name: gesehen.append((name, watcher.last_area_level)))
+
+    log.write_text(_level_lines("2026/09/26 13:00:00", "MapWorldsChateau", 68,
+                                "Chateau"), encoding="utf-8")
+    watcher.check_now()
+
+    assert gesehen == [("Chateau", 68)]
+    assert watcher.last_area_id == "MapWorldsChateau"
