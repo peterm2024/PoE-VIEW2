@@ -33,8 +33,8 @@ from poe_view.api.models import (Character, Item, StashTab,
 from poe_view.api.ninja import PriceIndex
 from poe_view.services import (cache_backup, cache_writer, data_cache, gem_xp_log,
                                icon_cache, mod_collection, mod_knowledge,
-                               poe2_probe, price_cache, xp_history,
-                               zone_catalog)
+                               poe2_probe, price_cache, season_log,
+                               xp_history, zone_catalog)
 from poe_view.services.experience import penalty_caption
 from poe_view.services.instance_lock import InstanceLock
 from poe_view.services.zone_watcher import (ZoneWatcher, deaths_since,
@@ -5325,11 +5325,15 @@ class MainWindow(QMainWindow):
                 "fills itself from your game log, including everything you "
                 "played before.")
             return
-        records = zone_catalog.refresh_from_log(pfad, konto)
+        # Die Season-Historie bestimmt, welchem Atlas ein Aufenthalt
+        # zugerechnet wird (§season_log) — sie kommt aus dem Liga-Abruf
+        # und wächst mit jeder Season, die das Programm erlebt.
+        seasons = season_log.load()
+        records = zone_catalog.refresh_from_log(pfad, konto, seasons)
         self._zone_table_dialog = ZoneTableDialog(
             sorted(records.values(), key=lambda r: (r.category, r.name)),
             self, character_level=self._active_character_level(),
-            account_name=konto)
+            account_name=konto, season=season_log.newest(seasons))
         self._zone_table_dialog.show()
 
     def _open_help_dialog(self) -> None:

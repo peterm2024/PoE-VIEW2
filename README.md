@@ -92,9 +92,10 @@ with the tiers you still miss left empty.
   into story, maps, special areas and the places without monsters, and
   exportable as CSV. It is built from Path of Exile's own `Client.txt`,
   which names the area level on every single zone entry, and it keeps
-  what it has seen even after the game truncates that log. Maps show a
-  range (`70–77`) because the level belongs to the map you rolled, not
-  to the area.
+  what it has seen even after the game truncates that log. Because the
+  atlas is rebuilt every season — across the last switch, 44 of 233
+  areas changed level — the table starts on the season you are playing
+  and can be switched to an earlier one, or to all of them at once.
 - **Configurable columns**: which columns are shown and in what order is
   set either in the settings dialog (checkboxes and drag & drop) or via
   a quick toggle in the header's right-click menu. The choice is saved

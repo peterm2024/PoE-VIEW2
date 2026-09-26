@@ -7436,6 +7436,70 @@ schreibt die Level dagegen einzeln in eigene Spalten: Eine
 Tabellenkalkulation soll damit rechnen können, und `70–77` ist dort
 Text.
 
+#### 4.56.3 Jede Season hat ihren eigenen Atlas
+
+Peter, 2026-09-26: "bei den Maps musst du bedenken, dass die Zonen hier
+auch von der aktuellen Season abhängen. Die Map-Zuordnung ändert sich
+hier mit jeder Season, d.h. wir müssen die Zones-Tabelle um einen
+Season-DropDown-Filter erweitern."
+
+**An seinen Daten nachgemessen**, weil die erste Fassung der Tabelle
+genau deshalb falsche Spannen zeigte. Peters Client.txt umfasst den
+Wechsel zur Allflame-Season am 24.07.2026:
+
+| | Zahl |
+|---|---|
+| Gebiete auf beiden Seiten des Wechsels | 233 |
+| davon mit ANDEREM Level danach | **44** |
+| Maps mit mehr als einem Level INNERHALB Allflames | 3 von 94 |
+| dasselbe für die Zeit davor | 0 von 79 |
+
+Chateau 76 → 68, Atoll 70 → 77, Gardens 80 → 71. Der Level einer Karte
+ist innerhalb einer Season also stabil und springt am Season-Wechsel —
+die Spanne "70–77", die die Tabelle vorher zeigte, hat nie existiert.
+Übrig bleiben nach der Trennung genau die Gebiete, die von Natur aus
+wandern (`Delve_Main` nach Tiefe, `DeepwaterEncounter`, die
+Labyrinth-Prüfungen).
+
+**Woher die Season kommt.** Nicht aus der Client.txt — die kennt keine
+Liga. `/account/leagues` nennt zu jeder Liga `startAt` und markiert die
+laufende Season über `category.current`; maßgeblich ist die KATEGORIE
+("Allflame"), nicht die einzelne Liga, denn Allflame, HC Allflame und
+SSF R Allflame teilen sich denselben Atlas. Jeder Aufenthalt wird über
+seinen Zeitstempel einsortiert (`season_log.season_at`).
+
+**Die Historie lässt sich nur vorwärts bauen.** Beendete Ligen
+verschwinden aus der API-Antwort, `endAt` steht bei allen auf `null`.
+`season_log` schreibt deshalb bei jedem Liga-Abruf die laufende Season
+mit ihrem Startdatum fest; das Ende einer Season ist der Beginn der
+nächsten. Alles vor der ältesten bekannten Season heißt `EARLIER` —
+bei Peter heute noch 297 seiner 381 Gebiete, weil die API nur Allflame
+datieren kann.
+
+**Der naheliegende Umweg führt in die Irre** und wurde verworfen: Die
+eigenen Charaktere tragen eine Liga, also könnte man die Vergangenheit
+über sie benennen. Gemessen: Von 226 Toden in Peters Log entfallen alle
+170 vor dem 24.07. auf Charaktere, die HEUTE in "SSF Ruthless" stehen —
+nach dem Season-Ende wandern sie in die permanente Liga. Die
+Liga-Angabe sagt, wo ein Charakter jetzt ist, nicht wo er gespielt
+wurde. "Mirage" wäre geraten gewesen, und die Tabelle soll nicht
+behaupten, was sie nicht belegen kann.
+
+**In der Oberfläche** steht die Season-Box links vor der Gruppen-Box,
+vorbelegt mit der laufenden Season: Wer die Tabelle öffnet, meint den
+Atlas, den er gerade spielt. Sie listet nur Seasons, die im Katalog
+wirklich vorkommen (eine Season ohne eigene Daten wäre ein Eintrag, der
+immer auf eine leere Tabelle führt), und ganz unten "All seasons" — dort
+zeigt die Level-Spalte wieder die volle Spanne, der Tooltip aber, welche
+Season welchen Wert beigesteuert hat. Zonen, die es in der gewählten
+Season nicht gab, verschwinden ganz; eine leere Level-Spalte sähe aus
+wie ein Fehler.
+
+Der CSV-Export folgt derselben Logik: eine Zeile je Season statt einer
+zusammengeworfenen, und die Season steht im vorgeschlagenen Dateinamen —
+wer zwei Seasons vergleichen will, exportiert zweimal und hätte sonst
+zweimal "zones.csv".
+
 ---
 
 ## 8. Entwicklungsstand

@@ -25,6 +25,16 @@ nach [SemVer](https://semver.org/lang/de/).
   die Orte ohne Monster, durchsuchbar und als CSV exportierbar. Peters
   Spiel-Log lieferte dafür auf Anhieb 381 Gebiete. Der Katalog behält
   sie auch dann, wenn das Spiel seine Logdatei kürzt.
+- **Season-Filter in der Zonen-Tabelle.** Path of Exile baut den Atlas
+  mit jeder Season um: Über den Wechsel am 24.07. hinweg trugen 44 von
+  233 Gebieten danach einen anderen Level (Chateau 76 → 68, Atoll
+  70 → 77). Innerhalb einer Season ist der Level dagegen fest — bei den
+  Karten schwankten nur 3 von 94. Die Tabelle beginnt deshalb mit der
+  laufenden Season und lässt sich auf frühere oder auf alle umschalten;
+  über alle Seasons hinweg sagt der Tooltip, welcher Level aus welcher
+  Season stammt. Die Season-Zeiten kommen aus dem Liga-Abruf, der
+  ohnehin läuft; für die Zeit davor steht "earlier", weil die API
+  beendete Ligen vergisst.
 
 ## [0.15.1] - 2026-09-23
 

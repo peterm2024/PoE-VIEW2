@@ -1706,3 +1706,53 @@ bleibt die Formel in `poe-verhalten.md` unter *Unconfirmed* und die
 Anzeige nennt sie Schätzung — was eine ungeprüfte Zahl ist, soll auch so
 dastehen.
 
+## 87. "70–77" war keine Spanne, sondern zwei Seasons — und ein Test ging dabei ins echte Netz
+
+**Anlass (Peter, 2026-09-26):** "bei den Maps musst du bedenken, dass
+die Zonen hier auch von der aktuellen Season abhängen. Die
+Map-Zuordnung ändert sich hier mit jeder Season."
+
+**Befund an seinen Daten:** Die frisch gebaute Zonen-Tabelle zeigte für
+Atoll "70–77", für Chateau "68–76". Beides sah nach einer Karte aus, die
+in verschiedenen Tiers vorkommt — tatsächlich war es der Atlas-Umbau am
+Season-Wechsel. Über den Wechsel zur Allflame-Season am 24.07. hinweg
+trugen **44 von 233** Gebieten danach einen anderen Level. Innerhalb
+einer Season sind es bei den Karten **3 von 94** (und die drei liegen
+einen Level auseinander). Die Tabelle zeigte also eine Zahl, die es nie
+gegeben hat, in einer Form, die wie eine Eigenschaft der Karte aussah.
+
+**Fix:** ``services/season_log.py`` führt die Seasons mit ihren
+Startzeiten (aus ``/account/leagues``, Kategorie + ``startAt``), der
+Zonen-Katalog sammelt die Level je Season, die Tabelle beginnt bei der
+laufenden. ARCHITEKTUR §4.56.3.
+
+**Zwei Sackgassen, beide gemessen statt geraten:**
+
+- **Die Vergangenheit lässt sich nicht aus der API holen.** Beendete
+  Ligen verschwinden aus der Antwort, ``endAt`` ist überall ``null``.
+  Die Historie kann nur vorwärts wachsen.
+- **Und nicht über die eigenen Charaktere.** Naheliegend, weil jeder
+  Charakter eine Liga trägt. Von 226 Toden in Peters Log entfallen alle
+  170 vor dem Wechsel auf Charaktere, die HEUTE in "SSF Ruthless"
+  stehen: Nach Season-Ende wandern sie in die permanente Liga. Die
+  Liga-Angabe sagt, wo ein Charakter jetzt ist, nicht wo er gespielt
+  wurde.
+
+**Der Nebenbefund, der eigentlich der wichtigere ist:** Damit die
+Season-Zeiten ankommen, holt der Liga-Job jetzt ``get_leagues_raw``
+statt ``get_leagues``. Ein Test in ``test_api_worker.py`` mockte den
+ALTEN Namen — und stellte damit beim nächsten Lauf eine **echte Anfrage
+an GGG**, die mit 401 zurückkam. Aufgefallen ist es nur, weil der Test
+daran scheiterte. Ein Mock, der auf einen Methodennamen zeigt, hält
+einen Umbau nicht auf; er hört einfach auf zu greifen, und der Test
+redet ab da mit dem Internet. Dass es hier knallte, war Glück — ein Mock
+auf einer Methode, deren Ausfall der Test nicht prüft, wäre still
+geblieben.
+
+**Lehre:** Wenn ein Aufruf durch einen anderen ersetzt wird, gehört die
+Frage dazu, wer ihn in den Tests ersetzt hatte. Und: Eine Spanne in
+einer Anzeige ist eine Behauptung über EINEN Zeitraum. Reicht die
+zugrunde liegende Messung über einen Bruch hinweg (Season, Patch,
+Liga), ist die Spanne keine Spanne, sondern zwei Zustände in einer
+Zelle.
+

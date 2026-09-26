@@ -24,7 +24,8 @@ from poe_view.api import ninja, oauth
 from poe_view.api.client import ApiError, AuthError, PoeApiClient
 from poe_view.api.models import StashTab
 from poe_view.api.rate_limiter import RateLimitManager
-from poe_view.services import icon_cache, mod_knowledge, poe2_probe, token_store
+from poe_view.services import (icon_cache, mod_knowledge, poe2_probe,
+                               season_log, token_store)
 
 log = logging.getLogger(__name__)
 
@@ -448,7 +449,16 @@ class ApiWorker(QThread):
                 self.login_required.emit("Logged out.", LOGIN_LOGGED_OUT)
             case FetchLeaguesJob():
                 self.status.emit("Loading leagues…")
-                self.leagues_loaded.emit(self.client.get_leagues())
+                # Die Rohdaten statt nur der Namen: Sie tragen ``startAt``
+                # und die Markierung der laufenden Season, und daraus
+                # schreibt ``season_log`` seine Historie fort (§4.56.3).
+                # Kein zusaetzlicher Request — es ist derselbe Endpunkt,
+                # den ``get_leagues`` ohnehin abfragt.
+                roh = self.client.get_leagues_raw()
+                season_log.record_current(roh)
+                self.leagues_loaded.emit([str(eintrag["id"])
+                                          for eintrag in roh.get("leagues", [])
+                                          if eintrag.get("id")])
                 self.status.emit("Ready")
             case FetchCharactersJob():
                 self.status.emit("Loading characters…")

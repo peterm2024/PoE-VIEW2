@@ -134,10 +134,16 @@ Settings, or quickly via right-click on a column header.</p>
 <p>The <b>Zones</b> button in the toolbar opens every zone you have
 entered, with its <b>monster level</b>. Path of Exile writes that level
 into its <code>Client.txt</code> on every zone entry, so the table knows
-the level of the map you actually rolled, not just of the area — which
-is why maps show a range. Sorted by group it reads story, maps, special
-areas, then the places without monsters; the search box and the group
-box narrow it down, and <b>Export CSV</b> saves whatever is on screen.
+the level of the map you actually rolled, not just of the area. Sorted
+by group it reads story, maps, special areas, then the places without
+monsters; the search box and the group box narrow it down, and
+<b>Export CSV</b> saves whatever is on screen.</p>
+<p>The <b>season box</b> matters more than it looks: the atlas is rebuilt
+every season, so the same map sits at a different level in each one —
+across the last switch, 44 of 233 areas changed. The table therefore
+opens on the season you are playing. Pick <i>All seasons</i> to see the
+whole range instead, with the tooltip naming which season contributed
+which level.
 The zone display next to it names the level of the zone you are in, and
 once the experience penalty bites, the share you still get there.</p>
 <p><b>Column filters</b> also live in that right-click menu. They accept

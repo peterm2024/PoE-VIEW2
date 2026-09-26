@@ -10,6 +10,7 @@ from datetime import datetime
 import pytest
 
 from poe_view.services import zone_catalog as zk
+from poe_view.services.season_log import EARLIER, Season
 from poe_view.services.zone_watcher import ZoneStay
 
 
@@ -56,24 +57,64 @@ def test_an_unknown_id_becomes_special_rather_than_disappearing() -> None:
 
 
 def test_a_zone_collects_every_level_it_was_ever_seen_with() -> None:
-    """Bei Karten hängt der Level an der eingelegten Karte, bei Delve an
-    der Tiefe — eine einzelne Zahl wäre dort falsch. Peters
-    ``MapWorldsAtoll`` stand auf 70 und auf 77."""
+    """Innerhalb EINER Season sammelt ein Gebiet trotzdem mehrere Level:
+    ``Delve_Main`` wandert mit der Tiefe. Ohne Season-Historie landet
+    alles unter ``EARLIER``."""
     records: dict[str, zk.ZoneRecord] = {}
-    zk.merge_stays(records, [stay("MapWorldsAtoll", "Atoll", 70),
-                             stay("MapWorldsAtoll", "Atoll", 77, minute=10)])
+    zk.merge_stays(records, [stay("Delve_Main", "Azurite Mine", 70),
+                             stay("Delve_Main", "Azurite Mine", 77, minute=10)])
+
+    eintrag = records["Delve_Main"]
+    assert eintrag.stats(EARLIER).levels == {70, 77}
+    assert eintrag.level_text() == "70–77"
+    assert eintrag.max_level() == 77
+    assert eintrag.stats(None).visits == 2
+
+
+def test_the_same_zone_in_two_seasons_stays_apart() -> None:
+    """Der Grund fuer das ganze Season-Modell (Peter, 2026-09-26): Der
+    Atlas baut sich um, Atoll stand in der vorigen Season auf 70 und in
+    Allflame auf 77. Zusammengeworfen ergaebe das die Spanne "70–77",
+    die es nie gab."""
+    seasons = [Season("Mirage", datetime(2026, 4, 1)),
+               Season("Allflame", datetime(2026, 7, 24, 22, 0))]
+    records: dict[str, zk.ZoneRecord] = {}
+
+    zk.merge_stays(records, [
+        ZoneStay(entered=datetime(2026, 7, 1, 12, 0),
+                 left=datetime(2026, 7, 1, 12, 5), name="Atoll",
+                 area_id="MapWorldsAtoll", instance="1", level=70),
+        ZoneStay(entered=datetime(2026, 9, 1, 12, 0),
+                 left=datetime(2026, 9, 1, 12, 5), name="Atoll",
+                 area_id="MapWorldsAtoll", instance="2", level=77),
+    ], seasons)
 
     eintrag = records["MapWorldsAtoll"]
-    assert eintrag.levels == {70, 77}
-    assert eintrag.level_text == "70–77"
-    assert eintrag.max_level == 77
-    assert eintrag.visits == 2
+    assert eintrag.level_text("Mirage") == "70"
+    assert eintrag.level_text("Allflame") == "77"
+    assert eintrag.level_text(None) == "70–77"
+    assert eintrag.seen_in("Mirage") and eintrag.seen_in("Allflame")
+
+
+def test_a_stay_before_the_first_known_season_lands_in_earlier() -> None:
+    """Die API vergisst beendete Ligen; fuer die Zeit davor wissen wir
+    den Namen schlicht nicht. ``EARLIER`` ist ehrlicher als ein
+    geratener."""
+    seasons = [Season("Allflame", datetime(2026, 7, 24, 22, 0))]
+    records: dict[str, zk.ZoneRecord] = {}
+
+    zk.merge_stays(records, [
+        ZoneStay(entered=datetime(2026, 5, 1, 12, 0),
+                 left=datetime(2026, 5, 1, 12, 5), name="Atoll",
+                 area_id="MapWorldsAtoll", instance="1", level=70)], seasons)
+
+    assert set(records["MapWorldsAtoll"].seasons) == {EARLIER}
 
 
 def test_a_single_level_is_shown_without_a_range() -> None:
     records: dict[str, zk.ZoneRecord] = {}
     zk.merge_stays(records, [stay("MapWorldsCells", "Cells", 68)])
-    assert records["MapWorldsCells"].level_text == "68"
+    assert records["MapWorldsCells"].level_text() == "68"
 
 
 def test_a_stay_without_an_area_id_is_skipped() -> None:
@@ -103,8 +144,8 @@ def test_a_saved_catalog_comes_back_unchanged(tmp_path) -> None:
 
     zurueck = zk.load(pfad)
     assert set(zurueck) == {"MapWorldsAtoll", "2_8_town"}
-    assert zurueck["MapWorldsAtoll"].levels == {70, 77}
-    assert zurueck["MapWorldsAtoll"].visits == 2
+    assert zurueck["MapWorldsAtoll"].stats(EARLIER).levels == {70, 77}
+    assert zurueck["MapWorldsAtoll"].stats(None).visits == 2
     assert zurueck["2_8_town"].category == zk.REST
 
 
@@ -170,5 +211,5 @@ def test_a_second_run_over_the_same_log_does_not_count_visits_twice(tmp_path) ->
     zuerst = zk.refresh_from_log(pfad, "TestAccount#1234")
     nochmal = zk.refresh_from_log(pfad, "TestAccount#1234")
 
-    assert zuerst["MapWorldsCells"].visits == 2
-    assert nochmal["MapWorldsCells"].visits == 2
+    assert zuerst["MapWorldsCells"].stats(None).visits == 2
+    assert nochmal["MapWorldsCells"].stats(None).visits == 2

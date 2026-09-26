@@ -32,11 +32,17 @@ from pathlib import Path
 
 from poe_view import config
 from poe_view.services.atomic_json import write_json
+from poe_view.services.season_log import season_at
 from poe_view.services.zone_watcher import is_rest_area, zone_stays
 
 log = logging.getLogger(__name__)
 
-VERSION = 1
+# Version 2 (2026-09-26): Die Level stehen jetzt je Season getrennt
+# (§season_log). Version 1 wird verworfen statt umgerechnet — die
+# alten Eintraege wuessten nicht, welcher Level zu welcher Season
+# gehoert, und der Katalog baut sich aus der Client.txt in einem
+# Zehntel einer Sekunde neu auf.
+VERSION = 2
 
 # Die drei Gruppen, die Peter genannt hat, plus eine vierte für die
 # Zonen ohne Monster — ausgezählt an seinen 381 Gebieten (2026-09-26):
@@ -86,32 +92,60 @@ def categorise(area_id: str) -> str:
 
 
 @dataclass
-class ZoneRecord:
-    """Ein Gebiet, so oft gesehen wie es gesehen wurde.
+class SeasonStats:
+    """Was ein Gebiet in EINER Season war. Getrennt gehalten, weil der
+    Atlas sich mit jeder Season umbaut: Chateau stand vor dem 24.07. auf
+    76 und danach auf 68 (§season_log). Zusammengeworfen ergäbe das eine
+    Spanne "68–76", die es nie gab."""
 
-    ``levels`` sammelt ALLE beobachteten Gebietslevel, nicht nur den
-    letzten: Bei Karten hängt der Level an der eingelegten Karte, bei
-    Delve an der Tiefe. Eine einzelne Zahl wäre dort schlicht falsch."""
-
-    area_id: str
-    name: str
-    category: str
     levels: set[int] = field(default_factory=set)
     visits: int = 0
     last_seen: str = ""          # ISO-Zeit, wie in der Client.txt gelesen
 
-    @property
-    def level_text(self) -> str:
+
+@dataclass
+class ZoneRecord:
+    """Ein Gebiet, je Season so oft gesehen wie es gesehen wurde.
+
+    Innerhalb einer Season sammelt ``levels`` trotzdem mehrere Werte:
+    ``Delve_Main`` wandert mit der Tiefe, ``DeepwaterEncounter`` mit dem
+    Fortschritt. Gemessen an Peters Log betrifft das 7 von 317 Gebieten
+    — die Ausnahme, nicht die Regel, und genau deshalb bleibt sie
+    sichtbar."""
+
+    area_id: str
+    name: str
+    category: str
+    seasons: dict[str, SeasonStats] = field(default_factory=dict)
+
+    def stats(self, season: str | None) -> SeasonStats:
+        """Die Zahlen einer Season, oder — mit ``None`` — aller
+        zusammen. Ein Gebiet, das in dieser Season nie betreten wurde,
+        liefert leere Zahlen statt eines Fehlers."""
+        if season is not None:
+            return self.seasons.get(season, SeasonStats())
+        gesamt = SeasonStats()
+        for eintrag in self.seasons.values():
+            gesamt.levels |= eintrag.levels
+            gesamt.visits += eintrag.visits
+            gesamt.last_seen = max(gesamt.last_seen, eintrag.last_seen)
+        return gesamt
+
+    def seen_in(self, season: str | None) -> bool:
+        return season is None or season in self.seasons
+
+    def level_text(self, season: str | None = None) -> str:
         """"68" oder "70–77" — was in der Spalte steht."""
-        if not self.levels:
+        levels = self.stats(season).levels
+        if not levels:
             return "?"
-        tief, hoch = min(self.levels), max(self.levels)
+        tief, hoch = min(levels), max(levels)
         return str(tief) if tief == hoch else f"{tief}–{hoch}"
 
-    @property
-    def max_level(self) -> int:
-        """Für die Sortierung: der höchste je gesehene Level."""
-        return max(self.levels) if self.levels else 0
+    def max_level(self, season: str | None = None) -> int:
+        """Für die Sortierung: der höchste in dieser Season gesehene Level."""
+        levels = self.stats(season).levels
+        return max(levels) if levels else 0
 
 
 def catalog_path(account_name: str) -> Path:
@@ -123,10 +157,17 @@ def catalog_path(account_name: str) -> Path:
     return config.APP_DATA_DIR / f"zone-catalog-{sicher}.json"
 
 
-def merge_stays(records: dict[str, ZoneRecord], stays) -> int:
+def merge_stays(records: dict[str, ZoneRecord], stays,
+                seasons: list | None = None) -> int:
     """Aufenthalte in den Katalog einarbeiten; liefert die Zahl der
     NEUEN Gebiete. Ein Aufenthalt ohne Kennung wird übergangen — ohne
-    sie ließe sich weder Gruppe noch Wiedererkennung bestimmen."""
+    sie ließe sich weder Gruppe noch Wiedererkennung bestimmen.
+
+    ``seasons`` ist die Historie aus ``season_log``; jeder Aufenthalt
+    wird über SEINEN Zeitpunkt einsortiert, nicht über die heute
+    laufende Season. Ohne Historie landet alles unter ``EARLIER`` — das
+    ist der Zustand vor dem ersten Liga-Abruf und keine Fehlangabe: Wir
+    wissen dann schlicht nicht, welche Season lief."""
     neu = 0
     for stay in stays:
         if not stay.area_id:
@@ -137,15 +178,17 @@ def merge_stays(records: dict[str, ZoneRecord], stays) -> int:
                                  category=categorise(stay.area_id))
             records[stay.area_id] = eintrag
             neu += 1
+        season = season_at(stay.entered, seasons or [])
+        zahlen = eintrag.seasons.setdefault(season, SeasonStats())
         if stay.level:
-            eintrag.levels.add(stay.level)
+            zahlen.levels.add(stay.level)
         # Der angezeigte Name kann sich ändern (Hideout umbenannt, Sprache
         # umgestellt) — der zuletzt gesehene gewinnt.
         eintrag.name = stay.name or eintrag.name
-        eintrag.visits += 1
+        zahlen.visits += 1
         zeit = stay.entered.isoformat(timespec="seconds")
-        if zeit > eintrag.last_seen:
-            eintrag.last_seen = zeit
+        if zeit > zahlen.last_seen:
+            zahlen.last_seen = zeit
     return neu
 
 
@@ -168,11 +211,15 @@ def load(path: Path) -> dict[str, ZoneRecord]:
                 area_id=area_id,
                 name=str(zeile.get("name") or ""),
                 category=str(zeile.get("category") or categorise(area_id)),
-                levels={int(x) for x in (zeile.get("levels") or [])},
-                visits=int(zeile.get("visits") or 0),
-                last_seen=str(zeile.get("last_seen") or ""),
+                seasons={
+                    str(name): SeasonStats(
+                        levels={int(x) for x in (werte.get("levels") or [])},
+                        visits=int(werte.get("visits") or 0),
+                        last_seen=str(werte.get("last_seen") or ""))
+                    for name, werte in (zeile.get("seasons") or {}).items()
+                },
             )
-        except (KeyError, TypeError, ValueError):
+        except (AttributeError, KeyError, TypeError, ValueError):
             continue
     return records
 
@@ -186,14 +233,23 @@ def save(path: Path, records: dict[str, ZoneRecord]) -> None:
         "version": VERSION,
         "zones": [
             {"area_id": r.area_id, "name": r.name, "category": r.category,
-             "levels": sorted(r.levels), "visits": r.visits,
-             "last_seen": r.last_seen}
+             "seasons": {
+                 name: {"levels": sorted(werte.levels), "visits": werte.visits,
+                        "last_seen": werte.last_seen}
+                 for name, werte in sorted(r.seasons.items())}}
             for r in sorted(records.values(), key=lambda r: r.area_id)
         ],
     })
 
 
-def refresh_from_log(log_path: Path, account_name: str) -> dict[str, ZoneRecord]:
+def _fingerabdruck(records: dict[str, ZoneRecord]) -> str:
+    return json.dumps([(r.area_id, sorted(r.seasons), r.stats(None).visits,
+                        sorted(r.stats(None).levels))
+                       for r in sorted(records.values(), key=lambda r: r.area_id)])
+
+
+def refresh_from_log(log_path: Path, account_name: str,
+                     seasons: list | None = None) -> dict[str, ZoneRecord]:
     """Katalog laden, die Client.txt einarbeiten, speichern, zurückgeben.
 
     Die volle Datei wird gelesen, nicht nur der neue Rest: Der Katalog
@@ -202,16 +258,15 @@ def refresh_from_log(log_path: Path, account_name: str) -> dict[str, ZoneRecord]
     nur, wenn sich etwas geändert hat."""
     pfad = catalog_path(account_name)
     records = load(pfad)
-    vorher = json.dumps([(r.area_id, sorted(r.levels), r.visits)
-                         for r in sorted(records.values(), key=lambda r: r.area_id)])
+    vorher = _fingerabdruck(records)
     # Der Katalog zählt Besuche ab dem Beginn der Datei; ohne Grenze
     # würde jeder Aufruf dieselben Aufenthalte erneut zählen. Deshalb
     # zählt er nur, was seit dem letzten Lauf dazugekommen ist.
     seit = _newest(records)
     merge_stays(records, [s for s in zone_stays(log_path, datetime.min)
-                          if s.entered.isoformat(timespec="seconds") > seit])
-    nachher = json.dumps([(r.area_id, sorted(r.levels), r.visits)
-                          for r in sorted(records.values(), key=lambda r: r.area_id)])
+                          if s.entered.isoformat(timespec="seconds") > seit],
+                seasons)
+    nachher = _fingerabdruck(records)
     if nachher != vorher:
         try:
             save(pfad, records)
@@ -221,4 +276,5 @@ def refresh_from_log(log_path: Path, account_name: str) -> dict[str, ZoneRecord]
 
 
 def _newest(records: dict[str, ZoneRecord]) -> str:
-    return max((r.last_seen for r in records.values()), default="")
+    return max((werte.last_seen for r in records.values()
+                for werte in r.seasons.values()), default="")

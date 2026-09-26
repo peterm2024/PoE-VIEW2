@@ -6,6 +6,7 @@ Netzwerk) — der Client wird per Monkeypatch durch eine Fake-Methode ersetzt.
 
 from poe_view.api.models import Item, StashTab
 from poe_view.api.ninja import PriceIndex
+from poe_view.services import season_log
 from poe_view.services.api_worker import (ApiWorker, FetchCharacterItemsJob,
                                           FetchLeaguesJob, FetchModKnowledgeJob,
                                           FetchPricesJob, FetchStashItemsJob,
@@ -53,16 +54,47 @@ def test_stash_items_dispatch_does_not_emit_bereit_after_result(qapp, monkeypatc
 
 
 def test_leagues_dispatch_emits_bereit_after_result(qapp, monkeypatch) -> None:
-    """Gegenprobe: Jobs ohne eigenen UI-Abschlusstext müssen 'Bereit' emittieren."""
+    """Gegenprobe: Jobs ohne eigenen UI-Abschlusstext müssen 'Bereit' emittieren.
+
+    Gemockt wird ``get_leagues_raw``, nicht ``get_leagues``: Der Job
+    holt seit der Season-Historie (§4.56.3) die Rohdaten, weil er daraus
+    ``startAt`` braucht. Als der Umbau kam und dieser Mock noch auf dem
+    alten Namen stand, ging der Test TATSAECHLICH ins Netz und bekam von
+    GGG eine 401 — ein Test, der eine echte Anfrage stellt, ist immer
+    ein Fehler, auch wenn er zufaellig gruen bliebe."""
     worker = ApiWorker()
-    monkeypatch.setattr(worker.client, "get_leagues", lambda: ["Standard"])
+    monkeypatch.setattr(worker.client, "get_leagues_raw",
+                        lambda realm=None: {"leagues": [{"id": "Standard"}]})
 
     emitted: list[str] = []
+    ligen: list[list[str]] = []
     worker.status.connect(emitted.append)
+    worker.leagues_loaded.connect(ligen.append)
 
     worker._dispatch(FetchLeaguesJob())
 
     assert emitted == ["Loading leagues…", "Ready"]
+    assert ligen == [["Standard"]]
+    worker.client.close()
+
+
+def test_the_leagues_job_records_the_running_season(qapp, monkeypatch, tmp_path) -> None:
+    """Die Season-Historie laesst sich nur vorwaerts bauen (die API
+    vergisst beendete Ligen), also muss JEDER Liga-Abruf die laufende
+    Season festhalten — sonst fehlt genau die Grenze, an der die
+    Zonen-Tabelle spaeter ihre Level trennt."""
+    worker = ApiWorker()
+    monkeypatch.setattr(worker.client, "get_leagues_raw", lambda realm=None: {
+        "leagues": [
+            {"id": "Standard", "category": {"id": "Standard"},
+             "startAt": "2013-01-23T21:00:00Z"},
+            {"id": "Allflame", "category": {"id": "Allflame", "current": True},
+             "startAt": "2026-07-24T20:00:00Z"},
+        ]})
+
+    worker._dispatch(FetchLeaguesJob())
+
+    assert [s.id for s in season_log.load()] == ["Allflame"]
     worker.client.close()
 
 

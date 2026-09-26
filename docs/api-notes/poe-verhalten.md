@@ -393,6 +393,38 @@ Measured against the full `Client.txt` (5,001 generations between
 For ordinary monsters the area level **is** the monster level; bosses
 sit one or two above it. [wiki]
 
+### The atlas is rebuilt every season, and the log shows it
+
+The same map zone carries a different level in each season. Measured
+across the switch to the Allflame season on 2026-07-24, which sits in
+the middle of the same `Client.txt`:
+
+| | |
+|---|---|
+| Areas entered on both sides of the switch | 233 |
+| of those with a different level afterwards | **44** |
+| Maps with more than one level *within* the new season | 3 of 94 |
+| the same for the months before it | 0 of 79 |
+
+Chateau went 76 → 68, Atoll 70 → 77, Gardens 80 → 71. So within a season
+a map's level is fixed, and it jumps at the season boundary. Anything
+that still varies inside a season varies by design: `Delve_Main` by
+depth, `DeepwaterEncounter` by progress, the labyrinth trials by which
+one is running.
+
+**The log does not say which season it was.** That has to come from
+`/account/leagues`, where the running season is the league category
+marked `current` and `startAt` gives its beginning. Finished leagues
+drop out of that answer entirely and `endAt` is `null` throughout, so
+the history can only be built going forward — one entry per season
+observed while the program was running.
+
+**Do not try to recover it from your own characters.** Of 226 deaths in
+the log, all 170 before the switch belong to characters that today sit
+in "SSF Ruthless": when a season ends, its characters migrate to the
+permanent league. A character's league says where it is now, not where
+it was played.
+
 ---
 
 ## 8. Unconfirmed

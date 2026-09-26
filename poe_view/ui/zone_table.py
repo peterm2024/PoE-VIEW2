@@ -30,7 +30,26 @@ from PySide6.QtWidgets import (QComboBox, QDialog, QFileDialog, QHBoxLayout,
 
 from poe_view.services.csv_export import sanitize_filename
 from poe_view.services.experience import experience_multiplier
+from poe_view.services.season_log import EARLIER
 from poe_view.services.zone_catalog import CATEGORIES, ZoneRecord
+
+
+def _season_choices(records: list[ZoneRecord]) -> list[str]:
+    """Die Seasons, die im Katalog wirklich vorkommen — jüngste zuerst,
+    ``EARLIER`` ganz unten.
+
+    Nicht die Liste aus ``season_log``: Eine Season, in der dieses Konto
+    nie gespielt hat, wäre ein Eintrag, der immer auf eine leere Tabelle
+    führt. Sortiert wird nach dem Namen absteigend, weil die Namen selbst
+    keine Ordnung tragen ("Allflame" vor "Mirage"?) — was zählt, ist das
+    jüngste Datum, und das steht in den Zahlen."""
+    zuletzt: dict[str, str] = {}
+    for record in records:
+        for name, werte in record.seasons.items():
+            zuletzt[name] = max(zuletzt.get(name, ""), werte.last_seen)
+    ohne_earlier = sorted((n for n in zuletzt if n != EARLIER),
+                          key=lambda n: zuletzt[n], reverse=True)
+    return ohne_earlier + ([EARLIER] if EARLIER in zuletzt else [])
 
 # Spalten. "Monster Level" trägt bewusst den Namen, unter dem Peter
 # gefragt hat, obwohl in der Client.txt "area level" steht: Für
@@ -45,11 +64,26 @@ NUMERIC_SORT_ROLE = Qt.ItemDataRole.UserRole + 1
 
 
 class ZoneTableModel(QAbstractTableModel):
-    def __init__(self, records: list[ZoneRecord],
-                 character_level: int = 0) -> None:
+    def __init__(self, records: list[ZoneRecord], character_level: int = 0,
+                 season: str | None = None) -> None:
         super().__init__()
         self._records = records
         self._character_level = character_level
+        # ``None`` heißt "alle Seasons zusammen". Sonst zeigt die Tabelle
+        # NUR die Level dieser Season — der Atlas baut sich mit jeder um
+        # (§season_log), Chateau stand vor dem 24.07. auf 76 und danach
+        # auf 68.
+        self._season = season
+
+    def set_season(self, season: str | None) -> None:
+        if season == self._season:
+            return
+        self.beginResetModel()
+        self._season = season
+        self.endResetModel()
+
+    def season(self) -> str | None:
+        return self._season
 
     def set_character_level(self, level: int) -> None:
         """Färbt die Level-Spalte danach ein, was dort noch zu holen ist
@@ -79,15 +113,17 @@ class ZoneTableModel(QAbstractTableModel):
     def data(self, index: QModelIndex, role):
         record = self._records[index.row()]
         col = index.column()
+        zahlen = record.stats(self._season)
         if role == Qt.ItemDataRole.DisplayRole:
-            return (record.category, record.name or "–", record.level_text,
-                    str(record.visits), record.last_seen.replace("T", " "),
+            return (record.category, record.name or "–",
+                    record.level_text(self._season),
+                    str(zahlen.visits), zahlen.last_seen.replace("T", " "),
                     record.area_id)[col]
         if role == NUMERIC_SORT_ROLE:
             if col == _LEVEL_COL:
-                return record.max_level
+                return record.max_level(self._season)
             if col == _VISITS_COL:
-                return record.visits
+                return zahlen.visits
             return self.data(index, Qt.ItemDataRole.DisplayRole).lower()
         if role == Qt.ItemDataRole.ToolTipRole and col == _LEVEL_COL:
             return self._level_tooltip(record)
@@ -97,14 +133,25 @@ class ZoneTableModel(QAbstractTableModel):
         """Alle gesehenen Level einzeln, plus was der Charakter dort noch
         bekäme. Die Zelle zeigt nur die Spanne — bei ``Delve_Main`` mit 34
         Werten ist das die einzig lesbare Form, die Einzelwerte sind aber
-        genau das, was man bei einer Spanne wissen will."""
-        if not record.levels:
+        genau das, was man bei einer Spanne wissen will.
+
+        Über alle Seasons hinweg steht zusätzlich, welcher Level aus
+        welcher Season stammt: Eine Spanne "68–76" ist dort meist gar
+        keine Spanne, sondern ein Atlas-Umbau."""
+        levels = record.stats(self._season).levels
+        if not levels:
             return None
-        zeilen = ["Levels seen: " + ", ".join(str(x) for x in sorted(record.levels))]
+        zeilen = ["Levels seen: " + ", ".join(str(x) for x in sorted(levels))]
+        if self._season is None and len(record.seasons) > 1:
+            zeilen += [f"  {name}: "
+                       + ", ".join(str(x) for x in sorted(werte.levels))
+                       for name, werte in sorted(record.seasons.items())
+                       if werte.levels]
         if self._character_level:
-            anteil = experience_multiplier(self._character_level, record.max_level)
+            hoechster = record.max_level(self._season)
+            anteil = experience_multiplier(self._character_level, hoechster)
             zeilen.append(f"At character level {self._character_level}, level "
-                          f"{record.max_level} yields {anteil:.1%} experience")
+                          f"{hoechster} yields {anteil:.1%} experience")
         return "\n".join(zeilen)
 
 
@@ -142,13 +189,14 @@ class ZoneFilterProxy(QSortFilterProxyModel):
         eins, zwei = model.record_at(left.row()), model.record_at(right.row())
         if eins is None or zwei is None:
             return super().lessThan(left, right)
-        return self._group_key(eins) < self._group_key(zwei)
+        season = model.season()
+        return self._group_key(eins, season) < self._group_key(zwei, season)
 
     @staticmethod
-    def _group_key(record: ZoneRecord) -> tuple[int, int, str]:
+    def _group_key(record: ZoneRecord, season: str | None) -> tuple[int, int, str]:
         reihenfolge = (CATEGORIES.index(record.category)
                        if record.category in CATEGORIES else len(CATEGORIES))
-        return (reihenfolge, record.max_level, record.name.lower())
+        return (reihenfolge, record.max_level(season), record.name.lower())
 
     def set_group(self, group: str) -> None:
         # begin/endFilterChange statt invalidateFilter — Letzteres ist
@@ -163,44 +211,64 @@ class ZoneFilterProxy(QSortFilterProxyModel):
         record = model.record_at(row)
         if record is None:
             return False
+        # Eine Zone, die es in dieser Season nicht gab, gehört nicht in
+        # die Tabelle — sonst stünde eine leere Level-Spalte da und sähe
+        # aus wie ein Fehler.
+        if not record.seen_in(model.season()):
+            return False
         if self._group and record.category != self._group:
             return False
         if not self._words:
             return True
         heuhaufen = f"{record.name} {record.area_id} {record.category} " \
-                    f"{record.level_text}".lower()
+                    f"{record.level_text(model.season())}".lower()
         return all(wort in heuhaufen for wort in self._words)
 
 
-def export_zones(path: str, records: list[ZoneRecord]) -> None:
+def export_zones(path: str, records: list[ZoneRecord],
+                 season: str | None = None) -> None:
     """Die Zonen als CSV — Semikolon und UTF-8-BOM wie beim Item-Export
     (``services/csv_export``), damit Excel sie unter deutscher Locale
     ohne Text-Import öffnet.
 
     Anders als die Anzeige schreibt die Datei die Level EINZELN
     (``68;70;77``) statt als Spanne: Eine Tabellenkalkulation soll damit
-    rechnen können, und "70–77" ist dort Text."""
+    rechnen können, und "70–77" ist dort Text.
+
+    Über alle Seasons hinweg (``season=None``) bekommt jede Season ihre
+    EIGENE Zeile statt einer zusammengeworfenen: Der Atlas baut sich mit
+    jeder Season um, eine Zeile "Chateau 68–76" gäbe einen Wert wieder,
+    den es nie gab."""
     with open(path, "w", encoding="utf-8-sig", newline="") as datei:
         schreiber = csv.writer(datei, delimiter=";")
-        schreiber.writerow(["Group", "Zone", "Area id", "Monster level (min)",
-                            "Monster level (max)", "All levels seen",
-                            "Visits", "Last seen"])
+        schreiber.writerow(["Season", "Group", "Zone", "Area id",
+                            "Monster level (min)", "Monster level (max)",
+                            "All levels seen", "Visits", "Last seen"])
         for record in records:
-            schreiber.writerow([
-                record.category, record.name, record.area_id,
-                min(record.levels) if record.levels else "",
-                record.max_level or "",
-                " ".join(str(x) for x in sorted(record.levels)),
-                record.visits, record.last_seen.replace("T", " "),
-            ])
+            namen = [season] if season is not None else sorted(record.seasons)
+            for name in namen:
+                zahlen = record.stats(name)
+                schreiber.writerow([
+                    name, record.category, record.name, record.area_id,
+                    min(zahlen.levels) if zahlen.levels else "",
+                    max(zahlen.levels) if zahlen.levels else "",
+                    " ".join(str(x) for x in sorted(zahlen.levels)),
+                    zahlen.visits, zahlen.last_seen.replace("T", " "),
+                ])
 
 
 class ZoneTableDialog(QDialog):
     def __init__(self, records: list[ZoneRecord], parent: QWidget | None = None,
-                 character_level: int = 0, account_name: str = "") -> None:
+                 character_level: int = 0, account_name: str = "",
+                 season: str | None = None) -> None:
+        """``season`` ist die Vorauswahl — die laufende Season, denn wer
+        die Tabelle öffnet, meint den Atlas, den er gerade spielt (Peter,
+        2026-09-26: "die Zonen hier [hängen] auch von der aktuellen
+        Season ab. Die Map-Zuordnung ändert sich hier mit jeder
+        Season")."""
         super().__init__(parent)
         self.setWindowTitle("Zones")
-        self.resize(820, 560)
+        self.resize(880, 560)
         # Wie beim Mod-Album: Ein QDialog bekommt unter Windows sonst
         # keinen Maximieren-Knopf, und 381 Zeilen wollen Platz.
         self.setWindowFlags(self.windowFlags()
@@ -208,7 +276,7 @@ class ZoneTableDialog(QDialog):
                             | Qt.WindowType.WindowMinimizeButtonHint)
         self._account_name = account_name
 
-        self._model = ZoneTableModel(records, character_level)
+        self._model = ZoneTableModel(records, character_level, season)
         self._proxy = ZoneFilterProxy()
         self._proxy.setSourceModel(self._model)
 
@@ -216,6 +284,24 @@ class ZoneTableDialog(QDialog):
         self._search.setPlaceholderText("Search zones…")
         self._search.textChanged.connect(self._proxy.setFilterFixedString)
         self._search.textChanged.connect(self._update_count)
+
+        # Die Seasons, die im Katalog wirklich vorkommen, jüngste zuerst.
+        # ``EARLIER`` sammelt alles vor der ersten Season, deren Beginn
+        # wir kennen (§season_log) — es steht unten, weil es die älteste
+        # Schicht ist.
+        self._season_combo = QComboBox()
+        self._season_combo.setToolTip(
+            "Path of Exile rebuilds the atlas every season, so the same "
+            "map zone has a different monster level in each. This picks "
+            "which season's levels the table shows.")
+        for name in _season_choices(records):
+            self._season_combo.addItem(
+                "Earlier (before the first known season)"
+                if name == EARLIER else name, name)
+        self._season_combo.addItem("All seasons", None)
+        if season is not None and self._season_combo.findData(season) >= 0:
+            self._season_combo.setCurrentIndex(self._season_combo.findData(season))
+        self._season_combo.currentIndexChanged.connect(self._on_season_changed)
 
         self._group_combo = QComboBox()
         self._group_combo.addItem("All groups", "")
@@ -230,6 +316,7 @@ class ZoneTableDialog(QDialog):
         self._export_button.clicked.connect(self._export)
 
         kopf = QHBoxLayout()
+        kopf.addWidget(self._season_combo)
         kopf.addWidget(self._group_combo)
         kopf.addWidget(self._search, 1)
         kopf.addWidget(self._count_label)
@@ -259,6 +346,16 @@ class ZoneTableDialog(QDialog):
         self._proxy.set_group(self._group_combo.currentData() or "")
         self._update_count()
 
+    def _on_season_changed(self) -> None:
+        """Die Season wechselt die Level UND die Zeilen: Zonen, die es
+        damals nicht gab, verschwinden. Nach dem Modell-Reset muss die
+        Sortierung neu angewandt werden, sonst steht die Tabelle in der
+        Reihenfolge des Katalogs da."""
+        self._model.set_season(self._season_combo.currentData())
+        self._view.sortByColumn(self._view.horizontalHeader().sortIndicatorSection(),
+                                self._view.horizontalHeader().sortIndicatorOrder())
+        self._update_count()
+
     def _update_count(self) -> None:
         sichtbar = self._proxy.rowCount()
         gesamt = self._model.rowCount()
@@ -279,13 +376,17 @@ class ZoneTableDialog(QDialog):
         return gefunden
 
     def _export(self) -> None:
-        vorschlag = sanitize_filename(f"zones-{self._account_name}", "zones")
+        # Die Season steht im Dateinamen: Wer zwei Seasons vergleichen
+        # will, exportiert zweimal und hätte sonst zweimal "zones.csv".
+        season = self._model.season()
+        teile = ["zones", self._account_name, season or "all-seasons"]
+        vorschlag = sanitize_filename("-".join(t for t in teile if t), "zones")
         pfad, _ = QFileDialog.getSaveFileName(
             self, "Export zones as CSV", str(Path.home() / f"{vorschlag}.csv"),
             "CSV files (*.csv)")
         if not pfad:
             return
         try:
-            export_zones(pfad, self.visible_records())
+            export_zones(pfad, self.visible_records(), season)
         except OSError as fehler:
             QMessageBox.warning(self, "Export failed", str(fehler))
