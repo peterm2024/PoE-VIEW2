@@ -1828,14 +1828,29 @@ beanstanden hat.
 Gegengeprobt statt geglaubt: eine Wegwerfdatei mit einem privaten Muster
 staged, dann `cd … && git commit --dry-run` — der Hook blockiert jetzt.
 
-**Der zweite Strick, der dabei sichtbar wurde.** Das Skript prüft den
-gesamten `git diff --cached`, also auch ENTFERNTE Zeilen. Damit lässt
+**Der zweite Strick, der dabei sichtbar wurde.** Das Skript prüfte den
+gesamten `git diff --cached`, also auch ENTFERNTE Zeilen. Damit ließ
 sich ausgerechnet der Commit nicht absetzen, der einen versehentlich
-eingecheckten Namen wieder herausnimmt. Richtig wäre, nur hinzugefügte
-Zeilen zu prüfen (`+`, ohne `+++`); eine entfernte Zeile mit einem
-Muster ist das Gegenteil eines Lecks.
+eingecheckten Namen wieder herausnimmt — der Hook blockierte seine
+eigene Bereinigung. Seit 2026-09-27 prüft er nur noch hinzugefügte
+Zeilen (`+`, ohne die Dateikopfzeile `+++`); eine entfernte Zeile mit
+einem Muster ist das Gegenteil eines Lecks.
+
+**Und ein dritter, der fast zu einem Fehlurteil geführt hätte.** Die
+Gegenprobe nach dem Umbau schien zu zeigen, dass der Hook nun gar nicht
+mehr zuschlägt: Wegwerfdatei anlegen, stagen und committen — alles in
+EINEM Befehl —, und der Commit ging durch. Der Hook ist ein
+*PreToolUse*-Hook: Er läuft, **bevor** der Befehl ausgeführt wird. Zur
+Prüfzeit existierte die Datei noch gar nicht, `git diff --cached` war
+leer, also gab es nichts zu beanstanden. Wer den Hook prüfen will, muss
+stagen und committen in GETRENNTEN Aufrufen — sonst prüft er einen
+Zustand, den es noch nicht gibt. Mit getrenntem Staging blockiert er
+zuverlässig (dreimal nachgestellt).
 
 **Lehre:** Ein Schutz, der noch nie ausgelöst hat, ist nicht erprobt,
 sondern unerprobt. Zu jedem Hook gehört einmal der Nachweis, dass er im
-Ernstfall wirklich zuschlägt — und zwar über denselben Weg, auf dem die
-echten Befehle laufen, nicht über einen von Hand gebauten Aufruf.
+Ernstfall wirklich zuschlägt — über denselben Weg, auf dem die echten
+Befehle laufen, und mit derselben zeitlichen Abfolge. Und wenn eine
+Gegenprobe behauptet, ein Schutz greife nicht, ist der nächste
+Verdächtige die Gegenprobe selbst: Hier war das Skript von Anfang an in
+Ordnung, von Hand aufgerufen lieferte es sauber seine Ablehnung.
