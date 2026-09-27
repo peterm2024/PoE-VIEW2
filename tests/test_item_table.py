@@ -266,7 +266,7 @@ def test_numeric_sort_role_orders_numbers_not_strings(qapp) -> None:
 # --- Spalten-Filter-Ausdrücke (Excel-artig) --------------- #
 
 def test_expression_matches_variants() -> None:
-    from poe_view.ui.item_table import _expression_matches
+    from poe_view.ui.column_filter import expression_matches as _expression_matches
     assert _expression_matches(">=20", "+20%")          # "20% Quality"
     assert not _expression_matches(">20", "+20%")
     assert _expression_matches("<45", "44")             # "iLvl <45"

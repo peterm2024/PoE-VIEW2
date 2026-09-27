@@ -547,3 +547,31 @@ def test_the_watcher_remembers_the_level_of_the_zone_just_entered(tmp_path) -> N
 
     assert gesehen == [("Chateau", 68)]
     assert watcher.last_area_id == "MapWorldsChateau"
+
+
+# --- Die Minen-Basis (Peters Bildschirmfoto, 2026-09-27) --------------- #
+
+def test_the_mine_base_is_a_rest_area_but_the_nodes_are_not() -> None:
+    """Die Basis teilt sich die Kennung ``Delve_Main`` mit dem ganzen
+    Bergwerk — am Namen allein ist sie nicht zu erkennen. Peters
+    Bildschirmfoto nennt beide Zahlen nebeneinander: "Azurite Mine ·
+    Monster Level: 34 · Delve Depth: 0". Dort stehen Niko, der
+    Voltaxic-Generator, eine Truhe und der einzige Wegpunkt des
+    Bergwerks; gestorben ist dort in 44 Besuchen nie jemand."""
+    assert is_rest_area("Delve_Main", 34)
+    assert not is_rest_area("Delve_Main", 72)
+    assert not is_rest_area("Delve_Main", 47)
+
+
+def test_without_a_level_the_mine_counts_as_a_combat_zone() -> None:
+    """Fehlt die DEBUG-Zeile mit dem Level, gilt die alte Regel: lieber
+    eine Ruhepause mitzaehlen als eine Kampfzone uebersehen."""
+    assert not is_rest_area("Delve_Main")
+
+
+def test_the_level_does_not_leak_into_other_zones() -> None:
+    """Ein Hideout bleibt eine Ruhezone, egal welche Stufe daneben
+    steht, und eine Karte auf Stufe 34 bleibt eine Kampfzone."""
+    assert is_rest_area("HideoutSlum", 34)
+    assert is_rest_area("HideoutSlum", 72)
+    assert not is_rest_area("MapWorldsBazaar", 34)

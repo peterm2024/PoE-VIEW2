@@ -141,15 +141,31 @@ sit inside one of them the log does not say. The recorded area level is
 the depth at load time; whatever was delved onward inside that chunk
 carries the same number.
 
-The area level is a coarse stand-in for depth anyway: of 149 consecutive
-load pairs inside the mine, 52 % have the *same* area level as the one
-before, so several depths share a level and the depth cannot be read
-back from it.
+**The number in the log is the monster level, not the depth**, and the
+two drift apart. Read off the in-game Subterranean Chart:
 
-**Level 34 is not a depth, it is the mine entrance.** Four signals, all
-from the same log: it is entered from a hideout or a town in 42 of 44
-cases while all 184 entries at other levels come from inside the mine;
-the median stay is 21 seconds against 256; nobody ever died there (0
+| Delve depth | Monster level |
+|---|---|
+| 0 (the base) | 34 |
+| 24 | 57 |
+| 53 | 72 |
+
+23 levels over the first 24 depths, 15 more over the next 29 — the curve
+flattens, so deeper down several depths share one monster level. That
+shows in the log: of 149 consecutive load pairs inside the mine, 52 %
+carry the *same* level as the one before. **The depth appears nowhere in
+`Client.txt`** and cannot be recovered from the level.
+
+**Level 34 is not a depth, it is the mine entrance.** The game says so
+outright — standing at the base, the info panel reads `Azurite Mine ·
+Monster Level: 34 · Delve Depth: 0`. That is where Niko, the Voltaxic
+Generator, the Subterranean Chart and the mine's **only waypoint** are;
+individual nodes are picked from the chart, not travelled to, so anyone
+entering the mine from outside arrives here.
+
+The log agrees on all four counts: entered from a hideout or a town in
+42 of 44 cases while all 184 entries at other levels come from inside
+the mine; median stay 21 seconds against 256; nobody ever died there (0
 deaths against 14); and it is the lowest level the mine ever reports.
 Anything counting Delve content should keep it apart — it is a vendor
 camp with the area id of a mine.

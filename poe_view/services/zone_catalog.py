@@ -115,7 +115,9 @@ def categorise(area_id: str) -> str:
     kennung = (area_id or "").strip()
     if not kennung:
         return SPECIAL
-    if is_rest_area(kennung):
+    if is_rest_area(kennung):        # ohne Level: die Minen-Basis
+        # bleibt in der Delve-Gruppe, wo sie hingehört — die
+        # Tabelle trennt sie ohnehin als eigene Zeile (§LevelStats).
         return REST
     if "labyrinth" in kennung.lower():
         return LABYRINTH

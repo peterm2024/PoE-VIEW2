@@ -6,6 +6,14 @@ nach [SemVer](https://semver.org/lang/de/).
 
 ## [Unveröffentlicht]
 
+### Neu
+
+- **Spalten-Filter in der Zonen-Tabelle**, wie in der Item-Liste:
+  Rechtsklick auf einen Spaltenkopf, dann ein Ausdruck wie `>=70`,
+  `<45`, `=Cells` oder einfach ein Textstück. Das Eingabefeld
+  vervollständigt über die Werte, die in dieser Spalte tatsächlich
+  vorkommen; eine gefilterte Spalte trägt 🔍 im Kopf.
+
 ### Geändert
 
 - **Die Zonen-Tabelle ist ein Baum.** Jede Zone lässt sich aufklappen
@@ -18,6 +26,12 @@ nach [SemVer](https://semver.org/lang/de/).
   Tier-9-Runde. Die Tier-Spalte zeigt entsprechend die Spanne
   ("4–5") statt einer einzelnen Zahl, und der CSV-Export schreibt eine
   Zeile je Stufe.
+- **Die Minen-Basis zählt nicht mehr als Kampfzone.** Sie teilt sich die
+  Gebiets-Kennung mit dem ganzen Bergwerk und ließ sich deshalb nicht am
+  Namen erkennen — wohl aber am Monsterlevel: Das Spiel zeigt dort
+  `Delve Depth: 0`, und dort stehen Niko, die Karte und der einzige
+  Wegpunkt des Bergwerks. In 44 Besuchen ist dort nie jemand gestorben.
+  Ihre Zeit zählt damit nicht mehr im Nenner der Erfahrungs-Rate.
 
 ## [0.16.0] - 2026-09-27
 

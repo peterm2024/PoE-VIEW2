@@ -532,3 +532,112 @@ def test_children_sort_by_level_under_the_group_column(qapp) -> None:
     assert [proxy.data(proxy.index(z, _LEVEL_COL, eltern),
                        Qt.ItemDataRole.DisplayRole)
             for z in range(proxy.rowCount(eltern))] == ["72", "71"]
+
+
+# --- Excel-artiger Spaltenfilter (Peter, 2026-09-27) ------------------- #
+
+def _proxy_mit(zonen, liga=ALLFLAME):
+    model = ZoneTreeModel(zonen, league=liga)
+    proxy = ZoneFilterProxy()
+    proxy.setSourceModel(model)
+    return model, proxy
+
+
+def test_a_column_filter_narrows_to_matching_rows(qapp) -> None:
+    model, proxy = _proxy_mit(beispiel())
+    vorher = proxy.rowCount()
+
+    proxy.set_column_filter(_NAME_COL, "atoll")
+
+    assert proxy.rowCount() == 1
+    assert proxy.data(proxy.index(0, _NAME_COL),
+                      Qt.ItemDataRole.DisplayRole) == "Atoll"
+    proxy.set_column_filter(_NAME_COL, "")
+    assert proxy.rowCount() == vorher
+
+
+def test_comparison_expressions_work_on_numbers(qapp) -> None:
+    """Dieselben Mini-Ausdruecke wie in der Item-Liste: ">=20", "<45"."""
+    model, proxy = _proxy_mit(beispiel())
+
+    proxy.set_column_filter(_LEVEL_COL, ">=70")
+    namen = {proxy.data(proxy.index(z, _NAME_COL), Qt.ItemDataRole.DisplayRole)
+             for z in range(proxy.rowCount())}
+    assert namen == {"Atoll"}            # 77; Cells 68, Aqueduct 61, Hideout 60
+
+    proxy.set_column_filter(_LEVEL_COL, "<62")
+    namen = {proxy.data(proxy.index(z, _NAME_COL), Qt.ItemDataRole.DisplayRole)
+             for z in range(proxy.rowCount())}
+    assert namen == {"The Blood Aqueduct", "Backstreet Hideout"}
+
+
+def test_two_column_filters_combine(qapp) -> None:
+    model, proxy = _proxy_mit(beispiel())
+
+    proxy.set_column_filter(0, MAP)
+    proxy.set_column_filter(_LEVEL_COL, "<70")
+
+    assert proxy.rowCount() == 1
+    assert proxy.data(proxy.index(0, _NAME_COL),
+                      Qt.ItemDataRole.DisplayRole) == "Cells"
+
+
+def test_an_active_column_filter_is_visible_in_the_header(qapp) -> None:
+    """Sonst sucht man spaeter, warum die Tabelle halb leer ist."""
+    model, proxy = _proxy_mit(beispiel())
+    assert "🔍" not in proxy.headerData(_NAME_COL, Qt.Orientation.Horizontal,
+                                        Qt.ItemDataRole.DisplayRole)
+
+    proxy.set_column_filter(_NAME_COL, "atoll")
+    assert proxy.headerData(_NAME_COL, Qt.Orientation.Horizontal,
+                            Qt.ItemDataRole.DisplayRole).endswith("🔍")
+
+    proxy.clear_column_filters()
+    assert proxy.filtered_columns() == set()
+    assert "🔍" not in proxy.headerData(_NAME_COL, Qt.Orientation.Horizontal,
+                                        Qt.ItemDataRole.DisplayRole)
+
+
+def test_children_stay_with_a_parent_that_passes_the_column_filter(qapp) -> None:
+    """Der Filter arbeitet auf Gebieten, nicht auf Stufen — sonst zeigte
+    die Elternzeile Zahlen, die nicht mehr zu ihren Kindern passen."""
+    model, proxy = _proxy_mit(beispiel() + [_bazaar()])
+
+    proxy.set_column_filter(_NAME_COL, "bazaar")
+
+    assert proxy.rowCount() == 1
+    assert proxy.rowCount(proxy.index(0, 0)) == 2
+
+
+def test_the_suggestions_only_list_values_of_the_shown_league(qapp) -> None:
+    """Ein Vorschlag, der auf nichts passt, ist schlimmer als keiner."""
+    model = ZoneTreeModel(beispiel(), league=ALLFLAME)
+    assert model.distinct_values(_NAME_COL) == [
+        "Atoll", "Backstreet Hideout", "Cells", "The Blood Aqueduct"]
+
+    model.set_league(MIRAGE)
+    assert model.distinct_values(_NAME_COL) == ["Atoll", "The Blood Aqueduct"]
+    # Und die Level-Spalte zeigt die Werte DIESER Liga (Atoll 70, nicht 77).
+    assert "70" in model.distinct_values(_LEVEL_COL)
+    assert "77" not in model.distinct_values(_LEVEL_COL)
+
+
+def test_the_dialog_builds_a_filter_edit_with_the_columns_values(qapp) -> None:
+    """Das Eingabefeld aus dem Spaltenkopf-Menue — gebaut ohne den
+    blockierenden ``QMenu.exec()``, sonst waere es nicht pruefbar."""
+    from poe_view.ui.zone_table import ZoneTableDialog
+
+    dialog = ZoneTableDialog(beispiel(), league=ALLFLAME)
+    try:
+        edit = dialog.build_column_filter_edit(_NAME_COL)
+        assert edit.completer() is not None
+        assert "Atoll" in edit._suggestions
+
+        dialog.apply_column_filter(_NAME_COL, "atoll")
+        assert dialog._proxy.rowCount() == 1
+        assert "1 of 4 zones" in dialog._count_label.text()
+
+        dialog._clear_column_filters()
+        assert dialog._proxy.rowCount() == 4
+    finally:
+        dialog.deleteLater()

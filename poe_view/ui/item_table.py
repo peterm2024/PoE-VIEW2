@@ -76,6 +76,7 @@ from PySide6.QtGui import (QBrush, QColor, QFont, QGuiApplication, QPalette,
 
 from poe_view.api.models import (Item, gem_level, gem_quality, map_tier,
                                  mod_blocks, req_attribute, req_level)
+from poe_view.ui.column_filter import expression_matches, first_number
 from poe_view.api.ninja import PriceIndex
 from poe_view.ui.theme import (OTHER_TYPE, RARITY_COLORS, ROW_CHANGED_COLOR,
                                ROW_GEM_LEVELED_COLOR, blend, dimmed_text)
@@ -134,13 +135,9 @@ def format_chaos_value(chaos: float, price_index: PriceIndex | None) -> str:
 # "113" vor "56" (Stringvergleich). Der Proxy nutzt diese Rolle als sortRole.
 NUMERIC_SORT_ROLE = Qt.ItemDataRole.UserRole
 
-_NUM_RE = re.compile(r"-?\d+(?:[.,]\d+)?")
-
-
-def _first_number(text: str) -> float | None:
-    """Erste Zahl im Anzeigetext ("+20%" → 20.0, "–" → None)."""
-    m = _NUM_RE.search(text)
-    return float(m.group().replace(",", ".")) if m else None
+# Der Spalten-Filter wohnt seit 2026-09-27 in ``ui/column_filter`` —
+# die Zonen-Tabelle braucht ihn genauso (§column_filter).
+_first_number = first_number
 
 
 # Feld-Suchen aus der Spiel-eigenen Truhensuche ("Search for item level by
@@ -601,33 +598,6 @@ def compile_search(text: str, regex_enabled: bool) -> SearchQuery:
     return SearchQuery(terms)
 
 
-# Vergleichsoperator am Anfang eines Spalten-Filter-Ausdrucks
-_OP_RE = re.compile(r"^\s*(<=|>=|!=|<>|<|>|=)\s*(.+)$")
-
-
-def _expression_matches(expr: str, cell_text: str) -> bool:
-    """Excel-artige Mini-Ausdrücke: ">=20", "<45", "=Beach Map", sonst
-    Teilstring. Numerisch wird verglichen, sobald Operand und Zelle eine
-    Zahl hergeben ("+20%" zählt als 20) — sonst Textvergleich; Zellen ohne
-    Zahl ("–") fallen bei <,>,<=,>= bewusst raus (wie in Excel)."""
-    m = _OP_RE.match(expr)
-    if not m:
-        return expr.lower() in cell_text.lower()
-    op, operand = m.group(1), m.group(2).strip()
-    operand_num = _first_number(operand)
-    cell_num = _first_number(cell_text)
-    if op in ("=", "!=", "<>"):
-        if operand_num is not None and cell_num is not None:
-            equal = cell_num == operand_num
-        else:
-            equal = cell_text.strip().lower() == operand.lower()
-        return equal if op == "=" else not equal
-    if operand_num is None or cell_num is None:
-        return False
-    return {"<": cell_num < operand_num, "<=": cell_num <= operand_num,
-            ">": cell_num > operand_num, ">=": cell_num >= operand_num}[op]
-
-
 class ItemFilterProxy(QSortFilterProxyModel):
     """Filtert lokal über Name + Typ + Tab + Mods + Properties — kostet
     bewusst keine API-Calls. Zusätzlich je Spalte ein optionaler
@@ -747,7 +717,7 @@ class ItemFilterProxy(QSortFilterProxyModel):
         if _type_key(item.frameType) in self._hidden_types:
             return False
         for col, expr in self._column_filters.items():
-            if not _expression_matches(expr, model.display_text(row, col)):
+            if not expression_matches(expr, model.display_text(row, col)):
                 return False
         text = self._search_text.strip()
         if not text:

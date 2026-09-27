@@ -109,9 +109,37 @@ _REST_AREA_PREFIXES = ("hideout",)
 _REST_AREA_SUFFIXES = ("_town", "hub")
 _REST_AREA_IDS = ("labyrinth_airlock", "kalguuransettlersleague")
 
+# Die Minen-Basis teilt sich die Kennung ``Delve_Main`` mit dem ganzen
+# Bergwerk — am Namen allein ist sie nicht zu erkennen, nur am
+# Monsterlevel. Peters Bildschirmfoto der Basis nennt beide Zahlen
+# nebeneinander:
+#
+#   Azurite Mine · Monster Level: 34 · Delve Depth: 0
+#
+# Tiefe 0 ist die Basis: Niko, der Voltaxic-Generator, die Subterranean
+# Chart, eine Truhe und der EINZIGE Wegpunkt des Bergwerks. Auf einen
+# Knoten kann man nicht reisen, den wählt man auf der Karte — wer von
+# außen ins Bergwerk kommt, kommt deshalb immer hier heraus.
+#
+# Die 34 ist eine Spielkonstante (die Stufe von Tiefe 0), nicht etwas
+# Charakterabhängiges. An Peters Log bestätigt: 44 Eintritte mit dieser
+# Stufe, davon 42 aus Hideout oder Stadt, während alle 184 Eintritte
+# anderer Stufen aus dem Bergwerk selbst kommen; Median-Aufenthalt 21 s
+# gegen 256 s, und in 44 Besuchen ist dort nie jemand gestorben (gegen
+# 14 Tode in den Knoten). Ändert GGG die Zahl, hört die Basis auf, als
+# Ruhezone zu gelten — sichtbar daran, dass in der Zonen-Tabelle wieder
+# eine Delve-Zeile mit 0 Toden und Sekunden-Aufenthalten auftaucht.
+_DELVE_AREA_ID = "delve_main"
+_DELVE_BASE_LEVEL = 34
 
-def is_rest_area(area_id: str) -> bool:
+
+def is_rest_area(area_id: str, level: int = 0) -> bool:
     """Eine Zone, in der es keine Erfahrung zu holen gibt (§_AREA_LINE).
+
+    ``level`` ist der Gebietslevel aus derselben Log-Zeile. Er wird nur
+    für die Minen-Basis gebraucht (§_DELVE_BASE_LEVEL) — überall sonst
+    reicht die Kennung, und ohne ihn verhält sich die Funktion wie
+    zuvor.
 
     Ohne Kennung (leerer String) gilt eine Zone als Kampfzone: Das ist
     das Verhalten von vor dieser Unterscheidung, und eine übersehene
@@ -121,6 +149,8 @@ def is_rest_area(area_id: str) -> bool:
     kennung = area_id.strip().lower()
     if not kennung:
         return False
+    if kennung == _DELVE_AREA_ID:
+        return level == _DELVE_BASE_LEVEL
     return (kennung.startswith(_REST_AREA_PREFIXES)
             or kennung.endswith(_REST_AREA_SUFFIXES)
             or kennung in _REST_AREA_IDS)
@@ -221,7 +251,7 @@ class ZoneStay(NamedTuple):
 
     @property
     def resting(self) -> bool:
-        return is_rest_area(self.area_id)
+        return is_rest_area(self.area_id, self.level)
 
 
 def zone_stays(log_path: Path, since: datetime) -> list[ZoneStay]:

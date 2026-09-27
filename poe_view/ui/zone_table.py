@@ -41,10 +41,12 @@ from pathlib import Path
 from PySide6.QtCore import (QAbstractItemModel, QModelIndex,
                             QSortFilterProxyModel, Qt)
 from PySide6.QtWidgets import (QComboBox, QDialog, QFileDialog, QHBoxLayout,
-                               QHeaderView, QLabel, QLineEdit, QMessageBox,
-                               QPushButton, QTreeView, QVBoxLayout, QWidget)
+                               QHeaderView, QLabel, QLineEdit, QMenu,
+                               QMessageBox, QPushButton, QTreeView,
+                               QVBoxLayout, QWidget, QWidgetAction)
 
 from poe_view.services.csv_export import sanitize_filename
+from poe_view.ui.column_filter import build_filter_edit, expression_matches
 from poe_view.services.experience import experience_multiplier
 from poe_view.services.league_log import UNKNOWN
 from poe_view.services.zone_catalog import (CATEGORIES, NO_LEVEL,
@@ -176,6 +178,27 @@ class ZoneTreeModel(QAbstractItemModel):
                 and orientation == Qt.Orientation.Horizontal:
             return COLUMNS[section]
         return None
+
+    def display_text(self, row: int, col: int) -> str:
+        """Der Text, den die oberste Ebene in dieser Zelle zeigt —
+        Grundlage des Spalten-Filters (§column_filter). Bewusst der
+        ANGEZEIGTE Text und nicht der Rohwert: Gefiltert wird, was man
+        sieht, sonst passt "4–5" im Feld auf nichts."""
+        wert = self._zone_data(self.record_at(row), col,
+                               Qt.ItemDataRole.DisplayRole)
+        return wert if isinstance(wert, str) else ""
+
+    def distinct_values(self, col: int) -> list[str]:
+        """Die in dieser Spalte tatsächlich vorkommenden Werte, für die
+        Autovervollständigung. Nur die Gebiete der laufenden Liga — was
+        anderswo vorkam, ist hier nicht filterbar und stünde als
+        Vorschlag, der auf nichts passt."""
+        werte = {self.display_text(zeile, col)
+                 for zeile in range(len(self._records))
+                 if self._records[zeile].seen_in(self._league)}
+        werte.discard("")
+        werte.discard("–")
+        return sorted(werte)
 
     def record_at(self, row: int) -> ZoneRecord | None:
         """Das Gebiet der obersten Ebene in dieser Zeile."""
@@ -321,6 +344,45 @@ class ZoneFilterProxy(QSortFilterProxyModel):
         # "blood\ aqueduct" — und die Aufteilung in Wörter fände damit
         # nichts mehr. Dieselbe Lösung wie in ``ItemFilterProxy``.
         self._words: list[str] = []
+        self._column_filters: dict[int, str] = {}
+
+    # --- Spalten-Filter (Peter, 2026-09-27: "Bitte auch hier nochmal so
+    # eine Art Excel-Filter einbauen ... sowas haben wir ja schon in der
+    # Item-List") — dieselben Methodennamen wie in ``ItemFilterProxy``,
+    # damit wer eine kennt, die andere auch kennt.
+
+    def set_column_filter(self, col: int, expr: str) -> None:
+        expr = (expr or "").strip()
+        self.beginFilterChange()
+        if expr:
+            self._column_filters[col] = expr
+        else:
+            self._column_filters.pop(col, None)
+        self.endFilterChange()
+        self.headerDataChanged.emit(Qt.Orientation.Horizontal, col, col)
+
+    def column_filter(self, col: int) -> str:
+        return self._column_filters.get(col, "")
+
+    def filtered_columns(self) -> set[int]:
+        return set(self._column_filters)
+
+    def clear_column_filters(self) -> None:
+        cols = list(self._column_filters)
+        self.beginFilterChange()
+        self._column_filters.clear()
+        self.endFilterChange()
+        for col in cols:
+            self.headerDataChanged.emit(Qt.Orientation.Horizontal, col, col)
+
+    def headerData(self, section, orientation,  # noqa: N802 (Qt-API)
+                   role=Qt.ItemDataRole.DisplayRole):
+        value = super().headerData(section, orientation, role)
+        if (role == Qt.ItemDataRole.DisplayRole
+                and orientation == Qt.Orientation.Horizontal
+                and section in self._column_filters and value):
+            return f"{value} 🔍"  # aktiver Spalten-Filter sichtbar im Header
+        return value
 
     def setFilterFixedString(self, text: str) -> None:  # noqa: N802 (Qt-API)
         self._words = text.lower().split()
@@ -387,6 +449,9 @@ class ZoneFilterProxy(QSortFilterProxyModel):
             return False
         if self._group and record.category != self._group:
             return False
+        for spalte, ausdruck in self._column_filters.items():
+            if not expression_matches(ausdruck, model.display_text(row, spalte)):
+                return False
         if not self._words:
             return True
         heuhaufen = f"{record.name} {record.area_id} {record.category} " \
@@ -510,6 +575,8 @@ class ZoneTableDialog(QDialog):
         # Kinder, die Fathomless Depths ebenso viele (§Modul-Kopf).
         self._view.setExpandsOnDoubleClick(True)
         kopfzeile = self._view.header()
+        kopfzeile.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        kopfzeile.customContextMenuRequested.connect(self._on_header_menu)
         kopfzeile.setSectionResizeMode(_NAME_COL, QHeaderView.ResizeMode.Stretch)
         kopfzeile.setSectionResizeMode(_ID_COL, QHeaderView.ResizeMode.Stretch)
         for spalte in (_GROUP_COL, _TIER_COL, _LEVEL_COL, _VISITS_COL,
@@ -520,6 +587,41 @@ class ZoneTableDialog(QDialog):
         aufbau = QVBoxLayout(self)
         aufbau.addLayout(kopf)
         aufbau.addWidget(self._view)
+        self._update_count()
+
+    def build_column_filter_edit(self, col: int):
+        """Eigene Methode statt inline im Menü, damit sie ohne den
+        blockierenden ``QMenu.exec()`` testbar ist — dieselbe Trennung
+        wie in ``MainWindow._build_column_filter_edit``."""
+        return build_filter_edit(self._proxy.column_filter(col),
+                                 self._model.distinct_values(col))
+
+    def apply_column_filter(self, col: int, expr: str) -> None:
+        self._proxy.set_column_filter(col, expr)
+        self._update_count()
+
+    def _on_header_menu(self, pos) -> None:
+        kopf = self._view.header()
+        spalte = kopf.logicalIndexAt(pos)
+        if spalte < 0:
+            return
+        menu = QMenu(self._view)
+        titel = menu.addAction(f"Filter {COLUMNS[spalte]}…")
+        titel.setEnabled(False)
+        edit = self.build_column_filter_edit(spalte)
+        edit.returnPressed.connect(
+            lambda c=spalte, e=edit, m=menu: (self.apply_column_filter(c, e.text()),
+                                              m.close()))
+        feld = QWidgetAction(menu)
+        feld.setDefaultWidget(edit)
+        menu.addAction(feld)
+        if self._proxy.filtered_columns():
+            loeschen = menu.addAction("✕ Clear all column filters")
+            loeschen.triggered.connect(self._clear_column_filters)
+        menu.exec(kopf.mapToGlobal(pos))
+
+    def _clear_column_filters(self) -> None:
+        self._proxy.clear_column_filters()
         self._update_count()
 
     def _on_group_changed(self) -> None:
