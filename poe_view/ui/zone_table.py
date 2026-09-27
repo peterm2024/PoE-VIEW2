@@ -9,6 +9,22 @@ Die Daten kommen aus ``services/zone_catalog`` (dort steht, warum aus
 der Client.txt und nicht aus einer mitgelieferten Liste). Diese Datei
 ist nur die Anzeige.
 
+**Warum ein Baum und keine flache Liste** (Peter, 2026-09-27): Eine Zone
+hat keine Kartenstufe, ein BESUCH hat eine — seine Karten sind
+nummerierte Items ("Map (Tier 4)") mit dem Text *"Travel to a Map of
+this tier or lower"*, der Gebietslevel kommt also vom Item. Bazaar
+erschien mit Tier 4 auf Level 71 und mit Tier 5 auf Level 72; Tode und
+Verweildauer darüber zu mitteln löscht genau das, was interessiert.
+
+Peters erster Vorschlag war eine Checkbox "zusammen" mit zwei Modi.
+Der Baum ist dieselbe Idee ohne Schalter: Die Zeile zeigt zugeklappt die
+Zusammenfassung, aufgeklappt eine Kindzeile je Stufe. Und er löst nebenbei
+ein Problem, an dem die Checkbox gescheitert wäre — das Azurite Mine hat
+37 Stufen (Delve-Tiefe) und die Fathomless Depths ebenso viele. Global
+aufgeklappt läge die eine interessante Karten-Zeile unter 70 Zeilen
+Rauschen; zugeklappt stört sie niemanden. Kinder gibt es deshalb nur,
+wo es mehr als eine Stufe gibt.
+
 **Warum eine Gruppen-Box und keine vier Abschnitte untereinander:** Eine
 sortierbare Tabelle verträgt keine Zwischenüberschriften — der erste
 Klick auf einen Spaltenkopf würde sie zerreißen. Die Gruppe steht
@@ -22,16 +38,18 @@ from __future__ import annotations
 import csv
 from pathlib import Path
 
-from PySide6.QtCore import (QModelIndex, QSortFilterProxyModel, Qt,
-                            QAbstractTableModel)
+from PySide6.QtCore import (QAbstractItemModel, QModelIndex,
+                            QSortFilterProxyModel, Qt)
 from PySide6.QtWidgets import (QComboBox, QDialog, QFileDialog, QHBoxLayout,
                                QHeaderView, QLabel, QLineEdit, QMessageBox,
-                               QPushButton, QTableView, QVBoxLayout, QWidget)
+                               QPushButton, QTreeView, QVBoxLayout, QWidget)
 
 from poe_view.services.csv_export import sanitize_filename
 from poe_view.services.experience import experience_multiplier
 from poe_view.services.league_log import UNKNOWN
-from poe_view.services.zone_catalog import CATEGORIES, ZoneRecord
+from poe_view.services.zone_catalog import (CATEGORIES, NO_LEVEL,
+                                            TIER_CATEGORIES, ZoneRecord,
+                                            map_tier_from_level)
 
 
 def _dauer_text(sekunden: float) -> str:
@@ -75,7 +93,17 @@ COLUMNS = ("Group", "Zone", "Tier", "Monster Level", "Visits", "Deaths",
 NUMERIC_SORT_ROLE = Qt.ItemDataRole.UserRole + 1
 
 
-class ZoneTableModel(QAbstractTableModel):
+class ZoneTreeModel(QAbstractItemModel):
+    """Oberste Ebene: ein Gebiet. Darunter: eine Zeile je Gebietslevel,
+    aber nur, wenn es mehr als einen gibt (§Modul-Kopf).
+
+    Die Eltern-Kind-Beziehung steckt in der ``internalId``: 0 heißt
+    "oberste Ebene", jede andere Zahl ist die um eins erhöhte Zeile des
+    Eltern-Gebiets. Kein eigener Knoten-Typ, weil der Baum genau zwei
+    Ebenen tief ist und die Kinder nichts halten, was nicht schon im
+    ``ZoneRecord`` steht — ein Knotenbaum daneben wäre ein zweiter
+    Datenbestand, der mit dem ersten aus dem Tritt geraten kann."""
+
     def __init__(self, records: list[ZoneRecord], character_level: int = 0,
                  league: str | None = None) -> None:
         super().__init__()
@@ -104,14 +132,44 @@ class ZoneTableModel(QAbstractTableModel):
             return
         self._character_level = level
         if self._records:
-            self.dataChanged.emit(self.index(0, _LEVEL_COL),
-                                  self.index(len(self._records) - 1, _LEVEL_COL))
+            self.dataChanged.emit(self.index(0, _LEVEL_COL, QModelIndex()),
+                                  self.index(len(self._records) - 1, _LEVEL_COL,
+                                             QModelIndex()))
+
+    # --- Baumgerüst ---------------------------------------------------- #
+
+    def levels_of(self, row: int) -> list[int]:
+        """Die Stufen, die unter diesem Gebiet als Kinder erscheinen —
+        leer bei nur einer, denn eine einzelne Kindzeile wiederholte
+        bloß ihre Elternzeile."""
+        record = self.record_at(row)
+        if record is None:
+            return []
+        stufen = sorted(record.stats(self._league).by_level)
+        return stufen if len(stufen) > 1 else []
+
+    def index(self, row: int, column: int,
+              parent: QModelIndex = QModelIndex()) -> QModelIndex:
+        if not self.hasIndex(row, column, parent):
+            return QModelIndex()
+        if not parent.isValid():
+            return self.createIndex(row, column, 0)
+        return self.createIndex(row, column, parent.row() + 1)
+
+    def parent(self, index: QModelIndex) -> QModelIndex:  # noqa: A003 (Qt-API)
+        if not index.isValid() or index.internalId() == 0:
+            return QModelIndex()
+        return self.createIndex(int(index.internalId()) - 1, 0, 0)
 
     def rowCount(self, parent: QModelIndex = QModelIndex()) -> int:
-        return 0 if parent.isValid() else len(self._records)
+        if not parent.isValid():
+            return len(self._records)
+        if parent.internalId() != 0:          # Kinder haben keine Kinder
+            return 0
+        return len(self.levels_of(parent.row()))
 
     def columnCount(self, parent: QModelIndex = QModelIndex()) -> int:
-        return 0 if parent.isValid() else len(COLUMNS)
+        return len(COLUMNS)
 
     def headerData(self, section: int, orientation, role):
         if role == Qt.ItemDataRole.DisplayRole \
@@ -120,16 +178,41 @@ class ZoneTableModel(QAbstractTableModel):
         return None
 
     def record_at(self, row: int) -> ZoneRecord | None:
+        """Das Gebiet der obersten Ebene in dieser Zeile."""
         return self._records[row] if 0 <= row < len(self._records) else None
 
+    def record_for(self, index: QModelIndex) -> ZoneRecord | None:
+        """Das Gebiet zu einem beliebigen Index — bei einem Kind das des
+        Eltern-Gebiets."""
+        if not index.isValid():
+            return None
+        if index.internalId() == 0:
+            return self.record_at(index.row())
+        return self.record_at(int(index.internalId()) - 1)
+
+    def level_for(self, index: QModelIndex) -> int | None:
+        """Der Gebietslevel, für den diese Kindzeile steht — ``None`` für
+        eine Zeile der obersten Ebene."""
+        if not index.isValid() or index.internalId() == 0:
+            return None
+        stufen = self.levels_of(int(index.internalId()) - 1)
+        return stufen[index.row()] if 0 <= index.row() < len(stufen) else None
+
     def data(self, index: QModelIndex, role):
-        record = self._records[index.row()]
-        col = index.column()
+        record = self.record_for(index)
+        if record is None:
+            return None
+        level = self.level_for(index)
+        return (self._child_data(record, level, index.column(), role)
+                if level is not None
+                else self._zone_data(record, index.column(), role))
+
+    def _zone_data(self, record: ZoneRecord, col: int, role):
+        """Die zusammengefasste Zeile eines Gebiets."""
         zahlen = record.stats(self._league)
-        tier = record.tier(self._league)
+        tier = record.tier_text(self._league)
         if role == Qt.ItemDataRole.DisplayRole:
-            return (record.category, record.name or "–",
-                    str(tier) if tier else "",
+            return (record.category, record.name or "–", tier,
                     record.level_text(self._league),
                     str(zahlen.visits),
                     str(zahlen.deaths) if zahlen.deaths else "",
@@ -140,7 +223,7 @@ class ZoneTableModel(QAbstractTableModel):
             # Leere Zellen ganz nach unten statt vorne: Eine Karte ohne
             # Tier ist keine Karte mit Tier 0.
             if col == _TIER_COL:
-                return tier if tier else -1
+                return record.tier(self._league) or -1
             if col == _LEVEL_COL:
                 return record.max_level(self._league)
             if col == _VISITS_COL:
@@ -149,13 +232,54 @@ class ZoneTableModel(QAbstractTableModel):
                 return zahlen.deaths
             if col == _TIME_COL:
                 return zahlen.average_seconds
-            return self.data(index, Qt.ItemDataRole.DisplayRole).lower()
+            return (self._zone_data(record, col, Qt.ItemDataRole.DisplayRole)
+                    or "").lower()
         if role == Qt.ItemDataRole.ToolTipRole and col == _LEVEL_COL:
             return self._level_tooltip(record)
         if role == Qt.ItemDataRole.ToolTipRole and col == _TIME_COL:
             return (f"{zahlen.visits} visits, "
                     f"{_dauer_text(zahlen.seconds) or '0 s'} in total"
                     if zahlen.seconds else None)
+        return None
+
+    def _child_data(self, record: ZoneRecord, level: int, col: int, role):
+        """Eine Kindzeile: dieselben Spalten, aber nur die Zahlen DIESER
+        Stufe. Gruppe, Name und Kennung bleiben leer — sie stünden
+        wortgleich in der Elternzeile darüber, und die Einrückung sagt
+        bereits, wozu die Zeile gehört."""
+        zahlen = record.stats(self._league).by_level.get(level)
+        if zahlen is None:
+            return None
+        tier = (map_tier_from_level(level)
+                if record.category in TIER_CATEGORIES else None)
+        if role == Qt.ItemDataRole.DisplayRole:
+            return ("", "", str(tier) if tier else "",
+                    str(level) if level != NO_LEVEL else "–",
+                    str(zahlen.visits),
+                    str(zahlen.deaths) if zahlen.deaths else "",
+                    _dauer_text(zahlen.average_seconds),
+                    zahlen.last_seen.replace("T", " "), "")[col]
+        if role == NUMERIC_SORT_ROLE:
+            if col == _TIER_COL:
+                return tier if tier else -1
+            if col == _LEVEL_COL:
+                return level
+            if col == _VISITS_COL:
+                return zahlen.visits
+            if col == _DEATHS_COL:
+                return zahlen.deaths
+            if col == _TIME_COL:
+                return zahlen.average_seconds
+            return level
+        if role == Qt.ItemDataRole.ToolTipRole and col == _TIME_COL:
+            return (f"{zahlen.visits} visits, "
+                    f"{_dauer_text(zahlen.seconds) or '0 s'} in total"
+                    if zahlen.seconds else None)
+        if role == Qt.ItemDataRole.ToolTipRole and col == _LEVEL_COL \
+                and self._character_level and level != NO_LEVEL:
+            anteil = experience_multiplier(self._character_level, level)
+            return (f"At character level {self._character_level}, level "
+                    f"{level} yields {anteil:.1%} experience")
         return None
 
     def _level_tooltip(self, record: ZoneRecord) -> str | None:
@@ -212,9 +336,17 @@ class ZoneFilterProxy(QSortFilterProxyModel):
         würde sie zerreißen), aber genau so sieht sie beim Öffnen aus.
         Alphabetisch sortiert stünde stattdessen "Map, Rest, Special,
         Story" da — richtig sortiert und trotzdem verkehrt herum."""
+        model = self.sourceModel()
+        if left.parent().isValid():
+            # Kindzeilen sind Stufen. In der Gruppen-Spalte stehen sie
+            # alle leer — ohne diesen Zweig wäre ihre Reihenfolge dem
+            # Zufall überlassen, und ausgerechnet die Stufe ist das
+            # einzige, wonach man sie ordnen will.
+            if left.column() != _GROUP_COL:
+                return super().lessThan(left, right)
+            return (model.level_for(left) or 0) < (model.level_for(right) or 0)
         if left.column() != _GROUP_COL:
             return super().lessThan(left, right)
-        model = self.sourceModel()
         eins, zwei = model.record_at(left.row()), model.record_at(right.row())
         if eins is None or zwei is None:
             return super().lessThan(left, right)
@@ -236,6 +368,13 @@ class ZoneFilterProxy(QSortFilterProxyModel):
         self.endFilterChange()
 
     def filterAcceptsRow(self, row: int, parent: QModelIndex) -> bool:
+        # Kindzeilen folgen ihrem Gebiet: Ist das Gebiet gefiltert, sind
+        # seine Stufen ohnehin nicht zu sehen; ist es sichtbar, gehören
+        # alle seine Stufen dazu. Eine Stufe für sich zu filtern hieße,
+        # eine Zone zu zeigen, deren Zahlen nicht mehr zu ihren Kindern
+        # passen.
+        if parent.isValid():
+            return True
         model = self.sourceModel()
         record = model.record_at(row)
         if record is None:
@@ -261,34 +400,36 @@ def export_zones(path: str, records: list[ZoneRecord],
     (``services/csv_export``), damit Excel sie unter deutscher Locale
     ohne Text-Import öffnet.
 
-    Anders als die Anzeige schreibt die Datei die Level EINZELN
-    (``68;70;77``) statt als Spanne und die Dauer in Sekunden statt als
-    "7:12": Eine Tabellenkalkulation soll damit rechnen können.
+    **Eine Zeile je Gebietslevel**, nicht je Gebiet — dieselbe Auflösung,
+    die der Baum aufgeklappt zeigt. Die Zusammenfassung ließe sich aus
+    diesen Zeilen jederzeit bilden, umgekehrt nicht: Aus "Bazaar, 6
+    Besuche, 71–72" ist nicht mehr herauszuholen, wie viele davon auf
+    welcher Stufe lagen. Die Dauer steht in Sekunden statt als "7:12",
+    damit eine Tabellenkalkulation damit rechnen kann.
 
     Über alle Ligen hinweg (``league=None``) bekommt jede Liga ihre
-    EIGENE Zeile statt einer zusammengeworfenen: Der Atlas baut sich mit
-    jeder Season um, eine Zeile "Chateau 68–76" gäbe einen Wert wieder,
-    den es nie gab."""
+    EIGENEN Zeilen statt einer zusammengeworfenen: Der Atlas baut sich
+    mit jeder Season um, eine Zeile "Chateau 68–76" gäbe einen Wert
+    wieder, den es nie gab."""
     with open(path, "w", encoding="utf-8-sig", newline="") as datei:
         schreiber = csv.writer(datei, delimiter=";")
         schreiber.writerow(["League", "Group", "Zone", "Area id", "Tier",
-                            "Monster level (min)", "Monster level (max)",
-                            "All levels seen", "Visits", "Deaths",
+                            "Monster level", "Visits", "Deaths",
                             "Total seconds", "Average seconds", "Last seen"])
         for record in records:
             namen = [league] if league is not None else sorted(record.leagues)
             for name in namen:
                 zahlen = record.stats(name)
-                schreiber.writerow([
-                    name, record.category, record.name, record.area_id,
-                    record.tier(name) or "",
-                    min(zahlen.levels) if zahlen.levels else "",
-                    max(zahlen.levels) if zahlen.levels else "",
-                    " ".join(str(x) for x in sorted(zahlen.levels)),
-                    zahlen.visits, zahlen.deaths, round(zahlen.seconds),
-                    round(zahlen.average_seconds),
-                    zahlen.last_seen.replace("T", " "),
-                ])
+                for level, w in sorted(zahlen.by_level.items()):
+                    tier = (map_tier_from_level(level)
+                            if record.category in TIER_CATEGORIES else None)
+                    schreiber.writerow([
+                        name, record.category, record.name, record.area_id,
+                        tier or "", level if level != NO_LEVEL else "",
+                        w.visits, w.deaths, round(w.seconds),
+                        round(w.average_seconds),
+                        w.last_seen.replace("T", " "),
+                    ])
 
 
 class ZoneTableDialog(QDialog):
@@ -310,7 +451,7 @@ class ZoneTableDialog(QDialog):
                             | Qt.WindowType.WindowMinimizeButtonHint)
         self._account_name = account_name
 
-        self._model = ZoneTableModel(records, character_level, league)
+        self._model = ZoneTreeModel(records, character_level, league)
         self._proxy = ZoneFilterProxy()
         self._proxy.setSourceModel(self._model)
 
@@ -356,15 +497,19 @@ class ZoneTableDialog(QDialog):
         kopf.addWidget(self._count_label)
         kopf.addWidget(self._export_button)
 
-        self._view = QTableView()
+        self._view = QTreeView()
         self._view.setModel(self._proxy)
         self._view.setSortingEnabled(True)
         # Beim Öffnen die bestellte Unterteilung (siehe
         # ``ZoneFilterProxy.lessThan``); jeder Spaltenkopf schaltet um.
         self._view.sortByColumn(_GROUP_COL, Qt.SortOrder.AscendingOrder)
-        self._view.verticalHeader().setVisible(False)
-        self._view.setSelectionBehavior(QTableView.SelectionBehavior.SelectRows)
-        kopfzeile = self._view.horizontalHeader()
+        self._view.setSelectionBehavior(QTreeView.SelectionBehavior.SelectRows)
+        self._view.setUniformRowHeights(True)
+        self._view.setAlternatingRowColors(True)
+        # Nichts wird vorab aufgeklappt: Das Azurite Mine hätte 37
+        # Kinder, die Fathomless Depths ebenso viele (§Modul-Kopf).
+        self._view.setExpandsOnDoubleClick(True)
+        kopfzeile = self._view.header()
         kopfzeile.setSectionResizeMode(_NAME_COL, QHeaderView.ResizeMode.Stretch)
         kopfzeile.setSectionResizeMode(_ID_COL, QHeaderView.ResizeMode.Stretch)
         for spalte in (_GROUP_COL, _TIER_COL, _LEVEL_COL, _VISITS_COL,

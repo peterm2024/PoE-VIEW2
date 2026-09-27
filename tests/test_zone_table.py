@@ -12,9 +12,10 @@ from PySide6.QtCore import Qt
 
 from poe_view.services.league_log import UNKNOWN
 from poe_view.services.zone_catalog import (MAP, REST, SIDE_AREA, STORY,
-                                            LeagueStats, ZoneRecord)
+                                            LeagueStats, LevelStats,
+                                            ZoneRecord)
 from poe_view.ui.zone_table import (NUMERIC_SORT_ROLE, ZoneFilterProxy,
-                                    ZoneTableModel, _dauer_text,
+                                    ZoneTreeModel, _dauer_text,
                                     _league_choices, export_zones)
 
 _NAME_COL = 1
@@ -30,11 +31,30 @@ MIRAGE = "SSF Ruthless (earlier)"
 
 def record(area_id: str, name: str, category: str,
            seasons: dict[str, tuple[set[int], int, str]]) -> ZoneRecord:
+    """Kurzform für Tests, die nur Gesamtzahlen prüfen: Die Besuche
+    landen auf der NIEDRIGSTEN genannten Stufe, die übrigen Stufen
+    bleiben als gesehen stehen, ohne eigene Zahlen. Wer die Aufteilung
+    selbst prüft, nimmt ``record_by_level``."""
+    def zahlen(levels: set[int], visits: int, zuletzt: str) -> LeagueStats:
+        stufen = sorted(levels)
+        nach_level = {lv: LevelStats() for lv in stufen}
+        if stufen:
+            nach_level[stufen[0]] = LevelStats(visits=visits, last_seen=zuletzt)
+        return LeagueStats(by_level=nach_level)
+
     return ZoneRecord(
         area_id=area_id, name=name, category=category,
-        leagues={season: LeagueStats(levels=set(levels), visits=visits,
-                                     last_seen=zuletzt)
-                 for season, (levels, visits, zuletzt) in seasons.items()})
+        leagues={season: zahlen(*werte) for season, werte in seasons.items()})
+
+
+def record_by_level(area_id: str, name: str, category: str,
+                    leagues: dict[str, dict[int, LevelStats]]) -> ZoneRecord:
+    """Ein Gebiet mit ausdrücklichen Zahlen je Gebietslevel — die Form,
+    in der der Baum seine Kindzeilen zieht."""
+    return ZoneRecord(
+        area_id=area_id, name=name, category=category,
+        leagues={liga: LeagueStats(by_level=dict(stufen))
+                 for liga, stufen in leagues.items()})
 
 
 def beispiel() -> list[ZoneRecord]:
@@ -60,7 +80,7 @@ def test_the_level_column_shows_only_the_selected_seasons_level(qapp) -> None:
     """Der eigentliche Punkt: Atoll stand in Mirage auf 70 und steht in
     Allflame auf 77. Ohne Trennung stünde da "70–77" — eine Spanne, die
     es nie gab."""
-    model = ZoneTableModel(beispiel(), league=ALLFLAME)
+    model = ZoneTreeModel(beispiel(), league=ALLFLAME)
     assert model.data(model.index(0, _LEVEL_COL),
                       Qt.ItemDataRole.DisplayRole) == "77"
 
@@ -72,7 +92,7 @@ def test_the_level_column_shows_only_the_selected_seasons_level(qapp) -> None:
 def test_all_leagues_together_show_the_whole_range(qapp) -> None:
     """Wer ausdrücklich alle Ligen wählt, bekommt die Spanne — und im
     Tooltip, aus welcher Liga welcher Level stammt."""
-    model = ZoneTableModel(beispiel(), league=None)
+    model = ZoneTreeModel(beispiel(), league=None)
     idx = model.index(0, _LEVEL_COL)
     assert model.data(idx, Qt.ItemDataRole.DisplayRole) == "70–77"
     tooltip = model.data(idx, Qt.ItemDataRole.ToolTipRole)
@@ -81,7 +101,7 @@ def test_all_leagues_together_show_the_whole_range(qapp) -> None:
 
 
 def test_visits_and_last_seen_follow_the_season(qapp) -> None:
-    model = ZoneTableModel(beispiel(), league=ALLFLAME)
+    model = ZoneTreeModel(beispiel(), league=ALLFLAME)
     assert model.data(model.index(0, _VISITS_COL),
                       Qt.ItemDataRole.DisplayRole) == "36"
     model.set_league(MIRAGE)
@@ -95,7 +115,7 @@ def test_visits_and_last_seen_follow_the_season(qapp) -> None:
 def test_a_zone_not_played_in_that_season_disappears(qapp) -> None:
     """Sonst stünde eine leere Level-Spalte da und sähe aus wie ein
     Fehler. Cells gab es in Mirage nicht (jedenfalls nicht betreten)."""
-    model = ZoneTableModel(beispiel(), league=MIRAGE)
+    model = ZoneTreeModel(beispiel(), league=MIRAGE)
     proxy = ZoneFilterProxy()
     proxy.setSourceModel(model)
 
@@ -123,7 +143,7 @@ def test_season_choices_only_list_what_the_catalogue_holds() -> None:
 def test_a_range_of_levels_sorts_by_the_highest_one(qapp) -> None:
     """"70–77" ist als Text sinnlos sortierbar — die Spalte muss nach
     Zahl gehen, sonst steht "68" hinter "61" aber vor "70–77"."""
-    model = ZoneTableModel(beispiel(), league=None)
+    model = ZoneTreeModel(beispiel(), league=None)
     idx = model.index(0, _LEVEL_COL)
     assert model.data(idx, NUMERIC_SORT_ROLE) == 77
 
@@ -131,26 +151,26 @@ def test_a_range_of_levels_sorts_by_the_highest_one(qapp) -> None:
 def test_the_level_tooltip_lists_every_level_seen(qapp) -> None:
     """Die Zelle zeigt die Spanne (bei Delve wären es 34 Werte), der
     Tooltip die Einzelwerte — genau das, was man bei einer Spanne fragt."""
-    model = ZoneTableModel(beispiel(), league=None)
+    model = ZoneTreeModel(beispiel(), league=None)
     tooltip = model.data(model.index(0, _LEVEL_COL), Qt.ItemDataRole.ToolTipRole)
     assert tooltip.startswith("Levels seen: 70, 77")
 
 
 def test_the_tooltip_adds_what_the_character_would_still_get(qapp) -> None:
-    model = ZoneTableModel(beispiel(), character_level=96, league=ALLFLAME)
+    model = ZoneTreeModel(beispiel(), character_level=96, league=ALLFLAME)
     tooltip = model.data(model.index(1, _LEVEL_COL), Qt.ItemDataRole.ToolTipRole)
     assert "character level 96" in tooltip
     assert "yields" in tooltip
 
 
 def test_without_a_character_the_tooltip_says_nothing_about_experience(qapp) -> None:
-    model = ZoneTableModel(beispiel(), league=ALLFLAME)
+    model = ZoneTreeModel(beispiel(), league=ALLFLAME)
     tooltip = model.data(model.index(1, _LEVEL_COL), Qt.ItemDataRole.ToolTipRole)
     assert "yields" not in tooltip
 
 
 def test_the_group_filter_narrows_to_one_category(qapp) -> None:
-    model = ZoneTableModel(beispiel(), league=ALLFLAME)
+    model = ZoneTreeModel(beispiel(), league=ALLFLAME)
     proxy = ZoneFilterProxy()
     proxy.setSourceModel(model)
 
@@ -162,7 +182,7 @@ def test_the_group_filter_narrows_to_one_category(qapp) -> None:
 
 
 def test_search_matches_name_id_group_and_level(qapp) -> None:
-    model = ZoneTableModel(beispiel(), league=ALLFLAME)
+    model = ZoneTreeModel(beispiel(), league=ALLFLAME)
     proxy = ZoneFilterProxy()
     proxy.setSourceModel(model)
 
@@ -173,7 +193,7 @@ def test_search_matches_name_id_group_and_level(qapp) -> None:
 
 
 def test_search_and_group_filter_combine(qapp) -> None:
-    model = ZoneTableModel(beispiel(), league=ALLFLAME)
+    model = ZoneTreeModel(beispiel(), league=ALLFLAME)
     proxy = ZoneFilterProxy()
     proxy.setSourceModel(model)
 
@@ -189,7 +209,7 @@ def test_sorting_by_group_puts_story_first_and_orders_by_level(qapp) -> None:
     """Peter hat "unterteilt nach Story, Map und Special-Maps" bestellt.
     Alphabetisch stünde da "Map, Rest, Special, Story" — richtig sortiert
     und trotzdem verkehrt herum."""
-    model = ZoneTableModel(beispiel(), league=ALLFLAME)
+    model = ZoneTreeModel(beispiel(), league=ALLFLAME)
     proxy = ZoneFilterProxy()
     proxy.setSourceModel(model)
 
@@ -211,7 +231,7 @@ def test_sorting_follows_the_season(qapp) -> None:
              record("MapWorldsPit", "Pit", MAP,
                     {MIRAGE: ({75}, 1, "2026-07-01T10:00:00"),
                      ALLFLAME: ({72}, 1, "2026-09-01T10:00:00")})]
-    model = ZoneTableModel(zonen, league=MIRAGE)
+    model = ZoneTreeModel(zonen, league=MIRAGE)
     proxy = ZoneFilterProxy()
     proxy.setSourceModel(model)
     proxy.sort(0, Qt.SortOrder.AscendingOrder)
@@ -228,22 +248,29 @@ def test_sorting_follows_the_season(qapp) -> None:
 
 # --- CSV ---------------------------------------------------------------- #
 
-def test_the_csv_writes_the_levels_individually(tmp_path) -> None:
-    """In der Anzeige steht "70–77", in der Datei stehen die Zahlen — eine
-    Tabellenkalkulation soll damit rechnen können, und "70–77" ist dort
-    Text."""
+def test_the_csv_writes_one_row_per_level(tmp_path) -> None:
+    """Dieselbe Aufloesung, die der Baum aufgeklappt zeigt. Die
+    Zusammenfassung liesse sich daraus jederzeit bilden, umgekehrt nicht:
+    Aus "Bazaar, 6 Besuche, 71–72" ist nicht mehr herauszuholen, wieviele
+    davon auf welcher Stufe lagen."""
+    zonen = [record_by_level("MapWorldsBazaar", "Bazaar", MAP, {ALLFLAME: {
+        71: LevelStats(visits=3, deaths=1, seconds=750, timed_visits=3,
+                       last_seen="2026-09-15T22:59:13"),
+        72: LevelStats(visits=3, deaths=0, seconds=738, timed_visits=3,
+                       last_seen="2026-09-27T11:40:11"),
+    }})]
     ziel = tmp_path / "zones.csv"
-    export_zones(str(ziel), beispiel(), ALLFLAME)
+    export_zones(str(ziel), zonen, ALLFLAME)
 
     with open(ziel, encoding="utf-8-sig", newline="") as datei:
         zeilen = list(csv.reader(datei, delimiter=";"))
 
-    assert zeilen[0][:5] == ["League", "Group", "Zone", "Area id", "Tier"]
-    atoll = next(z for z in zeilen if z[2] == "Atoll")
-    assert atoll[0] == ALLFLAME
-    assert atoll[4] == "10"                      # Tier: Level 77 - 67
-    assert atoll[5] == "77" and atoll[6] == "77"
-    assert atoll[8] == "36"                      # Besuche
+    assert zeilen[0][:6] == ["League", "Group", "Zone", "Area id", "Tier",
+                             "Monster level"]
+    bazaar = [z for z in zeilen if z[2] == "Bazaar"]
+    assert len(bazaar) == 2
+    assert [(z[4], z[5], z[6], z[7]) for z in bazaar] == [
+        ("4", "71", "3", "1"), ("5", "72", "3", "0")]
 
 
 def test_the_csv_gives_every_league_its_own_row(tmp_path) -> None:
@@ -255,7 +282,7 @@ def test_the_csv_gives_every_league_its_own_row(tmp_path) -> None:
     with open(ziel, encoding="utf-8-sig", newline="") as datei:
         zeilen = [z for z in csv.reader(datei, delimiter=";") if z[2] == "Atoll"]
 
-    assert [(z[0], z[7]) for z in zeilen] == [(ALLFLAME, "77"), (MIRAGE, "70")]
+    assert [(z[0], z[5]) for z in zeilen] == [(ALLFLAME, "77"), (MIRAGE, "70")]
 
 
 def test_the_csv_carries_a_bom_so_excel_opens_it_directly(tmp_path) -> None:
@@ -268,21 +295,32 @@ def test_the_csv_carries_a_bom_so_excel_opens_it_directly(tmp_path) -> None:
 
 # --- Tier, Tode, Dauer --------------------------------------------------- #
 
-def test_the_tier_column_uses_the_lowest_level(qapp) -> None:
-    """Peter: "Hier zaehlt natuerlich nur die niedrigmoeglichste Tier der
-    Map." Ueber alle Ligen hinweg ist das Atolls 70 aus der frueheren
-    Liga, in Allflame allein die 77."""
-    model = ZoneTableModel(beispiel(), league=None)
+def test_the_tier_column_shows_the_range_that_actually_occurred(qapp) -> None:
+    """Urspruenglich stand hier nur die niedrigste Stufe (Peter: "Hier
+    zaehlt natuerlich nur die niedrigmoeglichste Tier der Map") — unter
+    der Annahme, eine Karte HABE eine feste Stufe. Die Messung an seiner
+    Truhe hat das widerlegt: Die Karten sind nummerierte Items ("Map
+    (Tier 4)") mit dem Text "Travel to a Map of this tier or lower", der
+    Gebietslevel kommt also vom Item. Eine einzelne Zahl waere die
+    Antwort auf eine Frage, die so nicht mehr steht.
+
+    Atoll ueber alle Ligen: Tier 3 (Level 70, frueher) bis Tier 10
+    (Level 77, heute). In Allflame allein bleibt es die 10."""
+    model = ZoneTreeModel(beispiel(), league=None)
     assert model.data(model.index(0, _TIER_COL),
-                      Qt.ItemDataRole.DisplayRole) == "3"       # 70 - 67
+                      Qt.ItemDataRole.DisplayRole) == "3–10"
     model.set_league(ALLFLAME)
     assert model.data(model.index(0, _TIER_COL),
                       Qt.ItemDataRole.DisplayRole) == "10"      # 77 - 67
+    # Sortiert wird weiter nach der niedrigsten Stufe — eine Spanne
+    # laesst sich nicht vergleichen.
+    model.set_league(None)
+    assert model.data(model.index(0, _TIER_COL), NUMERIC_SORT_ROLE) == 3
 
 
 def test_zones_without_a_tier_leave_the_column_empty(qapp) -> None:
     """Story-Gebiete und Hideouts tragen einen Level, aber keine Tier."""
-    model = ZoneTableModel(beispiel(), league=ALLFLAME)
+    model = ZoneTreeModel(beispiel(), league=ALLFLAME)
     assert model.data(model.index(2, _TIER_COL),     # The Blood Aqueduct
                       Qt.ItemDataRole.DisplayRole) == ""
     # ... und sortieren nach unten statt vor Tier 1.
@@ -292,10 +330,11 @@ def test_zones_without_a_tier_leave_the_column_empty(qapp) -> None:
 def test_deaths_and_average_time_show_per_league(qapp) -> None:
     zonen = [record("MapWorldsAtoll", "Atoll", MAP,
                     {ALLFLAME: ({77}, 4, "2026-09-20T10:00:00")})]
-    zonen[0].leagues[ALLFLAME].deaths = 3
-    zonen[0].leagues[ALLFLAME].seconds = 4 * 430
-    zonen[0].leagues[ALLFLAME].timed_visits = 4
-    model = ZoneTableModel(zonen, league=ALLFLAME)
+    stufe = zonen[0].leagues[ALLFLAME].at(77)
+    stufe.deaths = 3
+    stufe.seconds = 4 * 430
+    stufe.timed_visits = 4
+    model = ZoneTreeModel(zonen, league=ALLFLAME)
 
     assert model.data(model.index(0, _DEATHS_COL),
                       Qt.ItemDataRole.DisplayRole) == "3"
@@ -306,7 +345,7 @@ def test_deaths_and_average_time_show_per_league(qapp) -> None:
 def test_a_zone_without_deaths_leaves_the_column_empty(qapp) -> None:
     """Eine 0 in jeder zweiten Zeile ist Rauschen; leer liest sich als
     "nichts passiert"."""
-    model = ZoneTableModel(beispiel(), league=ALLFLAME)
+    model = ZoneTreeModel(beispiel(), league=ALLFLAME)
     assert model.data(model.index(0, _DEATHS_COL),
                       Qt.ItemDataRole.DisplayRole) == ""
 
@@ -324,7 +363,7 @@ def test_side_areas_are_their_own_group_in_the_filter(qapp) -> None:
     zonen = beispiel() + [record("MapSideArea4_2", "Ancient Catacomb",
                                  SIDE_AREA, {ALLFLAME: ({81}, 1,
                                                         "2026-08-13T18:43:09")})]
-    model = ZoneTableModel(zonen, league=ALLFLAME)
+    model = ZoneTreeModel(zonen, league=ALLFLAME)
     proxy = ZoneFilterProxy()
     proxy.setSourceModel(model)
 
@@ -362,3 +401,134 @@ def test_an_endless_stay_does_not_drag_the_average_up() -> None:
     assert zahlen.visits == 2                 # beide Besuche zaehlen
     assert zahlen.timed_visits == 1           # nur einer hat eine Dauer
     assert zahlen.average_seconds == 480      # 8 min, nicht 9,5 Stunden
+
+
+# --- Der Baum: eine Kindzeile je Gebietslevel (Peter, 2026-09-27) ------- #
+
+def _bazaar() -> ZoneRecord:
+    """Peters echter Fall: dieselbe Zone auf zwei Stufen, weil der
+    Gebietslevel vom Karten-Item kommt ("Travel to a Map of this tier or
+    lower")."""
+    return record_by_level("MapWorldsBazaar", "Bazaar", MAP, {ALLFLAME: {
+        71: LevelStats(visits=3, deaths=1, seconds=750, timed_visits=3,
+                       last_seen="2026-09-15T22:59:13"),
+        72: LevelStats(visits=3, deaths=0, seconds=738, timed_visits=3,
+                       last_seen="2026-09-27T11:40:11"),
+    }})
+
+
+def test_a_zone_with_one_level_has_no_children(qapp) -> None:
+    """Eine einzelne Kindzeile wiederholte bloss ihre Elternzeile — und
+    ein Aufklapp-Pfeil, hinter dem nichts Neues steht, ist eine
+    Enttaeuschung."""
+    model = ZoneTreeModel(beispiel(), league=ALLFLAME)
+    assert model.rowCount(model.index(0, 0)) == 0
+
+
+def test_a_zone_with_two_levels_splits_into_two_children(qapp) -> None:
+    model = ZoneTreeModel([_bazaar()], league=ALLFLAME)
+    eltern = model.index(0, 0)
+
+    assert model.rowCount(eltern) == 2
+    assert [model.data(model.index(z, _LEVEL_COL, eltern),
+                       Qt.ItemDataRole.DisplayRole) for z in range(2)] == ["71", "72"]
+
+
+def test_a_child_shows_the_numbers_of_its_own_level(qapp) -> None:
+    """Der eigentliche Zweck: Gepoolt sagt "6 Besuche, 1 Tod" nichts
+    darueber, auf welcher Stufe gestorben wurde."""
+    model = ZoneTreeModel([_bazaar()], league=ALLFLAME)
+    eltern = model.index(0, 0)
+
+    def zelle(zeile, spalte):
+        return model.data(model.index(zeile, spalte, eltern),
+                          Qt.ItemDataRole.DisplayRole)
+
+    assert (zelle(0, _VISITS_COL), zelle(0, _DEATHS_COL)) == ("3", "1")
+    assert (zelle(1, _VISITS_COL), zelle(1, _DEATHS_COL)) == ("3", "")
+    assert zelle(0, _TIME_COL) == "4:10"        # 750 s / 3
+    # Die Elternzeile bleibt die Zusammenfassung.
+    assert model.data(model.index(0, _VISITS_COL), Qt.ItemDataRole.DisplayRole) == "6"
+    assert model.data(model.index(0, _DEATHS_COL), Qt.ItemDataRole.DisplayRole) == "1"
+
+
+def test_a_child_carries_its_own_tier_not_the_zones(qapp) -> None:
+    model = ZoneTreeModel([_bazaar()], league=ALLFLAME)
+    eltern = model.index(0, 0)
+
+    assert model.data(model.index(0, _TIER_COL, eltern),
+                      Qt.ItemDataRole.DisplayRole) == "4"       # 71 - 67
+    assert model.data(model.index(1, _TIER_COL, eltern),
+                      Qt.ItemDataRole.DisplayRole) == "5"       # 72 - 67
+    assert model.data(model.index(0, _TIER_COL),
+                      Qt.ItemDataRole.DisplayRole) == "4–5"
+
+
+def test_children_leave_name_group_and_id_empty(qapp) -> None:
+    """Sie stuenden wortgleich in der Zeile darueber, und die Einrueckung
+    sagt bereits, wozu die Zeile gehoert."""
+    model = ZoneTreeModel([_bazaar()], league=ALLFLAME)
+    kind = model.index(0, 0, model.index(0, 0))
+
+    for spalte in (0, _NAME_COL, 8):
+        assert model.data(model.index(kind.row(), spalte, model.index(0, 0)),
+                          Qt.ItemDataRole.DisplayRole) == ""
+
+
+def test_a_story_zone_has_no_tier_on_its_children_either(qapp) -> None:
+    zonen = [record_by_level("2_9_1", "The Blood Aqueduct", STORY, {ALLFLAME: {
+        60: LevelStats(visits=1, last_seen="2026-09-01T10:00:00"),
+        61: LevelStats(visits=2, last_seen="2026-09-02T10:00:00"),
+    }})]
+    model = ZoneTreeModel(zonen, league=ALLFLAME)
+    eltern = model.index(0, 0)
+
+    assert model.data(model.index(0, _TIER_COL, eltern),
+                      Qt.ItemDataRole.DisplayRole) == ""
+    assert model.data(eltern.siblingAtColumn(_TIER_COL),
+                      Qt.ItemDataRole.DisplayRole) == ""
+
+
+def test_switching_the_league_changes_the_children(qapp) -> None:
+    """Die Stufen sind eine Eigenschaft der Liga, nicht der Zone: In der
+    einen Liga lief Bazaar auf zwei Stufen, in der anderen auf einer."""
+    zone = record_by_level("MapWorldsBazaar", "Bazaar", MAP, {
+        ALLFLAME: {71: LevelStats(visits=3, last_seen="2026-09-15T22:59:13"),
+                   72: LevelStats(visits=3, last_seen="2026-09-27T11:40:11")},
+        MIRAGE: {71: LevelStats(visits=1, last_seen="2026-07-01T10:00:00")}})
+    model = ZoneTreeModel([zone], league=ALLFLAME)
+    assert model.rowCount(model.index(0, 0)) == 2
+
+    model.set_league(MIRAGE)
+    assert model.rowCount(model.index(0, 0)) == 0
+
+
+def test_children_follow_their_zone_through_the_filter(qapp) -> None:
+    """Eine Stufe fuer sich zu filtern hiesse, eine Zone zu zeigen, deren
+    Zahlen nicht mehr zu ihren Kindern passen."""
+    model = ZoneTreeModel(beispiel() + [_bazaar()], league=ALLFLAME)
+    proxy = ZoneFilterProxy()
+    proxy.setSourceModel(model)
+
+    proxy.setFilterFixedString("bazaar")
+    assert proxy.rowCount() == 1
+    assert proxy.rowCount(proxy.index(0, 0)) == 2
+
+    proxy.setFilterFixedString("cells")          # Bazaar faellt samt Kindern weg
+    assert proxy.rowCount() == 1
+    assert proxy.data(proxy.index(0, _NAME_COL),
+                      Qt.ItemDataRole.DisplayRole) == "Cells"
+
+
+def test_children_sort_by_level_under_the_group_column(qapp) -> None:
+    """In der Gruppen-Spalte stehen Kinder alle leer — ohne eigene Regel
+    waere ihre Reihenfolge dem Zufall ueberlassen."""
+    model = ZoneTreeModel([_bazaar()], league=ALLFLAME)
+    proxy = ZoneFilterProxy()
+    proxy.setSourceModel(model)
+    proxy.sort(0, Qt.SortOrder.DescendingOrder)
+
+    eltern = proxy.index(0, 0)
+    assert [proxy.data(proxy.index(z, _LEVEL_COL, eltern),
+                       Qt.ItemDataRole.DisplayRole)
+            for z in range(proxy.rowCount(eltern))] == ["72", "71"]

@@ -302,3 +302,89 @@ def test_a_second_run_over_the_same_log_does_not_count_visits_twice(tmp_path) ->
 
     assert zuerst["MapWorldsCells"].stats(None).visits == 2
     assert nochmal["MapWorldsCells"].stats(None).visits == 2
+
+
+# --- Zahlen je Gebietslevel (VERSION 4, Peter 2026-09-27) --------------- #
+
+def test_visits_are_counted_under_their_own_level() -> None:
+    """Der Befund, der diese Ebene noetig gemacht hat: Peters Karten sind
+    nummerierte Items ("Map (Tier 4)") mit dem Text "Travel to a Map of
+    this tier or lower" — der Gebietslevel kommt vom Item, nicht von der
+    Zone. Bazaar lief dreimal auf 71 und dreimal auf 72."""
+    records: dict[str, zk.ZoneRecord] = {}
+    zk.merge_stays(records, [stay("MapWorldsBazaar", "Bazaar", 71, m)
+                             for m in (0, 10, 20)]
+                   + [stay("MapWorldsBazaar", "Bazaar", 72, m)
+                      for m in (30, 40)])
+
+    zahlen = records["MapWorldsBazaar"].stats(UNKNOWN)
+    assert {lv: w.visits for lv, w in zahlen.by_level.items()} == {71: 3, 72: 2}
+    assert zahlen.visits == 5                     # die Summe bleibt richtig
+    assert zahlen.levels == {71, 72}
+
+
+def test_deaths_and_seconds_stay_with_their_level() -> None:
+    """Gepoolt waere nicht mehr zu sehen, auf welcher Stufe gestorben
+    wurde — genau das war Peters Anlass."""
+    records: dict[str, zk.ZoneRecord] = {}
+    tod = datetime(2026, 9, 26, 12, 2)
+    zk.merge_stays(records, [stay("MapWorldsBazaar", "Bazaar", 71, 0),
+                             stay("MapWorldsBazaar", "Bazaar", 72, 30)],
+                   deaths=[tod])
+
+    zahlen = records["MapWorldsBazaar"].stats(UNKNOWN)
+    assert zahlen.by_level[71].deaths == 1
+    assert zahlen.by_level[72].deaths == 0
+    assert zahlen.deaths == 1
+    assert zahlen.by_level[71].average_seconds == 300      # 5 Minuten
+
+
+def test_a_stay_without_a_level_is_not_lost() -> None:
+    """Die Zeile "Generating level N area" ist ein DEBUG-Eintrag; fehlt
+    sie, gibt es trotzdem einen Besuch zu zaehlen. Er landet unter
+    ``NO_LEVEL`` und bleibt aus jeder Level-Anzeige heraus."""
+    records: dict[str, zk.ZoneRecord] = {}
+    zk.merge_stays(records, [stay("MapWorldsBazaar", "Bazaar", 0, 0)])
+
+    zahlen = records["MapWorldsBazaar"].stats(UNKNOWN)
+    assert zahlen.by_level[zk.NO_LEVEL].visits == 1
+    assert zahlen.visits == 1
+    assert zahlen.levels == set()                 # kein erfundener Level
+
+
+def test_the_per_level_numbers_survive_a_save_and_load(tmp_path) -> None:
+    records: dict[str, zk.ZoneRecord] = {}
+    zk.merge_stays(records, [stay("MapWorldsBazaar", "Bazaar", 71, 0),
+                             stay("MapWorldsBazaar", "Bazaar", 72, 30),
+                             stay("MapWorldsBazaar", "Bazaar", 72, 40)])
+    pfad = tmp_path / "zonen.json"
+    zk.save(pfad, records)
+
+    zurueck = zk.load(pfad)
+    zahlen = zurueck["MapWorldsBazaar"].stats(UNKNOWN)
+    assert {lv: w.visits for lv, w in zahlen.by_level.items()} == {71: 1, 72: 2}
+    assert zahlen.by_level[72].last_seen == "2026-09-26T12:40:00"
+
+
+def test_an_older_catalogue_is_rebuilt_instead_of_guessed(tmp_path) -> None:
+    """VERSION 3 fuehrte nur eine Summe je Liga; wie sie sich auf die
+    Stufen verteilt, steht dort nicht. Statt sie zu erfinden, faengt der
+    Katalog leer an — ``refresh_from_log`` liest die Client.txt dann von
+    vorn und weiss es genau."""
+    pfad = tmp_path / "zonen.json"
+    pfad.write_text('{"version": 3, "zones": [{"area_id": "MapWorldsBazaar",'
+                    ' "leagues": {"X": {"levels": [71, 72], "visits": 6}}}]}',
+                    encoding="utf-8")
+    assert zk.load(pfad) == {}
+
+
+def test_the_tier_column_spans_what_actually_occurred() -> None:
+    records: dict[str, zk.ZoneRecord] = {}
+    zk.merge_stays(records, [stay("MapWorldsBazaar", "Bazaar", 71, 0),
+                             stay("MapWorldsBazaar", "Bazaar", 72, 30)])
+    eintrag = records["MapWorldsBazaar"]
+
+    assert eintrag.tier_text(UNKNOWN) == "4–5"
+    assert eintrag.tier(UNKNOWN) == 4              # Sortierung: die niedrigste
+    zk.merge_stays(records, [stay("1_5_3b", "The Ruined Square", 44, 0)])
+    assert records["1_5_3b"].tier_text(UNKNOWN) == ""      # Story hat keine

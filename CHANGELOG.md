@@ -6,6 +6,19 @@ nach [SemVer](https://semver.org/lang/de/).
 
 ## [Unveröffentlicht]
 
+### Geändert
+
+- **Die Zonen-Tabelle ist ein Baum.** Jede Zone lässt sich aufklappen
+  und zeigt dann eine Zeile je Gebietslevel — mit eigenen Besuchen,
+  Toden und Verweildauer. Der Grund ist eine Messung: Die Karten sind
+  nummerierte Items ("Map (Tier 4)") mit dem Text *"Travel to a Map of
+  this tier or lower"*, der Gebietslevel kommt also vom Karten-Item und
+  nicht von der Zone. Dieselbe Karte erscheint dadurch auf mehreren
+  Stufen, und ein Schnitt darüber mischt eine Tier-1-Runde mit einer
+  Tier-9-Runde. Die Tier-Spalte zeigt entsprechend die Spanne
+  ("4–5") statt einer einzelnen Zahl, und der CSV-Export schreibt eine
+  Zeile je Stufe.
+
 ## [0.16.0] - 2026-09-27
 
 ### Neu

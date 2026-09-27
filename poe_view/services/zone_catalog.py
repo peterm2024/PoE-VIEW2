@@ -14,6 +14,15 @@ generierten Gebietslevel, also auch den der eingelegten Karte, der
 Delve-Tiefe und des gerade laufenden Ligamechanismus. Eine statische
 Tabelle könnte das nicht.
 
+**Eine Zone hat keine Stufe — ein Besuch hat eine** (seit 2026-09-27,
+VERSION 4). Peters Karten sind nummerierte Items ("Map (Tier 4)") mit
+dem Text *"Travel to a Map of this tier or lower"*: Der Gebietslevel
+kommt vom Karten-Item, das Ziel wird aus dieser Stufe oder darunter
+gezogen. Dieselbe Zone erscheint deshalb je nach eingelegter Karte mit
+verschiedenen Leveln — Bazaar mit Tier 4 auf 71, mit Tier 5 auf 72.
+Besuche, Tode und Verweildauer werden darum je Level gezählt
+(§LevelStats), nicht je Liga.
+
 **Deshalb wächst der Katalog mit.** Die Client.txt wird von PoE
 irgendwann gekürzt; der Katalog liegt daneben in ``APP_DATA_DIR`` und
 behält, was einmal gesehen wurde. Peters Log reichte beim Bau 5,5 Monate
@@ -43,7 +52,7 @@ log = logging.getLogger(__name__)
 # dazu Tode und Verweildauer. Ältere Versionen werden verworfen statt
 # umgerechnet — sie wüssten die Liga nicht, und der Katalog baut sich aus
 # der Client.txt in einem Zehntel einer Sekunde neu auf.
-VERSION = 3
+VERSION = 4
 
 # Die Gruppen, ausgezählt an Peters 381 Gebieten (2026-09-26):
 #
@@ -86,6 +95,11 @@ _STORY_RE = re.compile(r"^\d+_", re.IGNORECASE)
 _MAP_RE = re.compile(r"^Map", re.IGNORECASE)
 _SIDE_AREA_RE = re.compile(r"^MapSideArea", re.IGNORECASE)
 _DELVE_RE = re.compile(r"^Delve", re.IGNORECASE)
+
+
+# Gruppen, in denen eine Kartenstufe überhaupt eine Bedeutung hat. Ein
+# Story-Gebiet hat keine, und eine ausgerechnete wäre erfunden.
+TIER_CATEGORIES = (MAP, SIDE_AREA)
 
 
 def categorise(area_id: str) -> str:
@@ -146,21 +160,35 @@ def map_tier_from_level(level: int) -> int | None:
     return tier if 1 <= tier <= 17 else None
 
 
+# Schlüssel für Aufenthalte OHNE Gebietslevel. Die Client.txt schreibt
+# die Zeile ``Generating level N area`` nur als DEBUG-Eintrag; fehlt sie,
+# gibt es trotzdem einen Besuch zu zählen. Er landet unter 0 und bleibt
+# damit aus jeder Level-Anzeige heraus, ohne verloren zu gehen.
+NO_LEVEL = 0
+
+
 @dataclass
-class LeagueStats:
-    """Was ein Gebiet in EINER Liga war. Getrennt gehalten aus zwei
-    Gründen: Der Atlas baut sich mit jeder Season um (Chateau stand vor
-    dem 24.07. auf 76 und danach auf 68), und die Ligen einer Season
-    haben verschiedene Inhalte — Vaal-Side-Areas gibt es in Ruthless
-    gar nicht. Liga-Namen tragen die Season bereits in sich ("SSF R
-    Allflame"), eine Season-Ebene obendrauf wäre doppelt.
+class LevelStats:
+    """Was ein Gebiet bei EINEM Gebietslevel war.
+
+    **Die Ebene, die erst 2026-09-27 dazukam** — und der Grund dafür ist
+    eine Messung an Peters Truhe. Seine Karten sind keine benannten
+    Karten, sondern nummerierte Items ("Map (Tier 4)") mit dem Text
+    *"Travel to a Map of this tier or lower"*. Der Gebietslevel hängt
+    damit am KARTEN-ITEM, nicht an der Zone: Bazaar erschien mit einer
+    Tier-4-Karte auf Level 71 und mit einer Tier-5-Karte auf Level 72.
+
+    Eine Zone hat also keine Stufe, ein Besuch hat eine. Tode und
+    Verweildauer über beide Stufen zu mitteln löscht genau das, wonach
+    gefragt war (Peter: "zählen für jeden Tier getrennt") — eine
+    Tier-1-Runde und eine Tier-9-Runde sind zwei verschiedene Inhalte,
+    die zufällig denselben Namen tragen.
 
     ``seconds`` ist die Summe der Verweildauern, nicht ihr Mittel: Der
     Durchschnitt lässt sich daraus jederzeit bilden, die Summe aus dem
     Durchschnitt aber nicht wieder zusammensetzen, sobald ein Besuch
     dazukommt."""
 
-    levels: set[int] = field(default_factory=set)
     visits: int = 0
     deaths: int = 0
     seconds: float = 0.0
@@ -172,6 +200,57 @@ class LeagueStats:
         """Nur über Aufenthalte mit brauchbarer Dauer (§_MAX_DWELL_S) —
         sonst zöge ein einziger Feierabend den Schnitt einer Karte auf
         eine Stunde hoch."""
+        return self.seconds / self.timed_visits if self.timed_visits else 0.0
+
+
+@dataclass
+class LeagueStats:
+    """Was ein Gebiet in EINER Liga war, aufgeschlüsselt nach
+    Gebietslevel. Getrennt gehalten aus zwei Gründen: Der Atlas baut
+    sich mit jeder Season um (Chateau stand vor dem 24.07. auf 76 und
+    danach auf 68), und die Ligen einer Season haben verschiedene
+    Inhalte — Vaal-Side-Areas gibt es in Ruthless gar nicht. Liga-Namen
+    tragen die Season bereits in sich ("SSF R Allflame"), eine
+    Season-Ebene obendrauf wäre doppelt.
+
+    Die Summen darüber stehen als Eigenschaften bereit, damit die
+    Aufrufer nicht wissen müssen, dass darunter mehrere Stufen liegen."""
+
+    by_level: dict[int, LevelStats] = field(default_factory=dict)
+
+    def at(self, level: int) -> LevelStats:
+        """Die Zahlen einer Stufe — anlegen, falls es sie noch nicht
+        gibt."""
+        return self.by_level.setdefault(level, LevelStats())
+
+    @property
+    def levels(self) -> set[int]:
+        """Die gesehenen Gebietslevel, ohne den Sammeleintrag für
+        Aufenthalte ohne Angabe (§NO_LEVEL)."""
+        return {lv for lv in self.by_level if lv != NO_LEVEL}
+
+    @property
+    def visits(self) -> int:
+        return sum(w.visits for w in self.by_level.values())
+
+    @property
+    def deaths(self) -> int:
+        return sum(w.deaths for w in self.by_level.values())
+
+    @property
+    def seconds(self) -> float:
+        return sum(w.seconds for w in self.by_level.values())
+
+    @property
+    def timed_visits(self) -> int:
+        return sum(w.timed_visits for w in self.by_level.values())
+
+    @property
+    def last_seen(self) -> str:
+        return max((w.last_seen for w in self.by_level.values()), default="")
+
+    @property
+    def average_seconds(self) -> float:
         return self.seconds / self.timed_visits if self.timed_visits else 0.0
 
 
@@ -198,12 +277,13 @@ class ZoneRecord:
             return self.leagues.get(league, LeagueStats())
         gesamt = LeagueStats()
         for eintrag in self.leagues.values():
-            gesamt.levels |= eintrag.levels
-            gesamt.visits += eintrag.visits
-            gesamt.deaths += eintrag.deaths
-            gesamt.seconds += eintrag.seconds
-            gesamt.timed_visits += eintrag.timed_visits
-            gesamt.last_seen = max(gesamt.last_seen, eintrag.last_seen)
+            for level, werte in eintrag.by_level.items():
+                ziel = gesamt.at(level)
+                ziel.visits += werte.visits
+                ziel.deaths += werte.deaths
+                ziel.seconds += werte.seconds
+                ziel.timed_visits += werte.timed_visits
+                ziel.last_seen = max(ziel.last_seen, werte.last_seen)
         return gesamt
 
     def seen_in(self, league: str | None) -> bool:
@@ -223,13 +303,30 @@ class ZoneRecord:
         return max(levels) if levels else 0
 
     def tier(self, league: str | None = None) -> int | None:
-        """Die Karten-Tier, aus dem NIEDRIGSTEN gesehenen Level (Peter:
-        "Hier zählt natürlich nur die niedrigmöglichste Tier der Map").
-        ``None`` für alles, was keine Karte ist."""
-        if self.category not in (MAP, SIDE_AREA):
+        """Die NIEDRIGSTE gesehene Karten-Tier — die Zahl, nach der
+        sortiert wird. ``None`` für alles, was keine Karte ist."""
+        if self.category not in TIER_CATEGORIES:
             return None
         levels = self.stats(league).levels
         return map_tier_from_level(min(levels)) if levels else None
+
+    def tier_text(self, league: str | None = None) -> str:
+        """"4" oder "4–5" — was in der Spalte steht.
+
+        Peter hatte ursprünglich nur die niedrigste Stufe bestellt
+        ("Hier zählt natürlich nur die niedrigmöglichste Tier der Map"),
+        unter der Annahme, eine Karte HABE eine feste Stufe. Die Messung
+        an seiner Truhe hat das widerlegt (§LevelStats): Der Gebietslevel
+        kommt vom Karten-Item, dieselbe Zone erscheint auf mehreren
+        Stufen. Eine einzelne Zahl wäre damit die Antwort auf eine Frage,
+        die so nicht mehr steht — die Spanne sagt, was wirklich vorkam."""
+        if self.category not in TIER_CATEGORIES:
+            return ""
+        stufen = sorted({t for lv in self.stats(league).levels
+                         if (t := map_tier_from_level(lv)) is not None})
+        if not stufen:
+            return ""
+        return str(stufen[0]) if len(stufen) == 1 else f"{stufen[0]}–{stufen[-1]}"
 
 
 def catalog_path(account_name: str) -> Path:
@@ -265,19 +362,20 @@ def merge_stays(records: dict[str, ZoneRecord], stays,
             neu += 1
         liga = league_of(stay.entered) if league_of else UNKNOWN
         zahlen = eintrag.leagues.setdefault(liga or UNKNOWN, LeagueStats())
-        if stay.level:
-            zahlen.levels.add(stay.level)
+        # Jeder Besuch zählt unter SEINEM Gebietslevel (§LevelStats) —
+        # ohne Angabe unter ``NO_LEVEL``, damit er nicht verschwindet.
+        stufe = zahlen.at(stay.level or NO_LEVEL)
         # Der angezeigte Name kann sich ändern (Hideout umbenannt, Sprache
         # umgestellt) — der zuletzt gesehene gewinnt.
         eintrag.name = stay.name or eintrag.name
-        zahlen.visits += 1
+        stufe.visits += 1
         if 0 < stay.seconds <= _MAX_DWELL_S:
-            zahlen.seconds += stay.seconds
-            zahlen.timed_visits += 1
-        zahlen.deaths += _deaths_within(todeszeiten, stay)
+            stufe.seconds += stay.seconds
+            stufe.timed_visits += 1
+        stufe.deaths += _deaths_within(todeszeiten, stay)
         zeit = stay.entered.isoformat(timespec="seconds")
-        if zeit > zahlen.last_seen:
-            zahlen.last_seen = zeit
+        if zeit > stufe.last_seen:
+            stufe.last_seen = zeit
     return neu
 
 
@@ -312,13 +410,14 @@ def load(path: Path) -> dict[str, ZoneRecord]:
                 name=str(zeile.get("name") or ""),
                 category=str(zeile.get("category") or categorise(area_id)),
                 leagues={
-                    str(name): LeagueStats(
-                        levels={int(x) for x in (werte.get("levels") or [])},
-                        visits=int(werte.get("visits") or 0),
-                        deaths=int(werte.get("deaths") or 0),
-                        seconds=float(werte.get("seconds") or 0.0),
-                        timed_visits=int(werte.get("timed_visits") or 0),
-                        last_seen=str(werte.get("last_seen") or ""))
+                    str(name): LeagueStats(by_level={
+                        int(level): LevelStats(
+                            visits=int(w.get("visits") or 0),
+                            deaths=int(w.get("deaths") or 0),
+                            seconds=float(w.get("seconds") or 0.0),
+                            timed_visits=int(w.get("timed_visits") or 0),
+                            last_seen=str(w.get("last_seen") or ""))
+                        for level, w in (werte.get("levels") or {}).items()})
                     for name, werte in (zeile.get("leagues") or {}).items()
                 },
             )
@@ -337,10 +436,12 @@ def save(path: Path, records: dict[str, ZoneRecord]) -> None:
         "zones": [
             {"area_id": r.area_id, "name": r.name, "category": r.category,
              "leagues": {
-                 name: {"levels": sorted(werte.levels), "visits": werte.visits,
-                        "deaths": werte.deaths, "seconds": round(werte.seconds, 1),
-                        "timed_visits": werte.timed_visits,
-                        "last_seen": werte.last_seen}
+                 name: {"levels": {
+                     str(level): {"visits": w.visits, "deaths": w.deaths,
+                                  "seconds": round(w.seconds, 1),
+                                  "timed_visits": w.timed_visits,
+                                  "last_seen": w.last_seen}
+                     for level, w in sorted(werte.by_level.items())}}
                  for name, werte in sorted(r.leagues.items())}}
             for r in sorted(records.values(), key=lambda r: r.area_id)
         ],

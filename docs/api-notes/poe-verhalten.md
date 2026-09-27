@@ -425,6 +425,44 @@ Measured against the full `Client.txt` (5,001 generations between
 For ordinary monsters the area level **is** the monster level; bosses
 sit one or two above it. [wiki]
 
+### A zone has no level — a *visit* has one
+
+Asked why the same map showed up at two different area levels, the log
+alone could not say: `Generating level 71 area "MapWorldsBazaar"` on
+2026-09-15 and `level 72` for the same base on 2026-09-27, same league,
+no corruption, no patch in between. Four of 94 maps in one season
+behaved that way, and every one of them differed by exactly 1.
+
+The stash answered it. **Every map item in this account is a numbered
+generic item, not a named map:**
+
+```
+baseType   "Map (Tier 4)"
+descrText  "Travel to a Map of this tier or lower by using this in a
+            personal Map Device. Maps can only be used once."
+monsterLevel 71
+```
+
+Tier → monster level is exact and gapless: Tier N gives area level
+67 + N (checked across 14 tiers). So the area level comes from **the map
+item you burn**, and the destination zone is drawn from that tier *or
+lower*. Run a Tier 4 map and land on Bazaar: level 71. Run a Tier 5 map
+and land on Bazaar again: level 72. Same zone, different content.
+
+Two consequences for anything that reads the log:
+
+- **A zone's level is not a property of the zone.** Averaging deaths or
+  dwell time across a zone's visits mixes a Tier 1 run with a Tier 9 run.
+- **"Tier" is a property of the trip, not of the area.** Computing it as
+  `area level − 67` is right, but it describes which map was used, not
+  where you went.
+
+And a separate, smaller finding from the same data: Ruthless has its own
+map tiers. Of four maps that appeared at two levels across the whole
+catalogue, two resolve completely once the leagues are separated —
+Colonnade was tier 5 in the normal league and tier 6 in Ruthless,
+Laboratory the other way round.
+
 ### The atlas is rebuilt every season, and the log shows it
 
 The same map zone carries a different level in each season. Measured
