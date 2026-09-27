@@ -130,10 +130,29 @@ one may have been bought rather than found. Neither can be subtracted
 away — the log does not say what happened. They can be *marked*, which
 is what the loot record does (§4.56.6, column `vendor_events`).
 
-Every delve node itself is visible, by the way: of 228 mine entries, 186
-follow another mine entry with a **new** instance id — each node is its
-own generated area with its own loading screen. The blind spot is the
-vendor, not the mine.
+**What a mine entry actually is.** Not a node — a *load event*. Delve is
+a chain of nodes, and moving to a directly adjacent one does not reload:
+several nodes live inside one generated area. A new area is generated
+when you pick a node that is not the direct neighbour, and sometimes on
+its own while travelling, apparently once an internal size is exceeded
+(player report, 2026-09-27). So of 228 mine entries, 186 follow another
+with a new instance id — those are loads, not nodes, and how many nodes
+sit inside one of them the log does not say. The recorded area level is
+the depth at load time; whatever was delved onward inside that chunk
+carries the same number.
+
+The area level is a coarse stand-in for depth anyway: of 149 consecutive
+load pairs inside the mine, 52 % have the *same* area level as the one
+before, so several depths share a level and the depth cannot be read
+back from it.
+
+**Level 34 is not a depth, it is the mine entrance.** Four signals, all
+from the same log: it is entered from a hideout or a town in 42 of 44
+cases while all 184 entries at other levels come from inside the mine;
+the median stay is 21 seconds against 256; nobody ever died there (0
+deaths against 14); and it is the lowest level the mine ever reports.
+Anything counting Delve content should keep it apart — it is a vendor
+camp with the area id of a mine.
 
 ### Vendors: neither identifying nor selling publishes reliably
 
