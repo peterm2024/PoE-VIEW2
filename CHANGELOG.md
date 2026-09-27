@@ -6,6 +6,8 @@ nach [SemVer](https://semver.org/lang/de/).
 
 ## [Unveröffentlicht]
 
+## [0.17.0] - 2026-09-27
+
 ### Neu
 
 - **Spalten-Filter in der Zonen-Tabelle**, wie in der Item-Liste:

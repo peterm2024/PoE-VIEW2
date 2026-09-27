@@ -90,13 +90,23 @@ with the tiers you still miss left empty.
 - **Zone table** (toolbar button "🗺 Zones"): every zone you have ever
   entered, with the monster level the game generated it at — grouped
   into story, maps, side areas, labyrinth, delve, special areas and the
-  places without monsters, and exportable as CSV. It is built from Path of Exile's own `Client.txt`,
-  which names the area level on every single zone entry, and it keeps
-  what it has seen even after the game truncates that log. Because the
-  atlas is rebuilt every season — across the last switch, 44 of 233
-  areas changed level — the table separates the leagues you played in,
-  starting on the most recent one. Columns: group, map tier, monster
-  level, visits, deaths and the average time you spent there.
+  places without monsters, and exportable as CSV. It is built from Path
+  of Exile's own `Client.txt`, which names the area level on every single
+  zone entry, and it keeps what it has seen even after the game
+  truncates that log. Columns: group, map tier, monster level, visits,
+  deaths and the average time you spent there.
+  **Expand a zone** to see one row per monster level, each with its own
+  visits, deaths and average time. A zone does not have a tier — a visit
+  does: maps are numbered items ("Map (Tier 4)") that send you to a map
+  of that tier *or lower*, so the same zone shows up at several levels,
+  and averaging across them mixes a tier 1 run with a tier 9 one.
+  **Separated by league**, because the atlas is rebuilt every season
+  (across the last switch, 44 of 233 areas changed level) and the
+  leagues of one season differ in content. Starts on the league you
+  played most recently.
+  **Column filters** as in the item list: right-click a column header
+  and type `>=70`, `<45`, `=Cells` or any substring. A filtered column
+  carries 🔍 in its header.
 - **Configurable columns**: which columns are shown and in what order is
   set either in the settings dialog (checkboxes and drag & drop) or via
   a quick toggle in the header's right-click menu. The choice is saved
