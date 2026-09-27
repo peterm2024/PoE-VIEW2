@@ -366,16 +366,30 @@ def test_the_per_level_numbers_survive_a_save_and_load(tmp_path) -> None:
     assert zahlen.by_level[72].last_seen == "2026-09-26T12:40:00"
 
 
-def test_an_older_catalogue_is_rebuilt_instead_of_guessed(tmp_path) -> None:
+def test_a_catalogue_of_another_version_is_discarded_even_if_it_parses(
+        tmp_path) -> None:
     """VERSION 3 fuehrte nur eine Summe je Liga; wie sie sich auf die
     Stufen verteilt, steht dort nicht. Statt sie zu erfinden, faengt der
     Katalog leer an — ``refresh_from_log`` liest die Client.txt dann von
-    vorn und weiss es genau."""
-    pfad = tmp_path / "zonen.json"
-    pfad.write_text('{"version": 3, "zones": [{"area_id": "MapWorldsBazaar",'
-                    ' "leagues": {"X": {"levels": [71, 72], "visits": 6}}}]}',
-                    encoding="utf-8")
-    assert zk.load(pfad) == {}
+    vorn und weiss es genau.
+
+    Geprueft wird das mit einem Rumpf, der sich SEHR WOHL lesen liesse.
+    Die erste Fassung dieses Tests nahm eine echte v3-Datei, und die ist
+    unter v4-Regeln ohnehin unlesbar ( "levels" ist dort eine Liste,
+    hier ein Objekt) — sie wurde also auch ohne Versionspruefung
+    verworfen, und der Test bestand aus dem falschen Grund. Aufgefallen
+    ist das erst in der Gegenprobe."""
+    gueltiger_rumpf = ('"zones": [{"area_id": "MapWorldsBazaar", "name": '
+                       '"Bazaar", "category": "Map", "leagues": {"X": '
+                       '{"levels": {"71": {"visits": 6}}}}}]')
+    passend = tmp_path / "passend.json"
+    passend.write_text('{"version": %d, %s}' % (zk.VERSION, gueltiger_rumpf),
+                       encoding="utf-8")
+    assert zk.load(passend)["MapWorldsBazaar"].stats("X").visits == 6
+
+    fremd = tmp_path / "fremd.json"
+    fremd.write_text('{"version": 3, %s}' % gueltiger_rumpf, encoding="utf-8")
+    assert zk.load(fremd) == {}
 
 
 def test_the_tier_column_spans_what_actually_occurred() -> None:
