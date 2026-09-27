@@ -39,6 +39,8 @@ def _isolated_local_state(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     # Umgebung anders ausgehen lassen — Tests bestimmen ihren Zustand
     # selbst.
     monkeypatch.delenv("POEVIEW_GEM_XP_LOG", raising=False)
+    # Dasselbe für die Beute-Mitschrift (§zone_loot_log.enabled).
+    monkeypatch.delenv("POEVIEW_ZONE_LOOT_LOG", raising=False)
     # MainWindow() reiht bei jedem Start einen FetchModKnowledgeJob ein
     # (§4.53) — ohne diese Zeile würde JEDER Test, der ein MainWindow()
     # baut, echt gegen repoe-fork.github.io abrufen (der Cache in

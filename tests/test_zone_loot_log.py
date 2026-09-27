@@ -145,8 +145,8 @@ def test_a_file_with_other_columns_is_set_aside_instead_of_corrupted(tmp_path) -
 
 
 def test_a_file_over_the_size_limit_is_set_aside(tmp_path, monkeypatch) -> None:
-    """Eine Datei, die nur wächst, ist ein Fehler auf Raten — diese läuft
-    anders als die Gem-Mitschrift auch in der ausgelieferten .exe."""
+    """Gemessen wird über Wochen; eine Datei, die nur wächst, ist ein
+    Fehler auf Raten."""
     pfad = tmp_path / "loot.csv"
     zone_loot_log.append(_row(), tally([], []), pfad)
     monkeypatch.setattr(zone_loot_log, "_MAX_BYTES", 10)
@@ -166,3 +166,45 @@ def test_the_log_path_follows_the_patched_log_dir() -> None:
     (CLAUDE.md, "Tests")."""
     from poe_view import config
     assert zone_loot_log.log_path().parent == config.LOG_DIR
+
+
+# --- Der Schalter -------------------------------------------------------- #
+
+def test_from_the_source_the_log_runs_by_itself(monkeypatch) -> None:
+    """Beim Entwickeln soll niemand daran denken müssen."""
+    monkeypatch.setattr("poe_view.config.RUNNING_AS_EXE", False)
+    assert zone_loot_log.enabled()
+
+
+def test_in_the_packaged_exe_the_log_stays_silent(monkeypatch) -> None:
+    """Peter, 2026-09-27: "Die Beute-Mitschrift wäre ja im Release mit
+    dabei, obwohl das rein für das Development ist." Eine Mitschrift,
+    aus der noch keine Anzeige geworden ist, hat auf fremden Rechnern
+    nichts zu suchen."""
+    monkeypatch.setattr("poe_view.config.RUNNING_AS_EXE", True)
+    assert not zone_loot_log.enabled()
+
+
+def test_the_environment_variable_overrides_both_ways(monkeypatch) -> None:
+    """Der Normalfall, nicht der Randfall: Gemessen wird an echten
+    Spielabenden, und die spielt Peter mit der .exe. Ohne diesen
+    Schalter gäbe es nie Daten."""
+    monkeypatch.setattr("poe_view.config.RUNNING_AS_EXE", True)
+    monkeypatch.setenv("POEVIEW_ZONE_LOOT_LOG", "1")
+    assert zone_loot_log.enabled()
+
+    monkeypatch.setattr("poe_view.config.RUNNING_AS_EXE", False)
+    monkeypatch.setenv("POEVIEW_ZONE_LOOT_LOG", "0")
+    assert not zone_loot_log.enabled()
+
+
+def test_a_switched_off_log_writes_no_file(tmp_path, monkeypatch) -> None:
+    """Der Wächter sitzt in append selbst, nicht an der Aufrufstelle
+    im Hauptfenster — wer die Mitschrift abschalten will, soll das an
+    EINER Stelle finden."""
+    monkeypatch.setenv("POEVIEW_ZONE_LOOT_LOG", "0")
+    pfad = tmp_path / "loot.csv"
+
+    zone_loot_log.append(_row(), tally([_item("a", 2)], []), pfad)
+
+    assert not pfad.exists()

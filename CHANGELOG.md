@@ -25,14 +25,6 @@ nach [SemVer](https://semver.org/lang/de/).
   die Orte ohne Monster, durchsuchbar und als CSV exportierbar. Peters
   Spiel-Log lieferte dafür auf Anhieb 381 Gebiete. Der Katalog behält
   sie auch dann, wenn das Spiel seine Logdatei kürzt.
-- **Mitschrift der Beute je Zone.** Was nach einer Map ins Inventar
-  wandert, wird mit der Zone, dem Monsterlevel und dem
-  Erfahrungs-Zuwachs in eine CSV geschrieben — Zählungen nach
-  Seltenheit, die Währung im Klartext, der Chaos-Wert als Untergrenze.
-  Noch keine Anzeige: Erst muss sich zeigen, ob daraus eine belastbare
-  Aussage über die Lukrativität einer Zone wird. Die Zuordnung ist an
-  Peters Log belegt — von 108 Zuwächsen direkt nach einem Zonenwechsel
-  landeten 95 im Hideout, die Beute gehört also der Zone davor.
 - **Die Zonen-Tabelle trennt nach Liga** (nicht nur nach Season) und
   zeigt Tier, Tode und durchschnittliche Verweildauer. Die Ligen einer
   Season unterscheiden sich im Inhalt: Von zehn besuchten

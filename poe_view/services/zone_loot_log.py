@@ -54,6 +54,12 @@ laufenden Zone zugerechnet, obwohl ein Teil davon Handel sein dürfte. Die
 Spalte ``trigger`` hält beide Fälle auseinander, damit sich die Frage
 später an den Daten statt an einer Annahme klären lässt.
 
+**Sie läuft nur bei uns.** In der ausgelieferten .exe bleibt sie still
+(§``enabled``) — eine Mitschrift, aus der noch keine Anzeige geworden
+ist, hat auf fremden Rechnern nichts zu suchen. Für die Messung an
+Peters echten Spielabenden schaltet ``POEVIEW_ZONE_LOOT_LOG=1`` sie in
+der .exe wieder ein.
+
 **Karten zählen als das, was sie sind** — eine gefundene Karte ist ein
 normales, magisches oder seltenes Item und steht in dessen Spalte. Ein
 eigener Eimer dafür wäre geraten (am Item-Rohdatum hängt kein sicheres
@@ -65,6 +71,7 @@ from __future__ import annotations
 
 import csv
 import logging
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import NamedTuple
@@ -96,11 +103,39 @@ FIELDNAMES = [
 
 # Ab wann wird die Mitschrift beiseitegelegt? Eine Zeile wiegt rund 200
 # Bytes, eine Spielstunde bringt gut 60 — fünf Megabyte reichen für
-# mehrere hundert Spielstunden. Die Grenze steht trotzdem da: Diese Datei
-# läuft anders als die Gem-Mitschrift auch in der ausgelieferten .exe
-# (sie ist die Datengrundlage eines künftigen Features, nicht unser
-# Messwerkzeug), und eine Datei, die nur wächst, ist ein Fehler auf Raten.
+# mehrere hundert Spielstunden. Die Grenze steht trotzdem da: Gemessen
+# wird über Wochen, und eine Datei, die nur wächst, ist ein Fehler auf
+# Raten.
 _MAX_BYTES = 5_000_000
+
+
+# Umgebungsvariable, die die Entscheidung unten überstimmt —
+# "1"/"true"/… schaltet ein, "0"/"false" aus (dasselbe Muster wie
+# ``gem_xp_log._ENABLE_ENV``).
+_ENABLE_ENV = "POEVIEW_ZONE_LOOT_LOG"
+_OFF_VALUES = frozenset({"", "0", "false", "no", "off", "nein"})
+
+
+def enabled() -> bool:
+    """Läuft die Mitschrift überhaupt?
+
+    Peter, 2026-09-27: "Die Beute-Mitschrift wäre ja im Release mit
+    dabei, obwohl das rein für das Development ist." Richtig — solange
+    keine Anzeige daraus geworden ist, schreibt sie eine Datei, mit der
+    niemand außer uns etwas anfangen kann. Deshalb dieselbe Regel wie
+    bei der Gem-Mitschrift (§``gem_xp_log.enabled``): Aus dem Quellcode
+    heraus läuft sie von selbst mit, in der gepackten .exe bleibt sie
+    still, niemand muss vor einem Release daran denken.
+
+    ``POEVIEW_ZONE_LOOT_LOG`` überstimmt beides — und das ist hier
+    nicht der Randfall, sondern der Normalfall: Gemessen werden soll an
+    Peters echten Spielabenden, und die spielt er mit der .exe. Ohne
+    diesen Schalter gäbe es nie Daten, und die Frage "Spalte oder
+    nicht?" bliebe für immer offen."""
+    override = os.environ.get(_ENABLE_ENV)
+    if override is not None:
+        return override.strip().lower() not in _OFF_VALUES
+    return not config.RUNNING_AS_EXE
 
 
 def log_path() -> Path:
@@ -198,7 +233,14 @@ def append(row: Row, counted: Tally, path: Path | None = None) -> None:
     """Eine Zeile anhängen. Der Aufrufer entscheidet, ob es etwas zu
     schreiben gibt — eine Veröffentlichung ohne Beute ist trotzdem eine
     Aussage (die Zone hat in dieser Zeit nichts gegeben), eine bloße
-    Abfrage ohne Veröffentlichung dagegen nicht."""
+    Abfrage ohne Veröffentlichung dagegen nicht.
+
+    Tut gar nichts, wenn die Mitschrift abgeschaltet ist (§``enabled``).
+    Die Prüfung sitzt hier und nicht an der Aufrufstelle im Hauptfenster:
+    Wer sie ausschalten will, soll das an EINER Stelle finden — dieselbe
+    Begründung wie bei ``gem_xp_log.append``."""
+    if not enabled():
+        return
     pfad = path or log_path()
     zeile = {
         "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),

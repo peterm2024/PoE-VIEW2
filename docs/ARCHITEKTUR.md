@@ -7646,11 +7646,22 @@ nichts: Er vergleicht gegen einen womöglich wochenalten Stand, sein
 "Zuwachs" wäre das halbe Inventar (derselbe Grund wie beim Item-Verlauf,
 §4.21).
 
-Die Mitschrift läuft — anders als die Gem-Mitschrift (§gem_xp_log) —
-auch in der ausgelieferten .exe: Sie ist die Datengrundlage eines
-künftigen Features, nicht unser Messwerkzeug, und sie kostet rund 200
-Bytes je Veröffentlichung. Bei fünf Megabyte legt sie sich selbst
-beiseite.
+**Sie läuft nur bei uns** — dieselbe Regel wie bei der Gem-Mitschrift
+(§gem_xp_log). Peter, als er den fertigen Stand sah: "Die
+Beute-Mitschrift wäre ja im Release mit dabei, obwohl das rein für das
+Development ist." Aus dem Quellcode heraus läuft sie mit, in der
+gepackten .exe bleibt sie still, und sie taucht aus demselben Grund
+nicht im Changelog auf.
+
+Der Haken daran ist der Grund für den Schalter
+`POEVIEW_ZONE_LOOT_LOG`: Gemessen werden soll an echten Spielabenden,
+und die spielt Peter mit der .exe. Ohne ihn gäbe es nie Daten — und
+das Zurückhalten des Releases würde die Messung nicht etwa abwarten,
+sondern verhindern, weil dann weiter die alte Fassung ohne jede
+Mitschrift läuft. Mit ihm ist beides entkoppelt: Der Release kann
+gehen, wann er fertig ist, und die Messung läuft davon unabhängig.
+
+Bei fünf Megabyte legt sich die Datei selbst beiseite.
 
 ---
 
