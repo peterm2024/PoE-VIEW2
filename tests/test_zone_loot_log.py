@@ -105,7 +105,7 @@ def test_without_a_price_index_there_is_no_chaos_value() -> None:
 def _row(**kwargs) -> Row:
     werte = dict(character="WitchOfPeter", league="Allflame", zone="Chateau",
                  area_id="MapWorldsChateau", instance="123", level=79,
-                 trigger="zone change", seconds=284.0,
+                 trigger="zone change", seconds=284.0, interval=66.0,
                  experience=4_200_000_000, experience_gain=12_345)
     return Row(**{**werte, **kwargs})
 
@@ -121,6 +121,8 @@ def test_a_row_lands_in_the_csv_with_its_header(tmp_path) -> None:
     assert zeilen[0]["rare"] == "1"
     assert zeilen[0]["experience_gain"] == "12345"
     assert zeilen[0]["trigger"] == "zone change"
+    assert zeilen[0]["seconds"] == "284"
+    assert zeilen[0]["interval"] == "66"
 
 
 def test_a_second_row_is_appended_not_a_second_header(tmp_path) -> None:

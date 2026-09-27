@@ -54,6 +54,14 @@ laufenden Zone zugerechnet, obwohl ein Teil davon Handel sein dürfte. Die
 Spalte ``trigger`` hält beide Fälle auseinander, damit sich die Frage
 später an den Daten statt an einer Annahme klären lässt.
 
+**Zwei Zeitspalten, und nur eine davon ist ein Nenner.** ``seconds``
+ist die Verweildauer in der Zone, ``interval`` der Abschnitt, den diese
+eine Zeile abdeckt. Bei mehreren Veröffentlichungen in derselben Zone
+wächst die erste über die zweite hinweg — wer aus ihr eine Rate bildet,
+zählt dieselbe Zeit mehrfach. Peters erste fünf Zeilen zeigten das
+sofort: 260 s und 324 s für dieselbe Map, die 324 enthielten die 260.
+Für XP/h und Items/h gilt deshalb ``interval``.
+
 **Sie läuft nur bei uns.** In der ausgelieferten .exe bleibt sie still
 (§``enabled``) — eine Mitschrift, aus der noch keine Anzeige geworden
 ist, hat auf fremden Rechnern nichts zu suchen. Für die Messung an
@@ -96,7 +104,7 @@ _BUCKET_OF_FRAME = {0: "normal", 1: "magic", 2: "rare", 3: "unique",
 
 FIELDNAMES = [
     "timestamp", "character", "league",
-    "zone", "area_id", "instance", "level", "trigger", "seconds",
+    "zone", "area_id", "instance", "level", "trigger", "seconds", "interval",
     "experience", "experience_gain",
     *BUCKETS, "chaos", "currency_detail",
 ]
@@ -224,7 +232,18 @@ class Row(NamedTuple):
     instance: str
     level: int
     trigger: str
+    # Die ganze Verweildauer in der Zone bis zu diesem Zeitpunkt.
     seconds: float
+    # **Der Abschnitt, den DIESE Zeile abdeckt** — und der einzige
+    # Nenner, mit dem man rechnen darf. ``seconds`` waechst ueber
+    # mehrere Veroeffentlichungen derselben Zone hinweg; wer damit eine
+    # Rate bildet, zaehlt dieselbe Zeit mehrfach. Real in Peters ersten
+    # fuenf Zeilen aufgetreten: zwei Veroeffentlichungen derselben Map
+    # mit 260 s und 324 s, wobei die 324 die 260 enthielten. Der
+    # Abschnitt beginnt beim SPAETEREN von Zonenbetreten und voriger
+    # Veroeffentlichung — dieselbe Regel wie bei der XP-Rate
+    # (``MainWindow._interval_seconds``).
+    interval: float
     experience: int
     experience_gain: int
 
@@ -252,6 +271,7 @@ def append(row: Row, counted: Tally, path: Path | None = None) -> None:
         "level": row.level or "",
         "trigger": row.trigger,
         "seconds": f"{row.seconds:.0f}",
+        "interval": f"{row.interval:.0f}",
         "experience": row.experience or "",
         "experience_gain": row.experience_gain,
         **counted.counts,

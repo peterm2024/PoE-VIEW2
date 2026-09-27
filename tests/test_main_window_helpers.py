@@ -10709,3 +10709,99 @@ def test_the_first_fetch_after_an_account_switch_writes_nothing(qapp) -> None:
     finally:
         win.worker.stop()
         win.worker.wait(5000)
+
+
+def test_a_second_publication_in_the_same_zone_does_not_claim_the_time_twice(
+        qapp) -> None:
+    """Der Fehler, den Peters erste fuenf echte Zeilen sofort zeigten:
+    zwei Veroeffentlichungen derselben Map mit 260 s und 324 s, wobei
+    die 324 die 260 bereits enthielten. Wer daraus XP/h rechnet, zaehlt
+    dieselbe Zeit zweimal — genau die Falle, die die XP-Rate laengst
+    kennt (``_interval_seconds``: "Man kann dieselbe Erfahrung nicht
+    zweimal verdienen").
+
+    ``seconds`` darf deshalb weiter die ganze Verweildauer sein, aber
+    ``interval`` muss beim SPAETEREN von Zonenbetreten und voriger
+    Veroeffentlichung beginnen."""
+    win = MainWindow()
+    try:
+        win._all_characters = [make_char("WitchOfPeter", "Allflame")]
+        _with_stays(win, (HIDEOUT_STAY, 900.0), (MAP_STAY, 300.0))
+        basis = Item.model_validate({"id": "belt", "typeLine": "Belt", "frameType": 2})
+        _publish(win, "WitchOfPeter", [basis], 4_200_000_000)   # Basis
+        _publish(win, "WitchOfPeter", [basis], 4_200_100_000)   # erste Zeile
+        _publish(win, "WitchOfPeter", [basis], 4_200_200_000)   # zweite Zeile
+
+        zeilen = _rows()
+        assert len(zeilen) == 2
+        # Erste: keine Vorgaengerin, also das ganze bisherige Aufenthalts-
+        # fenster.
+        assert zeilen[0]["seconds"] == "300"
+        assert zeilen[0]["interval"] == "300"
+        # Zweite: dieselbe Zone, dieselbe Verweildauer — aber der
+        # Abschnitt beginnt erst bei der ersten Veroeffentlichung.
+        assert zeilen[1]["seconds"] == "300"
+        assert zeilen[1]["interval"] == "0"
+    finally:
+        win.worker.stop()
+        win.worker.wait(5000)
+
+
+def test_a_skipped_hideout_publication_does_not_donate_its_time(qapp) -> None:
+    """Die Veroeffentlichung im Hideout bekommt keine Zeile (dort droppt
+    nichts) — ihre Zeit darf trotzdem nicht der naechsten Map
+    zugeschlagen werden. Deshalb wird der Zeitpunkt VOR der
+    Ruhezonen-Pruefung fortgeschrieben."""
+    win = MainWindow()
+    try:
+        win._all_characters = [make_char("WitchOfPeter", "Allflame")]
+        basis = Item.model_validate({"id": "belt", "typeLine": "Belt", "frameType": 2})
+        _with_stays(win, (MAP_STAY, 900.0), (HIDEOUT_STAY, 300.0))
+        _publish(win, "WitchOfPeter", [basis], 4_200_000_000)   # Basis
+        _publish(win, "WitchOfPeter", [basis], 4_200_100_000)   # Hideout: keine Zeile
+        assert _rows() == []
+
+        # Jetzt in einer Map, die schon 300 s laeuft — der Abschnitt
+        # beginnt aber bei der Hideout-Veroeffentlichung von eben.
+        _with_stays(win, (HIDEOUT_STAY, 900.0), (MAP_STAY, 300.0))
+        _publish(win, "WitchOfPeter", [basis], 4_200_200_000)
+
+        zeilen = _rows()
+        assert len(zeilen) == 1
+        assert zeilen[0]["seconds"] == "300"
+        assert zeilen[0]["interval"] == "0"
+    finally:
+        win.worker.stop()
+        win.worker.wait(5000)
+
+
+def test_a_publication_from_before_the_zone_was_entered_does_not_stretch_it(
+        qapp) -> None:
+    """Der Fall, fuer den das max() da ist: Die letzte
+    Veroeffentlichung liegt VOR dem Betreten der Zone — etwa die im
+    Hideout vor einer laengeren Pause. Der Abschnitt darf dann nur so
+    lang sein wie der Aufenthalt, sonst bekaeme eine frische Map die
+    Wartezeit davor als Nenner angerechnet und jede Rate waere zu
+    niedrig.
+
+    Diese Luecke hat die Gegenprobe gefunden: In allen anderen Tests lag
+    die vorige Veroeffentlichung NACH dem Zonenbetreten, dort ist das
+    max() wirkungslos."""
+    win = MainWindow()
+    try:
+        win._all_characters = [make_char("WitchOfPeter", "Allflame")]
+        _with_stays(win, (HIDEOUT_STAY, 900.0), (MAP_STAY, 60.0))
+        basis = Item.model_validate({"id": "belt", "typeLine": "Belt", "frameType": 2})
+        _publish(win, "WitchOfPeter", [basis], 4_200_000_000)   # Basis
+        # Die vorige Veroeffentlichung liegt lange vor dem Betreten.
+        win._last_publication_at["WitchOfPeter"] = time.monotonic() - 900.0
+
+        _publish(win, "WitchOfPeter", [basis], 4_200_100_000)
+
+        zeilen = _rows()
+        assert len(zeilen) == 1
+        assert zeilen[0]["seconds"] == "60"
+        assert zeilen[0]["interval"] == "60"      # nicht 900
+    finally:
+        win.worker.stop()
+        win.worker.wait(5000)

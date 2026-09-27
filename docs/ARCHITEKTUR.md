@@ -7646,6 +7646,18 @@ nichts: Er vergleicht gegen einen womöglich wochenalten Stand, sein
 "Zuwachs" wäre das halbe Inventar (derselbe Grund wie beim Item-Verlauf,
 §4.21).
 
+**Zwei Zeitspalten, und nur eine davon ist ein Nenner.** `seconds` ist
+die Verweildauer in der Zone, `interval` der Abschnitt, den diese eine
+Zeile abdeckt. Peters erste fünf echten Zeilen zeigten sofort, warum
+das nötig ist: zwei Veröffentlichungen derselben Map mit 260 s und
+324 s — und die 324 enthielten die 260. Wer daraus XP/h rechnet, zählt
+dieselbe Zeit zweimal. Der Abschnitt beginnt deshalb beim SPÄTEREN von
+Zonenbetreten und voriger Veröffentlichung, genau wie bei der XP-Rate
+(`_interval_seconds`, §_XpWatch). Der Zeitpunkt der Veröffentlichung
+wird dabei fortgeschrieben, BEVOR die Ruhezonen-Prüfung greift: Eine
+übersprungene Hideout-Veröffentlichung darf ihre Zeit nicht der
+nächsten Map schenken.
+
 **Sie läuft nur bei uns** — dieselbe Regel wie bei der Gem-Mitschrift
 (§gem_xp_log). Peter, als er den fertigen Stand sah: "Die
 Beute-Mitschrift wäre ja im Release mit dabei, obwohl das rein für das

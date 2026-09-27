@@ -771,6 +771,10 @@ class MainWindow(QMainWindow):
         # Reihenfolge ist fest (``ApiWorker`` sendet sie unmittelbar
         # nacheinander), ein ``None`` heißt "nichts Verwertbares".
         self._pending_loot: dict[str, zone_loot_log.Tally | None] = {}
+        # Wann hat GGG fuer diesen Charakter zuletzt etwas
+        # veroeffentlicht? Der Anfang des Abschnitts, den die naechste
+        # Zeile der Beute-Mitschrift abdeckt (§zone_loot_log.Row.interval).
+        self._last_publication_at: dict[str, float] = {}
         self._publish_watch: dict[str, _PublishWatch] = {}
         self._xp_watch: dict[str, _XpWatch] = {}
         # Aus der Datei geholte Verläufe (§4.44), erst beim ersten
@@ -4896,17 +4900,26 @@ class MainWindow(QMainWindow):
         beute = self._pending_loot.pop(name, None)
         if beute is None or (beute.empty and not gain):
             return
-        zugeordnet = self._loot_zone(time.monotonic())
+        jetzt = time.monotonic()
+        # VOR allen weiteren Abbruchbedingungen fortschreiben: Fuer den
+        # Abschnitt zaehlt, dass veroeffentlicht wurde — nicht, ob daraus
+        # eine Zeile wurde. Sonst schluege eine uebersprungene
+        # Hideout-Veroeffentlichung ihre Zeit der naechsten Map zu.
+        vorher = self._last_publication_at.get(name)
+        self._last_publication_at[name] = jetzt
+        zugeordnet = self._loot_zone(jetzt)
         if zugeordnet is None:
             return
         stay, trigger = zugeordnet
         if stay.resting:
             return
+        ende = stay.until or jetzt
+        beginn = max(stay.at, vorher) if vorher is not None else stay.at
         zone_loot_log.append(zone_loot_log.Row(
             character=name, league=self._league_of_character(name),
             zone=stay.name, area_id=stay.area_id, instance=stay.instance,
             level=stay.level, trigger=trigger,
-            seconds=(stay.until or time.monotonic()) - stay.at,
+            seconds=ende - stay.at, interval=max(ende - beginn, 0.0),
             experience=experience, experience_gain=gain), beute)
 
     def _show_character_items(self, name: str, items: list[Item],
