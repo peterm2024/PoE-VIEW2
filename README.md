@@ -89,8 +89,8 @@ with the tiers you still miss left empty.
   lines.
 - **Zone table** (toolbar button "🗺 Zones"): every zone you have ever
   entered, with the monster level the game generated it at — grouped
-  into story, maps, special areas and the places without monsters, and
-  exportable as CSV. It is built from Path of Exile's own `Client.txt`,
+  into story, maps, side areas, labyrinth, delve, special areas and the
+  places without monsters, and exportable as CSV. It is built from Path of Exile's own `Client.txt`,
   which names the area level on every single zone entry, and it keeps
   what it has seen even after the game truncates that log. Because the
   atlas is rebuilt every season — across the last switch, 44 of 233
@@ -293,7 +293,12 @@ with the tiers you still miss left empty.
   the game's own `Client.txt` (read-only, path entered by you) and
   reload the open view as soon as the game reports a zone change, which
   is when GGG's API tends to publish new stash contents. The toolbar
-  shows the zone most recently detected this way.
+  shows the zone most recently detected this way, together with the
+  monster level the game generated it at and — when the gap to your
+  character level is wide enough to cost you — how much of the
+  experience still arrives: `Chateau (Lv 68 · 14% XP)`. The penalty is
+  the community's formula, not our own measurement, and it is marked as
+  an estimate wherever it appears.
 - **Offline mode**: during GGG maintenance or a lost connection, the
   app shows the last known state from the cache, clearly marked as such
   (📴). A dot in the status bar carries the same information at a

@@ -49,6 +49,15 @@ from poe_view import config  # noqa: E402
 
 _TMP = Path(tempfile.mkdtemp(prefix="poe-view2-screenshots-"))
 config.APP_DATA_DIR = _TMP  # VOR jedem Import, der das Fenster baut
+# LOG_DIR MUSS eigens umgebogen werden: Es ist eine Modul-KONSTANTE, beim
+# Import aus dem noch ungepatchten APP_DATA_DIR berechnet — die Zeile
+# darueber erreicht sie nicht mehr. Ohne sie schreiben die Mitschriften
+# (gem_xp_log, zone_loot_log) ihre Demo-Zeilen in Peters ECHTEN
+# Log-Ordner; in seiner gem-xp-log.csv standen dadurch 32 Zeilen des
+# erfundenen "Demo Ranger" mitten in den Messdaten (gefunden 2026-09-27).
+# Dieselbe Falle wie in tests/conftest.py, nur an einer Stelle, an der
+# keine Fixture greift.
+config.LOG_DIR = _TMP / "logs"
 
 from poe_view.api.models import Character, Item, StashTab  # noqa: E402
 from poe_view.api.ninja import PriceIndex  # noqa: E402

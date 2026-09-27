@@ -6,11 +6,13 @@ nach [SemVer](https://semver.org/lang/de/).
 
 ## [Unveröffentlicht]
 
+## [0.16.0] - 2026-09-27
+
 ### Neu
 
 - **Der Monsterlevel der aktuellen Zone steht in der Kopfzeile**
   (`Chateau (Lv 68)`). Path of Exile schreibt ihn bei jedem Zonenwechsel
-  in seine `Client.txt` — an allen 5.000 Eintritten in Peters Log war er
+  in seine `Client.txt` — an allen 5.000 Eintritten im Testlog war er
   vorhanden. Er gehört zur Instanz, nicht zum Gebiet: Dieselbe Map-Zone
   erscheint je nach eingelegter Karte mit verschiedenen Leveln.
 - **Die Erfahrungs-Strafe daneben**, sobald sie zubeißt
@@ -21,33 +23,27 @@ nach [SemVer](https://semver.org/lang/de/).
   Gem-Mitschrift führt jetzt die Charakter-Erfahrung mit, damit sich die
   Strafe künftig nachrechnen lässt.
 - **Zonen-Tabelle** (Werkzeugleiste "🗺 Zones"): alle je betretenen
-  Gebiete mit ihrem Monsterlevel, gruppiert in Story, Map, Special und
-  die Orte ohne Monster, durchsuchbar und als CSV exportierbar. Peters
-  Spiel-Log lieferte dafür auf Anhieb 381 Gebiete. Der Katalog behält
-  sie auch dann, wenn das Spiel seine Logdatei kürzt.
-- **Die Zonen-Tabelle trennt nach Liga** (nicht nur nach Season) und
-  zeigt Tier, Tode und durchschnittliche Verweildauer. Die Ligen einer
-  Season unterscheiden sich im Inhalt: Von zehn besuchten
-  Vaal-Side-Areas lagen alle in der normalen Liga, keine in Ruthless.
-  Wer wann gespielt hat, verrät die `Client.txt` über Aufstiege und
-  Tode (482 Marken, 92 % Abdeckung); ab jetzt schreibt das Programm es
-  bei jeder Erfahrungs-Veröffentlichung genau mit. Zeiten vor der
-  laufenden Season tragen ein "(earlier)", weil Charaktere nach
-  Season-Ende in die permanente Liga wandern — die Spielart bleibt
-  lesbar, die Zahlen bleiben getrennt.
-- **Eigene Gruppen für Side Areas, Delve und Labyrinth.** Vaal-Side-Areas
-  sind keine Karten und verfälschten die Karten-Liste; das Labyrinth ist
-  mit 82 Kennungen zu groß für "Special".
-- **Season-Filter in der Zonen-Tabelle.** Path of Exile baut den Atlas
-  mit jeder Season um: Über den Wechsel am 24.07. hinweg trugen 44 von
-  233 Gebieten danach einen anderen Level (Chateau 76 → 68, Atoll
-  70 → 77). Innerhalb einer Season ist der Level dagegen fest — bei den
-  Karten schwankten nur 3 von 94. Die Tabelle beginnt deshalb mit der
-  laufenden Season und lässt sich auf frühere oder auf alle umschalten;
-  über alle Seasons hinweg sagt der Tooltip, welcher Level aus welcher
-  Season stammt. Die Season-Zeiten kommen aus dem Liga-Abruf, der
-  ohnehin läuft; für die Zeit davor steht "earlier", weil die API
-  beendete Ligen vergisst.
+  Gebiete mit Monsterlevel, Kartenstufe, Besuchen, Toden und
+  durchschnittlicher Verweildauer — durchsuchbar und als CSV
+  exportierbar. Das Testlog lieferte dafür auf Anhieb 381 Gebiete.
+  Gruppiert wird in Story, Map, Side Area, Labyrinth, Delve, Special
+  und die Orte ohne Monster; Vaal-Side-Areas sind keine Karten und
+  verfälschten sonst die Kartenliste, und das Labyrinth ist mit 82
+  Kennungen zu groß für "Special". Der Katalog behält die Gebiete auch
+  dann, wenn das Spiel seine Logdatei kürzt.
+- **Liga-Filter in der Zonen-Tabelle.** Zwei Gründe, beide gemessen:
+  Path of Exile baut den Atlas mit jeder Season um (über den Wechsel am
+  24.07. hinweg trugen 44 von 233 Gebieten danach einen anderen Level,
+  Chateau 76 → 68, Atoll 70 → 77; innerhalb einer Season schwankten nur
+  3 von 94 Karten). Und die Ligen *einer* Season unterscheiden sich im
+  Inhalt: Von zehn besuchten Vaal-Side-Areas lagen alle in der normalen
+  Liga, keine in Ruthless. Wer wann gespielt hat, verrät die
+  `Client.txt` über Aufstiege und Tode (92 % der Zonen-Eintritte lassen
+  sich so zuordnen); ab jetzt schreibt das Programm es bei jeder
+  Erfahrungs-Veröffentlichung genau mit. Zeiten vor der laufenden
+  Season tragen ein "(earlier)", weil Charaktere nach Season-Ende in
+  die permanente Liga wandern — die Spielart bleibt lesbar, die Zahlen
+  bleiben getrennt.
 
 ## [0.15.1] - 2026-09-23
 
