@@ -1799,3 +1799,43 @@ zusammenfällt. Solange die Kategorie daneben nicht ausgezählt ist, ist
 eine bestätigte Vermutung bloß eine unwidersprochene. Und: Wo zwei
 Signale zusammen eine Aussage ergeben, ist ihre Reihenfolge Teil der
 Schnittstelle und gehört getestet, nicht kommentiert.
+
+
+## 89. Der Hook gegen private Namen hat über Wochen nie gegriffen — weil jeder Commit mit `cd … &&` anfing
+
+**Symptom.** Beim Aufräumen für den nächsten Release fanden sich zwei
+echte Charakternamen im Quelltext: einer in `services/league_log.py`
+(noch ungepusht), einer in `services/zone_watcher.py` — dort seit
+v0.13.0 und damit **öffentlich**. Genau das soll der PreToolUse-Hook
+verhindern (`.claude/hooks/check_private_strings.py`), und er tut es
+auch: von Hand ausgelöst blockiert er sauber.
+
+**Ursache.** Nicht das Skript, sondern sein Filter in
+`.claude/settings.json`:
+
+```json
+"if": "Bash(git commit*)"
+```
+
+Das Muster verankert am Anfang der Befehlszeile. Jeder Commit dieses
+Projekts wurde aber als `cd /c/Users/peter/Projekte/PoE-VIEW2 && git
+commit …` abgesetzt — die Zeile fängt mit `cd` an, der Filter greift
+nicht, der Hook läuft gar nicht erst. Ein Schutz, der still nicht
+stattfindet, sieht von außen genauso aus wie einer, der nichts zu
+beanstanden hat.
+
+**Lösung.** `"if": "Bash(*git commit*)"` (und dasselbe für PowerShell).
+Gegengeprobt statt geglaubt: eine Wegwerfdatei mit einem privaten Muster
+staged, dann `cd … && git commit --dry-run` — der Hook blockiert jetzt.
+
+**Der zweite Strick, der dabei sichtbar wurde.** Das Skript prüft den
+gesamten `git diff --cached`, also auch ENTFERNTE Zeilen. Damit lässt
+sich ausgerechnet der Commit nicht absetzen, der einen versehentlich
+eingecheckten Namen wieder herausnimmt. Richtig wäre, nur hinzugefügte
+Zeilen zu prüfen (`+`, ohne `+++`); eine entfernte Zeile mit einem
+Muster ist das Gegenteil eines Lecks.
+
+**Lehre:** Ein Schutz, der noch nie ausgelöst hat, ist nicht erprobt,
+sondern unerprobt. Zu jedem Hook gehört einmal der Nachweis, dass er im
+Ernstfall wirklich zuschlägt — und zwar über denselben Weg, auf dem die
+echten Befehle laufen, nicht über einen von Hand gebauten Aufruf.

@@ -147,7 +147,7 @@ _INVENTORY_LINES = (
 
 # Tod des Charakters. Reales Format aus Peters Client.txt (2026-09-13):
 # "2026/09/13 19:25:16 28758625 cffb065b [INFO Client 19976] :
-# KRN_LZ_COTA has been slain." — der Name steht in der Zeile selbst,
+# WitchOfPeter has been slain." — der Name steht in der Zeile selbst,
 # damit ist das Ereignis je Charakter zählbar (in einer Gruppe erscheinen
 # auch die Tode der Mitspieler in derselben Form; der Anzeige-Code filtert
 # ohnehin nach dem gerade gezeigten Charakter, fremde Namen stören nicht).

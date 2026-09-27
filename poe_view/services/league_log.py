@@ -9,8 +9,8 @@ client.txt herausfinden?"
 **Ja, punktuell.** Zwei Zeilenarten nennen den Charakter beim Namen:
 
 ```
-: KRN_… (Chieftain) is now level 83
-: KRN_… has been slain.
+: WitchOfPeter (Chieftain) is now level 83
+: WitchOfPeter has been slain.
 ```
 
 In Peters Log sind das 256 Aufstiege und 226 Tode, zusammen 482
@@ -80,8 +80,8 @@ UNKNOWN = "unknown"
 # einen Schlaf hinweg raten.
 MARK_WINDOW = timedelta(hours=6)
 
-# "2026/04/13 11:22:45 … ] : KRN_LZ_COTA (Chieftain) is now level 83"
-# "2026/09/22 22:31:07 … ] : KRN_LZ_COTA has been slain."
+# "2026/04/13 11:22:45 … ] : WitchOfPeter (Chieftain) is now level 83"
+# "2026/09/22 22:31:07 … ] : WitchOfPeter has been slain."
 _MARK_RE = re.compile(
     r"^(\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2}).*\] : (\S+)"
     r"(?: \([^)]+\) is now level \d+| has been slain)")
