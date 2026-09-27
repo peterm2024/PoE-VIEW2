@@ -62,6 +62,17 @@ zählt dieselbe Zeit mehrfach. Peters erste fünf Zeilen zeigten das
 sofort: 260 s und 324 s für dieselbe Map, die 324 enthielten die 260.
 Für XP/h und Items/h gilt deshalb ``interval``.
 
+**Der Blindfleck heißt Delve** (Peter, 2026-09-27: "GGG refresht nur
+nach einem Lade-Bildschirm und der ist selten bei Delve, d.h. ich kann
+mehrmals mein komplettes Inventar vollstopfen, in die Minen-Basis per
+Wegpunkt gelangen und dort verkaufen und wieder in die Mine
+zurückkehren, ohne dass wir das mitbekommen"). Er hat recht, und es ist
+messbar: 58 der 228 Mine-Aufenthalte in seinem Log (25 %) enthalten
+Händler-Ereignisse MITTENDRIN, ohne dass eine Zonenzeile dazwischen
+steht; bei 1119 Karten-Aufenthalten sind es null. Die Spalte
+``vendor_events`` zählt sie je Abschnitt, statt so zu tun, als gäbe es
+sie nicht.
+
 **Sie läuft nur bei uns.** In der ausgelieferten .exe bleibt sie still
 (§``enabled``) — eine Mitschrift, aus der noch keine Anzeige geworden
 ist, hat auf fremden Rechnern nichts zu suchen. Für die Messung an
@@ -105,7 +116,7 @@ _BUCKET_OF_FRAME = {0: "normal", 1: "magic", 2: "rare", 3: "unique",
 FIELDNAMES = [
     "timestamp", "character", "league",
     "zone", "area_id", "instance", "level", "trigger", "seconds", "interval",
-    "experience", "experience_gain",
+    "experience", "experience_gain", "vendor_events",
     *BUCKETS, "chaos", "currency_detail",
 ]
 
@@ -246,6 +257,18 @@ class Row(NamedTuple):
     interval: float
     experience: int
     experience_gain: int
+    # Wie viele Händler-Ereignisse (Verkauf, Identifizieren) fielen in
+    # diesen Abschnitt? **Die Spalte, die Delve überhaupt auswertbar
+    # macht.** In der Azurite Mine erreicht man den Händler OHNE
+    # Zonenwechsel — die Client.txt schreibt dafür keine Zeile
+    # (poe-verhalten.md §1). An Peters Log ausgezählt: 25 % der 228
+    # Mine-Aufenthalte enthalten Händler-Ereignisse mittendrin, bei 1119
+    # Karten-Aufenthalten sind es 0 %. Was in so einem Abschnitt
+    # zuwächst, kann vom Händler stammen statt aus dem Boden, und die
+    # Verweildauer enthält den Ausflug (Median 5,8 statt 2,5 min).
+    # Weggerechnet wird das nicht — markiert, damit die Auswertung
+    # entscheiden kann.
+    vendor_events: int = 0
 
 
 def append(row: Row, counted: Tally, path: Path | None = None) -> None:
@@ -274,6 +297,7 @@ def append(row: Row, counted: Tally, path: Path | None = None) -> None:
         "interval": f"{row.interval:.0f}",
         "experience": row.experience or "",
         "experience_gain": row.experience_gain,
+        "vendor_events": row.vendor_events or "",
         **counted.counts,
         "chaos": f"{counted.chaos:.2f}" if counted.chaos else "",
         "currency_detail": counted.currency_detail,

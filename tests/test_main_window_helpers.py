@@ -10805,3 +10805,48 @@ def test_a_publication_from_before_the_zone_was_entered_does_not_stretch_it(
     finally:
         win.worker.stop()
         win.worker.wait(5000)
+
+
+def test_vendor_events_inside_the_section_are_counted(qapp) -> None:
+    """In der Azurite Mine erreicht man den Haendler OHNE Zonenwechsel —
+    die Client.txt schreibt dafuer keine Zeile (poe-verhalten.md §1).
+    Ausgezaehlt an Peters Log: 25 % der 228 Mine-Aufenthalte enthalten
+    Haendler-Ereignisse mittendrin, bei 1119 Karten-Aufenthalten null.
+    Was dort zuwaechst, kann vom Haendler stammen statt aus dem Boden."""
+    win = MainWindow()
+    try:
+        win._all_characters = [make_char("WitchOfPeter", "Allflame")]
+        _with_stays(win, (HIDEOUT_STAY, 900.0), (MAP_STAY, 300.0))
+        basis = Item.model_validate({"id": "belt", "typeLine": "Belt", "frameType": 2})
+        _publish(win, "WitchOfPeter", [basis], 4_200_000_000)   # Basis
+        win._on_inventory_event("Trade accepted.")
+        win._on_inventory_event("3 Items identified")
+        _publish(win, "WitchOfPeter", [basis], 4_200_100_000)
+
+        zeilen = _rows()
+        assert len(zeilen) == 1
+        assert zeilen[0]["vendor_events"] == "2"
+    finally:
+        win.worker.stop()
+        win.worker.wait(5000)
+
+
+def test_a_vendor_event_before_the_section_does_not_count(qapp) -> None:
+    """Sonst schleppte jede Zeile die Haendler-Besuche der ganzen
+    Sitzung mit sich herum und die Spalte saegte nichts mehr aus."""
+    win = MainWindow()
+    try:
+        win._all_characters = [make_char("WitchOfPeter", "Allflame")]
+        _with_stays(win, (HIDEOUT_STAY, 900.0), (MAP_STAY, 300.0))
+        basis = Item.model_validate({"id": "belt", "typeLine": "Belt", "frameType": 2})
+        win._on_inventory_event("Trade accepted.")
+        # Der Abschnitt beginnt erst beim Betreten der Zone vor 300 s;
+        # dieses Ereignis liegt davor.
+        win._vendor_events = [time.monotonic() - 900.0]
+        _publish(win, "WitchOfPeter", [basis], 4_200_000_000)
+        _publish(win, "WitchOfPeter", [basis], 4_200_100_000)
+
+        assert _rows()[0]["vendor_events"] == ""
+    finally:
+        win.worker.stop()
+        win.worker.wait(5000)

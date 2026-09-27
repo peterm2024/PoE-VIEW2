@@ -106,6 +106,7 @@ def _row(**kwargs) -> Row:
     werte = dict(character="WitchOfPeter", league="Allflame", zone="Chateau",
                  area_id="MapWorldsChateau", instance="123", level=79,
                  trigger="zone change", seconds=284.0, interval=66.0,
+                 vendor_events=0,
                  experience=4_200_000_000, experience_gain=12_345)
     return Row(**{**werte, **kwargs})
 
@@ -123,6 +124,7 @@ def test_a_row_lands_in_the_csv_with_its_header(tmp_path) -> None:
     assert zeilen[0]["trigger"] == "zone change"
     assert zeilen[0]["seconds"] == "284"
     assert zeilen[0]["interval"] == "66"
+    assert zeilen[0]["vendor_events"] == ""      # keine: leer, nicht "0"
 
 
 def test_a_second_row_is_appended_not_a_second_header(tmp_path) -> None:
@@ -210,3 +212,25 @@ def test_a_switched_off_log_writes_no_file(tmp_path, monkeypatch) -> None:
     zone_loot_log.append(_row(), tally([_item("a", 2)], []), pfad)
 
     assert not pfad.exists()
+
+
+def test_vendor_events_are_recorded_so_delve_stays_readable(tmp_path) -> None:
+    """Peter, 2026-09-27: "GGG refresht nur nach einem Lade-Bildschirm und
+    der ist selten bei Delve, d.h. ich kann mehrmals mein komplettes
+    Inventar vollstopfen, in die Minen-Basis per Wegpunkt gelangen und
+    dort verkaufen und wieder in die Mine zurueckkehren, ohne dass wir
+    das mitbekommen."
+
+    Er hat recht, und es ist ausgezaehlt: 58 der 228 Mine-Aufenthalte in
+    seinem Log (25 %) enthalten Haendler-Ereignisse mittendrin, bei 1119
+    Karten-Aufenthalten sind es null. Was dort zuwaechst, kann vom
+    Haendler stammen; die Spalte macht es sichtbar, statt es
+    wegzurechnen."""
+    pfad = tmp_path / "loot.csv"
+    zone_loot_log.append(_row(zone="Azurite Mine", area_id="Delve_Main",
+                              vendor_events=8),
+                         tally([_item("a", 2)], []), pfad)
+
+    zeilen = list(csv.DictReader(pfad.open(encoding="utf-8")))
+    assert zeilen[0]["vendor_events"] == "8"
+    assert zeilen[0]["zone"] == "Azurite Mine"

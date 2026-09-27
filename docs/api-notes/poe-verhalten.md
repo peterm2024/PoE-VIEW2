@@ -116,6 +116,25 @@ the mine does write `You have entered Azurite Mine` and triggers
 everything downstream (2026-08-11, 22:59:11 — new data 0.3 seconds
 later).
 
+**Counted across the whole log (2026-09-27).** The footprint of an
+invisible vendor trip is a vendor event with no zone line around it, so
+it can be counted: of 228 Azurite Mine stays, **58 (25 %) contain vendor
+events in the middle**, 158 events in total. Of 1119 map stays, **zero**
+do — in a map you cannot reach a vendor without a zone change, in the
+mine you can. The trips also show up in the clock: the median mine stay
+with a vendor event inside runs 5.8 minutes against 2.5 minutes without.
+
+Two consequences for anything that measures per zone: a Delve stay's
+duration silently includes the shopping, and items that appear during
+one may have been bought rather than found. Neither can be subtracted
+away — the log does not say what happened. They can be *marked*, which
+is what the loot record does (§4.56.6, column `vendor_events`).
+
+Every delve node itself is visible, by the way: of 228 mine entries, 186
+follow another mine entry with a **new** instance id — each node is its
+own generated area with its own loading screen. The blind spot is the
+vendor, not the mine.
+
 ### Vendors: neither identifying nor selling publishes reliably
 
 | Event | New data available |

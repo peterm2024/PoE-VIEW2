@@ -775,6 +775,11 @@ class MainWindow(QMainWindow):
         # veroeffentlicht? Der Anfang des Abschnitts, den die naechste
         # Zeile der Beute-Mitschrift abdeckt (§zone_loot_log.Row.interval).
         self._last_publication_at: dict[str, float] = {}
+        # Zeitpunkte der Händler-Ereignisse (``time.monotonic()``), für
+        # die Beute-Mitschrift. Nur so weit zurück, wie ein Abschnitt
+        # lang werden kann — alles Ältere kann in keiner Zeile mehr
+        # auftauchen.
+        self._vendor_events: list[float] = []
         self._publish_watch: dict[str, _PublishWatch] = {}
         self._xp_watch: dict[str, _XpWatch] = {}
         # Aus der Datei geholte Verläufe (§4.44), erst beim ersten
@@ -4920,7 +4925,8 @@ class MainWindow(QMainWindow):
             zone=stay.name, area_id=stay.area_id, instance=stay.instance,
             level=stay.level, trigger=trigger,
             seconds=ende - stay.at, interval=max(ende - beginn, 0.0),
-            experience=experience, experience_gain=gain), beute)
+            experience=experience, experience_gain=gain,
+            vendor_events=self._vendor_events_between(beginn, ende)), beute)
 
     def _show_character_items(self, name: str, items: list[Item],
                               previous_items: list[Item] | None = None) -> None:
@@ -5341,6 +5347,21 @@ class MainWindow(QMainWindow):
                 or self._current_league_is_archived()
                 or self.worker.rate_limiter.pacing_blocked())
 
+    # Wie weit zurück werden Händler-Zeitpunkte aufgehoben? Ein
+    # Abschnitt der Beute-Mitschrift reicht höchstens von einer
+    # Veröffentlichung zur nächsten; die längste gemessene Lücke lag bei
+    # 17 Minuten (§_XpWatch). Eine Stunde ist reichlich und hält die
+    # Liste klein.
+    _VENDOR_MEMORY_S = 3600.0
+
+    def _vendor_events_between(self, von: float, bis: float) -> int:
+        """Wie viele Händler-Ereignisse fielen in diesen Abschnitt?
+
+        Die Zahl steht in jeder Zeile der Beute-Mitschrift, weil sie in
+        der Azurite Mine den Unterschied zwischen Beute und Einkauf
+        ausmacht (§zone_loot_log.Row.vendor_events)."""
+        return sum(1 for t in self._vendor_events if von <= t <= bis)
+
     def _on_inventory_event(self, description: str) -> None:
         """Peter, 2026-08-10: "Die Interaktion mit einem Händler,
         Verkaufen, Identifizieren, ... triggert auch das Senden der
@@ -5354,6 +5375,15 @@ class MainWindow(QMainWindow):
         Rucksacks kommen "Trade accepted"-Zeilen in schneller Folge, und
         jede einzelne davon zu bedienen brächte kaum neue Erkenntnis,
         kostete aber je einen Request."""
+        # Für die Beute-Mitschrift: In der Azurite Mine ist das
+        # der EINZIGE Hinweis auf einen Händler-Ausflug — eine
+        # Zonenzeile schreibt das Spiel dafür nicht
+        # (poe-verhalten.md §1).
+        jetzt = time.monotonic()
+        self._vendor_events.append(jetzt)
+        grenze = jetzt - self._VENDOR_MEMORY_S
+        self._vendor_events = [t for t in self._vendor_events
+                               if t >= grenze]
         if self._event_refresh_blocked() or self._trigger_budget_spent():
             return
         if self._refresh_current_view():
