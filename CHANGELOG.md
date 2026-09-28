@@ -6,6 +6,17 @@ nach [SemVer](https://semver.org/lang/de/).
 
 ## [Unveröffentlicht]
 
+### Neu
+
+- **Hinweis auf neue Versionen.** Die .exe fragt beim Start einmal bei
+  GitHub nach dem neuesten Release; ist es neuer, erscheint rechts in
+  der Statusleiste ein Link auf die Release-Seite. Kein Auto-Update —
+  heruntergeladen wird nichts. Die Antwort wird sechs Stunden
+  vorgehalten, ohne Netz erscheint schlicht nichts. Abschaltbar unter
+  Settings → Updates; aus dem Quellcode gestartet wird nie gefragt.
+  `api.github.com` steht dafür jetzt in der Liste der kontaktierten
+  Hosts in der README.
+
 ## [0.17.0] - 2026-09-28
 
 ### Neu

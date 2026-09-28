@@ -25,7 +25,7 @@ from poe_view.api.client import ApiError, AuthError, PoeApiClient
 from poe_view.api.models import StashTab
 from poe_view.api.rate_limiter import RateLimitManager
 from poe_view.services import (icon_cache, mod_knowledge, poe2_probe,
-                               season_log, token_store)
+                               season_log, token_store, update_check)
 
 log = logging.getLogger(__name__)
 
@@ -172,6 +172,14 @@ class FetchModKnowledgeJob:
 
 
 @dataclass
+class CheckUpdateJob:
+    """Fragt GitHub nach dem neuesten Release (§4.57,
+    ``services/update_check.py``). Kein Auth, kein GGG-Budget — wie
+    ``FetchModKnowledgeJob`` außerhalb von ``_NEEDS_AUTH``. Das MainWindow
+    reiht ihn nur in der .exe und nur bei eingeschalteter Einstellung ein."""
+
+
+@dataclass
 class Poe2ProbeJob:
     """Einmaliger Rohdaten-Abzug der PoE2-Endpunkte (§4.43).
 
@@ -277,6 +285,9 @@ class ApiWorker(QThread):
     prices_loaded = Signal(str, object)        # league, PriceIndex
     poe2_probe_loaded = Signal(object)         # poe2_probe.Probe
     mod_knowledge_loaded = Signal(object)      # mod_knowledge.Knowledge | None
+    # Nur bei einem NEUEREN Release — "keins" und "Frage gescheitert"
+    # bleiben stumm, die Statusleiste hat dafür nichts zu sagen.
+    update_available = Signal(object)          # update_check.Release
 
     def __init__(self) -> None:
         super().__init__()
@@ -302,6 +313,11 @@ class ApiWorker(QThread):
         # Dateien zusammen sind ~30 MB.
         self._repoe_http = httpx.Client(
             timeout=60.0, headers={"User-Agent": config.user_agent()}, follow_redirects=True)
+        # Eigener Client für GitHub (§4.57) — GitHub verlangt einen
+        # User-Agent, der Timeout steht in ``update_check`` selbst.
+        self._github_http = httpx.Client(headers={
+            "User-Agent": "PoE-VIEW2-update-check (+https://github.com/peterm2024/PoE-VIEW2)",
+        })
 
     # Von außen (Main-Thread) aufrufen:
     def submit(self, job) -> None:
@@ -374,6 +390,7 @@ class ApiWorker(QThread):
         self.client.close()
         self._ninja_http.close()
         self._repoe_http.close()
+        self._github_http.close()
 
     # Jobs, die ohne gültiges Token garantiert einen 401 kassieren. Bootstrap
     # und Login stellen die Authentifizierung selbst her, Logout und der
@@ -504,6 +521,10 @@ class ApiWorker(QThread):
                 # unauffällig beim Programmstart, unabhängig vom Login.
                 mod_knowledge.ensure_fresh(self._repoe_http)
                 self.mod_knowledge_loaded.emit(mod_knowledge.get(rebuild=True))
+            case CheckUpdateJob():
+                release = update_check.check(self._github_http)
+                if release is not None:
+                    self.update_available.emit(release)
 
     # ------------------------------------------------------------------ #
 

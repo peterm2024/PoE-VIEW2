@@ -46,7 +46,7 @@ _COL_ENABLED, _COL_NAME, _COL_TEMPLATE = range(3)
 class SettingsDialog(QDialog):
     def __init__(self, entries: list[ToolEntry], column_config: list[tuple[str, bool]],
                 zone_watcher_enabled: bool, zone_watcher_path: str,
-                parent=None) -> None:
+                parent=None, *, update_check_enabled: bool = True) -> None:
         super().__init__(parent)
         self.setWindowTitle("PoE-VIEW2 — Settings")
         self.resize(560, 400)
@@ -57,6 +57,7 @@ class SettingsDialog(QDialog):
         tabs.addTab(self._build_columns_tab(column_config), "Columns")
         tabs.addTab(self._build_zone_refresh_tab(zone_watcher_enabled, zone_watcher_path),
                     "Zone Refresh")
+        tabs.addTab(self._build_updates_tab(update_check_enabled), "Updates")
         layout.addWidget(tabs)
 
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok
@@ -215,3 +216,24 @@ class SettingsDialog(QDialog):
 
     def result_zone_watcher_config(self) -> tuple[bool, str]:
         return self._zone_enabled_check.isChecked(), self._zone_path_edit.text().strip()
+
+    # --- Reiter "Updates" (§4.57) ----------------------------------------- #
+
+    def _build_updates_tab(self, enabled: bool) -> QWidget:
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.addWidget(QLabel(
+            "At startup, PoE-VIEW2 asks GitHub (api.github.com) once whether "
+            "a newer release exists.\nIf so, a link to the release page "
+            "appears at the right end of the status bar. Nothing is\n"
+            "downloaded or installed automatically. The answer is kept for "
+            "six hours.\n\nOnly the .exe checks; running from source never "
+            "does. Takes effect at the next start."))
+        self._update_check_box = QCheckBox("Check for a newer release at startup")
+        self._update_check_box.setChecked(enabled)
+        layout.addWidget(self._update_check_box)
+        layout.addStretch(1)
+        return tab
+
+    def result_update_check_enabled(self) -> bool:
+        return self._update_check_box.isChecked()

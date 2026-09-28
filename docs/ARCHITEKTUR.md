@@ -7677,6 +7677,72 @@ Bei fünf Megabyte legt sich die Datei selbst beiseite.
 
 ---
 
+### 4.57 Hinweis auf neue Versionen (`services/update_check.py`)
+
+Peter, 2026-09-28: "Haben wir eigentlich eine
+Aktualisierungsbenachrichtigung bei neuen Versionen?" Nein — und die
+Download-Zahlen desselben Abends zeigten, was das heißt: 45 Downloads
+über 21 Releases, die meisten auf Versionen, die längst überholt sind.
+Wer die .exe einmal geladen hatte, erfuhr von einer neuen nur, wenn er
+zufällig im Forum oder auf GitHub vorbeischaute.
+
+**Was gebaut ist:** Beim Start reiht das MainWindow einen
+`CheckUpdateJob` ein. Der fragt `api.github.com/repos/…/releases/latest`
+(Entwürfe und Vorab-Releases lässt dieser Endpunkt von sich aus weg),
+vergleicht den Tag mit `__version__` und meldet über
+`update_available` nur ein NEUERES Release. Das MainWindow zeigt dann
+ganz rechts in der Statusleiste `v0.18.0 available` als Link auf die
+Release-Seite.
+
+**Entscheidungen und ihre Gründe:**
+
+- **Kein Auto-Update.** Nichts wird heruntergeladen oder ersetzt. Das
+  passt zu "It only reads", und eine unsignierte .exe, die sich selbst
+  austauscht, wäre genau das, was ein vorsichtiger Nutzer einem
+  Fremdwerkzeug nicht zutrauen sollte.
+- **Standardmäßig an, abschaltbar** (Reiter "Updates" im
+  Settings-Dialog, Schlüssel `update_check/enabled`). Peters
+  Entscheidung: Ausgeschaltet erreichte der Hinweis genau die nicht,
+  die ihn brauchen. Weil die README verspricht, welche Hosts das
+  Programm kontaktiert, und "no others" dazuschreibt, steht
+  `api.github.com` jetzt dort.
+- **Nur in der .exe** (`config.RUNNING_AS_EXE`). Wer aus dem Quellcode
+  startet, hat Git; und so fragt auch keine Testsuite je bei GitHub.
+- **Sechs Stunden Vorrat** in `update-check.json`. Ohne Anmeldung
+  erlaubt GitHub 60 Anfragen pro Stunde und IP; wer oft neu startet,
+  soll davon höchstens eine verbrauchen. Ein **gescheiterter** Abruf
+  wird nicht vorgehalten: ohne Netz erscheint nichts, und der nächste
+  Start fragt erneut.
+- **`X.Y.Z+dev` ist nicht älter als `X.Y.Z`.** Zwischen zwei Releases
+  trägt das Programm den `+dev`-Zusatz (RELEASING §4). Der Vergleich
+  läuft über die drei Zahlen als Tupel, der Zusatz fällt weg — sonst
+  meldete jeder Entwicklerstand das Release, aus dem er entstanden ist.
+  Als Zahlen, nicht als Text: Als Text wäre "0.9.0" größer als
+  "0.17.0". Eine unlesbare Nummer auf einer Seite meldet nie etwas.
+- **Zehn Sekunden Timeout.** Der Abruf läuft im EINEN Worker-Thread
+  (§4.5); solange er wartet, wartet jeder GGG-Abruf dahinter. GitHub
+  antwortet gewöhnlich in unter einer Sekunde.
+- **Keine eigene Linkfarbe.** Qt nimmt die Link-Farbe der
+  Systempalette: auf Peters Windows 11 dunkel `#99ebff` auf der
+  Statusleiste `#1e1e1e`, Kontrast 12,5:1 (nativ gemessen, nicht
+  offscreen). Eine feste Farbe hätte für den hellen Modus eigens
+  gerechnet werden müssen und läge näher an den gelben Warnungen
+  (`#d9a441`) weiter links.
+- Tag und Adresse kommen von außen und werden vor dem Einsetzen ins
+  HTML des Labels escaped.
+
+Getestet: `tests/test_update_check.py` (Versionsvergleich inklusive
+`+dev` und Zahl-statt-Text, Vorrat und Ablauf, gescheiterter Abruf
+bleibt stumm und wird nicht vorgehalten, unbrauchbare Antworten
+404/403/kein JSON/ohne `tag_name`, kaputte Vorratsdatei, Pfad im
+umgebogenen Datenordner, Worker meldet nur Neueres, Einreihen nur in
+der .exe und nur bei eingeschalteter Einstellung, Statusleiste leer bis
+zur Meldung, Escaping, Einstellungs-Reiter und Neustart). Gegenprobe
+mit sieben Sabotagen, alle fallen. Live gegen GitHub geprüft:
+`0.17.0+dev` bekommt keinen Hinweis, `0.12.0` bekommt v0.17.0.
+
+---
+
 ## 8. Entwicklungsstand
 
 Die ursprünglich geplanten Meilensteine (Grundgerüst, Authentifizierung,

@@ -7,6 +7,7 @@ Die UI löst API-Arbeit ausschließlich über ``worker.submit(Job)`` aus.
 
 from __future__ import annotations
 
+import html
 import json
 import logging
 import time
@@ -37,12 +38,13 @@ from poe_view.services import (cache_backup, cache_writer, data_cache, gem_xp_lo
                                season_log, xp_history, zone_catalog)
 from poe_view.services.experience import penalty_caption
 from poe_view.services.instance_lock import InstanceLock
-from poe_view.services import zone_loot_log
+from poe_view.services import update_check, zone_loot_log
 from poe_view.services.zone_watcher import (ZoneWatcher, deaths_since,
                                               is_rest_area,
                                               resolve_client_log_path, zone_stays)
 from poe_view.services.api_worker import (ApiWorker, BootstrapJob,
-                                          BulkProgress, FetchAllItemsJob,
+                                          BulkProgress, CheckUpdateJob,
+                                          FetchAllItemsJob,
                                           FetchCharacterItemsJob,
                                           FetchCharactersJob, FetchIconJob,
                                           FetchLeaguesJob, FetchModKnowledgeJob,
@@ -813,6 +815,10 @@ class MainWindow(QMainWindow):
         # was `_build_ui()` auslöst — es darf irgendwo in der Warteschlange
         # stehen, Hauptsache es läuft einmal pro Start (§FetchModKnowledgeJob).
         self.worker.submit(FetchModKnowledgeJob())
+        # Update-Hinweis (§4.57): nur in der .exe — wer aus dem Quellcode
+        # startet, hat Git — und nur, solange die Einstellung an ist.
+        if config.RUNNING_AS_EXE and self._load_update_check_enabled():
+            self.worker.submit(CheckUpdateJob())
 
         self._build_ui()
         # NACH `_build_ui()` (die Anzeige muss stehen), aber VOR
@@ -1698,6 +1704,17 @@ class MainWindow(QMainWindow):
         self._refresh_status_label = QLabel("")
         self.statusBar().addPermanentWidget(self._refresh_status_label)
         self._refresh_status_label.setStyleSheet("color: #8a8478;")
+        # Neueres Release auf GitHub (§4.57). Ganz rechts und leer, bis
+        # ``update_available`` kommt — im Normalfall kostet es keinen Platz.
+        self._update_label = QLabel("")
+        self._update_label.setTextFormat(Qt.TextFormat.RichText)
+        self._update_label.setOpenExternalLinks(True)
+        self._update_label.setToolTip(
+            "A newer PoE-VIEW2 release is available on GitHub.\n"
+            "Nothing is downloaded automatically — the link opens the "
+            "release page.\nThe check can be switched off under "
+            "Settings → Updates.")
+        self.statusBar().addPermanentWidget(self._update_label)
 
         # Liga-Dropdown SOFORT aus dem Cache befüllen — unabhängig vom
         # Netzwerk nutzbar (GGG-Wartung am Patchday). Muss
@@ -2318,6 +2335,7 @@ class MainWindow(QMainWindow):
         w.offline_changed.connect(self._on_offline_changed)
         w.prices_loaded.connect(self._on_prices_loaded)
         w.mod_knowledge_loaded.connect(self._on_mod_knowledge_loaded)
+        w.update_available.connect(self._on_update_available)
 
     # --- Worker-Slots (Main-Thread) ------------------------------------ #
 
@@ -2709,6 +2727,18 @@ class MainWindow(QMainWindow):
             self.history_model.set_price_index(index)
             self._update_value_sum()
         self._drive_refresh_mode()
+
+    def _on_update_available(self, release: update_check.Release) -> None:
+        """Ein neueres Release (§4.57) — als Link, geklickt wird selbst.
+
+        Ohne eigene Farbe: Qt nimmt die Link-Farbe der Systempalette, auf
+        Peters Windows 11 dunkel #99ebff auf #1e1e1e, Kontrast 12,5:1
+        (nativ gemessen). Eine feste Farbe hätte im hellen Modus neu
+        gerechnet werden müssen und läge näher an den gelben Warnungen
+        links daneben."""
+        self._update_label.setText(
+            f'<a href="{html.escape(release.url, quote=True)}">'
+            f'{html.escape(release.version)} available</a>')
 
     def _on_mod_knowledge_loaded(self, knowledge: mod_knowledge.Knowledge | None) -> None:
         """Ergebnis von `FetchModKnowledgeJob` (§4.53) — `None`, wenn
@@ -5198,6 +5228,15 @@ class MainWindow(QMainWindow):
         path = str(settings.value("zone_watcher/log_path", "") or "")
         return enabled, path
 
+    def _load_update_check_enabled(self) -> bool:
+        """Standardmäßig AN (Peter, 2026-09-28) — ausgeschaltet erreichte
+        der Hinweis genau die nicht, die ihn brauchen."""
+        wert = self._settings().value("update_check/enabled", "true")
+        return str(wert).lower() in ("true", "1")
+
+    def _save_update_check_enabled(self, enabled: bool) -> None:
+        self._settings().setValue("update_check/enabled", enabled)
+
     def _save_zone_watcher_config(self, enabled: bool, path: str) -> None:
         settings = self._settings()
         settings.setValue("zone_watcher/enabled", enabled)
@@ -5476,7 +5515,8 @@ class MainWindow(QMainWindow):
 
     def _open_settings_dialog(self) -> None:
         dialog = SettingsDialog(self._load_tool_entries(), self._load_column_config(),
-                                *self._load_zone_watcher_config(), self)
+                                *self._load_zone_watcher_config(), self,
+                                update_check_enabled=self._load_update_check_enabled())
         if dialog.exec() == QDialog.DialogCode.Accepted:
             self._save_tool_entries(dialog.result_entries())
             column_config = dialog.result_column_config()
@@ -5485,6 +5525,7 @@ class MainWindow(QMainWindow):
             zone_enabled, zone_path = dialog.result_zone_watcher_config()
             self._save_zone_watcher_config(zone_enabled, zone_path)
             self._apply_zone_watcher_config(zone_enabled, zone_path)
+            self._save_update_check_enabled(dialog.result_update_check_enabled())
 
     def _on_status(self, text: str) -> None:
         """Reiner Verlaufstext — Busy-Zustand kommt separat über busy_changed

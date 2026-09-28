@@ -335,6 +335,12 @@ delve depth 0, where nobody dies) from the depths below it.
   data, so switching accounts never mixes up stash trees, items, or
   characters. Nothing is deleted in the process — each account keeps its
   own state, including when you switch back.
+- **New release notice**: at startup the .exe asks GitHub once whether
+  a newer version exists, and if so shows a link to the release page at
+  the right end of the status bar. Nothing is downloaded or installed
+  automatically — you click, you decide. The answer is kept for six
+  hours; without a network connection nothing appears. Switch it off
+  under Settings → Updates. Running from source never checks.
 - **Rate-limit dashboard** with rules, current usage, and active locks.
 - **Raw data viewer** per stash tab, showing the unmodified API
   response.
@@ -366,6 +372,10 @@ PoE-VIEW2 contacts these hosts, and no others:
   for the real tier ladders in the mod collection. Downloaded at start
   and cached for seven days. The data itself belongs to Grinding Gear
   Games; it is fetched at runtime and never shipped with PoE-VIEW2.
+- **`api.github.com`** — one request at startup, to see whether a newer
+  PoE-VIEW2 release exists (the .exe only; kept for six hours, can be
+  switched off under Settings → Updates). It sends nothing about you or
+  your account.
 
 Beyond that, the item lookups in the right-click menu are **empty out of
 the box**. PoE-VIEW2 deliberately ships without any preconfigured

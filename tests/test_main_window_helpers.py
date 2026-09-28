@@ -5776,7 +5776,8 @@ def test_settings_dialog_saves_entries_when_accepted(qapp, monkeypatch) -> None:
     new_zone_config = (True, r"C:\PoE")
 
     class _FakeDialog:
-        def __init__(self, entries, column_config, zone_watcher_enabled, zone_watcher_path, parent=None):
+        def __init__(self, entries, column_config, zone_watcher_enabled, zone_watcher_path,
+                     parent=None, *, update_check_enabled=True):
             pass
 
         def exec(self):
@@ -5791,11 +5792,16 @@ def test_settings_dialog_saves_entries_when_accepted(qapp, monkeypatch) -> None:
         def result_zone_watcher_config(self):
             return new_zone_config
 
+        def result_update_check_enabled(self):
+            return False
+
     monkeypatch.setattr("poe_view.ui.main_window.SettingsDialog", _FakeDialog)
     win._open_settings_dialog()
     assert win._load_tool_entries() == new_entries
     assert win._load_column_config() == new_column_config
     assert win._load_zone_watcher_config() == new_zone_config
+    # Der Update-Schalter (§4.57): standardmäßig an, nach OK wie gewählt.
+    assert win._load_update_check_enabled() is False
 
     win.worker.stop()
     win.worker.wait(5000)
@@ -5810,7 +5816,8 @@ def test_settings_dialog_does_not_save_when_cancelled(qapp, monkeypatch) -> None
     original_zone_config = win._load_zone_watcher_config()
 
     class _FakeDialog:
-        def __init__(self, entries, column_config, zone_watcher_enabled, zone_watcher_path, parent=None):
+        def __init__(self, entries, column_config, zone_watcher_enabled, zone_watcher_path,
+                     parent=None, *, update_check_enabled=True):
             pass
 
         def exec(self):
@@ -5825,11 +5832,15 @@ def test_settings_dialog_does_not_save_when_cancelled(qapp, monkeypatch) -> None
         def result_zone_watcher_config(self):
             raise AssertionError("result_zone_watcher_config darf bei Abbruch nicht abgefragt werden")
 
+        def result_update_check_enabled(self):
+            raise AssertionError("result_update_check_enabled darf bei Abbruch nicht abgefragt werden")
+
     monkeypatch.setattr("poe_view.ui.main_window.SettingsDialog", _FakeDialog)
     win._open_settings_dialog()
     assert win._load_tool_entries() == original
     assert win._load_column_config() == original_columns
     assert win._load_zone_watcher_config() == original_zone_config
+    assert win._load_update_check_enabled() is True
 
     win.worker.stop()
     win.worker.wait(5000)
