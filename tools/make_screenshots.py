@@ -67,6 +67,10 @@ data_cache._CACHE_FILE = _TMP / "unused.json"
 token_store.load_token = lambda: None  # kein echtes Konto, kein echter Login
 
 from poe_view.services.mod_knowledge import Knowledge, TierStep  # noqa: E402
+from poe_view.services.zone_catalog import (  # noqa: E402
+    DELVE, LABYRINTH, LeagueStats, LevelStats, MAP, REST, SIDE_AREA,
+    STORY, ZoneRecord)
+from poe_view.ui.zone_table import ZoneTableDialog  # noqa: E402
 from poe_view.ui.favourites import FavouriteRow  # noqa: E402
 from poe_view.ui.item_history import HistoryEntry  # noqa: E402
 from poe_view.ui.main_window import MainWindow, _XpWatch  # noqa: E402
@@ -636,6 +640,76 @@ def _character_history(win: MainWindow) -> None:
     _shot(win, "charakter-verlauf.png")
 
 
+# Erfundene Zonen fuer das Bild. Die Gebietsnamen selbst sind
+# Spielinhalt, keine Kontodaten — erfunden sind die Zahlen, und zwar so,
+# dass das Bild zeigt, worum es geht: Bazaar steht auf zwei Stufen, weil
+# der Gebietslevel vom Karten-Item kommt (§zone_catalog.LevelStats).
+_DEMO_LEAGUE = "SSF R Allflame"
+_DEMO_ZONES = [
+    ("MapWorldsBazaar", "Bazaar", MAP,
+     {71: (3, 1, 750), 72: (4, 0, 984)}),
+    ("MapWorldsChateau", "Chateau", MAP, {68: (11, 2, 2_310)}),
+    ("MapWorldsCells", "Cells", MAP, {68: (6, 0, 1_104)}),
+    ("MapWorldsDunes", "Dunes", MAP, {72: (5, 1, 1_205)}),
+    ("MapWorldsSiege", "Siege", MAP, {72: (4, 0, 1_080), 78: (2, 1, 702)}),
+    ("MapSideArea4_2", "Ancient Catacomb", SIDE_AREA, {81: (2, 0, 268)}),
+    ("Delve_Main", "Azurite Mine", DELVE,
+     {34: (9, 0, 196), 57: (4, 0, 918), 72: (6, 2, 1_530)}),
+    ("3_Labyrinth_boss_2", "Trial of Lingering Pain", LABYRINTH,
+     {73: (2, 0, 214)}),
+    ("2_9_1", "The Blood Aqueduct", STORY, {61: (17, 0, 2_805)}),
+    ("1_5_3b", "The Ruined Square", STORY, {44: (3, 0, 654)}),
+    ("HideoutSlum", "Backstreet Hideout", REST, {60: (204, 0, 0)}),
+]
+
+
+def _demo_zone_records() -> list[ZoneRecord]:
+    records = []
+    for area_id, name, kategorie, stufen in _DEMO_ZONES:
+        nach_level = {}
+        for level, (besuche, tode, sekunden) in stufen.items():
+            nach_level[level] = LevelStats(
+                visits=besuche, deaths=tode, seconds=sekunden,
+                timed_visits=besuche if sekunden else 0,
+                last_seen=f"2026-09-2{level % 7 + 1}T21:0{level % 6}:11")
+        records.append(ZoneRecord(area_id=area_id, name=name,
+                                  category=kategorie,
+                                  leagues={_DEMO_LEAGUE: LeagueStats(nach_level)}))
+    return records
+
+
+def _zone_table(win: MainWindow) -> None:
+    """Die Zonen-Tabelle (§4.56): ein Gebiet aufgeklappt, damit das Bild
+    zeigt, was der Baum kann — eine Zeile je Monsterlevel mit eigenen
+    Besuchen, Toden und Verweildauer.
+
+    Gebaut mit erfundenen Zahlen statt ueber ``_open_zone_table``: Das
+    liest den echten Katalog, und den gibt es hier absichtlich nicht
+    (§_TMP)."""
+    app = QApplication.instance()
+    dlg = ZoneTableDialog(_demo_zone_records(), win, character_level=92,
+                          account_name="", league=_DEMO_LEAGUE)
+    # Hoehe knapp am Inhalt: Ein Bild, dessen untere Haelfte leer ist,
+    # verschenkt in der README und im Forum genau den Platz, der die
+    # Zeilen gross genug zeigt.
+    dlg.resize(980, 430)
+    dlg.show()
+    for _ in range(3):
+        app.processEvents()
+    # Bazaar aufklappen: die Zone, an der sich der ganze Umbau
+    # entschieden hat.
+    for zeile in range(dlg._proxy.rowCount()):
+        index = dlg._proxy.index(zeile, 0)
+        if dlg._proxy.rowCount(index):
+            dlg._view.expand(index)
+    for _ in range(3):
+        app.processEvents()
+    path = OUT / "zonen.png"
+    assert dlg.grab().save(str(path)), "zonen.png ließ sich nicht schreiben"
+    print(f"  {path.relative_to(OUT.parent.parent)}  ({path.stat().st_size // 1024} KB)")
+    dlg.close()
+
+
 def main() -> None:
     app = QApplication.instance() or QApplication([])
     win = _build_window()
@@ -645,6 +719,7 @@ def main() -> None:
     _item_details(win)
     _mod_album(win)
     _character_history(win)
+    _zone_table(win)
     win.worker.stop()
     win.worker.wait(5000)
     app.processEvents()

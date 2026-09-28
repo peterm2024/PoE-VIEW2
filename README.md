@@ -64,6 +64,16 @@ with the tiers you still miss left empty.
 
 ![The mod collection as an album with tier slots, ghost cards and the tier ladder](docs/screenshots/mod-album.png)
 
+Every zone you have ever entered, with the monster level the game
+generated it at. A zone does not have a tier — a *visit* does: maps are
+numbered items that send you to a map of that tier or lower, so the same
+zone shows up at several levels. Expand one to see each level with its
+own visits, deaths and average time. Here Bazaar was run at tier 4 and
+at tier 5, and the Azurite Mine separates its base (monster level 34,
+delve depth 0, where nobody dies) from the depths below it.
+
+![The zone table, with Bazaar and the Azurite Mine expanded into one row per monster level](docs/screenshots/zonen.png)
+
 ## Features
 
 ### Browsing and searching

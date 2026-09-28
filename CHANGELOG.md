@@ -6,7 +6,7 @@ nach [SemVer](https://semver.org/lang/de/).
 
 ## [Unveröffentlicht]
 
-## [0.17.0] - 2026-09-27
+## [0.17.0] - 2026-09-28
 
 ### Neu
 
