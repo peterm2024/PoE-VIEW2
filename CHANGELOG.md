@@ -6,6 +6,8 @@ nach [SemVer](https://semver.org/lang/de/).
 
 ## [Unveröffentlicht]
 
+## [0.18.0] - 2026-09-28
+
 ### Neu
 
 - **Hinweis auf neue Versionen.** Die .exe fragt beim Start einmal bei
