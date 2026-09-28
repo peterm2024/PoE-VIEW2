@@ -190,14 +190,18 @@ delve depth 0, where nobody dies) from the depths below it.
 
 ### Mod collection
 
-- **Every mod line that passes through your stash is collected**: how
-  often seen, lowest and highest roll, on which item levels — kept apart
+- **Every mod line the API shows you is collected** — from your stash
+  tabs and your character inventories alike: how often seen, lowest and highest roll, on which item levels — kept apart
   by league (temporary leagues each get their own pot, the permanent
   ones share one) and by rarity, with corrupted items counted
   separately. The collection fills itself from the existing cache on
   first start and grows from then on without a single extra request. A
   sighting is one item passing through your hands; the same item fetched
   again on the next refresh does not count twice.
+  The collection only learns what is identified at the moment GGG
+  publishes it. The API sends no mods at all for an unidentified item,
+  so anything you identify and sell before the next publication never
+  reaches it.
 - **A bar in front of every mod line** in the item panel: where this
   roll sits on the real tier ladder of that mod — full means the best
   roll the game can give — with the tier (`T1` gold, `T2` silver, `T3`
