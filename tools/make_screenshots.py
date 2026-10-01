@@ -645,21 +645,25 @@ def _character_history(win: MainWindow) -> None:
 # dass das Bild zeigt, worum es geht: Bazaar steht auf zwei Stufen, weil
 # der Gebietslevel vom Karten-Item kommt (§zone_catalog.LevelStats).
 _DEMO_LEAGUE = "SSF R Allflame"
+# Je Stufe: (Besuche, Eintritte, Tode, Sekunden). Besuche sind Karten,
+# Eintritte jede Rückkehr dazu (§zone_catalog.LevelStats) — in Peters
+# Log rund drei Eintritte je Karte, die Zahlen hier halten das Verhältnis.
 _DEMO_ZONES = [
     ("MapWorldsBazaar", "Bazaar", MAP,
-     {71: (3, 1, 750), 72: (4, 0, 984)}),
-    ("MapWorldsChateau", "Chateau", MAP, {68: (11, 2, 2_310)}),
-    ("MapWorldsCells", "Cells", MAP, {68: (6, 0, 1_104)}),
-    ("MapWorldsDunes", "Dunes", MAP, {72: (5, 1, 1_205)}),
-    ("MapWorldsSiege", "Siege", MAP, {72: (4, 0, 1_080), 78: (2, 1, 702)}),
-    ("MapSideArea4_2", "Ancient Catacomb", SIDE_AREA, {81: (2, 0, 268)}),
+     {71: (3, 9, 1, 1_650), 72: (4, 11, 0, 2_280)}),
+    ("MapWorldsChateau", "Chateau", MAP, {68: (11, 30, 2, 6_270)}),
+    ("MapWorldsCells", "Cells", MAP, {68: (6, 17, 0, 3_300)}),
+    ("MapWorldsDunes", "Dunes", MAP, {72: (5, 16, 1, 3_050)}),
+    ("MapWorldsSiege", "Siege", MAP,
+     {72: (4, 12, 0, 2_520), 78: (2, 7, 1, 1_380)}),
+    ("MapSideArea4_2", "Ancient Catacomb", SIDE_AREA, {81: (2, 2, 0, 268)}),
     ("Delve_Main", "Azurite Mine", DELVE,
-     {34: (9, 0, 196), 57: (4, 0, 918), 72: (6, 2, 1_530)}),
+     {34: (9, 9, 0, 196), 57: (4, 4, 0, 918), 72: (6, 6, 2, 1_530)}),
     ("3_Labyrinth_boss_2", "Trial of Lingering Pain", LABYRINTH,
-     {73: (2, 0, 214)}),
-    ("2_9_1", "The Blood Aqueduct", STORY, {61: (17, 0, 2_805)}),
-    ("1_5_3b", "The Ruined Square", STORY, {44: (3, 0, 654)}),
-    ("HideoutSlum", "Backstreet Hideout", REST, {60: (204, 0, 0)}),
+     {73: (2, 2, 0, 214)}),
+    ("2_9_1", "The Blood Aqueduct", STORY, {61: (17, 24, 0, 2_805)}),
+    ("1_5_3b", "The Ruined Square", STORY, {44: (3, 4, 0, 654)}),
+    ("HideoutSlum", "Backstreet Hideout", REST, {60: (204, 204, 0, 0)}),
 ]
 
 
@@ -667,9 +671,9 @@ def _demo_zone_records() -> list[ZoneRecord]:
     records = []
     for area_id, name, kategorie, stufen in _DEMO_ZONES:
         nach_level = {}
-        for level, (besuche, tode, sekunden) in stufen.items():
+        for level, (besuche, eintritte, tode, sekunden) in stufen.items():
             nach_level[level] = LevelStats(
-                visits=besuche, deaths=tode, seconds=sekunden,
+                visits=besuche, entries=eintritte, deaths=tode, seconds=sekunden,
                 timed_visits=besuche if sekunden else 0,
                 last_seen=f"2026-09-2{level % 7 + 1}T21:0{level % 6}:11")
         records.append(ZoneRecord(area_id=area_id, name=name,
@@ -692,7 +696,7 @@ def _zone_table(win: MainWindow) -> None:
     # Hoehe knapp am Inhalt: Ein Bild, dessen untere Haelfte leer ist,
     # verschenkt in der README und im Forum genau den Platz, der die
     # Zeilen gross genug zeigt.
-    dlg.resize(980, 430)
+    dlg.resize(1040, 470)
     dlg.show()
     for _ in range(3):
         app.processEvents()

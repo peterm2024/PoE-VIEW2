@@ -7675,6 +7675,103 @@ gehen, wann er fertig ist, und die Messung läuft davon unabhängig.
 
 Bei fünf Megabyte legt sich die Datei selbst beiseite.
 
+#### 4.56.7 Karten statt Eintritte, Aktualisieren, Filterzeile
+
+Peter, 2026-10-01: "Mir ist gerade aufgefallen, dass ich ziemlich viel
+Map-Visits hatte, wird hier jeder Besuch gezählt (auch Händlerbesuche)
+oder die gesamte Map?" Jeder Eintritt. Map → Hideout zum Händler → durchs
+Portal zurück waren zwei Besuche, ebenso jeder Tod mit Rückkehr.
+
+**Ausgezählt an seiner Client.txt:** 1.130 Karten-Eintritte, aber nur
+359 tatsächlich gelaufene Karten — Faktor 3,15. Nur 81 Karten liefen in
+einem Rutsch durch, eine wurde 13-mal betreten. Port stand mit 72
+"Besuchen" in der Tabelle und war 19-mal gelaufen; der Schnitt
+"2,7 Minuten" war die Zeit pro Eintritt, je Karte sind es 10,3.
+
+**Woran dieselbe Karte zu erkennen ist: am Seed, nicht an der
+Instanz-ID.** Die Zeile `Generating level N area "…" with seed S` steht
+vor jedem Eintritt. Der Seed bleibt über alle Rückkehrten in dieselbe
+Karte gleich, im längsten Fall über 140 Minuten. Die Instanz-ID
+(`Client-Safe Instance ID`), mit der der XP-Graph seit §4.40 gruppiert,
+wechselt dagegen innerhalb derselben Karte — 483 IDs für 360 Karten,
+407 Wechsel, davon nur 49 mit einem Tod dazwischen. Für den Graphen
+reicht sie (dort geht es um aufeinanderfolgende Abschnitte), zum Zählen
+nicht. Hideout und Städte stehen immer auf Seed 1, als einziger Seed,
+der über mehr als sechs Stunden wiederkehrt (13 Gebiete); dort bleibt
+jeder Eintritt ein Besuch. Das Bergwerk bekommt bei jedem Laden einen
+neuen Seed — dort sind Besuche weiterhin Ladeereignisse (§poe-verhalten).
+
+**Umsetzung:** `ZoneStay.seed`; `LevelStats` zählt `visits` je Seed und
+`entries` je Eintritt, `timed_visits` je Karte mit messbarer Dauer —
+"Avg. time" ist damit die Zeit pro Karte. Das Gedächtnis dafür
+(`last_seed`, `last_seed_timed`) wird mitgespeichert, weil der Katalog
+die Client.txt in Stücken einarbeitet: Eine Karte, die über zwei Stücke
+reicht, zählte sonst doppelt. `VERSION = 5`; ein Katalog älterer Version
+wird verworfen und aus der Client.txt neu aufgebaut — die alten Zahlen
+zählten Eintritte, ein Umrechnen ist nicht möglich. Was die Client.txt
+schon gekürzt hat, geht dabei verloren; Peters reicht bis zum 12.04.
+zurück und ist vollständig.
+
+**Dabei aufgefallen: Der laufende Aufenthalt wurde mit 0 Sekunden
+gezählt — und nie korrigiert.** `refresh_from_log` arbeitete alle
+Aufenthalte nach dem jüngsten bekannten ein, auch den noch offenen. Der
+hatte noch keine Dauer und keine Tode; beim nächsten Lauf lag er vor der
+Grenze und wurde nie nachgetragen. Wer die Tabelle mitten in einer Map
+öffnete, verlor deren Zeit und Tode. Jetzt kommt ein Aufenthalt erst
+in den Katalog, wenn er beendet ist (FALLSTRICKE #90).
+
+**Aktualisieren** (Peter: "wir brauchen einen aktualisieren Button in
+der Anzeige für die Zonen oder eine automatische aktualisierung"): Es
+sind beide geworden. Der Dialog bekommt `reload` (=
+`MainWindow._load_zone_records`), daran hängen der Knopf "⟳ Refresh" und
+`MainWindow._refresh_open_zone_table`, das bei jedem Zonenwechsel läuft,
+solange das Fenster zu sehen ist. Genau dann endet der Aufenthalt davor
+und wird zählbar. Kosten gemessen: 180 ms auf dem 11-MB-Log
+(Aufenthalte 122, Tode 25, Liga-Marken 30), sie fallen in den
+Ladebildschirm. Ein Fehler darin wird geloggt und bricht den Zonenwechsel
+nicht ab — daran hängen Ansichts-Refresh und XP-Rechnung.
+`ZoneTableDialog.set_records` hält dabei Liga, Gruppe, Suche,
+Spaltenfilter, Sortierung, aufgeklappte Gebiete, Auswahl und
+Scrollposition fest; sonst risse jeder Zonenwechsel die Tabelle an den
+Anfang.
+
+**Filterzeile** (Peter: "wenn man die Filter direkt in eine Zeile
+eintragen könnte, evtl eine kleine beschreibbare extra Tabelle oberhalb
+mit den Headern und unterhalb die Header ausblenden"): umgesetzt als
+`column_filter.FilterHeader`, ein Spaltenkopf mit einer Zeile Felder
+unter den Namen. Optisch dasselbe wie die zweite Tabelle, aber Breiten,
+seitliches Scrollen und Sortier-Klicks stimmen von selbst, weil die
+Felder im Kopf sitzen und ihre Lage aus denselben Abschnittsmaßen
+beziehen. Ein Klick in die Feldzeile sortiert nie. Die Lupe im
+Spaltennamen entfällt hier — der Filter steht im Feld darunter. Die
+Spaltenbreiten werden einmal nach dem Inhalt bemessen und stehen dann
+still: Mit `ResizeToContents` passten sie sich jedem Filter an, und das
+Feld, in das man tippt, rutschte unter dem Cursor weg (nativ gesehen,
+die Spalte "Group" wurde schmaler, sobald "Side Area" herausfiel).
+
+**Zwei Altfehler, die die neuen Tests fanden:** Der Liga-Wechsel rief
+`horizontalHeader()` — das gibt es nur an einer QTableView, nicht an
+einem QTreeView (FALLSTRICKE #91). Und der Zähler rechnete die Gesamtzahl
+über den ganzen Katalog: nach dem Wechsel auf eine Liga mit zwei Zonen
+stand "2 of 4 zones" da, als verstecke ein Filter zwei davon. Er zählt
+jetzt die Zonen der gewählten Liga.
+
+Getestet: `tests/test_zone_catalog.py` (Rückkehr in dieselbe Karte,
+neuer Seed, Seed 1 und fehlender Seed, Dauer je Karte auch bei
+unbrauchbarem erstem Eintritt, Summe über Ligen, Karte über zwei
+Auffrischungen, laufender Aufenthalt erst nach Ende und mit seiner Zeit,
+Speichern und Laden des Gedächtnisses, Version 4 wird verworfen),
+`tests/test_zone_watcher.py` (Seed gelesen und nicht geerbt),
+`tests/test_zone_table.py` (Entries-Spalte, Knopf nur mit `reload`,
+neue Zahlen nach Aktualisieren, Filter/Liga/Aufgeklapptes bleiben,
+leerer Reload ändert nichts, Liga-Wechsel sortiert und zählt neu,
+Felder unter ihren Spalten, Klick in die Feldzeile sortiert nicht,
+Spalten bleiben beim Tippen stehen, Feld zeigt auch einen von außen
+gesetzten Filter), `tests/test_main_window_helpers.py` (offene Tabelle
+folgt dem Zonenwechsel, geschlossene nicht, ein Fehler bricht den
+Zonenwechsel nicht ab). Gegenprobe mit 13 Sabotagen. An Peters echtem
+Log gegengerechnet: 360 Karten, 1.131 Eintritte.
+
 ---
 
 ### 4.57 Hinweis auf neue Versionen (`services/update_check.py`)

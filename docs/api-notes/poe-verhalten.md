@@ -240,6 +240,24 @@ area name plus seed repeat the identity. Note these are `[DEBUG]` lines,
 unlike the `[INFO]` zone line — anything relying on them needs to work
 without them too.
 
+**To count maps, use the seed, not the instance id** (measured
+2026-10-01 over the full log, 12.04.–01.10.). The seed stays the same
+across every return into one map — the longest span was 140 minutes —
+while the instance id changes within the same map: 483 ids for 360
+maps, 407 changes, only 49 of them with a death in between. So the
+example above, where both repeat, is the lucky case.
+
+| | entries | distinct seeds | distinct instance ids |
+|---|---|---|---|
+| Maps (`MapWorlds…`) | 1,132 | 360 | 483 |
+| Azurite Mine (`Delve_Main`) | 229 | 229 | 229 |
+| Hideout | 944 | — (always seed 1) | 829 |
+
+Hideouts and towns always carry **seed 1**, the only seed that recurs
+over more than six hours (13 areas). The Azurite Mine gets a fresh seed
+on every load. Only 81 of the 360 maps were played in one go; a typical
+map is entered two to four times, one was entered 13 times.
+
 Not in the file: anything about experience points below a level up,
 loot, currency, or the contents of the stash.
 

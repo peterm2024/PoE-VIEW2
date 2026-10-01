@@ -5,7 +5,9 @@ der Punkt: Die Einteilung wurde an 381 vorkommenden Gebieten ausgezählt,
 nicht an erdachten Mustern.
 """
 
-from datetime import datetime
+from datetime import datetime, timedelta
+
+import json
 
 import pytest
 
@@ -15,10 +17,11 @@ from poe_view.services.zone_watcher import ZoneStay
 
 
 def stay(area_id: str, name: str = "Zone", level: int = 68,
-         minute: int = 0) -> ZoneStay:
+         minute: int = 0, seed: str = "", minutes: int = 5) -> ZoneStay:
     return ZoneStay(entered=datetime(2026, 9, 26, 12, minute),
-                    left=datetime(2026, 9, 26, 12, minute + 5),
-                    name=name, area_id=area_id, instance="1", level=level)
+                    left=datetime(2026, 9, 26, 12, minute) + timedelta(minutes=minutes),
+                    name=name, area_id=area_id, instance="1", level=level,
+                    seed=seed)
 
 
 @pytest.mark.parametrize("area_id,gruppe", [
@@ -264,11 +267,12 @@ def _log(tmp_path, zeilen: list[str]):
     return pfad
 
 
-def _eintritt(zeit: str, level: int, area: str, name: str) -> list[str]:
+def _eintritt(zeit: str, level: int, area: str, name: str,
+              seed: str = "1") -> list[str]:
     return [
         f"2026/09/26 {zeit} 123 abc [DEBUG Client 1] Client-Safe Instance ID = 1",
         f'2026/09/26 {zeit} 123 abc [DEBUG Client 1] Generating level {level} '
-        f'area "{area}" with seed 1',
+        f'area "{area}" with seed {seed}',
         f"2026/09/26 {zeit} 123 abc [INFO Client 1] : You have entered {name}.",
     ]
 
@@ -276,15 +280,20 @@ def _eintritt(zeit: str, level: int, area: str, name: str) -> list[str]:
 def test_refresh_reads_the_log_saves_and_survives_a_truncated_log(tmp_path) -> None:
     """Der eigentliche Zweck des Katalogs: PoE kürzt die Client.txt
     irgendwann, der Katalog behält trotzdem, was einmal gesehen wurde."""
+    # Jedes Log endet mit einer Rückkehr ins Hideout: Der jeweils letzte
+    # Aufenthalt läuft noch und wird erst gezählt, wenn er vorbei ist
+    # (§refresh_from_log).
     pfad = _log(tmp_path, [*_eintritt("12:00:00", 68, "MapWorldsCells", "Cells"),
                            *_eintritt("12:10:00", 60, "HideoutSlum", "Hideout"),
-                           *_eintritt("12:20:00", 77, "MapWorldsAtoll", "Atoll")])
+                           *_eintritt("12:20:00", 77, "MapWorldsAtoll", "Atoll"),
+                           *_eintritt("12:25:00", 60, "HideoutSlum", "Hideout")])
 
     records = zk.refresh_from_log(pfad, "TestAccount#1234")
     assert set(records) == {"MapWorldsCells", "HideoutSlum", "MapWorldsAtoll"}
     assert zk.catalog_path("TestAccount#1234").exists()
 
-    gekuerzt = _log(tmp_path, _eintritt("12:30:00", 81, "MapWorldsPit", "Pit"))
+    gekuerzt = _log(tmp_path, [*_eintritt("12:30:00", 81, "MapWorldsPit", "Pit"),
+                               *_eintritt("12:40:00", 60, "HideoutSlum", "Hideout")])
     danach = zk.refresh_from_log(gekuerzt, "TestAccount#1234")
     assert set(danach) == {"MapWorldsCells", "HideoutSlum", "MapWorldsAtoll",
                            "MapWorldsPit"}
@@ -402,3 +411,125 @@ def test_the_tier_column_spans_what_actually_occurred() -> None:
     assert eintrag.tier(UNKNOWN) == 4              # Sortierung: die niedrigste
     zk.merge_stays(records, [stay("1_5_3b", "The Ruined Square", 44, 0)])
     assert records["1_5_3b"].tier_text(UNKNOWN) == ""      # Story hat keine
+
+
+# --- Karten statt Eintritte (VERSION 5, Peter 2026-10-01) --------------- #
+# "wird hier jeder Besuch gezählt (auch Händlerbesuche) oder die gesamte
+# Map?" — an seinem Log 1.130 Eintritte für 359 Karten.
+
+def test_returning_to_the_same_map_is_one_visit_but_several_entries() -> None:
+    """Map, Händler, zurück, Händler, zurück: eine Karte, drei Eintritte.
+    Die Zeit addiert sich, der Schnitt gilt je Karte."""
+    records: dict[str, zk.ZoneRecord] = {}
+    zk.merge_stays(records, [stay("MapWorldsPort", "Port", 70, m, seed="711400918")
+                             for m in (0, 10, 20)])
+    zahlen = records["MapWorldsPort"].stats(None)
+    assert zahlen.visits == 1
+    assert zahlen.entries == 3
+    assert zahlen.seconds == 15 * 60
+    assert zahlen.average_seconds == 15 * 60
+
+
+def test_a_new_seed_is_a_new_map() -> None:
+    records: dict[str, zk.ZoneRecord] = {}
+    zk.merge_stays(records, [stay("MapWorldsPort", "Port", 70, 0, seed="111"),
+                             stay("MapWorldsPort", "Port", 70, 10, seed="111"),
+                             stay("MapWorldsPort", "Port", 70, 20, seed="222")])
+    zahlen = records["MapWorldsPort"].stats(None)
+    assert (zahlen.visits, zahlen.entries) == (2, 3)
+    assert zahlen.average_seconds == 15 * 60 / 2
+
+
+@pytest.mark.parametrize("seed", ["1", ""])
+def test_fixed_or_missing_seeds_count_every_entry(seed) -> None:
+    """Hideout und Städte stehen immer auf Seed 1 — jede Rückkehr ist
+    ein eigener Aufenthalt. Ohne Seed bleibt es beim alten Zählen."""
+    records: dict[str, zk.ZoneRecord] = {}
+    zk.merge_stays(records, [stay("HideoutSlum", "Hideout", 60, m, seed=seed)
+                             for m in (0, 10, 20)])
+    zahlen = records["HideoutSlum"].stats(None)
+    assert (zahlen.visits, zahlen.entries) == (3, 3)
+
+
+def test_a_map_counts_as_timed_once_even_if_only_a_later_entry_was_measurable() -> None:
+    """Der erste Eintritt ist zu lang (Feierabend in der offenen Instanz,
+    §_MAX_DWELL_S), der zweite gemessen: eine Karte mit Dauer, nicht
+    null und nicht zwei."""
+    records: dict[str, zk.ZoneRecord] = {}
+    zk.merge_stays(records, [stay("MapWorldsPort", "Port", 70, 0, seed="9", minutes=120),
+                             stay("MapWorldsPort", "Port", 70, 10, seed="9", minutes=4),
+                             stay("MapWorldsPort", "Port", 70, 20, seed="9", minutes=6)])
+    zahlen = records["MapWorldsPort"].stats(None)
+    assert zahlen.timed_visits == 1
+    assert zahlen.average_seconds == 10 * 60
+
+
+def test_entries_are_summed_across_leagues() -> None:
+    records: dict[str, zk.ZoneRecord] = {}
+    zk.merge_stays(records, [stay("MapWorldsPort", "Port", 70, 0, seed="5"),
+                             stay("MapWorldsPort", "Port", 70, 10, seed="5")],
+                   league_of=lambda zeit: "A")
+    zk.merge_stays(records, [stay("MapWorldsPort", "Port", 70, 30, seed="6")],
+                   league_of=lambda zeit: "B")
+    gesamt = records["MapWorldsPort"].stats(None)
+    assert (gesamt.visits, gesamt.entries) == (2, 3)
+
+
+def test_a_map_spanning_two_refreshes_is_counted_once(tmp_path) -> None:
+    """Der Katalog arbeitet die Client.txt in Stücken ein. Läuft dieselbe
+    Karte über die Grenze, muss er sich ihren Seed gemerkt haben —
+    sonst zählte jedes Öffnen der Tabelle mitten im Lauf eine Karte
+    mehr."""
+    zeilen = [*_eintritt("12:00:00", 70, "MapWorldsPort", "Port", "4242"),
+              *_eintritt("12:05:00", 60, "HideoutSlum", "Hideout")]
+    pfad = _log(tmp_path, zeilen)
+    zk.refresh_from_log(pfad, "TestAccount#1234")
+    zeilen += [*_eintritt("12:07:00", 70, "MapWorldsPort", "Port", "4242"),
+               *_eintritt("12:12:00", 60, "HideoutSlum", "Hideout")]
+    pfad = _log(tmp_path, zeilen)
+    records = zk.refresh_from_log(pfad, "TestAccount#1234")
+    zahlen = records["MapWorldsPort"].stats(None)
+    assert (zahlen.visits, zahlen.entries) == (1, 2)
+    assert zahlen.average_seconds == 10 * 60
+
+
+def test_the_running_stay_is_counted_only_once_it_ended_with_its_time(tmp_path) -> None:
+    """Der Fehler, der dabei auffiel: Wer die Tabelle mitten in einer
+    Map öffnete, bekam sie mit 0 Sekunden eingetragen — und weil sie
+    danach vor der Grenze lag, nie korrigiert."""
+    zeilen = [*_eintritt("12:00:00", 60, "HideoutSlum", "Hideout"),
+              *_eintritt("12:01:00", 70, "MapWorldsPort", "Port", "77")]
+    pfad = _log(tmp_path, zeilen)
+    mitten = zk.refresh_from_log(pfad, "TestAccount#1234")
+    assert "MapWorldsPort" not in mitten
+    zeilen += _eintritt("12:09:00", 60, "HideoutSlum", "Hideout")
+    pfad = _log(tmp_path, zeilen)
+    danach = zk.refresh_from_log(pfad, "TestAccount#1234")
+    zahlen = danach["MapWorldsPort"].stats(None)
+    assert zahlen.visits == 1
+    assert zahlen.seconds == 8 * 60
+
+
+def test_seed_memory_survives_save_and_load(tmp_path) -> None:
+    records: dict[str, zk.ZoneRecord] = {}
+    zk.merge_stays(records, [stay("MapWorldsPort", "Port", 70, 0, seed="31"),
+                             stay("MapWorldsPort", "Port", 70, 10, seed="31")])
+    pfad = tmp_path / "katalog.json"
+    zk.save(pfad, records)
+    geladen = zk.load(pfad)
+    stufe = geladen["MapWorldsPort"].leagues[UNKNOWN].by_level[70]
+    assert (stufe.visits, stufe.entries) == (1, 2)
+    assert stufe.last_seed == "31" and stufe.last_seed_timed
+    zk.merge_stays(geladen, [stay("MapWorldsPort", "Port", 70, 20, seed="31")])
+    assert geladen["MapWorldsPort"].stats(None).visits == 1
+
+
+def test_a_version_4_catalog_is_rebuilt_instead_of_reinterpreted(tmp_path) -> None:
+    """Version-4-Zahlen zählen Eintritte als Besuche; als Karten gelesen
+    wären sie dreimal zu hoch. Verworfen und neu aufgebaut."""
+    pfad = tmp_path / "alt.json"
+    pfad.write_text(json.dumps({"version": 4, "zones": [
+        {"area_id": "MapWorldsPort", "name": "Port", "category": "Map",
+         "leagues": {"A": {"levels": {"70": {"visits": 72}}}}}]}),
+        encoding="utf-8")
+    assert zk.load(pfad) == {}

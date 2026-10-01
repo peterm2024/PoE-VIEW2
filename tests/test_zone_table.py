@@ -22,8 +22,10 @@ _NAME_COL = 1
 _TIER_COL = 2
 _LEVEL_COL = 3
 _VISITS_COL = 4
-_DEATHS_COL = 5
-_TIME_COL = 6
+_ENTRIES_COL = 5
+_DEATHS_COL = 6
+_TIME_COL = 7
+_ID_COL = 9
 
 ALLFLAME = "Allflame"
 MIRAGE = "SSF Ruthless (earlier)"
@@ -255,9 +257,9 @@ def test_the_csv_writes_one_row_per_level(tmp_path) -> None:
     davon auf welcher Stufe lagen."""
     zonen = [record_by_level("MapWorldsBazaar", "Bazaar", MAP, {ALLFLAME: {
         71: LevelStats(visits=3, deaths=1, seconds=750, timed_visits=3,
-                       last_seen="2026-09-15T22:59:13"),
+                       last_seen="2026-09-15T22:59:13", entries=7),
         72: LevelStats(visits=3, deaths=0, seconds=738, timed_visits=3,
-                       last_seen="2026-09-27T11:40:11"),
+                       last_seen="2026-09-27T11:40:11", entries=5),
     }})]
     ziel = tmp_path / "zones.csv"
     export_zones(str(ziel), zonen, ALLFLAME)
@@ -269,8 +271,9 @@ def test_the_csv_writes_one_row_per_level(tmp_path) -> None:
                              "Monster level"]
     bazaar = [z for z in zeilen if z[2] == "Bazaar"]
     assert len(bazaar) == 2
-    assert [(z[4], z[5], z[6], z[7]) for z in bazaar] == [
-        ("4", "71", "3", "1"), ("5", "72", "3", "0")]
+    assert zeilen[0][6:9] == ["Visits", "Entries", "Deaths"]
+    assert [(z[4], z[5], z[6], z[7], z[8]) for z in bazaar] == [
+        ("4", "71", "3", "7", "1"), ("5", "72", "3", "5", "0")]
 
 
 def test_the_csv_gives_every_league_its_own_row(tmp_path) -> None:
@@ -470,7 +473,7 @@ def test_children_leave_name_group_and_id_empty(qapp) -> None:
     model = ZoneTreeModel([_bazaar()], league=ALLFLAME)
     kind = model.index(0, 0, model.index(0, 0))
 
-    for spalte in (0, _NAME_COL, 8):
+    for spalte in (0, _NAME_COL, _ID_COL):
         assert model.data(model.index(kind.row(), spalte, model.index(0, 0)),
                           Qt.ItemDataRole.DisplayRole) == ""
 
@@ -582,20 +585,16 @@ def test_two_column_filters_combine(qapp) -> None:
                       Qt.ItemDataRole.DisplayRole) == "Cells"
 
 
-def test_an_active_column_filter_is_visible_in_the_header(qapp) -> None:
-    """Sonst sucht man spaeter, warum die Tabelle halb leer ist."""
+def test_clearing_the_column_filters_empties_them_all(qapp) -> None:
     model, proxy = _proxy_mit(beispiel())
-    assert "🔍" not in proxy.headerData(_NAME_COL, Qt.Orientation.Horizontal,
-                                        Qt.ItemDataRole.DisplayRole)
-
     proxy.set_column_filter(_NAME_COL, "atoll")
-    assert proxy.headerData(_NAME_COL, Qt.Orientation.Horizontal,
-                            Qt.ItemDataRole.DisplayRole).endswith("🔍")
+    proxy.set_column_filter(_LEVEL_COL, ">60")
+    assert proxy.filtered_columns() == {_NAME_COL, _LEVEL_COL}
 
     proxy.clear_column_filters()
+
     assert proxy.filtered_columns() == set()
-    assert "🔍" not in proxy.headerData(_NAME_COL, Qt.Orientation.Horizontal,
-                                        Qt.ItemDataRole.DisplayRole)
+    assert proxy.rowCount() == 4
 
 
 def test_children_stay_with_a_parent_that_passes_the_column_filter(qapp) -> None:
@@ -622,22 +621,221 @@ def test_the_suggestions_only_list_values_of_the_shown_league(qapp) -> None:
     assert "77" not in model.distinct_values(_LEVEL_COL)
 
 
-def test_the_dialog_builds_a_filter_edit_with_the_columns_values(qapp) -> None:
-    """Das Eingabefeld aus dem Spaltenkopf-Menue — gebaut ohne den
-    blockierenden ``QMenu.exec()``, sonst waere es nicht pruefbar."""
+def test_typing_into_the_header_field_filters_the_table(qapp) -> None:
+    """Peter, 2026-10-01: "wenn man die Filter direkt in eine Zeile
+    eintragen könnte" — die Felder sitzen im Spaltenkopf
+    (§column_filter.FilterHeader)."""
     from poe_view.ui.zone_table import ZoneTableDialog
 
     dialog = ZoneTableDialog(beispiel(), league=ALLFLAME)
     try:
-        edit = dialog.build_column_filter_edit(_NAME_COL)
-        assert edit.completer() is not None
-        assert "Atoll" in edit._suggestions
+        feld = dialog._filter_header.filter_edit(_NAME_COL)
+        assert feld.completer() is not None
+        assert "Atoll" in feld._suggestions
 
-        dialog.apply_column_filter(_NAME_COL, "atoll")
+        feld.setText("atoll")
         assert dialog._proxy.rowCount() == 1
         assert "1 of 4 zones" in dialog._count_label.text()
 
         dialog._clear_column_filters()
+        assert feld.text() == ""
         assert dialog._proxy.rowCount() == 4
+    finally:
+        dialog.deleteLater()
+
+
+def test_a_filter_set_from_outside_shows_up_in_its_field(qapp) -> None:
+    """Das Feld ist die eine Stelle, die den Filter zeigt — auch wenn er
+    nicht dort eingetippt wurde."""
+    from poe_view.ui.zone_table import ZoneTableDialog
+
+    dialog = ZoneTableDialog(beispiel(), league=ALLFLAME)
+    try:
+        dialog.apply_column_filter(_LEVEL_COL, "<70")
+        assert dialog._filter_header.filter_text(_LEVEL_COL) == "<70"
+        assert dialog._proxy.column_filter(_LEVEL_COL) == "<70"
+    finally:
+        dialog.deleteLater()
+
+
+# --- Aktualisieren (Peter, 2026-10-01: "einen aktualisieren Button ...
+# oder eine automatische aktualisierung") ----------------------------- #
+
+def _dialog_mit(records, reload=None, league=ALLFLAME):
+    from poe_view.ui.zone_table import ZoneTableDialog
+    return ZoneTableDialog(records, league=league, reload=reload)
+
+
+def _mehr_besuche(records, area_id, extra):
+    """Dieselben Zonen, bei einer davon ``extra`` Besuche mehr — so sieht
+    ein frischer Stand nach einem Zonenwechsel aus."""
+    neu = []
+    for r in records:
+        ligen = {}
+        for name, werte in r.leagues.items():
+            ligen[name] = LeagueStats(by_level={
+                lv: LevelStats(visits=w.visits + (extra if r.area_id == area_id else 0),
+                               entries=w.entries, deaths=w.deaths,
+                               seconds=w.seconds, timed_visits=w.timed_visits,
+                               last_seen=w.last_seen)
+                for lv, w in werte.by_level.items()})
+        neu.append(ZoneRecord(r.area_id, r.name, r.category, ligen))
+    return neu
+
+
+def test_the_refresh_button_only_exists_with_something_to_reload(qapp) -> None:
+    ohne = _dialog_mit(beispiel())
+    mit = _dialog_mit(beispiel(), reload=lambda: beispiel())
+    try:
+        assert ohne._refresh_button.isHidden()
+        assert not mit._refresh_button.isHidden()
+    finally:
+        ohne.deleteLater()
+        mit.deleteLater()
+
+
+def test_refresh_shows_the_new_numbers(qapp) -> None:
+    stand = {"records": beispiel()}
+    dialog = _dialog_mit(stand["records"], reload=lambda: stand["records"])
+    try:
+        stand["records"] = _mehr_besuche(beispiel(), "MapWorldsCells", 5)
+        dialog._refresh_button.click()
+        zeile = next(z for z in range(dialog._proxy.rowCount())
+                     if dialog._proxy.index(z, _NAME_COL).data() == "Cells")
+        vorher = next(r for r in beispiel() if r.area_id == "MapWorldsCells")
+        assert dialog._proxy.index(zeile, _VISITS_COL).data() == str(
+            vorher.stats(ALLFLAME).visits + 5)
+    finally:
+        dialog.deleteLater()
+
+
+def test_refresh_keeps_filters_league_and_expanded_zones(qapp) -> None:
+    """Sonst risse jeder Zonenwechsel die Tabelle an den Anfang zurück —
+    die automatische Aktualisierung wäre eine Störung statt einer Hilfe."""
+    zonen = beispiel() + [_bazaar()]
+    dialog = _dialog_mit(zonen, reload=lambda: _mehr_besuche(zonen, "MapWorldsBazaar", 1))
+    try:
+        dialog._group_combo.setCurrentIndex(dialog._group_combo.findData(MAP))
+        dialog._filter_header.filter_edit(_NAME_COL).setText("baz")
+        assert dialog._proxy.rowCount() == 1
+        bazaar = dialog._proxy.index(0, 0)
+        dialog._view.expand(bazaar)
+        dialog._view.setCurrentIndex(bazaar)
+
+        dialog.refresh()
+
+        assert dialog._model.league() == ALLFLAME
+        assert dialog._league_combo.currentData() == ALLFLAME
+        assert dialog._group_combo.currentData() == MAP
+        assert dialog._filter_header.filter_text(_NAME_COL) == "baz"
+        assert dialog._proxy.rowCount() == 1
+        assert dialog._view.isExpanded(dialog._proxy.index(0, 0))
+        assert dialog._view.currentIndex().row() == 0
+    finally:
+        dialog.deleteLater()
+
+
+def test_a_reload_that_returns_nothing_leaves_the_table_alone(qapp) -> None:
+    """Zonen-Beobachter inzwischen aus: lieber den alten Stand zeigen als
+    eine leere Tabelle."""
+    dialog = _dialog_mit(beispiel(), reload=lambda: None)
+    try:
+        dialog.refresh()
+        assert dialog._proxy.rowCount() == 4
+    finally:
+        dialog.deleteLater()
+
+
+def test_switching_the_league_resorts_and_recounts(qapp) -> None:
+    """Regression: Bis 2026-10-01 rief der Liga-Wechsel
+    ``horizontalHeader()`` — das gibt es an einem QTreeView nicht. Die
+    Zahlen wechselten, Sortierung und Zähler blieben stehen."""
+    dialog = _dialog_mit(beispiel())
+    try:
+        assert "4 zones" in dialog._count_label.text()
+        dialog._league_combo.setCurrentIndex(dialog._league_combo.findData(MIRAGE))
+        assert dialog._model.league() == MIRAGE
+        assert "2 zones" in dialog._count_label.text()
+        assert "77" not in dialog._filter_header.filter_edit(_LEVEL_COL)._suggestions
+    finally:
+        dialog.deleteLater()
+
+
+def test_the_entries_column_shows_every_entry(qapp) -> None:
+    zonen = [record_by_level("MapWorldsPort", "Port", MAP, {ALLFLAME: {
+        70: LevelStats(visits=19, entries=72, seconds=19 * 600, timed_visits=19,
+                       last_seen="2026-09-30T20:00:00")}})]
+    model = ZoneTreeModel(zonen, league=ALLFLAME)
+    assert model.data(model.index(0, _VISITS_COL), Qt.ItemDataRole.DisplayRole) == "19"
+    assert model.data(model.index(0, _ENTRIES_COL), Qt.ItemDataRole.DisplayRole) == "72"
+    assert model.data(model.index(0, _ENTRIES_COL), NUMERIC_SORT_ROLE) == 72
+    assert "entries" in model.headerData(_ENTRIES_COL, Qt.Orientation.Horizontal,
+                                         Qt.ItemDataRole.ToolTipRole).lower()
+
+
+# --- Der Filterkopf (§column_filter.FilterHeader) ----------------------- #
+
+def test_the_filter_fields_sit_under_their_columns(qapp) -> None:
+    dialog = _dialog_mit(beispiel())
+    try:
+        dialog.resize(1000, 400)
+        dialog.show()
+        qapp.processEvents()
+        kopf = dialog._filter_header
+        assert kopf.height() >= kopf.label_height() + kopf.filter_edit(0).sizeHint().height()
+        for spalte in (0, _NAME_COL, _VISITS_COL, _ID_COL):
+            feld = kopf.filter_edit(spalte)
+            assert feld.isVisible()
+            assert feld.y() >= kopf.label_height()
+            assert abs(feld.x() - kopf.sectionViewportPosition(spalte)) <= 1
+            assert abs(feld.width() - kopf.sectionSize(spalte)) <= 2
+    finally:
+        dialog.deleteLater()
+
+
+def test_a_click_in_the_field_row_does_not_sort(qapp) -> None:
+    """Der Klick gehört dem Feld, auch im freien Pixel zwischen zwei
+    Feldern — sonst sortierte die Tabelle beim Danebenklicken um."""
+    from PySide6.QtCore import QPoint
+    from PySide6.QtTest import QTest
+
+    dialog = _dialog_mit(beispiel())
+    try:
+        dialog.resize(1000, 400)
+        dialog.show()
+        qapp.processEvents()
+        kopf = dialog._filter_header
+        vorher = (kopf.sortIndicatorSection(), kopf.sortIndicatorOrder())
+        # Mitten in der Spalte, weit weg vom Rand (dort zöge der Kopf die
+        # Spaltenbreite, statt zu sortieren — ein Klick dort bewiese
+        # nichts). QTest liefert den Klick an den Kopf selbst, nicht an
+        # das Feld darüber: genau der Fall eines Klicks, den kein Feld
+        # abfängt.
+        mitte = (kopf.sectionViewportPosition(_VISITS_COL)
+                 + kopf.sectionSize(_VISITS_COL) // 2)
+        QTest.mouseClick(kopf.viewport(), Qt.MouseButton.LeftButton,
+                         pos=QPoint(mitte, kopf.label_height() + 3))
+        assert (kopf.sortIndicatorSection(), kopf.sortIndicatorOrder()) == vorher
+        QTest.mouseClick(kopf.viewport(), Qt.MouseButton.LeftButton,
+                         pos=QPoint(mitte, kopf.label_height() // 2))
+        assert kopf.sortIndicatorSection() == _VISITS_COL
+    finally:
+        dialog.deleteLater()
+
+
+def test_typing_a_filter_does_not_move_the_columns(qapp) -> None:
+    """Passten sich die Breiten dem gefilterten Inhalt an, rutschte das
+    Feld, in das man gerade tippt, unter dem Cursor weg."""
+    dialog = _dialog_mit(beispiel())
+    try:
+        dialog.resize(1000, 400)
+        dialog.show()
+        qapp.processEvents()
+        kopf = dialog._filter_header
+        vorher = [kopf.sectionSize(c) for c in range(kopf.count())]
+        kopf.filter_edit(_NAME_COL).setText("cells")
+        qapp.processEvents()
+        assert dialog._proxy.rowCount() == 1
+        assert [kopf.sectionSize(c) for c in range(kopf.count())] == vorher
     finally:
         dialog.deleteLater()

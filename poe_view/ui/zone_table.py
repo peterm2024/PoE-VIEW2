@@ -36,6 +36,7 @@ zeigt, was sie hat.
 from __future__ import annotations
 
 import csv
+from collections.abc import Callable
 from pathlib import Path
 
 from PySide6.QtCore import (QAbstractItemModel, QModelIndex,
@@ -43,10 +44,11 @@ from PySide6.QtCore import (QAbstractItemModel, QModelIndex,
 from PySide6.QtWidgets import (QComboBox, QDialog, QFileDialog, QHBoxLayout,
                                QHeaderView, QLabel, QLineEdit, QMenu,
                                QMessageBox, QPushButton, QTreeView,
-                               QVBoxLayout, QWidget, QWidgetAction)
+                               QVBoxLayout, QWidget)
 
 from poe_view.services.csv_export import sanitize_filename
-from poe_view.ui.column_filter import build_filter_edit, expression_matches
+from poe_view.ui.column_filter import (PLACEHOLDER, FilterHeader,
+                                       expression_matches)
 from poe_view.services.experience import experience_multiplier
 from poe_view.services.league_log import UNKNOWN
 from poe_view.services.zone_catalog import (CATEGORIES, NO_LEVEL,
@@ -85,10 +87,24 @@ def _league_choices(records: list[ZoneRecord]) -> list[str]:
 # gefragt hat, obwohl in der Client.txt "area level" steht: Für
 # gewöhnliche Monster ist es dasselbe, und "Gebietslevel" beantwortet die
 # Frage nicht, die jemand hat, der auf die Spalte schaut.
-COLUMNS = ("Group", "Zone", "Tier", "Monster Level", "Visits", "Deaths",
-           "Avg. time", "Last seen", "Area id")
-(_GROUP_COL, _NAME_COL, _TIER_COL, _LEVEL_COL, _VISITS_COL, _DEATHS_COL,
- _TIME_COL, _SEEN_COL, _ID_COL) = range(9)
+#
+# "Visits" zählt Karten, "Entries" jeden Eintritt (Peter, 2026-10-01:
+# "wird hier jeder Besuch gezählt (auch Händlerbesuche) oder die gesamte
+# Map?" — und dann: "Ja bitte beide Spalten", §zone_catalog.LevelStats).
+COLUMNS = ("Group", "Zone", "Tier", "Monster Level", "Visits", "Entries",
+           "Deaths", "Avg. time", "Last seen", "Area id")
+(_GROUP_COL, _NAME_COL, _TIER_COL, _LEVEL_COL, _VISITS_COL, _ENTRIES_COL,
+ _DEATHS_COL, _TIME_COL, _SEEN_COL, _ID_COL) = range(10)
+
+_HEADER_TOOLTIPS = {
+    _VISITS_COL: "Separate runs. Going back into the same map — after a "
+                 "vendor trip or a death —\nis still the same visit. "
+                 "Hideouts and towns count every entry.",
+    _ENTRIES_COL: "Every time you entered, including each return to the "
+                  "same map.\nMany entries per visit mean many trips out "
+                  "and back in.",
+    _TIME_COL: "Average time per visit, all entries of a map added up.",
+}
 
 # Sortierrolle wie in der Item-Tabelle: "70–77" ist als Text sinnlos
 # sortierbar, als Zahl (höchster gesehener Level) nicht.
@@ -116,6 +132,13 @@ class ZoneTreeModel(QAbstractItemModel):
         # Season um, und die Ligen einer Season unterscheiden sich im
         # Inhalt (Vaal-Side-Areas gibt es in Ruthless nicht).
         self._league = league
+
+    def set_records(self, records: list[ZoneRecord]) -> None:
+        """Neuer Stand aus dem Katalog (Aktualisieren, §ZoneTableDialog
+        .refresh) — Liga und Charakterlevel bleiben, wie sie sind."""
+        self.beginResetModel()
+        self._records = records
+        self.endResetModel()
 
     def set_league(self, league: str | None) -> None:
         if league == self._league:
@@ -174,9 +197,12 @@ class ZoneTreeModel(QAbstractItemModel):
         return len(COLUMNS)
 
     def headerData(self, section: int, orientation, role):
-        if role == Qt.ItemDataRole.DisplayRole \
-                and orientation == Qt.Orientation.Horizontal:
+        if orientation != Qt.Orientation.Horizontal:
+            return None
+        if role == Qt.ItemDataRole.DisplayRole:
             return COLUMNS[section]
+        if role == Qt.ItemDataRole.ToolTipRole:
+            return _HEADER_TOOLTIPS.get(section)
         return None
 
     def display_text(self, row: int, col: int) -> str:
@@ -237,7 +263,7 @@ class ZoneTreeModel(QAbstractItemModel):
         if role == Qt.ItemDataRole.DisplayRole:
             return (record.category, record.name or "–", tier,
                     record.level_text(self._league),
-                    str(zahlen.visits),
+                    str(zahlen.visits), str(zahlen.entries),
                     str(zahlen.deaths) if zahlen.deaths else "",
                     _dauer_text(zahlen.average_seconds),
                     zahlen.last_seen.replace("T", " "),
@@ -251,6 +277,8 @@ class ZoneTreeModel(QAbstractItemModel):
                 return record.max_level(self._league)
             if col == _VISITS_COL:
                 return zahlen.visits
+            if col == _ENTRIES_COL:
+                return zahlen.entries
             if col == _DEATHS_COL:
                 return zahlen.deaths
             if col == _TIME_COL:
@@ -260,7 +288,7 @@ class ZoneTreeModel(QAbstractItemModel):
         if role == Qt.ItemDataRole.ToolTipRole and col == _LEVEL_COL:
             return self._level_tooltip(record)
         if role == Qt.ItemDataRole.ToolTipRole and col == _TIME_COL:
-            return (f"{zahlen.visits} visits, "
+            return (f"{zahlen.visits} visits ({zahlen.entries} entries), "
                     f"{_dauer_text(zahlen.seconds) or '0 s'} in total"
                     if zahlen.seconds else None)
         return None
@@ -278,7 +306,7 @@ class ZoneTreeModel(QAbstractItemModel):
         if role == Qt.ItemDataRole.DisplayRole:
             return ("", "", str(tier) if tier else "",
                     str(level) if level != NO_LEVEL else "–",
-                    str(zahlen.visits),
+                    str(zahlen.visits), str(zahlen.entries),
                     str(zahlen.deaths) if zahlen.deaths else "",
                     _dauer_text(zahlen.average_seconds),
                     zahlen.last_seen.replace("T", " "), "")[col]
@@ -289,13 +317,15 @@ class ZoneTreeModel(QAbstractItemModel):
                 return level
             if col == _VISITS_COL:
                 return zahlen.visits
+            if col == _ENTRIES_COL:
+                return zahlen.entries
             if col == _DEATHS_COL:
                 return zahlen.deaths
             if col == _TIME_COL:
                 return zahlen.average_seconds
             return level
         if role == Qt.ItemDataRole.ToolTipRole and col == _TIME_COL:
-            return (f"{zahlen.visits} visits, "
+            return (f"{zahlen.visits} visits ({zahlen.entries} entries), "
                     f"{_dauer_text(zahlen.seconds) or '0 s'} in total"
                     if zahlen.seconds else None)
         if role == Qt.ItemDataRole.ToolTipRole and col == _LEVEL_COL \
@@ -375,14 +405,10 @@ class ZoneFilterProxy(QSortFilterProxyModel):
         for col in cols:
             self.headerDataChanged.emit(Qt.Orientation.Horizontal, col, col)
 
-    def headerData(self, section, orientation,  # noqa: N802 (Qt-API)
-                   role=Qt.ItemDataRole.DisplayRole):
-        value = super().headerData(section, orientation, role)
-        if (role == Qt.ItemDataRole.DisplayRole
-                and orientation == Qt.Orientation.Horizontal
-                and section in self._column_filters and value):
-            return f"{value} 🔍"  # aktiver Spalten-Filter sichtbar im Header
-        return value
+    # Keine Lupe im Spaltennamen wie in der Item-Liste: Hier steht der
+    # Filter in seinem Feld direkt darunter (§FilterHeader) — ein
+    # aktiver Filter ist damit ohnehin zu sehen, und die Lupe machte nur
+    # die Spalte breiter.
 
     def setFilterFixedString(self, text: str) -> None:  # noqa: N802 (Qt-API)
         self._words = text.lower().split()
@@ -479,7 +505,7 @@ def export_zones(path: str, records: list[ZoneRecord],
     with open(path, "w", encoding="utf-8-sig", newline="") as datei:
         schreiber = csv.writer(datei, delimiter=";")
         schreiber.writerow(["League", "Group", "Zone", "Area id", "Tier",
-                            "Monster level", "Visits", "Deaths",
+                            "Monster level", "Visits", "Entries", "Deaths",
                             "Total seconds", "Average seconds", "Last seen"])
         for record in records:
             namen = [league] if league is not None else sorted(record.leagues)
@@ -491,7 +517,7 @@ def export_zones(path: str, records: list[ZoneRecord],
                     schreiber.writerow([
                         name, record.category, record.name, record.area_id,
                         tier or "", level if level != NO_LEVEL else "",
-                        w.visits, w.deaths, round(w.seconds),
+                        w.visits, w.entries, w.deaths, round(w.seconds),
                         round(w.average_seconds),
                         w.last_seen.replace("T", " "),
                     ])
@@ -500,12 +526,19 @@ def export_zones(path: str, records: list[ZoneRecord],
 class ZoneTableDialog(QDialog):
     def __init__(self, records: list[ZoneRecord], parent: QWidget | None = None,
                  character_level: int = 0, account_name: str = "",
-                 league: str | None = None) -> None:
+                 league: str | None = None,
+                 reload: Callable[[], list[ZoneRecord] | None] | None = None) -> None:
         """``league`` ist die Vorauswahl — die zuletzt gespielte Liga,
         denn wer die Tabelle öffnet, meint den Atlas, auf dem er gerade
         steht (Peter, 2026-09-26: "die Zonen hier [hängen] auch von der
         aktuellen Season ab", und dann: "Wir machen Liga, statt
-        Season")."""
+        Season").
+
+        ``reload`` holt einen frischen Stand aus der Client.txt (Peter,
+        2026-10-01: "wir brauchen einen aktualisieren Button in der
+        Anzeige für die Zonen oder eine automatische aktualisierung") —
+        beides hängt daran: der Knopf und das MainWindow, das bei jedem
+        Zonenwechsel ``refresh`` ruft, solange die Tabelle offen ist."""
         super().__init__(parent)
         self.setWindowTitle("Zones")
         self.resize(880, 560)
@@ -515,6 +548,7 @@ class ZoneTableDialog(QDialog):
                             | Qt.WindowType.WindowMaximizeButtonHint
                             | Qt.WindowType.WindowMinimizeButtonHint)
         self._account_name = account_name
+        self._reload = reload
 
         self._model = ZoneTreeModel(records, character_level, league)
         self._proxy = ZoneFilterProxy()
@@ -534,13 +568,7 @@ class ZoneTableDialog(QDialog):
             "season differ in content — Vaal side areas do not exist in "
             "Ruthless at all. This picks which league's zones and levels "
             "the table shows.")
-        for name in _league_choices(records):
-            self._league_combo.addItem(
-                "Unknown (no character could be matched)"
-                if name == UNKNOWN else name, name)
-        self._league_combo.addItem("All leagues", None)
-        if league is not None and self._league_combo.findData(league) >= 0:
-            self._league_combo.setCurrentIndex(self._league_combo.findData(league))
+        self._fill_league_combo(records, league)
         self._league_combo.currentIndexChanged.connect(self._on_league_changed)
 
         self._group_combo = QComboBox()
@@ -554,15 +582,27 @@ class ZoneTableDialog(QDialog):
         self._export_button.setToolTip(
             "Save the zones currently shown (filtered) as CSV")
         self._export_button.clicked.connect(self._export)
+        self._refresh_button = QPushButton("⟳ Refresh")
+        self._refresh_button.setToolTip(
+            "Read the latest zones from Client.txt.\nWhile this window is "
+            "open, it also updates by itself on every zone change.")
+        self._refresh_button.clicked.connect(self.refresh)
+        self._refresh_button.setVisible(reload is not None)
 
         kopf = QHBoxLayout()
         kopf.addWidget(self._league_combo)
         kopf.addWidget(self._group_combo)
         kopf.addWidget(self._search, 1)
         kopf.addWidget(self._count_label)
+        kopf.addWidget(self._refresh_button)
         kopf.addWidget(self._export_button)
 
         self._view = QTreeView()
+        # Der Spaltenkopf trägt die Filterfelder (§column_filter
+        # .FilterHeader) — VOR setModel und setSortingEnabled gesetzt,
+        # damit die Ansicht ihn von Anfang an als ihren eigenen führt.
+        self._filter_header = FilterHeader(self._view)
+        self._view.setHeader(self._filter_header)
         self._view.setModel(self._proxy)
         self._view.setSortingEnabled(True)
         # Beim Öffnen die bestellte Unterteilung (siehe
@@ -574,55 +614,156 @@ class ZoneTableDialog(QDialog):
         # Nichts wird vorab aufgeklappt: Das Azurite Mine hätte 37
         # Kinder, die Fathomless Depths ebenso viele (§Modul-Kopf).
         self._view.setExpandsOnDoubleClick(True)
-        kopfzeile = self._view.header()
+        kopfzeile = self._filter_header
+        kopfzeile.set_column_count(
+            len(COLUMNS), f"Filter this column: {PLACEHOLDER}")
+        kopfzeile.filter_changed.connect(self.apply_column_filter)
         kopfzeile.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         kopfzeile.customContextMenuRequested.connect(self._on_header_menu)
         kopfzeile.setSectionResizeMode(_NAME_COL, QHeaderView.ResizeMode.Stretch)
         kopfzeile.setSectionResizeMode(_ID_COL, QHeaderView.ResizeMode.Stretch)
+        # Die Breiten werden EINMAL nach dem Inhalt bemessen und stehen
+        # dann still (Interactive, von Hand ziehbar). Mit
+        # ResizeToContents passten sie sich bei jedem Filter neu an — und
+        # das Feld, in das man gerade tippt, rutschte unter dem Cursor
+        # weg (an Peters Bildschirm gesehen: "Map" in Group, die Spalte
+        # wurde schmaler, sobald "Side Area" herausgefiltert war).
         for spalte in (_GROUP_COL, _TIER_COL, _LEVEL_COL, _VISITS_COL,
-                       _DEATHS_COL, _TIME_COL, _SEEN_COL):
+                       _ENTRIES_COL, _DEATHS_COL, _TIME_COL, _SEEN_COL):
             kopfzeile.setSectionResizeMode(spalte,
-                                           QHeaderView.ResizeMode.ResizeToContents)
+                                           QHeaderView.ResizeMode.Interactive)
+            self._view.resizeColumnToContents(spalte)
+        self._update_suggestions()
 
         aufbau = QVBoxLayout(self)
         aufbau.addLayout(kopf)
         aufbau.addWidget(self._view)
         self._update_count()
 
-    def build_column_filter_edit(self, col: int):
-        """Eigene Methode statt inline im Menü, damit sie ohne den
-        blockierenden ``QMenu.exec()`` testbar ist — dieselbe Trennung
-        wie in ``MainWindow._build_column_filter_edit``."""
-        return build_filter_edit(self._proxy.column_filter(col),
-                                 self._model.distinct_values(col))
+    # --- Spalten-Filter: Felder im Kopf (§column_filter.FilterHeader) -- #
 
     def apply_column_filter(self, col: int, expr: str) -> None:
+        """Wird bei jedem Tastendruck im Feld gerufen. Steht der Text
+        nicht schon im Feld (Aufruf von außen), wird er dort eingetragen
+        — das Feld ist die eine Stelle, die den Filter zeigt."""
+        if self._filter_header.filter_text(col) != (expr or "").strip():
+            self._filter_header.set_filter_text(col, expr)
+            return  # das Feld meldet sich über filter_changed zurück
         self._proxy.set_column_filter(col, expr)
         self._update_count()
 
+    def _update_suggestions(self) -> None:
+        """Vorschläge je Feld aus dem, was in DIESER Liga in der Spalte
+        steht (§ZoneTreeModel.distinct_values)."""
+        for spalte in range(len(COLUMNS)):
+            self._filter_header.set_suggestions(
+                spalte, self._model.distinct_values(spalte))
+
     def _on_header_menu(self, pos) -> None:
-        kopf = self._view.header()
-        spalte = kopf.logicalIndexAt(pos)
-        if spalte < 0:
+        if not self._proxy.filtered_columns():
             return
         menu = QMenu(self._view)
-        titel = menu.addAction(f"Filter {COLUMNS[spalte]}…")
-        titel.setEnabled(False)
-        edit = self.build_column_filter_edit(spalte)
-        edit.returnPressed.connect(
-            lambda c=spalte, e=edit, m=menu: (self.apply_column_filter(c, e.text()),
-                                              m.close()))
-        feld = QWidgetAction(menu)
-        feld.setDefaultWidget(edit)
-        menu.addAction(feld)
-        if self._proxy.filtered_columns():
-            loeschen = menu.addAction("✕ Clear all column filters")
-            loeschen.triggered.connect(self._clear_column_filters)
-        menu.exec(kopf.mapToGlobal(pos))
+        loeschen = menu.addAction("✕ Clear all column filters")
+        loeschen.triggered.connect(self._clear_column_filters)
+        menu.exec(self._filter_header.mapToGlobal(pos))
 
     def _clear_column_filters(self) -> None:
-        self._proxy.clear_column_filters()
+        self._filter_header.clear_filters()
+
+    # --- Aktualisieren ------------------------------------------------- #
+
+    def refresh(self) -> None:
+        """Frischen Stand holen und einsetzen. Ohne ``reload`` (oder wenn
+        er nichts liefert, z. B. weil der Zonen-Beobachter inzwischen aus
+        ist) bleibt alles, wie es ist."""
+        if self._reload is None:
+            return
+        records = self._reload()
+        if records is not None:
+            self.set_records(records)
+
+    def set_records(self, records: list[ZoneRecord]) -> None:
+        """Den neuen Stand einsetzen, OHNE dass sich die Ansicht unter dem
+        Nutzer wegdreht: Liga, Gruppe, Suche, Spaltenfilter, Sortierung,
+        aufgeklappte Gebiete, Auswahl und Scrollposition bleiben. Sonst
+        risse jeder Zonenwechsel die Tabelle zurück an den Anfang, und
+        die automatische Aktualisierung wäre eine Störung statt einer
+        Hilfe."""
+        aufgeklappt = self._expanded_area_ids()
+        auswahl = self._selected_area_id()
+        scroll = self._view.verticalScrollBar().value()
+        liga = self._model.league()
+
+        self._league_combo.blockSignals(True)
+        self._league_combo.clear()
+        self._fill_league_combo(records, liga)
+        self._league_combo.blockSignals(False)
+        self._model.set_records(records)
+        # Fehlt die gewählte Liga im neuen Stand (sollte nie vorkommen —
+        # der Katalog vergisst nichts), zeigt die Box jetzt etwas anderes
+        # als das Modell. Die Box gewinnt.
+        self._model.set_league(self._league_combo.currentData())
+        self._resort()
+        self._restore_expanded(aufgeklappt)
+        self._select_area_id(auswahl)
+        self._view.verticalScrollBar().setValue(scroll)
+        self._update_suggestions()
         self._update_count()
+
+    def _fill_league_combo(self, records: list[ZoneRecord], league: str | None) -> None:
+        for name in _league_choices(records):
+            self._league_combo.addItem(
+                "Unknown (no character could be matched)"
+                if name == UNKNOWN else name, name)
+        self._league_combo.addItem("All leagues", None)
+        if league is not None and self._league_combo.findData(league) >= 0:
+            self._league_combo.setCurrentIndex(self._league_combo.findData(league))
+        else:
+            self._league_combo.setCurrentIndex(self._league_combo.count() - 1
+                                               if league is None else 0)
+
+    def _expanded_area_ids(self) -> set[str]:
+        gefunden = set()
+        for zeile in range(self._proxy.rowCount()):
+            index = self._proxy.index(zeile, 0)
+            if self._view.isExpanded(index):
+                record = self._model.record_for(self._proxy.mapToSource(index))
+                if record is not None:
+                    gefunden.add(record.area_id)
+        return gefunden
+
+    def _restore_expanded(self, area_ids: set[str]) -> None:
+        if not area_ids:
+            return
+        for zeile in range(self._proxy.rowCount()):
+            index = self._proxy.index(zeile, 0)
+            record = self._model.record_for(self._proxy.mapToSource(index))
+            if record is not None and record.area_id in area_ids:
+                self._view.expand(index)
+
+    def _selected_area_id(self) -> str | None:
+        index = self._view.currentIndex()
+        if not index.isValid():
+            return None
+        record = self._model.record_for(self._proxy.mapToSource(index))
+        return record.area_id if record is not None else None
+
+    def _select_area_id(self, area_id: str | None) -> None:
+        if area_id is None:
+            return
+        for zeile in range(self._proxy.rowCount()):
+            index = self._proxy.index(zeile, 0)
+            record = self._model.record_for(self._proxy.mapToSource(index))
+            if record is not None and record.area_id == area_id:
+                self._view.setCurrentIndex(index)
+                return
+
+    def _resort(self) -> None:
+        """Nach einem Modell-Reset die gewählte Sortierung neu anwenden,
+        sonst steht die Tabelle in der Reihenfolge des Katalogs da."""
+        kopf = self._view.header()
+        self._view.sortByColumn(kopf.sortIndicatorSection(),
+                                kopf.sortIndicatorOrder())
 
     def _on_group_changed(self) -> None:
         self._proxy.set_group(self._group_combo.currentData() or "")
@@ -633,14 +774,23 @@ class ZoneTableDialog(QDialog):
         dort nicht gab, verschwinden. Nach dem Modell-Reset muss die
         Sortierung neu angewandt werden, sonst steht die Tabelle in der
         Reihenfolge des Katalogs da."""
+        # Bis 2026-10-01 stand hier ``horizontalHeader()`` — das hat eine
+        # QTableView, ein QTreeView nicht. Der Aufruf warf, die Zahlen
+        # wechselten zwar (das Modell war schon umgestellt), Sortierung
+        # und Zähler blieben aber auf dem alten Stand.
         self._model.set_league(self._league_combo.currentData())
-        self._view.sortByColumn(self._view.horizontalHeader().sortIndicatorSection(),
-                                self._view.horizontalHeader().sortIndicatorOrder())
+        self._resort()
+        self._update_suggestions()
         self._update_count()
 
     def _update_count(self) -> None:
+        # Gesamt sind die Zonen DIESER Liga, nicht alle im Katalog: Sonst
+        # stünde nach dem Wechsel auf eine Liga mit zwei Zonen "2 of 4"
+        # da, als versteckte ein Filter zwei davon.
         sichtbar = self._proxy.rowCount()
-        gesamt = self._model.rowCount()
+        liga = self._model.league()
+        gesamt = sum(1 for zeile in range(self._model.rowCount())
+                     if self._model.record_at(zeile).seen_in(liga))
         self._count_label.setText(
             f"{sichtbar} zones" if sichtbar == gesamt
             else f"{sichtbar} of {gesamt} zones")

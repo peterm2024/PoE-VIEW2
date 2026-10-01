@@ -21,8 +21,8 @@ from __future__ import annotations
 
 import re
 
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QCompleter, QLineEdit, QWidget
+from PySide6.QtCore import QRect, Qt, Signal
+from PySide6.QtWidgets import QCompleter, QHeaderView, QLineEdit, QWidget
 
 _NUM_RE = re.compile(r"-?\d+(?:[.,]\d+)?")
 
@@ -134,3 +134,138 @@ def build_filter_edit(current: str, values: list[str],
         completer.setFilterMode(Qt.MatchFlag.MatchContains)
         edit.setCompleter(completer)
     return edit
+
+
+class FilterHeader(QHeaderView):
+    """Ein Spaltenkopf mit einer Zeile Filterfelder unter den Namen.
+
+    Peter, 2026-10-01, für die Zonen-Tabelle: "Schön wäre es auch, wenn
+    man die Filter direkt in eine Zeile eintragen könnte, evtl eine
+    kleine beschreibbare extra Tabelle oberhalb mit den Headern und
+    unterhalb die Header ausblenden, so dass das nicht auffällt."
+
+    **Warum im Kopf selbst statt als zweite Tabelle darüber:** Optisch
+    ist es dasselbe — eine Zeile Felder unter den Spaltennamen. Eine
+    zweite Tabelle müsste aber alles, was der Kopf von sich aus kann,
+    von Hand nachziehen: jede Spaltenbreite beim Ziehen, das seitliche
+    Scrollen, den Sortier-Klick, ein Ein- und Ausblenden von Spalten.
+    Jede vergessene Stelle wäre eine Spalte, deren Filterfeld neben der
+    falschen Spalte steht. Hier sitzen die Felder im Ansichtsbereich des
+    Kopfes und werden mit ihm verschoben; ihre Lage kommt aus denselben
+    Abschnittsmaßen, nach denen der Kopf sich selbst zeichnet.
+
+    Die Spaltennamen bleiben oben in ihrer gewohnten Höhe
+    (``paintSection`` bekommt nur diesen Streifen), darunter liegt die
+    Feldzeile. Ein Klick in die Feldzeile sortiert nicht — er gehört dem
+    Feld, auch dort, wo zwischen zwei Feldern ein Pixel frei ist."""
+
+    filter_changed = Signal(int, str)
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(Qt.Orientation.Horizontal, parent)
+        self._edits: list[InlineCompleteLineEdit] = []
+        self.setSectionsClickable(True)
+        self.setHighlightSections(False)
+        self.sectionResized.connect(self._place_edits)
+        self.sectionMoved.connect(self._place_edits)
+
+    # --- Felder ---------------------------------------------------------- #
+
+    def set_column_count(self, count: int, tooltip: str = "") -> None:
+        """Ein Feld je Spalte anlegen (einmal, beim Aufbau)."""
+        for edit in self._edits:
+            edit.deleteLater()
+        self._edits = []
+        for col in range(count):
+            edit = InlineCompleteLineEdit("", self.viewport())
+            edit.setPlaceholderText("filter")
+            edit.setClearButtonEnabled(True)
+            if tooltip:
+                edit.setToolTip(tooltip)
+            edit.textChanged.connect(
+                lambda text, c=col: self.filter_changed.emit(c, text))
+            self._edits.append(edit)
+        self.updateGeometries()
+
+    def filter_edit(self, col: int) -> InlineCompleteLineEdit | None:
+        return self._edits[col] if 0 <= col < len(self._edits) else None
+
+    def filter_text(self, col: int) -> str:
+        edit = self.filter_edit(col)
+        return edit.text().strip() if edit is not None else ""
+
+    def set_filter_text(self, col: int, text: str) -> None:
+        edit = self.filter_edit(col)
+        if edit is not None:
+            edit.setText(text)
+
+    def clear_filters(self) -> None:
+        for edit in self._edits:
+            edit.clear()
+
+    def set_suggestions(self, col: int, values: list[str]) -> None:
+        """Vervollständigung wie im Kopfmenü der Item-Liste: inline über
+        den Präfix UND als Popup über Teilstrings (§build_filter_edit)."""
+        edit = self.filter_edit(col)
+        if edit is None:
+            return
+        edit.set_suggestions(values)
+        completer = QCompleter(values, edit)
+        completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+        completer.setFilterMode(Qt.MatchFlag.MatchContains)
+        edit.setCompleter(completer)
+
+    # --- Maße und Zeichnen ----------------------------------------------- #
+
+    def label_height(self) -> int:
+        """Die Höhe, die der Kopf OHNE Feldzeile hätte."""
+        return super().sizeHint().height()
+
+    def _edit_height(self) -> int:
+        return self._edits[0].sizeHint().height() if self._edits else 0
+
+    def sizeHint(self):  # noqa: N802 (Qt-API)
+        groesse = super().sizeHint()
+        groesse.setHeight(groesse.height() + self._edit_height())
+        return groesse
+
+    def updateGeometries(self) -> None:  # noqa: N802 (Qt-API)
+        super().updateGeometries()
+        self._place_edits()
+
+    def paintSection(self, painter, rect, logical_index) -> None:  # noqa: N802
+        super().paintSection(painter, QRect(rect.x(), rect.y(), rect.width(),
+                                            self.label_height()), logical_index)
+
+    def _place_edits(self, *_args) -> None:
+        oben, hoehe = self.label_height(), self._edit_height()
+        for col, edit in enumerate(self._edits):
+            if col >= self.count() or self.isSectionHidden(col):
+                edit.hide()
+                continue
+            edit.setGeometry(self.sectionViewportPosition(col) + 1, oben,
+                             max(self.sectionSize(col) - 2, 0), hoehe)
+            edit.show()
+
+    # --- Klicks in der Feldzeile gehören nicht dem Kopf ------------------ #
+
+    def _in_field_row(self, event) -> bool:
+        return event.position().y() >= self.label_height()
+
+    def mousePressEvent(self, event) -> None:  # noqa: N802 (Qt-API)
+        if self._in_field_row(event):
+            event.ignore()
+            return
+        super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:  # noqa: N802 (Qt-API)
+        if self._in_field_row(event):
+            event.ignore()
+            return
+        super().mouseReleaseEvent(event)
+
+    def mouseDoubleClickEvent(self, event) -> None:  # noqa: N802 (Qt-API)
+        if self._in_field_row(event):
+            event.ignore()
+            return
+        super().mouseDoubleClickEvent(event)

@@ -104,7 +104,16 @@ delve depth 0, where nobody dies) from the depths below it.
   of Exile's own `Client.txt`, which names the area level on every single
   zone entry, and it keeps what it has seen even after the game
   truncates that log. Columns: group, map tier, monster level, visits,
-  deaths and the average time you spent there.
+  entries, deaths and the average time per visit.
+  **A visit is one map**, however often you went in and out of it:
+  walking to a vendor and back through the portal is still the same
+  visit. The game writes a seed for every area it generates, and the
+  same map keeps its seed across returns. **Entries** counts every time
+  you went in, so many entries per visit mean many trips out and back.
+  Hideouts and towns count every entry as a visit.
+  **Updates itself** on every zone change while it is open, keeping your
+  filters, expanded zones and scroll position; there is a ⟳ Refresh
+  button too.
   **Expand a zone** to see one row per monster level, each with its own
   visits, deaths and average time. A zone does not have a tier — a visit
   does: maps are numbered items ("Map (Tier 4)") that send you to a map
@@ -114,9 +123,9 @@ delve depth 0, where nobody dies) from the depths below it.
   (across the last switch, 44 of 233 areas changed level) and the
   leagues of one season differ in content. Starts on the league you
   played most recently.
-  **Column filters** as in the item list: right-click a column header
-  and type `>=70`, `<45`, `=Cells` or any substring. A filtered column
-  carries 🔍 in its header.
+  **Filter fields right under the column names**: type `>=70`, `<45`,
+  `=Cells` or any substring and the table filters as you type, with the
+  same completion over the column's values as the item list.
 - **Configurable columns**: which columns are shown and in what order is
   set either in the settings dialog (checkboxes and drag & drop) or via
   a quick toggle in the header's right-click menu. The choice is saved

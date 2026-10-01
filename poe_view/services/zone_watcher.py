@@ -92,7 +92,17 @@ _INSTANCE_LINE = re.compile(r"Client-Safe Instance ID = (\d+)")
 # Zahl hängt an der INSTANZ, nicht am Gebiet — ``MapWorldsAtoll`` steht
 # je nach eingelegter Karte auf 70 oder 77, ``Delve_Main`` auf 34
 # verschiedenen Werten je nach Tiefe. Genau das braucht man.
-_AREA_LINE = re.compile(r'Generating level (\d+) area "([^"]+)" with seed')
+#
+# **Der Seed am Ende ist die Karte selbst** (Peter, 2026-10-01: "wird hier
+# jeder Besuch gezählt (auch Händlerbesuche) oder die gesamte Map?").
+# Ausgezählt an Peters Client.txt: 1.132 Karten-Eintritte, aber nur 360
+# verschiedene Seeds — dieselbe Karte behält ihren Seed über alle
+# Rückkehrten aus dem Hideout, im längsten Fall über 140 Minuten. Die
+# Instanz-ID darüber taugt dafür NICHT: Sie wechselte innerhalb
+# derselben Karte 407-mal (483 IDs für dieselben 360 Karten). Hideout
+# und Städte haben immer Seed 1 (§zone_catalog._FIXED_SEEDS), das
+# Bergwerk bei jedem Laden einen neuen.
+_AREA_LINE = re.compile(r'Generating level (\d+) area "([^"]+)" with seed (\d+)')
 
 # Woran eine Ruhezone zu erkennen ist — ausgezählt an Peters Client.txt
 # (alle vorkommenden Kennungen, 2026-09-22):
@@ -233,7 +243,9 @@ def deaths_since(log_path: Path, cutoff: datetime) -> dict[str, list[datetime]]:
 class ZoneStay(NamedTuple):
     """Ein Aufenthalt in einer Zone: betreten, verlassen (``None`` =
     noch drin), angezeigter Name, Gebiets-Kennung, Instanz und
-    Gebietslevel (0 = unbekannt, siehe ``_AREA_LINE``).
+    Gebietslevel (0 = unbekannt, siehe ``_AREA_LINE``) sowie der Seed,
+    an dem sich dieselbe Karte über mehrere Eintritte hinweg erkennen
+    lässt (leer = unbekannt).
 
     Zeiten sind naive lokale ``datetime`` wie in der Client.txt."""
 
@@ -243,6 +255,7 @@ class ZoneStay(NamedTuple):
     area_id: str
     instance: str
     level: int = 0
+    seed: str = ""
 
     @property
     def seconds(self) -> float:
@@ -277,7 +290,7 @@ def zone_stays(log_path: Path, since: datetime) -> list[ZoneStay]:
         return []
     stays: list[ZoneStay] = []
     offen: ZoneStay | None = None
-    area = instance = ""
+    area = instance = seed = ""
     level = 0
     for line in raw.decode("utf-8", errors="replace").splitlines():
         if "Client-Safe Instance ID = " in line:
@@ -289,6 +302,7 @@ def zone_stays(log_path: Path, since: datetime) -> list[ZoneStay]:
             treffer = _AREA_LINE.search(line)
             if treffer:
                 level, area = int(treffer.group(1)), treffer.group(2)
+                seed = treffer.group(3)
             continue
         if " You have entered " not in line:
             continue
@@ -299,11 +313,12 @@ def zone_stays(log_path: Path, since: datetime) -> list[ZoneStay]:
         if offen is not None:
             stays.append(offen._replace(left=zeit))
         offen = ZoneStay(entered=zeit, left=None, name=treffer.group(1),
-                         area_id=area, instance=instance, level=level)
-        # Kennung, Instanz und Level gelten für GENAU diesen einen
+                         area_id=area, instance=instance, level=level,
+                         seed=seed)
+        # Kennung, Instanz, Level und Seed gelten für GENAU diesen einen
         # Eintritt. Stehen sie beim nächsten nicht in der Datei, sind sie
         # unbekannt — dann lieber leer als von der Zone davor geerbt.
-        area = instance = ""
+        area = instance = seed = ""
         level = 0
     if offen is not None:
         stays.append(offen)

@@ -5376,6 +5376,7 @@ class MainWindow(QMainWindow):
         wer zwischen Hideout und Map hin- und herportet, löst sonst
         beliebig viele Abrufe aus."""
         self._zone_label.setText(self._zone_caption(zone_name))
+        self._refresh_open_zone_table()
         # VOR den Abbruchbedingungen: Für die Messung zählt, dass ein
         # Zonenwechsel stattgefunden hat — nicht, ob daraufhin ein
         # Refresh lief (§_PublishWatch, gleiche Begründung wie beim
@@ -5446,15 +5447,54 @@ class MainWindow(QMainWindow):
                 "fills itself from your game log, including everything you "
                 "played before.")
             return
+        records = self._load_zone_records()
+        if records is None:
+            return
+        self._zone_table_dialog = ZoneTableDialog(
+            records, self, character_level=self._active_character_level(),
+            account_name=konto,
+            league=self._current_league_of_play(
+                {r.area_id: r for r in records}),
+            reload=self._load_zone_records)
+        self._zone_table_dialog.show()
+
+    def _load_zone_records(self) -> list | None:
+        """Den Katalog aus der Client.txt auffrischen und als Liste
+        liefern — ``None``, wenn der Zonen-Beobachter aus ist. Eigene
+        Methode, weil drei Stellen sie brauchen: das Öffnen, der
+        Aktualisieren-Knopf im Dialog und der Zonenwechsel
+        (§_refresh_open_zone_table). Kostet auf Peters 11-MB-Log rund
+        180 ms (gemessen 2026-10-01: Aufenthalte 122, Tode 25,
+        Liga-Marken 30)."""
+        pfad = self._client_log_path
+        if pfad is None:
+            return None
         records = zone_catalog.refresh_from_log(
-            pfad, konto, self._league_lookup(pfad),
+            pfad, self._account_name or "", self._league_lookup(pfad),
             [zeit for zeiten in deaths_since(pfad, datetime.min).values()
              for zeit in zeiten])
-        self._zone_table_dialog = ZoneTableDialog(
-            sorted(records.values(), key=lambda r: (r.category, r.name)),
-            self, character_level=self._active_character_level(),
-            account_name=konto, league=self._current_league_of_play(records))
-        self._zone_table_dialog.show()
+        return sorted(records.values(), key=lambda r: (r.category, r.name))
+
+    def _refresh_open_zone_table(self) -> None:
+        """Die Zonen-Tabelle nachziehen, wenn sie offen ist (Peter,
+        2026-10-01: "einen aktualisieren Button ... oder eine automatische
+        aktualisierung" — es sind beide geworden).
+
+        Gerufen bei jedem Zonenwechsel: Genau dann endet der Aufenthalt
+        davor, und erst ein beendeter Aufenthalt kommt in den Katalog
+        (§zone_catalog.refresh_from_log). Die rund 180 ms fallen in den
+        Ladebildschirm und nur an, solange das Fenster zu sehen ist.
+
+        Ein Fehler hier darf den Zonenwechsel nicht abbrechen — an ihm
+        hängen der Refresh der Ansicht und die XP-Rechnung."""
+        dialog = getattr(self, "_zone_table_dialog", None)
+        if dialog is None or not dialog.isVisible():
+            return
+        try:
+            dialog.refresh()
+        except Exception:  # noqa: BLE001 — siehe Docstring
+            log.exception("Zonen-Tabelle: Aktualisieren beim Zonenwechsel "
+                          "fehlgeschlagen")
 
     def _league_lookup(self, log_path: Path):
         """Eine Funktion "Zeitpunkt → Liga" (§league_log).

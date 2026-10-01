@@ -1854,3 +1854,53 @@ Befehle laufen, und mit derselben zeitlichen Abfolge. Und wenn eine
 Gegenprobe behauptet, ein Schutz greife nicht, ist der nächste
 Verdächtige die Gegenprobe selbst: Hier war das Skript von Anfang an in
 Ordnung, von Hand aufgerufen lieferte es sauber seine Ablehnung.
+
+---
+
+## 90. Wer die Zonen-Tabelle mitten in einer Map öffnete, verlor deren Zeit und Tode — für immer
+
+**Symptom.** Keins, das jemand bemerkt hätte: Einzelne Karten standen mit
+zu wenig Zeit und ohne Tode im Katalog. Aufgefallen beim Umbau auf
+Karten statt Eintritte (ARCHITEKTUR §4.56.7), beim Lesen von
+`refresh_from_log`.
+
+**Ursache.** Der Katalog arbeitet die Client.txt in Stücken ein: alles,
+was nach dem jüngsten bekannten Aufenthalt beginnt. Dazu gehörte auch
+der gerade LAUFENDE Aufenthalt — ohne Ende, also mit 0 Sekunden, und
+ohne Tode, weil die erst zugeordnet werden, wenn er vorbei ist. Beim
+nächsten Öffnen lag sein Beginn vor der Grenze; er wurde nie wieder
+angefasst.
+
+**Lösung.** Ein Aufenthalt kommt erst in den Katalog, wenn er beendet
+ist (`s.left is not None`). Der laufende wird beim nächsten Auffrischen
+nach seinem Ende vollständig gezählt.
+
+**Lehre:** Wer inkrementell einarbeitet, muss sich fragen, ob der
+letzte Datensatz schon fertig ist. Eine Grenze "alles nach dem
+jüngsten" friert einen halben Datensatz ein, sobald er einmal drin ist.
+
+---
+
+## 91. `horizontalHeader()` an einem QTreeView — der Liga-Wechsel der Zonen-Tabelle brach wochenlang still ab
+
+**Symptom.** Liga-Wechsel in der Zonen-Tabelle: Die Zahlen wechselten,
+aber die Sortierung blieb in Katalog-Reihenfolge und der Zähler auf dem
+alten Stand. Keine Fehlermeldung — in der .exe gibt es keine Konsole,
+und eine Ausnahme in einem Qt-Slot beendet nur diesen Slot.
+
+**Ursache.** Die Tabelle war am 2026-09-27 von einer Liste
+(`QTableView`) auf einen Baum (`QTreeView`) umgestellt worden. Die
+Methode rief weiter `self._view.horizontalHeader()` — das hat nur die
+Tabelle; der Baum heißt `header()`. Das Modell war zu dem Zeitpunkt
+schon umgestellt, deshalb sah es halb richtig aus. Kein Test hat die
+Liga-Box je bedient.
+
+**Lösung.** `header()`, ausgelagert in `ZoneTableDialog._resort`, das
+jetzt auch das Aktualisieren benutzt. Test bedient die Box und prüft
+Liga, Zähler und Vorschläge.
+
+**Lehre:** Nach dem Tausch eines Widget-Typs jeden Aufruf auf dessen
+alte API durchgehen — Python merkt es erst, wenn die Zeile läuft. Und
+ein Bedienelement ohne Test ist nach einem Umbau ungeprüft, egal wie
+klein die Änderung aussah.
+

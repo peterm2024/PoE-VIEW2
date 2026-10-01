@@ -52,7 +52,13 @@ log = logging.getLogger(__name__)
 # dazu Tode und Verweildauer. Ältere Versionen werden verworfen statt
 # umgerechnet — sie wüssten die Liga nicht, und der Katalog baut sich aus
 # der Client.txt in einem Zehntel einer Sekunde neu auf.
-VERSION = 4
+#
+# Version 5 (2026-10-01): "Visits" zählt KARTEN (eine je Seed), die neue
+# Zahl ``entries`` die Eintritte — vorher war jeder Gang zum Händler und
+# zurück ein eigener Besuch (§LevelStats). Aus gespeicherten Zahlen
+# lässt sich das nicht nachrechnen; der Katalog baut sich neu aus der
+# Client.txt auf, was dort schon gekürzt ist, geht verloren.
+VERSION = 5
 
 # Die Gruppen, ausgezählt an Peters 381 Gebieten (2026-09-26):
 #
@@ -168,6 +174,14 @@ def map_tier_from_level(level: int) -> int | None:
 # damit aus jeder Level-Anzeige heraus, ohne verloren zu gehen.
 NO_LEVEL = 0
 
+# Seeds, die nichts über den einzelnen Besuch sagen: Hideout und Städte
+# haben einen festen Grundriss und stehen immer auf Seed 1 (an Peters
+# Log: der einzige Seed, der über mehr als sechs Stunden wiederkehrt,
+# bei 13 Ruhezonen). Dort bleibt jeder Eintritt ein Besuch — eine
+# Rückkehr ins Hideout IST ein neuer Aufenthalt, kein Teil des alten.
+# Leer heißt: Die Client.txt nannte keinen.
+_FIXED_SEEDS = frozenset({"", "1"})
+
 
 @dataclass
 class LevelStats:
@@ -189,13 +203,33 @@ class LevelStats:
     ``seconds`` ist die Summe der Verweildauern, nicht ihr Mittel: Der
     Durchschnitt lässt sich daraus jederzeit bilden, die Summe aus dem
     Durchschnitt aber nicht wieder zusammensetzen, sobald ein Besuch
-    dazukommt."""
+    dazukommt.
 
-    visits: int = 0
+    **Ein Besuch ist eine Karte, nicht ein Eintritt** (seit 2026-10-01,
+    VERSION 5). Peter: "wird hier jeder Besuch gezählt (auch
+    Händlerbesuche) oder die gesamte Map?" — bis dahin jeder Eintritt.
+    An seinem Log: 1.130 Karten-Eintritte für 359 tatsächlich gelaufene
+    Karten, Faktor 3,15; nur 81 Karten liefen in einem Rutsch durch.
+    Der Schnitt "2,5 Minuten pro Map" war damit die Zeit pro Eintritt.
+    Erkannt wird dieselbe Karte an ihrem Seed (§zone_watcher._AREA_LINE):
+    Ein neuer Besuch beginnt, sobald der Seed ein anderer ist als beim
+    letzten Eintritt auf dieser Stufe. ``entries`` zählt weiterhin jeden
+    Eintritt — viele Eintritte je Karte heißen viele Händlergänge oder
+    viele Tode, auch das ist eine Auskunft.
+
+    ``last_seed`` und ``last_seed_timed`` sind das Gedächtnis dafür über
+    den Neustart hinweg: Der Katalog arbeitet die Client.txt in Stücken
+    ein (§refresh_from_log), und eine Karte, die über zwei Stücke reicht,
+    zählte sonst doppelt."""
+
+    visits: int = 0              # Karten (eine je Seed, §_FIXED_SEEDS)
     deaths: int = 0
     seconds: float = 0.0
     timed_visits: int = 0        # Besuche, deren Dauer in ``seconds`` steckt
     last_seen: str = ""          # ISO-Zeit, wie in der Client.txt gelesen
+    entries: int = 0             # jeder einzelne Eintritt
+    last_seed: str = ""
+    last_seed_timed: bool = False
 
     @property
     def average_seconds(self) -> float:
@@ -248,6 +282,10 @@ class LeagueStats:
         return sum(w.timed_visits for w in self.by_level.values())
 
     @property
+    def entries(self) -> int:
+        return sum(w.entries for w in self.by_level.values())
+
+    @property
     def last_seen(self) -> str:
         return max((w.last_seen for w in self.by_level.values()), default="")
 
@@ -282,6 +320,7 @@ class ZoneRecord:
             for level, werte in eintrag.by_level.items():
                 ziel = gesamt.at(level)
                 ziel.visits += werte.visits
+                ziel.entries += werte.entries
                 ziel.deaths += werte.deaths
                 ziel.seconds += werte.seconds
                 ziel.timed_visits += werte.timed_visits
@@ -370,10 +409,19 @@ def merge_stays(records: dict[str, ZoneRecord], stays,
         # Der angezeigte Name kann sich ändern (Hideout umbenannt, Sprache
         # umgestellt) — der zuletzt gesehene gewinnt.
         eintrag.name = stay.name or eintrag.name
-        stufe.visits += 1
+        seed = getattr(stay, "seed", "")
+        stufe.entries += 1
+        if seed in _FIXED_SEEDS or seed != stufe.last_seed:
+            stufe.visits += 1
+            stufe.last_seed_timed = False
+        stufe.last_seed = seed
         if 0 < stay.seconds <= _MAX_DWELL_S:
             stufe.seconds += stay.seconds
-            stufe.timed_visits += 1
+            # Gezählt wird die KARTE mit messbarer Dauer, nicht jeder
+            # Eintritt — sonst hieße "Avg. time" wieder Zeit pro Eintritt.
+            if not stufe.last_seed_timed:
+                stufe.timed_visits += 1
+                stufe.last_seed_timed = True
         stufe.deaths += _deaths_within(todeszeiten, stay)
         zeit = stay.entered.isoformat(timespec="seconds")
         if zeit > stufe.last_seen:
@@ -418,7 +466,10 @@ def load(path: Path) -> dict[str, ZoneRecord]:
                             deaths=int(w.get("deaths") or 0),
                             seconds=float(w.get("seconds") or 0.0),
                             timed_visits=int(w.get("timed_visits") or 0),
-                            last_seen=str(w.get("last_seen") or ""))
+                            last_seen=str(w.get("last_seen") or ""),
+                            entries=int(w.get("entries") or 0),
+                            last_seed=str(w.get("last_seed") or ""),
+                            last_seed_timed=bool(w.get("last_seed_timed")))
                         for level, w in (werte.get("levels") or {}).items()})
                     for name, werte in (zeile.get("leagues") or {}).items()
                 },
@@ -442,7 +493,10 @@ def save(path: Path, records: dict[str, ZoneRecord]) -> None:
                      str(level): {"visits": w.visits, "deaths": w.deaths,
                                   "seconds": round(w.seconds, 1),
                                   "timed_visits": w.timed_visits,
-                                  "last_seen": w.last_seen}
+                                  "last_seen": w.last_seen,
+                                  "entries": w.entries,
+                                  "last_seed": w.last_seed,
+                                  "last_seed_timed": w.last_seed_timed}
                      for level, w in sorted(werte.by_level.items())}}
                  for name, werte in sorted(r.leagues.items())}}
             for r in sorted(records.values(), key=lambda r: r.area_id)
@@ -452,7 +506,8 @@ def save(path: Path, records: dict[str, ZoneRecord]) -> None:
 
 def _fingerabdruck(records: dict[str, ZoneRecord]) -> str:
     return json.dumps([(r.area_id, sorted(r.leagues), r.stats(None).visits,
-                        r.stats(None).deaths, sorted(r.stats(None).levels))
+                        r.stats(None).entries, r.stats(None).deaths,
+                        sorted(r.stats(None).levels))
                        for r in sorted(records.values(), key=lambda r: r.area_id)])
 
 
@@ -470,9 +525,16 @@ def refresh_from_log(log_path: Path, account_name: str,
     # Der Katalog zählt Besuche ab dem Beginn der Datei; ohne Grenze
     # würde jeder Aufruf dieselben Aufenthalte erneut zählen. Deshalb
     # zählt er nur, was seit dem letzten Lauf dazugekommen ist.
+    #
+    # Der LAUFENDE Aufenthalt bleibt draußen, bis er endet. Vorher wurde
+    # er mitgezählt — mit 0 Sekunden und ohne Tode, denn beides steht erst
+    # fest, wenn er vorbei ist —, und weil er danach vor der Grenze lag,
+    # wurde er nie nachgetragen. Wer die Tabelle mitten in einer Map
+    # öffnete, verlor deren Dauer und Tode für immer.
     seit = _newest(records)
     merge_stays(records, [s for s in zone_stays(log_path, datetime.min)
-                          if s.entered.isoformat(timespec="seconds") > seit],
+                          if s.left is not None
+                          and s.entered.isoformat(timespec="seconds") > seit],
                 league_of, deaths)
     nachher = _fingerabdruck(records)
     if nachher != vorher:

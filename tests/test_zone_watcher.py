@@ -575,3 +575,20 @@ def test_the_level_does_not_leak_into_other_zones() -> None:
     assert is_rest_area("HideoutSlum", 34)
     assert is_rest_area("HideoutSlum", 72)
     assert not is_rest_area("MapWorldsBazaar", 34)
+
+
+def test_zone_stays_carries_the_seed_and_does_not_inherit_it(tmp_path) -> None:
+    """Der Seed erkennt dieselbe Karte über mehrere Eintritte
+    (§_AREA_LINE). Ein Eintritt ohne Generierungszeile erbt ihn nicht —
+    sonst hielte der Katalog eine fremde Zone für dieselbe Karte."""
+    log = tmp_path / "Client.txt"
+    log.write_text(
+        "2026/09/26 13:00:00 1 1186a8a3 [DEBUG Client 1] "
+        'Generating level 70 area "MapWorldsPort" with seed 711400918\n'
+        "2026/09/26 13:00:01 1 cffb065b [INFO Client 1] : You have entered Port.\n"
+        "2026/09/26 13:10:00 1 cffb065b [INFO Client 1] : You have entered Cage.\n",
+        encoding="utf-8")
+
+    stays = zone_stays(log, datetime(2026, 9, 26))
+
+    assert [s.seed for s in stays] == ["711400918", ""]

@@ -10861,3 +10861,90 @@ def test_a_vendor_event_before_the_section_does_not_count(qapp) -> None:
     finally:
         win.worker.stop()
         win.worker.wait(5000)
+
+
+# --- Zonen-Tabelle: Öffnen und Nachziehen beim Zonenwechsel (§4.56) ---
+
+def _zonen_log(pfad, eintritte):
+    zeilen = []
+    for zeit, level, area, name, seed in eintritte:
+        zeilen += [
+            f"2026/09/30 {zeit} 1 abc [DEBUG Client 1] Client-Safe Instance ID = 1",
+            f'2026/09/30 {zeit} 1 abc [DEBUG Client 1] Generating level {level} '
+            f'area "{area}" with seed {seed}',
+            f"2026/09/30 {zeit} 1 abc [INFO Client 1] : You have entered {name}.",
+        ]
+    pfad.write_text("\n".join(zeilen) + "\n", encoding="utf-8")
+
+
+def test_the_open_zone_table_follows_every_zone_change(qapp, tmp_path) -> None:
+    """Peter, 2026-10-01: "einen aktualisieren Button ... oder eine
+    automatische aktualisierung". Offen zieht die Tabelle bei jedem
+    Zonenwechsel nach; Port hat danach EINEN Besuch (dieselbe Karte,
+    Seed 77) und zwei Eintritte."""
+    log = tmp_path / "Client.txt"
+    eintritte = [("20:00:00", 70, "MapWorldsPort", "Port", "77"),
+                 ("20:05:00", 60, "HideoutSlum", "Hideout", "1")]
+    _zonen_log(log, eintritte)
+    win = MainWindow()
+    try:
+        win._client_log_path = log
+        win._account_name = "TestAccount#1234"
+        win._open_zone_table()
+        dialog = win._zone_table_dialog
+        assert dialog.isVisible()
+        assert not dialog._refresh_button.isHidden()
+
+        _zonen_log(log, eintritte + [("20:06:00", 70, "MapWorldsPort", "Port", "77"),
+                                     ("20:11:00", 60, "HideoutSlum", "Hideout", "1")])
+        win._on_zone_changed("Hideout")
+
+        port = next(r for r in dialog._model._records if r.area_id == "MapWorldsPort")
+        assert (port.stats(None).visits, port.stats(None).entries) == (1, 2)
+    finally:
+        win._zone_table_dialog.close()
+        win.worker.stop()
+        win.worker.wait(5000)
+
+
+def test_a_closed_zone_table_is_not_refreshed(qapp, tmp_path, monkeypatch) -> None:
+    """Die 180 ms fallen nur an, solange man die Tabelle sieht."""
+    log = tmp_path / "Client.txt"
+    _zonen_log(log, [("20:00:00", 70, "MapWorldsPort", "Port", "77"),
+                     ("20:05:00", 60, "HideoutSlum", "Hideout", "1")])
+    win = MainWindow()
+    try:
+        win._client_log_path = log
+        win._open_zone_table()
+        win._zone_table_dialog.close()
+        aufrufe = []
+        monkeypatch.setattr(win._zone_table_dialog, "refresh",
+                            lambda: aufrufe.append(1))
+        win._on_zone_changed("Hideout")
+        assert aufrufe == []
+    finally:
+        win.worker.stop()
+        win.worker.wait(5000)
+
+
+def test_a_failing_zone_table_refresh_does_not_break_the_zone_change(
+        qapp, tmp_path, monkeypatch) -> None:
+    """An ``_on_zone_changed`` hängen Ansichts-Refresh und XP-Rechnung."""
+    log = tmp_path / "Client.txt"
+    _zonen_log(log, [("20:00:00", 70, "MapWorldsPort", "Port", "77"),
+                     ("20:05:00", 60, "HideoutSlum", "Hideout", "1")])
+    win = MainWindow()
+    try:
+        win._client_log_path = log
+        win._open_zone_table()
+
+        def kaputt():
+            raise RuntimeError("Absicht")
+        monkeypatch.setattr(win._zone_table_dialog, "refresh", kaputt)
+        vorher = win._zone_changes
+        win._on_zone_changed("Hideout")
+        assert win._zone_changes == vorher + 1
+    finally:
+        win._zone_table_dialog.close()
+        win.worker.stop()
+        win.worker.wait(5000)

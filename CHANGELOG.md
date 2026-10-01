@@ -6,6 +6,35 @@ nach [SemVer](https://semver.org/lang/de/).
 
 ## [Unveröffentlicht]
 
+### Geändert
+
+- **Zonen-Tabelle: „Visits" zählt jetzt Karten, nicht Eintritte.** Wer
+  aus der Map zum Händler und durchs Portal zurück ging, hatte bisher
+  zwei Besuche — erkannt wird dieselbe Karte jetzt an ihrem Seed aus der
+  Client.txt. Eine neue Spalte **„Entries"** zeigt weiterhin jeden
+  Eintritt. „Avg. time" ist damit die Zeit pro Karte statt pro Eintritt
+  (an Peters Log: Port 19 Karten à 10,3 min statt 72 Besuche à 2,7 min).
+  Der Katalog baut sich dafür einmal neu aus der Client.txt auf.
+- **Spalten-Filter direkt im Spaltenkopf:** Unter jedem Spaltennamen
+  steht ein Eingabefeld, das beim Tippen filtert — mit derselben
+  Vervollständigung wie bisher im Kopfmenü. Die Spaltenbreiten bleiben
+  dabei stehen.
+
+### Neu
+
+- **Zonen-Tabelle aktualisiert sich selbst**, bei jedem Zonenwechsel,
+  solange sie offen ist — Filter, Aufgeklapptes und Scrollposition
+  bleiben. Dazu ein Knopf „⟳ Refresh".
+
+### Behoben
+
+- Öffnete man die Zonen-Tabelle mitten in einer Map, wurde diese mit
+  0 Sekunden und ohne Tode eingetragen und nie korrigiert.
+- Der Liga-Wechsel in der Zonen-Tabelle brach nach dem Umstellen der
+  Zahlen ab: Sortierung und Zähler blieben auf dem alten Stand.
+- Der Zähler „2 of 4 zones" rechnete Zonen anderer Ligen mit, als
+  verstecke ein Filter sie.
+
 ## [0.18.0] - 2026-09-28
 
 ### Neu
