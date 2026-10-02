@@ -41,6 +41,7 @@ from pathlib import Path
 
 from PySide6.QtCore import (QAbstractItemModel, QModelIndex,
                             QSortFilterProxyModel, Qt)
+from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (QComboBox, QDialog, QFileDialog, QHBoxLayout,
                                QHeaderView, QLabel, QLineEdit, QMenu,
                                QMessageBox, QPushButton, QTreeView,
@@ -620,16 +621,21 @@ class ZoneTableDialog(QDialog):
         kopfzeile.filter_changed.connect(self.apply_column_filter)
         kopfzeile.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         kopfzeile.customContextMenuRequested.connect(self._on_header_menu)
-        kopfzeile.setSectionResizeMode(_NAME_COL, QHeaderView.ResizeMode.Stretch)
-        kopfzeile.setSectionResizeMode(_ID_COL, QHeaderView.ResizeMode.Stretch)
+        # Auch Name und Kennung nach Inhalt, nicht mehr gestreckt (Peter,
+        # 2026-10-02: "wir könnten die Größe des Fensters überarbeiten
+        # abhängig von der optimierten Spaltenbreite"). Gestreckt teilten
+        # sie sich jeden freien Pixel — an seinem Bildschirm stand
+        # "Zone" 280 Pixel breit über Namen von 120. Jetzt bestimmen die
+        # Spalten das Fenster (§_fit_to_columns), und wird es größer
+        # gezogen, nimmt die letzte Spalte den Rest
+        # (``stretchLastSection``, die Voreinstellung des Baums).
         # Die Breiten werden EINMAL nach dem Inhalt bemessen und stehen
         # dann still (Interactive, von Hand ziehbar). Mit
         # ResizeToContents passten sie sich bei jedem Filter neu an — und
         # das Feld, in das man gerade tippt, rutschte unter dem Cursor
         # weg (an Peters Bildschirm gesehen: "Map" in Group, die Spalte
         # wurde schmaler, sobald "Side Area" herausgefiltert war).
-        for spalte in (_GROUP_COL, _TIER_COL, _LEVEL_COL, _VISITS_COL,
-                       _ENTRIES_COL, _DEATHS_COL, _TIME_COL, _SEEN_COL):
+        for spalte in range(len(COLUMNS)):
             kopfzeile.setSectionResizeMode(spalte,
                                            QHeaderView.ResizeMode.Interactive)
             self._view.resizeColumnToContents(spalte)
@@ -639,6 +645,41 @@ class ZoneTableDialog(QDialog):
         aufbau.addLayout(kopf)
         aufbau.addWidget(self._view)
         self._update_count()
+        self._fit_to_columns()
+
+    def _fit_to_columns(self) -> None:
+        """Das Fenster so breit wie die Spalten nach ihrem Inhalt (höchstens
+        90 % des Bildschirms), so hoch wie die Zeilen (höchstens 70 %). Darunter nie schmaler als die Kopfzeile mit Liga,
+        Suche und Knöpfen, sonst würden die zusammengedrückt."""
+        bildschirm = (self.parentWidget().screen() if self.parentWidget()
+                      else QGuiApplication.primaryScreen())
+        frei = bildschirm.availableGeometry() if bildschirm else None
+        rand = self.layout().contentsMargins()
+        rahmen = 2 * self._view.frameWidth()
+        rollbalken = self._view.verticalScrollBar().sizeHint().width()
+        kopf = self._filter_header
+        # Aus dem Inhalt gerechnet statt aus ``sectionSize``: Die letzte
+        # Spalte wird gestreckt (``stretchLastSection``), ihre aktuelle
+        # Größe hängt also am Fenster — vor dem ersten Anzeigen ist das
+        # noch dasselbe, danach nicht mehr.
+        spalten = sum(max(self._view.sizeHintForColumn(c), kopf.sectionSizeHint(c))
+                      for c in range(kopf.count()) if not kopf.isSectionHidden(c))
+        breite = max(spalten + rahmen + rollbalken + rand.left() + rand.right(),
+                     self.layout().itemAt(0).sizeHint().width()
+                     + rand.left() + rand.right())
+        zeile = max(self._view.sizeHintForRow(0), 1) if self._proxy.rowCount() else 20
+        hoehe = (rand.top() + rand.bottom() + self.layout().spacing()
+                 + self.layout().itemAt(0).sizeHint().height()
+                 + kopf.sizeHint().height() + rahmen
+                 + zeile * max(self._proxy.rowCount(), 8)
+                 + self._view.horizontalScrollBar().sizeHint().height())
+        if frei is not None:
+            breite = min(breite, int(frei.width() * 0.9))
+            # Höhe knapper als die Breite: 381 Zonen füllten sonst jeden
+            # Bildschirm von oben bis unten, und ein Fenster, das alles
+            # verdeckt, ist kein Nachschlagefenster mehr.
+            hoehe = min(hoehe, int(frei.height() * 0.7))
+        self.resize(breite, hoehe)
 
     # --- Spalten-Filter: Felder im Kopf (§column_filter.FilterHeader) -- #
 

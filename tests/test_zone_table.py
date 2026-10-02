@@ -839,3 +839,46 @@ def test_typing_a_filter_does_not_move_the_columns(qapp) -> None:
         assert [kopf.sectionSize(c) for c in range(kopf.count())] == vorher
     finally:
         dialog.deleteLater()
+
+
+class _GrosserBildschirm:
+    """Der Offscreen-Bildschirm ist 800 Pixel breit — da stieße jede
+    Tabelle an die 90-%-Grenze, und der Test prüfte nur die Grenze."""
+    def availableGeometry(self):  # noqa: N802 (Qt-API)
+        from PySide6.QtCore import QRect
+        return QRect(0, 0, 4000, 2000)
+
+
+def test_the_window_is_capped_by_the_screen(qapp) -> None:
+    """Peters 381 Zonen füllten sonst jeden Bildschirm von oben bis unten."""
+    viele = [record_by_level(f"MapWorldsTest{i}", f"Test {i}", MAP, {ALLFLAME: {
+        70: LevelStats(visits=1, entries=1, last_seen="2026-09-30T20:00:00")}})
+        for i in range(200)]
+    dialog = _dialog_mit(viele)
+    try:
+        frei = qapp.primaryScreen().availableGeometry()
+        assert dialog.width() <= int(frei.width() * 0.9)
+        assert dialog.height() <= int(frei.height() * 0.7)
+    finally:
+        dialog.deleteLater()
+
+
+def test_the_window_fits_the_columns(qapp, monkeypatch) -> None:
+    """Peter, 2026-10-02: "wir könnten die Größe des Fensters überarbeiten
+    abhängig von der optimierten Spaltenbreite". Alle Spalten passen
+    ohne seitliches Rollen hinein, und es bleibt kaum Luft — die frühere
+    gestreckte Zone-Spalte hatte jeden freien Pixel geschluckt."""
+    from poe_view.ui import zone_table
+    monkeypatch.setattr(zone_table.QGuiApplication, "primaryScreen",
+                        staticmethod(lambda: _GrosserBildschirm()))
+    dialog = _dialog_mit(beispiel())
+    try:
+        kopf = dialog._filter_header
+        inhalt = [max(dialog._view.sizeHintForColumn(c), kopf.sectionSizeHint(c))
+                  for c in range(kopf.count())]
+        assert kopf.sectionSize(_NAME_COL) == inhalt[_NAME_COL]
+        mindestens = dialog.layout().itemAt(0).sizeHint().width()
+        assert dialog.width() >= sum(inhalt)
+        assert dialog.width() <= max(sum(inhalt), mindestens) + 80
+    finally:
+        dialog.deleteLater()

@@ -7749,6 +7749,18 @@ still: Mit `ResizeToContents` passten sie sich jedem Filter an, und das
 Feld, in das man tippt, rutschte unter dem Cursor weg (nativ gesehen,
 die Spalte "Group" wurde schmaler, sobald "Side Area" herausfiel).
 
+**Fenstergröße nach den Spalten** (Peter, 2026-10-02: "wir könnten die
+Größe des Fensters überarbeiten abhängig von der optimierten
+Spaltenbreite"): Zone und Kennung sind nicht mehr gestreckt, alle
+Spalten werden einmal nach Inhalt bemessen, und `_fit_to_columns` macht
+das Fenster so breit wie ihre Summe (nie schmaler als die Kopfzeile mit
+Liga, Suche und Knöpfen) und so hoch wie die Zeilen — höchstens 90 % der
+Breite und 70 % der Höhe des Bildschirms. Höhe knapper, weil 381 Zonen
+sonst jeden Bildschirm füllten. Wird das Fenster größer gezogen, nimmt
+die letzte Spalte den Rest. An Peters echtem Katalog nativ gemessen:
+1128 Pixel breit statt vorher rund 1300 mit einer halb leeren
+Zone-Spalte.
+
 **Zwei Altfehler, die die neuen Tests fanden:** Der Liga-Wechsel rief
 `horizontalHeader()` — das gibt es nur an einer QTableView, nicht an
 einem QTreeView (FALLSTRICKE #91). Und der Zähler rechnete die Gesamtzahl

@@ -19,6 +19,10 @@ nach [SemVer](https://semver.org/lang/de/).
   steht ein Eingabefeld, das beim Tippen filtert — mit derselben
   Vervollständigung wie bisher im Kopfmenü. Die Spaltenbreiten bleiben
   dabei stehen.
+- **Das Zonen-Fenster richtet seine Größe nach den Spalten:** so breit,
+  wie die Spalten nach ihrem Inhalt brauchen, so hoch wie die Zeilen —
+  höchstens 90 % der Bildschirmbreite und 70 % der Höhe. Bisher füllte
+  die gestreckte Zone-Spalte jeden freien Pixel.
 
 ### Neu
 
