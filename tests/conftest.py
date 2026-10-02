@@ -50,3 +50,6 @@ def _isolated_local_state(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     # deterministisch, kein Verhalten der App wird dadurch verändert
     # (ein echter Offline-Start ohne Cache liefert genau dasselbe None).
     monkeypatch.setattr("poe_view.services.mod_knowledge.fetch", lambda http=None: False)
+    # Kein Gong aus der Testsuite (§kills_reminder): Ein Test, der die
+    # Erinnerung einschaltet, soll prüfen, DASS sie klingt, nicht klingen.
+    monkeypatch.setattr("poe_view.ui.kills_reminder.play_gong", lambda: None)

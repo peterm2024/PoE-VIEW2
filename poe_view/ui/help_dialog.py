@@ -239,6 +239,11 @@ switch it on under <i>Settings &gt; Zone Refresh</i>. The toolbar then
 shows the zone last detected. A burst of events in quick succession is
 capped at four refreshes, so it never eats into the request budget your
 own clicks need.</p>
+<p>On the same tab you can switch on a <b>/kills reminder</b>: entering a
+new combat zone plays a short gong and shows a small window asking you to
+type <code>/kills</code> in chat. It closes once the game has answered;
+the answers, with the difference to the previous one, go to
+<code>kills-log.csv</code> in the log folder.</p>
 <p>After a character refresh the table marks what moved:</p>
 {_REFRESH_LEGEND}
 <p>An item that left the inventory stays visible for one more cycle,

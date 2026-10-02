@@ -351,6 +351,15 @@ delve depth 0, where nobody dies) from the depths below it.
   experience still arrives: `Chateau (Lv 68 · 14% XP)`. The penalty is
   the community's formula, not our own measurement, and it is marked as
   an estimate wherever it appears.
+- **Optional `/kills` reminder** (off by default, *Settings > Zone
+  Refresh*): on entering a new combat zone — not on returning to the
+  same map through a portal — a short gong sounds and a small window in
+  the corner asks you to type `/kills` in chat. It does not take the
+  keyboard away from the game, and closes itself once the answer shows
+  up in `Client.txt`. Every answer is written to `kills-log.csv` in the
+  log folder, with the difference to the previous one and the combat
+  zones in between. The window sits above the game in windowed or
+  windowed-fullscreen mode, not in exclusive fullscreen.
 - **Offline mode**: during GGG maintenance or a lost connection, the
   app shows the last known state from the cache, clearly marked as such
   (📴). A dot in the status bar carries the same information at a

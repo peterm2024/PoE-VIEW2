@@ -37,6 +37,8 @@ from typing import NamedTuple
 
 from PySide6.QtCore import QFileSystemWatcher, QObject, QTimer, Signal
 
+from poe_view.services.kills_log import parse_kills
+
 log = logging.getLogger(__name__)
 
 # Takt des Poll-Fallbacks. 2 s ist für den Zweck reichlich schnell (der
@@ -369,6 +371,8 @@ class ZoneWatcher(QObject):
     # statt eines Qt-Datentyps, damit das naive lokale datetime unverändert
     # durchgereicht wird (§_DEATH_LINE).
     death_seen = Signal(str, object)
+    # Ablesung von "/kills": (Zähler, Zeitpunkt aus der Zeile) — §kills_log.
+    kills_reported = Signal(int, object)
 
     def __init__(self, log_path: Path, parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -384,6 +388,10 @@ class ZoneWatcher(QObject):
         # ... und für den Gebietslevel aus derselben Zeile, den die
         # Anzeige als Monsterlevel zeigt (0 = noch keine Zeile gesehen).
         self.last_area_level = 0
+        # ... und der Seed: Er bleibt über alle Rückkehren in dieselbe Map
+        # gleich (FALLSTRICKE #90) — die Kill-Erinnerung meldet sich je
+        # Map, nicht nach jedem Portal (§MainWindow._maybe_remind_kills).
+        self.last_area_seed = ""
         self._log_path = log_path
         self._position = log_path.stat().st_size
         self._watcher = QFileSystemWatcher([str(log_path)], self)
@@ -448,6 +456,7 @@ class ZoneWatcher(QObject):
             if area:
                 self.last_area_level = int(area.group(1))
                 self.last_area_id = area.group(2)
+                self.last_area_seed = area.group(3)
                 continue
             match = _ZONE_LINE.search(line)
             if match:
@@ -459,6 +468,12 @@ class ZoneWatcher(QObject):
                 zeit = _line_time(line) or datetime.now()
                 log.info("Tod erkannt: %s (%s)", match.group(1), zeit)
                 self.death_seen.emit(match.group(1), zeit)
+                continue
+            kills = parse_kills(line)
+            if kills is not None:
+                zeit = _line_time(line) or datetime.now()
+                log.info("Kill-Zähler abgelesen: %d (%s)", kills, zeit)
+                self.kills_reported.emit(kills, zeit)
                 continue
             for pattern in _INVENTORY_LINES:
                 match = pattern.search(line)

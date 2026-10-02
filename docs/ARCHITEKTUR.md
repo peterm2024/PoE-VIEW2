@@ -8056,6 +8056,81 @@ Sabotagen, alle fallen — die für die Trennbalken erst, nachdem der Test
 auf den Verlauf-Trenner umgestellt war: Offscreen steht der linke
 Bereich auf seiner Mindestbreite, `setSizes` blieb dort wirkungslos.
 
+### 4.59 Erinnerung an `/kills` und die Kill-Mitschrift (`services/kills_log.py`, `ui/kills_reminder.py`)
+
+Peter, 2026-10-02, nach zwei Aqueduct-Runs: "Die Anzahl der gekillten
+Monster kann ich mittels /kills im Game ermitteln. daraus und aus der
+Dauer der Map könnten wir schon ein paar Werte holen." Und für den
+Versuch: "Ich benötige aber eine Erinnerung von dir wenn ich eine
+Killzone betrete, einen kurzen Gong und ein kleines aufpoppendes
+Fenster mit der Aufforderung den Befehl einzugeben." Was daraus wird
+("Idee 2 schauen wir uns erst noch näher an"), entscheidet die
+Auswertung; gebaut ist nur das Messen.
+
+**Die Zeile:** `: You have killed 131.404 monsters.` — ein Zähler über
+die Lebenszeit des Charakters, nicht je Map. Der Punkt ist der
+Tausendertrenner des deutschen Windows (in Peters Client.txt vom August
+und Oktober gleich); `parse_kills` nimmt nur die Ziffern und verträgt
+damit Punkt, Komma und Leerzeichen. Der Ausdruck verlangt das Satzende
+am Zeilenende — ein Mitspieler, der den Satz im Chat zitiert und etwas
+dahinter schreibt, ist keine Ablesung. Der `ZoneWatcher` meldet sie als
+`kills_reported(int, datetime)`.
+
+**Wann erinnert wird:** beim Betreten einer Kampfzone (nicht
+`is_rest_area`) mit einem anderen Seed als die vorige Kampfzone. Der
+Seed bleibt bei der Rückkehr durch ein Portal gleich (FALLSTRICKE #90),
+dafür hält der Beobachter jetzt `last_area_seed`. Delve lädt jeden
+Knoten mit neuem Seed und erinnert deshalb je Knoten.
+
+**Welche Zonen eine Zeile abdeckt:** Wer der Erinnerung folgt, liest am
+Anfang der neuen Map ab. Der Unterschied zur vorigen Ablesung gehört
+dann zu den Maps davor, nicht zu der, in der man steht. Deshalb werden
+Kampfzonen vorgemerkt (auch bei ausgeschalteter Erinnerung, damit eine
+Ablesung aus eigenem Antrieb stimmt) und bei der Ablesung die gerade
+betretene herausgenommen, wenn man in ihr steht; im Hideout abgelesen
+deckt die Zeile alle. Die erste Ablesung einer Sitzung hat keinen
+Unterschied — gegen einen Stand aus einer früheren Sitzung zu rechnen,
+mischte alles hinein, was dazwischen gespielt wurde.
+
+**Die Datei** `kills-log.csv` im Log-Ordner (`log_path()` als Funktion,
+CLAUDE.md "Tests"): `time, character, kills_total, kills_since_last,
+seconds_since_last, zones_since_last, current_zone, area_level`.
+Geschrieben wird bei jeder Ablesung, unabhängig von der Einstellung —
+`/kills` ist eine bewusste Handlung. Ein Schreibfehler wird geloggt,
+nicht geworfen.
+
+**Das Fenster** (`KillsReminder`) darf dem Spiel den Fokus nicht
+nehmen: Werkzeugfenster ohne Rahmen, immer oben,
+`WA_ShowWithoutActivating`, keine Fokus-Policy; nativ gemessen ist es
+nach dem Zeigen nicht aktiv. Es sitzt unten rechts auf dem
+Hauptbildschirm, schließt sich bei der Ablesung, nach 30 s oder bei
+einem Klick. Über dem Spiel liegt es nur, wenn PoE im Fenster oder in
+"Windowed Fullscreen" läuft. Rahmen in der Akzentfarbe des Systems
+(`palette(highlight)`, an Peters Windows `#0078d4` auf `#1e1e1e`,
+3,68:1, über der Schwelle von 3:1 für Bedienelemente). **Falle:** Eine
+eigene `QWidget`-Unterklasse malt Hintergrund und Rahmen aus dem
+Stylesheet erst mit `WA_StyledBackground` — nativ fehlte der Rahmen
+zunächst ganz.
+
+**Der Gong** wird gerechnet (vier Teiltöne im Verhältnis einer Glocke,
+1,1 s, Spitze 32 % der Vollaussteuerung) und einmal als
+`kills-gong.wav` in den Datenordner geschrieben; abgespielt mit
+`winsound` aus der Standardbibliothek, asynchron. Keine Audiodatei im
+Repo, kein Qt-Multimedia in der .exe. Außerhalb von Windows und bei
+jedem Fehler bleibt es beim Systemton. Die Testsuite schaltet
+`play_gong` in der Autouse-Fixture stumm.
+
+Getestet: `tests/test_kills_log.py` (Trenner, Einzahl, fremde Zeilen
+und zitierter Chat, Kopfzeile und Zeilen, Pfade in den umgebogenen
+Ordnern, Schreibfehler, Gong-Datei, Fenster ohne Fokus, mit Rahmen,
+Klick schließt), `tests/test_zone_watcher.py` (Signal, Seed),
+`tests/test_main_window_helpers.py` (Gong und Fenster bei neuer
+Kampfzone, keiner im Hideout und bei Rückkehr in dieselbe Map, aus
+heißt still, Voreinstellung aus, Ablesung schließt das Fenster und
+schreibt den Unterschied, Ablesung im Hideout deckt alles),
+`tests/test_settings_dialog.py`. Gegenprobe mit neun Sabotagen, alle
+fallen.
+
 ---
 
 ## 8. Entwicklungsstand

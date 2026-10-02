@@ -46,7 +46,8 @@ _COL_ENABLED, _COL_NAME, _COL_TEMPLATE = range(3)
 class SettingsDialog(QDialog):
     def __init__(self, entries: list[ToolEntry], column_config: list[tuple[str, bool]],
                 zone_watcher_enabled: bool, zone_watcher_path: str,
-                parent=None, *, update_check_enabled: bool = True) -> None:
+                parent=None, *, update_check_enabled: bool = True,
+                kills_reminder_enabled: bool = False) -> None:
         super().__init__(parent)
         self.setWindowTitle("PoE-VIEW2 — Settings")
         self.resize(560, 400)
@@ -55,7 +56,8 @@ class SettingsDialog(QDialog):
         tabs = QTabWidget()
         tabs.addTab(self._build_tools_tab(entries), "External Tools")
         tabs.addTab(self._build_columns_tab(column_config), "Columns")
-        tabs.addTab(self._build_zone_refresh_tab(zone_watcher_enabled, zone_watcher_path),
+        tabs.addTab(self._build_zone_refresh_tab(zone_watcher_enabled, zone_watcher_path,
+                                                 kills_reminder_enabled),
                     "Zone Refresh")
         tabs.addTab(self._build_updates_tab(update_check_enabled), "Updates")
         layout.addWidget(tabs)
@@ -162,7 +164,7 @@ class SettingsDialog(QDialog):
 
     # --- Reiter "Zone Refresh" ------------------------------------------ #
 
-    def _build_zone_refresh_tab(self, enabled: bool, path: str) -> QWidget:
+    def _build_zone_refresh_tab(self, enabled: bool, path: str, kills_reminder: bool = False) -> QWidget:
         tab = QWidget()
         layout = QVBoxLayout(tab)
         layout.addWidget(QLabel(
@@ -195,6 +197,16 @@ class SettingsDialog(QDialog):
         layout.addWidget(self._zone_path_status)
         self._update_zone_path_status(path)
 
+        # Die Kill-Erinnerung (§kills_reminder) hängt am selben Log und
+        # steht deshalb hier. Aus, bis man sie will: Ein Gong bei jeder Map
+        # ist ein Messwerkzeug, keine Grundausstattung.
+        self._kills_reminder_check = QCheckBox(
+            "Remind me to type /kills when entering a new combat zone\n"
+            "(a short gong and a small window; the answers are logged to "
+            "kills-log.csv)")
+        self._kills_reminder_check.setChecked(kills_reminder)
+        layout.addWidget(self._kills_reminder_check)
+
         layout.addStretch(1)
         return tab
 
@@ -213,6 +225,9 @@ class SettingsDialog(QDialog):
             self._zone_path_status.setText("✗ No Client.txt found at this path")
         else:
             self._zone_path_status.setText("")
+
+    def result_kills_reminder_enabled(self) -> bool:
+        return self._kills_reminder_check.isChecked()
 
     def result_zone_watcher_config(self) -> tuple[bool, str]:
         return self._zone_enabled_check.isChecked(), self._zone_path_edit.text().strip()

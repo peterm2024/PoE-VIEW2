@@ -179,3 +179,18 @@ def test_the_language_check_actually_sees_every_kind_of_field(qapp) -> None:
     assert any("SteamLibrary" in t for t in texts)  # Platzhalter
 
     dialog.deleteLater()
+
+
+
+def test_the_kills_reminder_box_shows_and_returns_the_choice(qapp) -> None:
+    from poe_view.ui.settings_dialog import SettingsDialog
+    aus = SettingsDialog([], [], False, "")
+    an = SettingsDialog([], [], False, "", kills_reminder_enabled=True)
+    try:
+        assert aus.result_kills_reminder_enabled() is False
+        assert an.result_kills_reminder_enabled() is True
+        an._kills_reminder_check.setChecked(False)
+        assert an.result_kills_reminder_enabled() is False
+    finally:
+        aus.deleteLater()
+        an.deleteLater()

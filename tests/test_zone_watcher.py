@@ -592,3 +592,36 @@ def test_zone_stays_carries_the_seed_and_does_not_inherit_it(tmp_path) -> None:
     stays = zone_stays(log, datetime(2026, 9, 26))
 
     assert [s.seed for s in stays] == ["711400918", ""]
+
+
+# --- /kills (§kills_log) ------------------------------------------------ #
+
+_KILLS_LINE = ('2026/10/02 21:32:08 36346140 cffb065b [INFO Client 21176] '
+               ': You have killed 131.404 monsters.\n')
+
+
+def test_a_kills_reading_is_emitted_with_its_count_and_time(tmp_path, qapp) -> None:
+    log = tmp_path / "Client.txt"
+    _write(log, _OTHER_LINE)
+    watcher = ZoneWatcher(log)
+    gesehen, zonen = [], []
+    watcher.kills_reported.connect(lambda n, at: gesehen.append((n, at)))
+    watcher.zone_changed.connect(zonen.append)
+
+    with log.open("a", encoding="utf-8") as f:
+        f.write(_KILLS_LINE)
+    watcher.check_now()
+
+    assert gesehen == [(131404, datetime(2026, 10, 2, 21, 32, 8))]
+    assert zonen == []
+
+
+def test_the_watcher_keeps_the_seed_of_the_last_area(tmp_path, qapp) -> None:
+    log = tmp_path / "Client.txt"
+    _write(log, _OTHER_LINE)
+    watcher = ZoneWatcher(log)
+    with log.open("a", encoding="utf-8") as f:
+        f.write('2026/10/02 21:30:00 1 c [DEBUG Client 1] Generating level 61 area '
+                '"2_9_1" with seed 2711539918\n')
+    watcher.check_now()
+    assert watcher.last_area_seed == "2711539918"

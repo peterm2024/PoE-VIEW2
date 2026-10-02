@@ -5777,7 +5777,8 @@ def test_settings_dialog_saves_entries_when_accepted(qapp, monkeypatch) -> None:
 
     class _FakeDialog:
         def __init__(self, entries, column_config, zone_watcher_enabled, zone_watcher_path,
-                     parent=None, *, update_check_enabled=True):
+                     parent=None, *, update_check_enabled=True,
+                     kills_reminder_enabled=False):
             pass
 
         def exec(self):
@@ -5795,6 +5796,9 @@ def test_settings_dialog_saves_entries_when_accepted(qapp, monkeypatch) -> None:
         def result_update_check_enabled(self):
             return False
 
+        def result_kills_reminder_enabled(self):
+            return True
+
     monkeypatch.setattr("poe_view.ui.main_window.SettingsDialog", _FakeDialog)
     win._open_settings_dialog()
     assert win._load_tool_entries() == new_entries
@@ -5802,6 +5806,8 @@ def test_settings_dialog_saves_entries_when_accepted(qapp, monkeypatch) -> None:
     assert win._load_zone_watcher_config() == new_zone_config
     # Der Update-Schalter (§4.57): standardmäßig an, nach OK wie gewählt.
     assert win._load_update_check_enabled() is False
+    # Die Kill-Erinnerung: standardmäßig aus, nach OK wie gewählt.
+    assert win._load_kills_reminder_enabled() is True
 
     win.worker.stop()
     win.worker.wait(5000)
@@ -5817,7 +5823,8 @@ def test_settings_dialog_does_not_save_when_cancelled(qapp, monkeypatch) -> None
 
     class _FakeDialog:
         def __init__(self, entries, column_config, zone_watcher_enabled, zone_watcher_path,
-                     parent=None, *, update_check_enabled=True):
+                     parent=None, *, update_check_enabled=True,
+                     kills_reminder_enabled=False):
             pass
 
         def exec(self):
@@ -5834,6 +5841,9 @@ def test_settings_dialog_does_not_save_when_cancelled(qapp, monkeypatch) -> None
 
         def result_update_check_enabled(self):
             raise AssertionError("result_update_check_enabled darf bei Abbruch nicht abgefragt werden")
+
+        def result_kills_reminder_enabled(self):
+            raise AssertionError("result_kills_reminder_enabled darf bei Abbruch nicht abgefragt werden")
 
     monkeypatch.setattr("poe_view.ui.main_window.SettingsDialog", _FakeDialog)
     win._open_settings_dialog()
@@ -8291,6 +8301,8 @@ class _KennungsWatcher:
         self.last_area_id = ""
         # Seit §4.56 liest die Zonen-Beschriftung auch den Gebietslevel.
         self.last_area_level = 0
+        # Seit der Kill-Erinnerung auch den Seed (§_maybe_remind_kills).
+        self.last_area_seed = ""
 
 
 def _betritt(win, name: str, area_id: str, instance: str = "") -> None:
@@ -11435,4 +11447,119 @@ def test_a_click_with_a_tiny_drag_does_not_set_the_history_scrolling(qapp) -> No
         assert set(werte) == {werte[0]}
     finally:
         win.hide()
+        _schliessen(win)
+
+
+# --- /kills: Erinnerung und Mitschrift ---------------------------------- #
+
+def _kill_fenster(qapp, monkeypatch, *, erinnern: bool):
+    """Ein Fenster mit Ersatz-Beobachter; der Gong wird mitgezählt."""
+    from poe_view.ui import kills_reminder
+    gongs = []
+    monkeypatch.setattr(kills_reminder, "play_gong", lambda: gongs.append(1))
+    win = MainWindow()
+    win._save_kills_reminder_enabled(erinnern)
+    win._zone_watcher = _KennungsWatcher()
+    return win, gongs
+
+
+def _betritt_mit_seed(win, name, area_id, level, seed) -> None:
+    win._zone_watcher.last_area_id = area_id
+    win._zone_watcher.last_area_level = level
+    win._zone_watcher.last_area_seed = seed
+    win._on_zone_changed(name)
+
+
+def test_entering_a_new_combat_zone_rings_and_shows_the_reminder(qapp, monkeypatch) -> None:
+    win, gongs = _kill_fenster(qapp, monkeypatch, erinnern=True)
+    try:
+        _betritt_mit_seed(win, "The Blood Aqueduct", "2_9_1", 61, "111")
+        assert gongs == [1]
+        assert win._kills_popup.isVisible()
+    finally:
+        win._kills_popup and win._kills_popup.close()
+        _schliessen(win)
+
+
+def test_no_reminder_in_hideout_or_on_return_to_the_same_map(qapp, monkeypatch) -> None:
+    """Ein Portal zurück in dieselbe Map hat denselben Seed (FALLSTRICKE
+    #90) — kein zweiter Gong."""
+    win, gongs = _kill_fenster(qapp, monkeypatch, erinnern=True)
+    try:
+        _betritt_mit_seed(win, "Atoll", "MapWorldsAtoll", 77, "222")
+        _betritt_mit_seed(win, "Backstreet Hideout", "HideoutSlum", 60, "1")
+        _betritt_mit_seed(win, "Atoll", "MapWorldsAtoll", 77, "222")
+        assert gongs == [1]
+        _betritt_mit_seed(win, "Atoll", "MapWorldsAtoll", 77, "333")   # die nächste Atoll
+        assert gongs == [1, 1]
+    finally:
+        win._kills_popup and win._kills_popup.close()
+        _schliessen(win)
+
+
+def test_switched_off_there_is_neither_gong_nor_window(qapp, monkeypatch) -> None:
+    win, gongs = _kill_fenster(qapp, monkeypatch, erinnern=False)
+    try:
+        _betritt_mit_seed(win, "Atoll", "MapWorldsAtoll", 77, "222")
+        assert gongs == []
+        assert win._kills_popup is None
+        # ... vorgemerkt wird trotzdem, für eine Ablesung aus eigenem Antrieb.
+        assert win._kills_zones == ["Atoll"]
+    finally:
+        _schliessen(win)
+
+
+def test_the_reminder_is_off_by_default(qapp) -> None:
+    win = MainWindow()
+    try:
+        assert win._load_kills_reminder_enabled() is False
+    finally:
+        _schliessen(win)
+
+
+def _csv_zeilen():
+    from poe_view.services import kills_log
+    return list(csv.DictReader(kills_log.log_path().open(encoding="utf-8")))
+
+
+def test_a_reading_closes_the_window_and_logs_the_difference(qapp, monkeypatch) -> None:
+    """Der Ablauf, den Peter spielt: Map betreten, Gong, /kills; nächste
+    Map, Gong, /kills. Die zweite Zeile zählt die Kills der ersten Map —
+    die gerade betretene gehört erst zur nächsten."""
+    win, _gongs = _kill_fenster(qapp, monkeypatch, erinnern=True)
+    try:
+        _betritt_mit_seed(win, "Atoll", "MapWorldsAtoll", 77, "222")
+        win._on_kills_reported(131404, datetime(2026, 10, 2, 21, 30, 0))
+        assert not win._kills_popup.isVisible()
+        assert "first reading" in win._status_msg.text()
+
+        _betritt_mit_seed(win, "Backstreet Hideout", "HideoutSlum", 60, "1")
+        _betritt_mit_seed(win, "Cells", "MapWorldsCells", 68, "333")
+        win._on_kills_reported(131950, datetime(2026, 10, 2, 21, 38, 0))
+
+        zeilen = _csv_zeilen()
+        assert [z["kills_total"] for z in zeilen] == ["131404", "131950"]
+        assert zeilen[0]["kills_since_last"] == ""
+        assert zeilen[1]["kills_since_last"] == "546"
+        assert zeilen[1]["seconds_since_last"] == "480"
+        assert zeilen[1]["zones_since_last"] == "Atoll"
+        assert zeilen[1]["current_zone"] == "Cells"
+        assert zeilen[1]["area_level"] == "68"
+        assert "+546 since the last reading in Atoll" in win._status_msg.text()
+    finally:
+        win._kills_popup and win._kills_popup.close()
+        _schliessen(win)
+
+
+def test_a_reading_in_the_hideout_covers_every_zone_since(qapp, monkeypatch) -> None:
+    win, _gongs = _kill_fenster(qapp, monkeypatch, erinnern=False)
+    try:
+        _betritt_mit_seed(win, "Atoll", "MapWorldsAtoll", 77, "222")
+        win._on_kills_reported(100, datetime(2026, 10, 2, 21, 0, 0))
+        _betritt_mit_seed(win, "Cells", "MapWorldsCells", 68, "333")
+        _betritt_mit_seed(win, "Backstreet Hideout", "HideoutSlum", 60, "1")
+        win._on_kills_reported(400, datetime(2026, 10, 2, 21, 10, 0))
+        assert _csv_zeilen()[1]["zones_since_last"] == "Atoll | Cells"
+        assert win._kills_zones == []
+    finally:
         _schliessen(win)

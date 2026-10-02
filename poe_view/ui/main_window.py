@@ -38,7 +38,7 @@ from poe_view.services import (cache_backup, cache_writer, data_cache, gem_xp_lo
                                season_log, xp_history, zone_catalog)
 from poe_view.services.experience import penalty_caption, time_to_next_level
 from poe_view.services.instance_lock import InstanceLock
-from poe_view.services import update_check, zone_loot_log
+from poe_view.services import kills_log, update_check, zone_loot_log
 from poe_view.services.zone_watcher import (ZoneWatcher, deaths_since,
                                               is_rest_area,
                                               resolve_client_log_path, zone_stays)
@@ -63,6 +63,7 @@ from poe_view.ui.gem_progress import gem_progress_of
 from poe_view.ui.leveling_panel import LevelingPanel
 from poe_view.ui.mod_album import ModAlbumDialog
 from poe_view.ui.xp_graph import GRAPH_SPAN_S, XpPoint, pace_for_next_level
+from poe_view.ui import kills_reminder
 from poe_view.ui.zone_table import ZoneTableDialog
 from poe_view.ui.column_filter import PLACEHOLDER, FilterHeader
 from poe_view.ui.item_table import (COLUMNS, CONFIGURABLE_COLUMNS, ICON_COL,
@@ -726,6 +727,12 @@ class MainWindow(QMainWindow):
         # Reihenfolge ist fest (``ApiWorker`` sendet sie unmittelbar
         # nacheinander), ein ``None`` heißt "nichts Verwertbares".
         self._pending_loot: dict[str, zone_loot_log.Tally | None] = {}
+        # /kills (§_on_kills_reported): letzte Ablesung dieser Sitzung als
+        # (Zähler, Zeitpunkt) und die Kampfzonen seither.
+        self._kills_last_reading: tuple[int, datetime] | None = None
+        self._kills_zones: list[str] = []
+        self._kills_last_seed = ""
+        self._kills_popup = None
         # Wann hat GGG fuer diesen Charakter zuletzt etwas
         # veroeffentlicht? Der Anfang des Abschnitts, den die naechste
         # Zeile der Beute-Mitschrift abdeckt (§zone_loot_log.Row.interval).
@@ -5351,6 +5358,88 @@ class MainWindow(QMainWindow):
         return [zeit for zeit in self._deaths.get(name, ())
                 if zeit >= grenze]
 
+    # --- /kills: Erinnerung und Mitschrift (§kills_log, §kills_reminder) -- #
+
+    _KILLS_REMINDER_KEY = "kills/reminder"
+
+    def _load_kills_reminder_enabled(self) -> bool:
+        """Standardmäßig aus — siehe Settings-Reiter "Zone Refresh"."""
+        return str(self._settings().value(self._KILLS_REMINDER_KEY, "")).lower() in ("true", "1")
+
+    def _save_kills_reminder_enabled(self, enabled: bool) -> None:
+        self._settings().setValue(self._KILLS_REMINDER_KEY, "true" if enabled else "false")
+        if not enabled and getattr(self, "_kills_popup", None) is not None:
+            self._kills_popup.hide()
+
+    def _maybe_remind_kills(self, zone_name: str) -> None:
+        """Beim Betreten einer NEUEN Kampfzone: die Zone vormerken und, wenn
+        eingeschaltet, an ``/kills`` erinnern.
+
+        "Neu" heißt: anderer Seed als die letzte Kampfzone. Wer per Portal
+        in dieselbe Map zurückkehrt, bekommt keinen zweiten Gong — der Seed
+        bleibt dabei gleich, die Instanz-Kennung nicht (FALLSTRICKE #90).
+        Vorgemerkt wird auch bei ausgeschalteter Erinnerung: Liest jemand
+        von sich aus ab, sollen die Zonen dazwischen trotzdem stimmen."""
+        beobachter = self._zone_watcher
+        if beobachter is None or is_rest_area(beobachter.last_area_id,
+                                              beobachter.last_area_level):
+            return
+        seed = beobachter.last_area_seed
+        if seed and seed == getattr(self, "_kills_last_seed", ""):
+            return
+        self._kills_last_seed = seed
+        self._kills_zones.append(zone_name)
+        if not self._load_kills_reminder_enabled():
+            return
+        if getattr(self, "_kills_popup", None) is None:
+            self._kills_popup = kills_reminder.KillsReminder()
+        kills_reminder.play_gong()
+        self._kills_popup.pop(zone_name)
+
+    def _active_character_name(self) -> str:
+        """Wie ``_active_character_level``: der Charakter mit der jüngsten
+        Veröffentlichung, sonst der gerade angezeigte."""
+        watches = [(name, w) for name, w in self._xp_watch.items() if w.level]
+        if watches:
+            return max(watches, key=lambda nw: nw[1].last_snapshot_at)[0]
+        return self._current_character_name or ""
+
+    def _on_kills_reported(self, total: int, at: datetime) -> None:
+        """Eine Ablesung aus der Client.txt: Fenster zu, Zeile in die
+        Mitschrift, Unterschied in die Statusleiste.
+
+        Welche Zonen der Unterschied abdeckt: alle vorgemerkten, AUSSER der
+        gerade betretenen, wenn man in ihr abliest — wer der Erinnerung
+        folgt, steht am Anfang der neuen Map, und deren Kills gehören zur
+        nächsten Zeile. Liest man im Hideout ab, deckt die Zeile alles."""
+        if getattr(self, "_kills_popup", None) is not None:
+            self._kills_popup.hide()
+        beobachter = self._zone_watcher
+        aktuell = self._last_zone_name or ""
+        in_kampfzone = beobachter is not None and not is_rest_area(
+            beobachter.last_area_id, beobachter.last_area_level)
+        if in_kampfzone and self._kills_zones and self._kills_zones[-1] == aktuell:
+            abgedeckt, rest = self._kills_zones[:-1], self._kills_zones[-1:]
+        else:
+            abgedeckt, rest = list(self._kills_zones), []
+        vorher = self._kills_last_reading
+        seit = total - vorher[0] if vorher is not None else None
+        sekunden = (at - vorher[1]).total_seconds() if vorher is not None else None
+        kills_log.append(kills_log.Reading(
+            at=at, character=self._active_character_name(), total=total,
+            since_last=seit, seconds=sekunden, zones=abgedeckt,
+            current_zone=aktuell,
+            area_level=beobachter.last_area_level if beobachter is not None else 0))
+        self._kills_last_reading = (total, at)
+        self._kills_zones = rest
+        zahl = f"{total:,}".replace(",", " ")
+        if seit is None:
+            self._on_status(f"/kills: {zahl} — first reading this session")
+        else:
+            wo = f" in {', '.join(abgedeckt)}" if abgedeckt else ""
+            unterschied = f"{seit:+,}".replace(",", " ")
+            self._on_status(f"/kills: {zahl} — {unterschied} since the last reading{wo}")
+
     def _on_death_seen(self, name: str, at: datetime) -> None:
         """Ein Tod aus der Client.txt (§ZoneWatcher.death_seen). In einer
         Gruppe kommen hier auch fremde Namen an — die stören nicht, die
@@ -5636,6 +5725,7 @@ class MainWindow(QMainWindow):
         self._zone_watcher.zone_changed.connect(self._on_zone_changed)
         self._zone_watcher.inventory_event.connect(self._on_inventory_event)
         self._zone_watcher.death_seen.connect(self._on_death_seen)
+        self._zone_watcher.kills_reported.connect(self._on_kills_reported)
         self._seed_running_stay(resolved)
         # Die letzten 24 h aus der Datei nachladen, damit der Zaehler einen
         # App-Neustart uebersteht — der Watcher selbst beginnt am Dateiende.
@@ -5766,6 +5856,7 @@ class MainWindow(QMainWindow):
         self._last_zone_at = jetzt
         self._last_zone_name = zone_name
         self._note_zone_stay(zone_name, jetzt)
+        self._maybe_remind_kills(zone_name)
         if self._event_refresh_blocked() or self._trigger_budget_spent():
             return
         if self._refresh_current_view():
@@ -5925,7 +6016,8 @@ class MainWindow(QMainWindow):
     def _open_settings_dialog(self) -> None:
         dialog = SettingsDialog(self._load_tool_entries(), self._load_column_config(),
                                 *self._load_zone_watcher_config(), self,
-                                update_check_enabled=self._load_update_check_enabled())
+                                update_check_enabled=self._load_update_check_enabled(),
+                                kills_reminder_enabled=self._load_kills_reminder_enabled())
         if dialog.exec() == QDialog.DialogCode.Accepted:
             self._save_tool_entries(dialog.result_entries())
             column_config = dialog.result_column_config()
@@ -5935,6 +6027,7 @@ class MainWindow(QMainWindow):
             self._save_zone_watcher_config(zone_enabled, zone_path)
             self._apply_zone_watcher_config(zone_enabled, zone_path)
             self._save_update_check_enabled(dialog.result_update_check_enabled())
+            self._save_kills_reminder_enabled(dialog.result_kills_reminder_enabled())
 
     def _on_status(self, text: str) -> None:
         """Reiner Verlaufstext — Busy-Zustand kommt separat über busy_changed
@@ -6680,6 +6773,8 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:  # noqa: N802
         self._save_window_layout()
+        if self._kills_popup is not None:
+            self._kills_popup.close()
         # Ein offenes Zonen-Fenster geht mit dem Hauptfenster zu, ohne
         # ``finished`` zu senden — sein Stand wird deshalb hier gesichert.
         zonen = getattr(self, "_zone_table_dialog", None)
