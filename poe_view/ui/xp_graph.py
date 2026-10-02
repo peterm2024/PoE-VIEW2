@@ -228,6 +228,10 @@ class Layout:
     # Indizes in ``bars``, die aus der Client.txt rekonstruiert sind
     # (§XpPoint.estimated) — sie werden blasser gezeichnet.
     estimated: list[int] = field(default_factory=list)
+    # Rechter Rand des Zeitraums (§average_end): das Jetzt, solange
+    # gespielt wird, sonst das Ende des letzten Abschnitts. ``None`` =
+    # rechter Rand des Graphen (für Aufrufer, die Layout selbst bauen).
+    average_end_x: float | None = None
 
 
 def combined_rate(points: Sequence[XpPoint]) -> float:
@@ -461,10 +465,13 @@ def graph_layout(points: Sequence[XpPoint], now: float, width: float, height: fl
     # seiner Veröffentlichung: Gezeichnet werden soll die Strecke, die der
     # Schnitt abdeckt, und der erste Balken gehört ganz dazu.
     beginn = fenster[0].at - max(fenster[0].seconds, 0.0) if fenster else now
+    ende = average_end(fenster, now)
     average_x = max(0.0, min(width, width - (now - beginn) / span_s * width))
+    average_end_x = max(average_x, min(width, width - (now - ende) / span_s * width))
     return Layout(bars, zero_y, peak, trough, groups,
                   zero_y - average * scale, average,
-                  average_x, max(0.0, now - beginn), gross, marks=marks,
+                  average_x, max(0.0, ende - beginn), gross,
+                  average_end_x=average_end_x, marks=marks,
                   clipped=clipped, estimated=estimated)
 
 
@@ -562,6 +569,27 @@ def point_tooltip(point: XpPoint, group: Sequence[XpPoint],
                       "time comes from Client.txt,<br>the experience of that "
                       "stretch is spread evenly over its maps.</i>")
     return "<br>".join(zeilen)
+
+
+def average_end(window: Sequence[XpPoint], now: float,
+                pause_s: float = AVERAGE_PAUSE_S) -> float:
+    """Wo der Zeitraum des Schnitts ENDET.
+
+    Peter, 2026-10-02, mit einem Bild um 17:17: ein einziger Balken ganz
+    links (14:18–14:21, Blood Aqueduct), darüber eine dicke grüne Linie
+    über die volle Breite und "⌀ 5M · 2 h 58 min". Gespielt hatte er
+    zweieinhalb Minuten; danach stand das Spiel drei Stunden im Hideout.
+    Der Anfang des Zeitraums kannte die Pausenregel schon
+    (``average_window``), das Ende nicht: Es lag immer beim Jetzt.
+
+    Jetzt gilt dieselbe Regel auch hinten: Liegt der letzte Abschnitt
+    länger als ``pause_s`` zurück, endet der Zeitraum mit ihm. Solange
+    weniger vergangen ist, reicht er bis jetzt — dann läuft vermutlich
+    gerade die nächste Map, und die gehört dazu."""
+    if not window:
+        return now
+    letzter = window[-1].at
+    return letzter if now - letzter > pause_s else now
 
 
 def axis_label(rate: float) -> str:
@@ -723,6 +751,8 @@ class XpGraph(QWidget):
             if layout.average_y is not None and layout.average != 0:
                 y = round(layout.average_y)
                 beginn = round(layout.average_x)
+                ende = round(width if layout.average_end_x is None
+                             else layout.average_end_x)
                 # Ein stark negativer Schnitt liegt tiefer, als der
                 # gekappte Verlust-Bereich hergibt (§NEGATIVE_SHARE).
                 # Dann bleibt die LINIE weg — am Rand geklemmt zerschnitte
@@ -738,13 +768,20 @@ class XpGraph(QWidget):
                     stift.setStyle(Qt.PenStyle.DashLine)
                     painter.setPen(stift)
                     painter.drawLine(0, y, beginn, y)
+                # Nach dem Zeitraum ebenso nur gestrichelt: Dort wurde
+                # nicht gespielt, die Linie ist nur noch Maßstab.
+                if ende < width and im_bild:
+                    stift = QPen(QColor(_AVERAGE_COLOR))
+                    stift.setStyle(Qt.PenStyle.DashLine)
+                    painter.setPen(stift)
+                    painter.drawLine(ende, y, width, y)
                 # Über seinem Zeitraum dick und durchgezogen — das ist die
                 # Strecke, für die die Zahl gerechnet ist.
                 if im_bild:
                     spanne = QPen(QColor(_AVERAGE_SPAN_COLOR))
                     spanne.setWidth(_AVERAGE_SPAN_W)
                     painter.setPen(spanne)
-                    painter.drawLine(beginn, y, width, y)
+                    painter.drawLine(beginn, y, ende, y)
                 painter.setPen(QColor(_AVERAGE_COLOR))
                 # Beschriftung AN der Linie, nicht in der Ecke: Dort
                 # stand sie zuerst und verschwand prompt auf einem hohen

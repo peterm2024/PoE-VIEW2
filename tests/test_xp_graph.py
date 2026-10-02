@@ -792,3 +792,26 @@ def test_the_marked_span_is_lighter_over_its_full_height(qapp) -> None:
     # Neben der Spanne bleibt alles, wie es war.
     daneben = int(x + w + 20)
     assert graph.grab().toImage().pixelColor(daneben, 5) == ohne
+
+
+# --- Ende des Schnitt-Zeitraums (Peter, 2026-10-02, 17:17) --------------- #
+
+def test_after_a_long_break_the_average_ends_with_the_last_section() -> None:
+    """Sein Bild: ein Balken 14:18–14:21, danach drei Stunden Hideout —
+    und "⌀ 5M · 2 h 58 min" mit dicker Linie über die volle Breite."""
+    jetzt = 20_000.0
+    punkt = XpPoint(at=jetzt - 10_500, seconds=150, rate=4_800_000, estimated=True)
+    layout = graph_layout([punkt], jetzt, 520, 100)
+    assert layout.average_span_s == pytest.approx(150)
+    x, _y, w, _h, _r = layout.bars[0]
+    assert layout.average_end_x == pytest.approx(x + w, abs=1)
+
+
+def test_while_playing_the_average_still_reaches_now() -> None:
+    """Weniger als eine halbe Stunde seit dem letzten Abschnitt: Es läuft
+    vermutlich gerade die nächste Map — die gehört dazu."""
+    jetzt = 20_000.0
+    punkt = XpPoint(at=jetzt - 600, seconds=300, rate=1_000_000)
+    layout = graph_layout([punkt], jetzt, 520, 100)
+    assert layout.average_end_x == pytest.approx(520)
+    assert layout.average_span_s == pytest.approx(900)
