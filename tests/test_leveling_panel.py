@@ -221,3 +221,16 @@ def test_ohne_client_txt_fehlt_die_zeile_ganz(qapp) -> None:
     panel.show_character("WitchOfPeter", level=74, experience=1000,
                          rate_text=None, age_note="", recent_deaths=None)
     assert "24 h" not in panel._body.text()
+
+
+def test_the_panel_shows_the_time_to_the_next_level(qapp) -> None:
+    panel = LevelingPanel()
+    panel.show_character("WitchOfPeter", level=79, experience=1, rate_text="4.7M XP/h",
+                         age_note="", next_level=("⏱ Level 80 in ~2 h 34 min",
+                                                  "Projected from your pace in X"))
+    assert "Level 80 in ~2 h 34 min" in panel._body.text()
+    assert "Projected" in panel._body.toolTip()
+    panel.show_character("WitchOfPeter", level=79, experience=1, rate_text=None,
+                         age_note="")
+    assert "Level 80 in" not in panel._body.text()
+    assert panel._body.toolTip() == ""

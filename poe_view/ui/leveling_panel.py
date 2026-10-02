@@ -17,6 +17,8 @@ sich ohne Charakterdaten und ohne laufende Uhr prüfen.
 
 from __future__ import annotations
 
+import html
+
 from typing import Sequence
 
 from PySide6.QtCore import Qt
@@ -105,7 +107,8 @@ class LevelingPanel(QFrame):
                        points: Sequence[XpPoint] = (), now: float = 0.0,
                        gems: Sequence[GemProgress] = (),
                        recent_deaths: int | None = None,
-                       death_marks: Sequence[float] = ()) -> None:
+                       death_marks: Sequence[float] = (),
+                       next_level: tuple[str, str] | None = None) -> None:
         """``rate_text`` ist die fertig formatierte Rate ("119.2M XP/h")
         oder ``None``, solange erst eine Veröffentlichung beobachtet wurde
         — dann steht dort, WARUM noch nichts da ist. Das ist keine
@@ -133,6 +136,12 @@ class LevelingPanel(QFrame):
             lines.append(f"<b>{rate_text}</b>{age_note}")
         else:
             lines.append("<i>Rate follows after the next zone change</i>")
+        # Zeit bis zur nächsten Stufe (Peter, 2026-10-02) — fertig
+        # formatiert vom MainWindow, das weiß, welche Rate dafür zählt.
+        # Die Zeile kurz, die Herkunft der Rate im Tooltip.
+        if next_level:
+            lines.append(html.escape(next_level[0]))
+        self._body.setToolTip(next_level[1] if next_level else "")
         if recent_deaths is not None:
             wort = "death" if recent_deaths == 1 else "deaths"
             lines.append(f"☠ {recent_deaths} {wort} (24 h)")

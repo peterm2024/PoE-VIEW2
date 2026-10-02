@@ -10,6 +10,15 @@ nach [SemVer](https://semver.org/lang/de/).
 
 ### Neu
 
+- **Zeit bis zur nächsten Stufe** im Leveling-Feld: „⏱ Level 80 in
+  ~2 h 34 min". Hochgerechnet aus dem Tempo in der Zone, in der der
+  Charakter steht (im Hideout oder in der Stadt: die letzte Kampfzone),
+  und zwar nur aus Abschnitten auf demselben Gebietslevel — die Strafe
+  hängt daran. Ohne solche Abschnitte gilt der Schnitt. Welche Rate es
+  war, sagt der Tooltip. Dafür steht die Erfahrungstabelle der 100
+  Stufen jetzt im Programm; im Tooltip eines Balkens steht damit auch,
+  wie viel Prozent der Stufe der Abschnitt gebracht hat.
+
 - **Tooltip je Balken im XP-Graphen:** Zone (bei Maps mit Tier und
   Gebietslevel, bei mehreren Zonen jede mit ihrer Zeit), Zeitraum,
   Kampfzeit, XP-Zuwachs und Rate, die Level-Strafe bei diesem

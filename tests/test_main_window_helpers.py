@@ -11054,3 +11054,44 @@ def test_a_graph_point_carries_its_zones_and_deaths(qapp, monkeypatch) -> None:
     finally:
         win.worker.stop()
         win.worker.wait(5000)
+
+
+# --- Zeit bis zur nächsten Stufe (Peter, 2026-10-02) --------------------- #
+
+def test_the_next_level_line_uses_the_pace_of_the_last_combat_zone(
+        qapp, monkeypatch) -> None:
+    """Zwischen zwei Aqueducts in der Stadt: gemeint ist der Aqueduct."""
+    from poe_view.services.experience import LEVEL_EXPERIENCE
+    mono = [10_000.0]
+    monkeypatch.setattr("poe_view.ui.main_window.time.monotonic", lambda: mono[0])
+
+    win = MainWindow()
+    try:
+        start = LEVEL_EXPERIENCE[78] + 1_000_000
+        win._on_character_snapshot("WitchOfPeter", 79, start)
+        mono[0] += 30
+        win._zone_watcher = _KennungsWatcher()
+        win._zone_watcher.last_area_level = 61
+        _betritt(win, "The Blood Aqueduct", "2_9_1", "9")
+        mono[0] += 360                                   # 6 min
+        win._zone_watcher.last_area_level = 61
+        _betritt(win, "The Sarn Encampment", "2_9_town", "1")
+        mono[0] += 2
+        win._on_character_snapshot("WitchOfPeter", 79, start + 600_000)   # 6 M/h
+
+        assert win._pace_zone() == ("The Blood Aqueduct", "2_9_1", 61)
+        text, erklaerung = win._next_level_text(win._xp_watch["WitchOfPeter"], mono[0])
+        fehlt = LEVEL_EXPERIENCE[79] - (start + 600_000)
+        erwartet = win._format_duration(fehlt / 6_000_000 * 3600)
+        assert text == f"⏱ Level 80 in ~{erwartet}"
+        assert "The Blood Aqueduct" in erklaerung and "6.0M XP/h" in erklaerung
+    finally:
+        win.worker.stop()
+        win.worker.wait(5000)
+
+
+@pytest.mark.parametrize("sekunden,text", [(20, "1 min"), (2880, "48 min"),
+                                           (3600, "1 h"), (9240, "2 h 34 min"),
+                                           (400 * 3600, "> 99 h")])
+def test_the_duration_is_shown_to_the_minute(sekunden, text) -> None:
+    assert MainWindow._format_duration(sekunden) == text

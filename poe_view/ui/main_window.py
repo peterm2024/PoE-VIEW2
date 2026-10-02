@@ -36,7 +36,7 @@ from poe_view.services import (cache_backup, cache_writer, data_cache, gem_xp_lo
                                icon_cache, mod_collection, mod_knowledge,
                                league_log, poe2_probe, price_cache,
                                season_log, xp_history, zone_catalog)
-from poe_view.services.experience import penalty_caption
+from poe_view.services.experience import penalty_caption, time_to_next_level
 from poe_view.services.instance_lock import InstanceLock
 from poe_view.services import update_check, zone_loot_log
 from poe_view.services.zone_watcher import (ZoneWatcher, deaths_since,
@@ -62,7 +62,7 @@ from poe_view.ui.favourites import favourite_rows
 from poe_view.ui.gem_progress import gem_progress_of
 from poe_view.ui.leveling_panel import LevelingPanel
 from poe_view.ui.mod_album import ModAlbumDialog
-from poe_view.ui.xp_graph import GRAPH_SPAN_S, XpPoint
+from poe_view.ui.xp_graph import GRAPH_SPAN_S, XpPoint, pace_for_next_level
 from poe_view.ui.zone_table import ZoneTableDialog
 from poe_view.ui.column_filter import build_filter_edit
 from poe_view.ui.item_table import (COLUMNS, CONFIGURABLE_COLUMNS, ICON_COL,
@@ -5053,7 +5053,55 @@ class MainWindow(QMainWindow):
             now=now_mono,
             gems=gem_progress_of(items or []),
             recent_deaths=len(tode) if self._zone_watcher is not None else None,
-            death_marks=[now_mono - (now_wall - zeit.timestamp()) for zeit in tode])
+            death_marks=[now_mono - (now_wall - zeit.timestamp()) for zeit in tode],
+            next_level=self._next_level_text(watch, now_mono))
+
+    def _pace_zone(self) -> tuple[str, str, int] | None:
+        """Die Zone, nach der sich die Hochrechnung richtet: die, in der
+        der Charakter steht — oder, im Hideout oder in der Stadt, die
+        letzte Kampfzone davor. Wer zwischen zwei Aqueducts verkauft,
+        meint den Aqueduct."""
+        for stay in reversed(self._zone_stays):
+            if not stay.resting and stay.area_id:
+                return stay.name, stay.area_id, stay.level
+        return None
+
+    def _next_level_text(self, watch: "_XpWatch | None",
+                         now: float) -> tuple[str, str] | None:
+        """``("⏱ Level 80 in ~2 h 34 min", Erklärung)`` — oder ``None``,
+        wenn es nichts Belastbares hochzurechnen gibt.
+
+        Kurz, weil die Textspalte des Panels schmal ist (rechts daneben
+        steht die Währungsliste): Eine lange Zeile bräche um und drückte
+        den Graphen zusammen. Welche Rate dahintersteckt, steht im
+        Tooltip."""
+        if watch is None or not watch.level or not watch.current_experience:
+            return None
+        tempo = pace_for_next_level(watch.history, now, self._pace_zone())
+        if tempo is None:
+            return None
+        rate, zone = tempo
+        sekunden = time_to_next_level(watch.level, watch.current_experience, rate)
+        if sekunden is None:
+            return None
+        quelle = (f"your pace in {zone} at this area level" if zone
+                  else "your average pace (the stretch of the average line)")
+        return (f"⏱ Level {watch.level + 1} in ~{self._format_duration(sekunden)}",
+                f"Projected from {quelle}: {self._format_xp_rate(rate)}.\n"
+                "Holds only as long as you keep playing like that.")
+
+    @staticmethod
+    def _format_duration(sekunden: float) -> str:
+        """"2 h 34 min", "48 min", "> 99 h" — für eine Hochrechnung reicht
+        die Minute; Sekunden täuschten eine Genauigkeit vor, die eine
+        geschätzte Rate nicht hat."""
+        minuten = round(sekunden / 60)
+        if minuten < 60:
+            return f"{max(minuten, 1)} min"
+        stunden, rest = divmod(minuten, 60)
+        if stunden > 99:
+            return "> 99 h"
+        return f"{stunden} h {rest} min" if rest else f"{stunden} h"
 
     def _recent_deaths(self, name: str) -> list[datetime]:
         """Die Tode eines Charakters der letzten 24 h — rollierendes

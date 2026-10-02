@@ -47,7 +47,7 @@ from PySide6.QtCore import QEvent, QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QPainter, QPen, QPolygonF
 from PySide6.QtWidgets import QSizePolicy, QToolTip, QWidget
 
-from poe_view.services.experience import experience_multiplier
+from poe_view.services.experience import experience_multiplier, level_span
 from poe_view.services.zone_catalog import (TIER_CATEGORIES, categorise,
                                             map_tier_from_level)
 from poe_view.ui.theme import DASH_BAD, DASH_OK, blend, dimmed_text
@@ -522,6 +522,32 @@ def _zone_line(name: str, area_id: str, level: int) -> str:
     return f"{name or area_id or 'Unknown zone'}" + (f" ({', '.join(teile)})" if teile else "")
 
 
+def pace_for_next_level(points: Sequence[XpPoint], now: float,
+                        zone: tuple[str, str, int] | None) -> tuple[float, str] | None:
+    """Welche Rate die Zeit bis zur nächsten Stufe hochrechnet, und wie
+    sie heißt.
+
+    Peter, 2026-10-02: "Time to next Level (anhand der aktuellen Zone)".
+    Die Strafe hängt am Gebietslevel — eine Rate aus Tier-3-Maps sagt
+    nichts darüber, wie lange es im Blood Aqueduct dauert. Deshalb zuerst
+    die Abschnitte DIESER Zone auf DIESEM Level (``zone`` ist
+    ``(Name, Kennung, Level)``; bei mehreren Zonen in einem Abschnitt
+    zählt die längste). Gibt es keine, der Schnitt über den Zeitraum der
+    Schnitt-Linie (§average_window) — dieselbe Zahl, die am Graphen
+    steht."""
+    gezeigt = visible_points(points, now)
+    if zone is not None:
+        _name, area_id, level = zone
+        hier = [p for p in gezeigt
+                if p.zones and (p.zones[0][1], p.zones[0][2]) == (area_id, level)]
+        rate = combined_rate(hier)
+        if hier and rate > 0:
+            return rate, zone[0] or area_id
+    fenster = average_window(gezeigt, now)
+    rate = combined_rate(fenster)
+    return (rate, "") if fenster and rate > 0 else None
+
+
 def point_tooltip(point: XpPoint, group: Sequence[XpPoint],
                   now: float, now_wall: float) -> str:
     """Der Text zu einem Balken (Peter, 2026-10-02). Bewusst ohne Beute:
@@ -550,7 +576,9 @@ def point_tooltip(point: XpPoint, group: Sequence[XpPoint],
     zeilen.append(f"{uhr(point.at - point.seconds)} – {uhr(point.at)} · "
                   f"{_dauer(point.seconds)} in combat")
     gewinn = round(point.gain)
-    zeilen.append(f"{gewinn:+,} XP · {_rate_text(point.rate)}".replace(",", " "))
+    stufe_xp = level_span(point.level) if point.level else None
+    anteil = f" ({gewinn / stufe_xp:.1%} of level {point.level})" if stufe_xp else ""
+    zeilen.append(f"{gewinn:+,} XP{anteil} · {_rate_text(point.rate)}".replace(",", " "))
     stufen = {z[2] for z in zonen if z[2]}
     if point.level and stufen:
         for stufe in sorted(stufen):

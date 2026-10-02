@@ -7851,6 +7851,57 @@ Einträge fallen still heraus), `tests/test_main_window_helpers.py`
 Gegenprobe mit acht Sabotagen; eine hielt zuerst (Schätzbalken ohne
 Zone), der Test ist verschärft.
 
+#### 4.56.9 Zeit bis zur nächsten Stufe
+
+Peter, 2026-10-02, nach zwei Aqueduct-Läufen: "Wir brauchen neben den
+XP/h auch eine Anzeige für Time to next Level (anhand der aktuellen
+Zone)."
+
+**Die Tabelle** (`experience.LEVEL_EXPERIENCE`): hundert Gesamtwerte aus
+dem PoE-Wiki, direkt im Code — anders als die RePoE-Exporte (§4.53)
+keine Datenbank, sondern hundert überall nachzulesende Zahlen. Beim
+Übernehmen gegengerechnet: Die Kette Summe + Zuwachs = nächste Summe
+bricht im Wiki zweimal. Bei Stufe 34 ein Zahlendreher in der Summe
+(8.384.398 statt 8.348.398, beide Nachbarn belegen es), bei Stufe 89 ein
+um 431 falscher Zuwachs bei stimmenden Summen — Stufe 100 kommt auf
+4.250.334.444, genau das Ende der Erfahrung in der API. Peters
+Charakter (79, 843.087.247) liegt zwischen den Werten für 79 und 80.
+
+**Welche Rate** (`xp_graph.pace_for_next_level`): die Abschnitte der
+aktuellen Zone auf DEMSELBEN Gebietslevel (bei mehreren Zonen in einem
+Abschnitt zählt die längste), gemeinsam gerechnet wie die Flächen im
+Graphen (`combined_rate`). "Anhand der aktuellen Zone" heißt das, weil
+die Strafe am Gebietslevel hängt — eine Map-Rate sagt nichts über den
+Aqueduct. Steht der Charakter im Hideout oder in der Stadt, gilt die
+letzte Kampfzone davor (`MainWindow._pace_zone`): Wer zwischen zwei
+Aqueducts verkauft, meint den Aqueduct. Gibt es keine passenden
+Abschnitte, der Schnitt über den Zeitraum der Schnitt-Linie.
+
+**Anzeige**: kurz, "⏱ Level 80 in ~2 h 34 min", auf die Minute — eine
+Hochrechnung aus geschätzter Rate verdient keine Sekunden. Kurz auch,
+weil die Textspalte neben der Währungsliste schmal ist; eine lange
+Zeile bräche um und drückte den Graphen zusammen. Welche Rate dahinter
+steht, sagt der Tooltip des Textes.
+
+**Was Peter mit derselben Nachricht vorschlug und noch offen ist:**
+`/kills` schreibt "You have killed 131.404 monsters." in die Client.txt
+(deutscher Tausenderpunkt) — damit ließen sich Kills je Map, je Minute
+und XP je Kill messen. Auf seinen Wunsch erst genauer ansehen, bevor
+etwas gebaut wird. Bewusst NICHT vorgeschlagen: Bewegungs- oder
+Schadenszuwachs in Zeit umzurechnen — wie viel einer Map Laufen und wie
+viel Kämpfen ist, steht nirgends.
+
+Getestet: `tests/test_experience.py` (Tabelle steigend, endet beim
+API-Höchstwert, Korrektur bei 34, echter Stand liegt richtig,
+Hochrechnung, nichts auf 100 oder ohne positive Rate),
+`tests/test_xp_graph.py` (Tempo der aktuellen Zone auf ihrem Level,
+anderes Level zählt nicht, Rückfall auf den Schnitt, keine Rate ohne
+positiven Wert, Prozent der Stufe im Tooltip),
+`tests/test_leveling_panel.py` (Zeile und Tooltip, beides verschwindet
+ohne Hochrechnung), `tests/test_main_window_helpers.py` (in der Stadt
+gilt die letzte Kampfzone, Dauer auf die Minute). Gegenprobe mit sieben
+Sabotagen.
+
 ### 4.57 Hinweis auf neue Versionen (`services/update_check.py`)
 
 Peter, 2026-09-28: "Haben wir eigentlich eine

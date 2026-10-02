@@ -267,6 +267,12 @@ delve depth 0, where nobody dies) from the depths below it.
   since the last update counts, not just the one you left last. The graph
   survives a restart: measured sections are stored per account and drawn
   again next time, so closing the program does not empty it.
+  **Time to the next level** stands under the rate ("⏱ Level 80 in
+  ~2 h 34 min"), projected from your pace in the zone you are in — or,
+  in your hideout or a town, the last combat zone before it — at that
+  same area level, since the level penalty depends on it. Without such
+  sections it uses your average. Hover over the line to see which rate
+  it used.
   **Hover over a bar** to see what it was: the zone (with map tier and
   area level, or several zones with their times), when, how long in
   combat, the experience gained and the rate, the level penalty at that

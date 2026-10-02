@@ -815,3 +815,53 @@ def test_while_playing_the_average_still_reaches_now() -> None:
     layout = graph_layout([punkt], jetzt, 520, 100)
     assert layout.average_end_x == pytest.approx(520)
     assert layout.average_span_s == pytest.approx(900)
+
+
+# --- Welche Rate die Zeit bis zur nächsten Stufe trägt (2026-10-02) ------
+
+from poe_view.ui.xp_graph import pace_for_next_level  # noqa: E402
+
+_AQUEDUCT = ("The Blood Aqueduct", "2_9_1", 61)
+
+
+def _abschnitt(minuten_her, rate, zone=_AQUEDUCT, sekunden=240):
+    name, area_id, level = zone
+    return XpPoint(at=_NOW - minuten_her * 60, seconds=sekunden, rate=rate, level=79,
+                   zones=((name, area_id, level, float(sekunden)),))
+
+
+def test_the_pace_comes_from_the_current_zone_at_its_level() -> None:
+    """Die Strafe hängt am Gebietslevel — Maps sagen nichts über den
+    Aqueduct."""
+    punkte = [_abschnitt(50, 1_000_000, ("Port", "MapWorldsPort", 70)),
+              _abschnitt(20, 4_000_000), _abschnitt(10, 5_000_000)]
+    rate, zone = pace_for_next_level(punkte, _NOW, _AQUEDUCT)
+    assert rate == pytest.approx(4_500_000)
+    assert zone == "The Blood Aqueduct"
+
+
+def test_a_different_level_of_the_same_zone_does_not_count() -> None:
+    punkte = [_abschnitt(10, 5_000_000, ("The Blood Aqueduct", "2_9_1", 68))]
+    rate, zone = pace_for_next_level(punkte, _NOW, _AQUEDUCT)
+    assert zone == ""                      # Schnitt statt Zonen-Tempo
+    assert rate == pytest.approx(5_000_000)
+
+
+def test_without_sections_of_this_zone_the_average_is_used() -> None:
+    punkte = [_abschnitt(20, 1_000_000, ("Port", "MapWorldsPort", 70)),
+              _abschnitt(10, 3_000_000, ("Cage", "MapWorldsCage", 70))]
+    rate, zone = pace_for_next_level(punkte, _NOW, None)
+    assert zone == ""
+    assert rate == pytest.approx(2_000_000)
+
+
+def test_nothing_to_project_without_a_positive_rate() -> None:
+    assert pace_for_next_level([], _NOW, _AQUEDUCT) is None
+    assert pace_for_next_level([_abschnitt(10, -2_000_000)], _NOW, _AQUEDUCT) is None
+
+
+def test_the_tooltip_says_how_much_of_the_level_a_section_was() -> None:
+    from poe_view.services.experience import level_span
+    punkt = _abschnitt(0, 4_500_000)
+    anteil = punkt.gain / level_span(79)
+    assert f"({anteil:.1%} of level 79)" in point_tooltip(punkt, [punkt], _NOW, _WALL)
