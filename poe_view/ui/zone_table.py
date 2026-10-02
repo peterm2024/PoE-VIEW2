@@ -39,7 +39,7 @@ import csv
 from collections.abc import Callable
 from pathlib import Path
 
-from PySide6.QtCore import (QAbstractItemModel, QModelIndex,
+from PySide6.QtCore import (QAbstractItemModel, QByteArray, QModelIndex,
                             QSortFilterProxyModel, Qt)
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (QComboBox, QDialog, QFileDialog, QHBoxLayout,
@@ -710,6 +710,65 @@ class ZoneTableDialog(QDialog):
 
     def _clear_column_filters(self) -> None:
         self._filter_header.clear_filters()
+
+    # --- Gemerkter Zustand (Peter, 2026-10-02) ------------------------- #
+
+    def view_state(self) -> dict:
+        """Was beim nächsten Öffnen wieder so stehen soll: Gruppe, Suche,
+        Spaltenfilter, Sortierung, aufgeklappte Gebiete, Fenster.
+
+        Peter, 2026-10-02: "bei Zones: welche filter ausgewählt, gruppe".
+        Die Liga bewusst NICHT: Sie richtet sich beim Öffnen nach der
+        zuletzt gespielten (§__init__) — eine gemerkte stünde nach dem
+        Start einer neuen Liga auf der alten, und genau dann schaut man
+        nach. Spalten über ihren NAMEN, nicht die Nummer: Kommt eine
+        Spalte dazu, landete ein Filter sonst in der falschen."""
+        kopf = self._filter_header
+        sortiert = kopf.sortIndicatorSection()
+        return {
+            "group": self._group_combo.currentData() or "",
+            "search": self._search.text(),
+            "filters": {COLUMNS[c]: kopf.filter_text(c)
+                        for c in range(len(COLUMNS)) if kopf.filter_text(c)},
+            "sort": ([COLUMNS[sortiert],
+                      "desc" if kopf.sortIndicatorOrder() == Qt.SortOrder.DescendingOrder
+                      else "asc"]
+                     if 0 <= sortiert < len(COLUMNS) else None),
+            "expanded": sorted(self._expanded_area_ids()),
+            "geometry": bytes(self.saveGeometry().toBase64()).decode("ascii"),
+        }
+
+    def apply_view_state(self, state: object) -> None:
+        """Gegenstück zu ``view_state``. Verträgt alles, was in einer
+        Einstellungsdatei stehen kann — auch Unsinn: Ein kaputter Eintrag
+        darf das Fenster nicht am Öffnen hindern, er fällt dann eben auf
+        die Voreinstellung zurück."""
+        if not isinstance(state, dict):
+            return
+        gruppe = state.get("group")
+        if isinstance(gruppe, str) and self._group_combo.findData(gruppe) >= 0:
+            self._group_combo.setCurrentIndex(self._group_combo.findData(gruppe))
+        suche = state.get("search")
+        if isinstance(suche, str):
+            self._search.setText(suche)
+        filter_ = state.get("filters")
+        if isinstance(filter_, dict):
+            for name, text in filter_.items():
+                if name in COLUMNS and isinstance(text, str):
+                    self._filter_header.set_filter_text(COLUMNS.index(name), text)
+        sortierung = state.get("sort")
+        if (isinstance(sortierung, list) and len(sortierung) == 2
+                and sortierung[0] in COLUMNS):
+            self._view.sortByColumn(
+                COLUMNS.index(sortierung[0]),
+                Qt.SortOrder.DescendingOrder if sortierung[1] == "desc"
+                else Qt.SortOrder.AscendingOrder)
+        offen = state.get("expanded")
+        if isinstance(offen, list):
+            self._restore_expanded({a for a in offen if isinstance(a, str)})
+        fenster = state.get("geometry")
+        if isinstance(fenster, str) and fenster:
+            self.restoreGeometry(QByteArray.fromBase64(fenster.encode("ascii")))
 
     # --- Aktualisieren ------------------------------------------------- #
 

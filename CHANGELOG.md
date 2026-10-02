@@ -6,6 +6,22 @@ nach [SemVer](https://semver.org/lang/de/).
 
 ## [Unveröffentlicht]
 
+### Neu
+
+- **Das Programm merkt sich die Ansicht:** Fensterlage und -größe
+  (auch maximiert), die Trennbalken zwischen Baum, Tabelle, Verlauf,
+  Item-Detail und Leveling-Feld, den zuletzt gewählten Charakter oder
+  das zuletzt gewählte Fach (je Liga, angewählt, sobald die Daten da
+  sind; ein Klick vorher gewinnt), die Sortierung der Item-Tabelle und
+  die Spaltenfilter samt Pins. In der Zonen-Tabelle: Gruppe, Suche,
+  Spaltenfilter, Sortierung, aufgeklappte Gebiete und Fenstergröße —
+  die Liga nicht, sie folgt weiter der zuletzt gespielten.
+- **Filterzeile in der Item-Tabelle** wie in der Zonen-Tabelle: ein
+  Feld je Spalte direkt unter den Namen, mit derselben
+  Vervollständigung. Ein Pin steht danach in seinem Feld. Das
+  Filterfeld im Rechtsklick-Menü des Spaltenkopfs entfällt; dort
+  bleiben die Spaltenauswahl und „Clear All Column Filters".
+
 ## [0.20.0] - 2026-10-02
 
 ### Neu

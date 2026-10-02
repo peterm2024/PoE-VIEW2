@@ -7,6 +7,9 @@ Spannen, die es nie gab.
 """
 
 import csv
+import json
+
+import pytest
 
 from PySide6.QtCore import Qt
 
@@ -18,6 +21,7 @@ from poe_view.ui.zone_table import (NUMERIC_SORT_ROLE, ZoneFilterProxy,
                                     ZoneTreeModel, _dauer_text,
                                     _league_choices, export_zones)
 
+_GROUP_COL = 0
 _NAME_COL = 1
 _TIER_COL = 2
 _LEVEL_COL = 3
@@ -880,5 +884,57 @@ def test_the_window_fits_the_columns(qapp, monkeypatch) -> None:
         mindestens = dialog.layout().itemAt(0).sizeHint().width()
         assert dialog.width() >= sum(inhalt)
         assert dialog.width() <= max(sum(inhalt), mindestens) + 80
+    finally:
+        dialog.deleteLater()
+
+
+# --- Gemerkter Zustand (Peter, 2026-10-02: "bei Zones: welche filter
+# ausgewählt, gruppe") -------------------------------------------------- #
+
+def test_the_view_state_carries_group_filters_sort_and_open_areas(qapp) -> None:
+    zonen = beispiel() + [_bazaar()]
+    alt = _dialog_mit(zonen)
+    neu = _dialog_mit(zonen)
+    try:
+        alt._group_combo.setCurrentIndex(alt._group_combo.findData(MAP))
+        alt._filter_header.filter_edit(_NAME_COL).setText("baz")
+        alt._view.sortByColumn(_NAME_COL, Qt.SortOrder.DescendingOrder)
+        alt._view.expand(alt._proxy.index(0, 0))
+        alt._search.setText("Bazaar")
+
+        neu.apply_view_state(json.loads(json.dumps(alt.view_state())))
+
+        assert neu._group_combo.currentData() == MAP
+        assert neu._filter_header.filter_text(_NAME_COL) == "baz"
+        assert neu._search.text() == "Bazaar"
+        assert neu._view.header().sortIndicatorSection() == _NAME_COL
+        assert neu._view.header().sortIndicatorOrder() == Qt.SortOrder.DescendingOrder
+        assert neu._proxy.rowCount() == 1
+        assert neu._view.isExpanded(neu._proxy.index(0, 0))
+    finally:
+        alt.deleteLater()
+        neu.deleteLater()
+
+
+def test_the_view_state_does_not_carry_the_league(qapp) -> None:
+    """Die Liga richtet sich nach der zuletzt gespielten — eine gemerkte
+    stünde nach dem Start einer neuen Liga auf der alten."""
+    dialog = _dialog_mit(beispiel())
+    try:
+        assert "league" not in dialog.view_state()
+    finally:
+        dialog.deleteLater()
+
+
+@pytest.mark.parametrize("unsinn", [None, [], "x", {"group": 3, "filters": [1],
+                                                    "sort": ["Gibtsnicht", "asc"],
+                                                    "expanded": "Atoll",
+                                                    "geometry": 7}])
+def test_a_broken_view_state_leaves_the_defaults(qapp, unsinn) -> None:
+    dialog = _dialog_mit(beispiel())
+    try:
+        dialog.apply_view_state(unsinn)
+        assert dialog._group_combo.currentData() == ""
+        assert dialog._view.header().sortIndicatorSection() == _GROUP_COL
     finally:
         dialog.deleteLater()

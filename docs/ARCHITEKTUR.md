@@ -7966,6 +7966,96 @@ zur Meldung, Escaping, Einstellungs-Reiter und Neustart). Gegenprobe
 mit sieben Sabotagen, alle fallen. Live gegen GitHub geprüft:
 `0.17.0+dev` bekommt keinen Hinweis, `0.12.0` bekommt v0.17.0.
 
+### 4.58 Die Ansicht überlebt den Neustart
+
+Peter, 2026-10-02: "Was wir noch machen könnten ist uns die
+verschiedenen Settings merken, Fensterposition, maximiert, welcher
+character ausgewählt, was angepinnt, bei Zones: welche filter
+ausgewählt, gruppe". Bis dahin blieben Liga, "Hide empty",
+Watch-Liste, Spalten, Regex-Schalter, Tools und die Einstellungen des
+Settings-Dialogs erhalten; alles andere fing bei jedem Start von vorn
+an.
+
+**Wo es liegt:** dieselbe `ui-settings.ini` (§`MainWindow._settings`).
+Fenster und Trennbalken als Base64 von `saveGeometry`/`saveState`
+(`window/geometry`, `window/main_splitter`, `window/table_splitter`,
+`window/bottom_splitter`), geschrieben beim Beenden. Alles andere wird
+SOFORT bei der Änderung geschrieben — ein Absturz verschluckte sonst
+genau das, was man zuletzt eingestellt hat:
+`item_table/sort` ("Name:desc"), `item_table/column_filters`
+(JSON {Spaltenname: Ausdruck}), `view/last` (JSON
+{league, kind, key}), `zone_table/state` (JSON aus
+`ZoneTableDialog.view_state`). Spalten stehen überall unter ihrem
+NAMEN, nicht ihrer Nummer: Kommt eine Spalte dazu, landete ein Filter
+sonst in der falschen.
+
+**`restoreGeometry`** bringt "maximiert" mit und holt ein Fenster auf
+einen vorhandenen Bildschirm zurück, wenn der zweite Monitor fehlt. Es
+läuft nach `_build_ui()`, damit es die Voreinstellung aus `resize()`
+überschreibt, nicht umgekehrt; die Trennbalken entsprechend nach ihren
+`setSizes`-Voreinstellungen.
+
+**Die Filterzeile in der Item-Tabelle** (Peter: "Oder wir machen auch
+so eine Filterzeile bei den Items wie bei den Zones"). Gemerkte Filter
+sind nur vertretbar, wenn sie zu SEHEN sind: Bis dahin meldete ein
+gesetzter Filter sich nur kurz in der Statusleiste und mit 🔍 im
+Spaltenkopf — nach einem Neustart fehlten Items, und nichts sagte,
+warum. Jetzt sitzt der `FilterHeader` aus §4.56.7 auch an der
+Item-Tabelle; ein Pin (§`_add_pin_action`) schreibt seinen Ausdruck ins
+Feld. Unterschiede zur Zonen-Tabelle:
+- **Getippt wird gedämpft** (`SEARCH_DEBOUNCE_MS`, wie das Suchfeld):
+  Jeder Filterwechsel läuft über alle Zeilen, in der liga-weiten
+  Ansicht zehntausende. Pin, Löschen und Ansichtswechsel greifen sofort.
+- **Vorschläge erst beim Fokus** (`FilterHeader.field_focused`): Die
+  Werte aller 20+ Spalten nach jedem Abruf vorab zu sammeln, kostete
+  bei jedem Takt, wofür nur das Feld zahlen soll, in das jemand tippt.
+- **Feld und Filter haben eine Quelle:** `_apply_column_filter`,
+  `_clear_column_filters` und `_clear_view_relative_column_filters`
+  setzen das Feld mit (`set_filter_text_silently`, ohne erneutes
+  `filter_changed`), sonst stünde nach einem Ansichtswechsel ein Text
+  im Feld, der nicht mehr filtert.
+- Das Filterfeld im Kopfmenü entfiel — zwei Eingaben für denselben
+  Filter. `_build_column_filter_edit` liefert seither das Feld aus der
+  Zeile, mit frischen Vorschlägen.
+
+**Die Auswahl** (`_remember_view`, `_restore_view`): gemerkt werden ein
+Charakter oder ein EINZELNES Fach, je mit Liga; Mehrfachauswahl, Ordner
+und "All Tabs" nicht — nach dem Start steht dann das zuletzt einzeln
+Gewählte da. Wiederhergestellt wird, sobald Charakterliste bzw. Baum
+der Liga befüllt sind (`_apply_character_league_filter`,
+`_activate_stash_tree`), einmal; ein Klick vorher oder ein
+Liga-Wechsel verwirft das Ausstehende — wer schon etwas anderes gewählt
+hat, will nicht zurückgerissen werden. Das Anwählen läuft über dieselben
+Methoden wie ein Klick, lädt also bei einem Cache-Fehlschlag nach.
+**Falle:** Tab- und Position-Filter gehören zur Ansicht und werden bei
+jedem Ansichtswechsel geräumt (§`_clear_view_relative_column_filters`,
+Peter 2026-08-02). Beim Wiederherstellen ist das derselbe Wechsel — der
+gemerkte Pin `Tab = MainInventory` wäre sofort wieder weg. Deshalb
+werden diese beiden Filter vor dem Anwählen gelesen und danach wieder
+gesetzt.
+
+**Zonen-Tabelle** (`view_state`/`apply_view_state`): Gruppe, Suche,
+Spaltenfilter, Sortierung, aufgeklappte Gebiete, Fenster. Die Liga
+bewusst NICHT — sie richtet sich beim Öffnen nach der zuletzt
+gespielten, und eine gemerkte stünde nach dem Start einer neuen Liga
+auf der alten, also genau dann falsch, wenn man nachschaut. Gesichert
+bei `finished` (Schließen) und im `closeEvent` des Hauptfensters, falls
+die Tabelle da noch offen ist — dann sendet sie kein `finished`.
+`apply_view_state` verträgt jeden Unsinn aus der Datei; ein kaputter
+Eintrag fällt auf die Voreinstellung zurück, statt das Fenster am
+Öffnen zu hindern.
+
+Getestet: `tests/test_main_window_helpers.py` (Filter über Neustart und
+im Feld, gedämpftes Tippen, Löschen, Ansichtswechsel leert das Feld,
+kaputte Einstellung, Vorschläge beim echten Fokus-Ereignis, Sortierung
+und ihre Voreinstellung, Fenster und Trennbalken, Charakter samt
+Tab-Pin, Fach, Merken beim Klick, Klick vor den Daten, Liga-Wechsel,
+Zonen-Zustand über die Einstellung), `tests/test_zone_table.py`
+(Zustand hin und zurück, ohne Liga, Unsinn). Gegenprobe mit zehn
+Sabotagen, alle fallen — die für die Trennbalken erst, nachdem der Test
+auf den Verlauf-Trenner umgestellt war: Offscreen steht der linke
+Bereich auf seiner Mindestbreite, `setSizes` blieb dort wirkungslos.
+
 ---
 
 ## 8. Entwicklungsstand

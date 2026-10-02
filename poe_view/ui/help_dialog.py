@@ -154,15 +154,19 @@ average — the game writes nothing when you quit, so the last zone of an
 evening would otherwise run until the next start.
 The zone display next to it names the level of the zone you are in, and
 once the experience penalty bites, the share you still get there.</p>
-<p><b>Column filters</b> also live in that right-click menu. They accept
-comparisons, so <code>&gt;=20</code> on Quality or <code>&lt;45</code>
-on iLvl work as expected. A filtered column is marked with 🔍. While you
-type, the field completes what you have started from the values actually
-present in that column — press Return or Tab to take the suggestion.</p>
+<p><b>Column filters</b> sit in the row of fields right below the column
+names. They accept comparisons, so <code>&gt;=20</code> on Quality or
+<code>&lt;45</code> on iLvl work as expected. A filtered column is also
+marked with 🔍. While you type, the field completes what you have
+started from the values actually present in that column — press Return
+or Tab to take the suggestion. The filters are kept when you close the
+program; the ✕ in a field clears it, and right-clicking a column name
+offers to clear them all.</p>
 <p><b>📌 Pin</b> is the quick way to the same thing: right-click an item
 and pick it to filter that column down to exactly the value you clicked
 on. Right-clicking <code>MainInventory</code> in the Tab column leaves
-only items from there.</p>
+only items from there. The pinned value then shows in that column's
+field.</p>
 """),
     ("Type filters", """
 <h3>Type filters</h3>
@@ -200,8 +204,8 @@ of the <b>gems socketed into it</b>.</p>
 <p>Two shorthands from the game work as well: <code>ilvl:84</code> finds
 item level exactly 84, <code>tier:16</code> map tier exactly 16. Both
 combine with everything else (<code>ilvl:84 ring</code>). For ranges use
-a column filter instead — right-click a column header and type
-<code>&gt;=84</code>.</p>
+a column filter instead — type <code>&gt;=84</code> into the field below
+the column name.</p>
 <p><b>Ctrl+F</b> jumps to the search field and selects what is in it, so
 you can start typing over it straight away.</p>
 <p>In very large leagues the search waits until you pause typing before

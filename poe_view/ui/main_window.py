@@ -17,7 +17,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Iterator
 
-from PySide6.QtCore import QSettings, Qt, QTimer, QUrl, Signal
+from PySide6.QtCore import QByteArray, QSettings, Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import (QAction, QDesktopServices, QGuiApplication,
                            QKeySequence, QMouseEvent, QPixmap, QShortcut)
 from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QCompleter,
@@ -26,7 +26,7 @@ from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QCompleter,
                                QMainWindow, QMenu, QMessageBox, QProgressBar,
                                QProgressDialog, QSizePolicy, QSplitter,
                                QTableView, QToolBar, QToolButton, QVBoxLayout,
-                               QWidget, QWidgetAction)
+                               QWidget)
 
 from poe_view import __version__, config
 from poe_view.api.models import (Character, Item, StashTab,
@@ -64,7 +64,7 @@ from poe_view.ui.leveling_panel import LevelingPanel
 from poe_view.ui.mod_album import ModAlbumDialog
 from poe_view.ui.xp_graph import GRAPH_SPAN_S, XpPoint, pace_for_next_level
 from poe_view.ui.zone_table import ZoneTableDialog
-from poe_view.ui.column_filter import build_filter_edit
+from poe_view.ui.column_filter import PLACEHOLDER, FilterHeader
 from poe_view.ui.item_table import (COLUMNS, CONFIGURABLE_COLUMNS, ICON_COL,
                                     MODS_COL, POSITION_COL, TAB_COL,
                                     VALUE_COL, ItemFilterProxy, ItemTableModel,
@@ -824,7 +824,14 @@ class MainWindow(QMainWindow):
         if config.RUNNING_AS_EXE and self._load_update_check_enabled():
             self.worker.submit(CheckUpdateJob())
 
+        # Vor `_build_ui()`: Schon der Aufbau kann Charaktere und Fächer
+        # aus dem Cache einsetzen, und dabei soll die Auswahl greifen.
+        self._pending_view = self._load_pending_view()
         self._build_ui()
+        # Fenster wie beim letzten Beenden — Lage, Größe, maximiert (Peter,
+        # 2026-10-02). Nach `_build_ui()`, damit die Voreinstellung aus
+        # `resize()` überschrieben wird, nicht umgekehrt.
+        self._restore_window_geometry()
         # NACH `_build_ui()` (die Anzeige muss stehen), aber VOR
         # `worker.start()`: Bis dahin ist die Job-Queue nur gefüllt, nicht
         # abgearbeitet — die von `_build_ui()` mit eingereihten Daten-Jobs
@@ -1492,6 +1499,14 @@ class MainWindow(QMainWindow):
         self._filter_edit.textChanged.connect(self._on_filter_text_changed)
 
         self.table = QTableView()
+        # Filterzeile direkt unter den Spaltennamen, wie in der
+        # Zonen-Tabelle (Peter, 2026-10-02: "Oder wir machen auch so eine
+        # Filterzeile bei den Items wie bei den Zones"). Seit die Filter
+        # über einen Neustart erhalten bleiben, muss ein gesetzter Filter
+        # zu SEHEN sein — sonst fehlen nach dem Start Items, und nichts
+        # sagt warum. VOR setModel gesetzt, wie dort (§zone_table).
+        self._filter_header = FilterHeader(self.table)
+        self.table.setHorizontalHeader(self._filter_header)
         self.table.setModel(self.proxy)
         self.table.setSortingEnabled(True)
         # Voreinstellung statt roher API-Reihenfolge: aufsteigend nach Wert,
@@ -1500,7 +1515,9 @@ class MainWindow(QMainWindow):
         # "Schrott-Items finden"). Nur der Startzustand — ein Klick auf
         # einen anderen Header überschreibt ihn wie jede normale
         # Sortierung, Qt merkt sich das eigenständig.
-        self.table.sortByColumn(VALUE_COL, Qt.SortOrder.AscendingOrder)
+        # Seit 2026-10-02 gemerkt: Wer einmal auf "Name" umgestellt hat,
+        # findet es nach dem Neustart wieder so (§_restore_item_sort).
+        self._restore_item_sort()
         self.table.setSelectionBehavior(QTableView.SelectionBehavior.SelectRows)
         self.table.verticalHeader().hide()
         self.table.setColumnWidth(0, 36)
@@ -1523,6 +1540,7 @@ class MainWindow(QMainWindow):
         table_header.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         table_header.customContextMenuRequested.connect(self._on_table_header_menu)
         self._apply_column_config(self._load_column_config())
+        self._setup_filter_row()
 
         # Charakter-Item-Verlauf (Peter, 2026-08-02): eigenes, schlankes
         # Spaltenformat statt der Item-Tabelle (§item_history.py) — deshalb
@@ -1564,6 +1582,7 @@ class MainWindow(QMainWindow):
                           + self.history_table.verticalHeader().defaultSectionSize()
                           + 2 * self.history_table.frameWidth())
         table_splitter.setSizes([1000, one_row_height])
+        self._table_splitter = table_splitter
         right_layout.addWidget(table_splitter, stretch=1)
         # Detail links, Leveling rechts (Peter, 2026-08-12): Seit das
         # Detail-Panel seine Blöcke durch Linien trennt (§4.39), zogen
@@ -1589,6 +1608,7 @@ class MainWindow(QMainWindow):
         bottom_splitter.setStretchFactor(0, 0)
         bottom_splitter.setStretchFactor(1, 1)
         bottom_splitter.setSizes([self.detail.preferred_width(), 1])
+        self._bottom_splitter = bottom_splitter
         right_layout.addWidget(bottom_splitter)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -1601,6 +1621,10 @@ class MainWindow(QMainWindow):
         # 2026-07-28). Fensterbreite um denselben Betrag erhöht, damit die
         # Item-Tabelle rechts nicht kleiner wird als vorher.
         splitter.setSizes([340, 840])
+        self._main_splitter = splitter
+        # Die Voreinstellungen oben gelten nur beim allerersten Start;
+        # danach steht jeder Trennbalken, wo er zuletzt stand.
+        self._restore_splitters()
 
         self.dashboard = RateLimitDashboard()
         central = QWidget()
@@ -2085,6 +2109,136 @@ class MainWindow(QMainWindow):
         return QSettings(str(config.APP_DATA_DIR / "ui-settings.ini"),
                          QSettings.Format.IniFormat)
 
+    # --- Gemerkte Ansicht (Peter, 2026-10-02) --------------------------- #
+    # "Was wir noch machen könnten ist uns die verschiedenen Settings
+    # merken, Fensterposition, maximiert, welcher character ausgewählt,
+    # was angepinnt, bei Zones: welche filter ausgewählt, gruppe".
+    # Geschrieben wird beim Beenden (Fenster, Trennbalken) oder sofort bei
+    # der Änderung (Auswahl, Filter, Sortierung) — Letzteres, weil ein
+    # Absturz sonst genau das verschluckte, was man zuletzt eingestellt hat.
+
+    _WINDOW_GEOMETRY_KEY = "window/geometry"
+    _SPLITTER_KEYS = (("window/main_splitter", "_main_splitter"),
+                      ("window/table_splitter", "_table_splitter"),
+                      ("window/bottom_splitter", "_bottom_splitter"))
+    _ITEM_SORT_KEY = "item_table/sort"
+    _LAST_VIEW_KEY = "view/last"
+    _ZONE_TABLE_STATE_KEY = "zone_table/state"
+
+    def _restore_window_geometry(self) -> None:
+        """``restoreGeometry`` bringt "maximiert" mit und holt ein Fenster
+        zurück auf einen vorhandenen Bildschirm, wenn der zweite Monitor
+        inzwischen fehlt."""
+        stored = self._settings().value(self._WINDOW_GEOMETRY_KEY)
+        if stored:
+            self.restoreGeometry(QByteArray.fromBase64(str(stored).encode("ascii")))
+
+    def _restore_splitters(self) -> None:
+        settings = self._settings()
+        for key, attr in self._SPLITTER_KEYS:
+            stored = settings.value(key)
+            if stored:
+                getattr(self, attr).restoreState(
+                    QByteArray.fromBase64(str(stored).encode("ascii")))
+
+    def _save_window_layout(self) -> None:
+        settings = self._settings()
+        settings.setValue(self._WINDOW_GEOMETRY_KEY,
+                          bytes(self.saveGeometry().toBase64()).decode("ascii"))
+        for key, attr in self._SPLITTER_KEYS:
+            settings.setValue(key, bytes(getattr(self, attr).saveState()
+                                         .toBase64()).decode("ascii"))
+
+    def _restore_item_sort(self) -> None:
+        """Gemerkte Sortierung, sonst aufsteigend nach Wert. Gespeichert
+        wird bei jedem Umschalten (``sortIndicatorChanged``), über den
+        Spalten-NAMEN."""
+        spalte, richtung = VALUE_COL, Qt.SortOrder.AscendingOrder
+        stored = str(self._settings().value(self._ITEM_SORT_KEY, "") or "")
+        name, _, order = stored.rpartition(":")
+        if name in COLUMNS:
+            spalte = COLUMNS.index(name)
+            if order == "desc":
+                richtung = Qt.SortOrder.DescendingOrder
+        self.table.sortByColumn(spalte, richtung)
+        self.table.horizontalHeader().sortIndicatorChanged.connect(self._save_item_sort)
+
+    def _save_item_sort(self, col: int, order) -> None:
+        if 0 <= col < len(COLUMNS):
+            richtung = "desc" if order == Qt.SortOrder.DescendingOrder else "asc"
+            self._settings().setValue(self._ITEM_SORT_KEY, f"{COLUMNS[col]}:{richtung}")
+
+    def _remember_view(self, kind: str, key: str) -> None:
+        """Charakter oder einzelnes Fach, das gerade gezeigt wird. Eine
+        Mehrfachauswahl, ein Ordner oder "All Tabs" werden nicht gemerkt —
+        nach dem Start steht dann das zuletzt einzeln gewählte da.
+
+        Ein Klick vor dem Eintreffen der Daten gewinnt: Wer schon etwas
+        anderes ausgewählt hat, will nicht zurückgerissen werden."""
+        self._pending_view = None
+        if self._current_league:
+            self._settings().setValue(self._LAST_VIEW_KEY, json.dumps(
+                {"league": self._current_league, "kind": kind, "key": key}))
+
+    def _load_pending_view(self) -> dict | None:
+        stored = self._settings().value(self._LAST_VIEW_KEY)
+        if not stored:
+            return None
+        try:
+            roh = json.loads(str(stored))
+        except ValueError:
+            return None
+        if (not isinstance(roh, dict) or roh.get("kind") not in ("character", "stash")
+                or not all(isinstance(roh.get(k), str) and roh.get(k)
+                           for k in ("league", "key"))):
+            return None
+        return roh
+
+    def _restore_view(self) -> None:
+        """Die Auswahl der letzten Sitzung wieder anwählen — einmal, sobald
+        Charakterliste bzw. Fach-Baum der Liga dafür stehen. Gerufen nach
+        jedem Befüllen; wirkt nur, solange noch etwas aussteht.
+
+        Die angepinnten Tab- und Position-Filter gehören zu genau dieser
+        Ansicht (§_clear_view_relative_column_filters räumt sie bei jedem
+        Ansichtswechsel weg). Sie werden deshalb nach dem Anwählen wieder
+        eingesetzt — sonst überlebte "Tab = MainInventory" den Neustart nie."""
+        pending = getattr(self, "_pending_view", None)
+        if pending is None or pending["league"] != self._current_league:
+            return
+        if pending["kind"] == "character":
+            char = self.character_list.select_name(pending["key"])
+            if char is None:
+                return
+            ansicht = lambda: self._on_character_selected(char)  # noqa: E731
+        else:
+            if not any(s.id == pending["key"] for s in self._leaf_stashes):
+                return
+            stash = self._find_stash(self._stash_trees.get(self._current_league, []),
+                                     pending["key"])
+            if stash is None:
+                return
+            self.tree.highlight_stash(stash.id)
+            ansicht = lambda: self._on_stash_selected(stash.id, stash.display_name)  # noqa: E731
+        gepinnt = {col: self.proxy.column_filter(col)
+                   for col in (TAB_COL, POSITION_COL) if self.proxy.column_filter(col)}
+        ansicht()
+        for col, expr in gepinnt.items():
+            self._apply_column_filter(col, expr)
+
+    def _restore_zone_table_state(self, dialog) -> None:
+        stored = self._settings().value(self._ZONE_TABLE_STATE_KEY)
+        if not stored:
+            return
+        try:
+            dialog.apply_view_state(json.loads(str(stored)))
+        except ValueError:
+            pass
+
+    def _save_zone_table_state(self, dialog) -> None:
+        self._settings().setValue(self._ZONE_TABLE_STATE_KEY,
+                                  json.dumps(dialog.view_state()))
+
     # --- Beobachtete Stapelgrößen (§4.45) ------------------------------ #
 
     _FAVOURITES_SETTING_KEY = "favourites/names"
@@ -2259,36 +2413,87 @@ class MainWindow(QMainWindow):
         else:
             self._update_summaries()
 
+    _COLUMN_FILTERS_SETTING_KEY = "item_table/column_filters"
+
+    def _setup_filter_row(self) -> None:
+        """Ein Feld je Spalte im Kopf (§column_filter.FilterHeader), dazu
+        die Filter aus der letzten Sitzung (Peter, 2026-10-02: "was
+        angepinnt").
+
+        Getippt wird gedämpft wie im Suchfeld (SEARCH_DEBOUNCE_MS): Jeder
+        Filterwechsel läuft über alle Zeilen, und bei der liga-weiten
+        Ansicht sind das zehntausende. Ein Pin oder das Löschen greift
+        dagegen sofort (§_apply_column_filter)."""
+        kopf = self._filter_header
+        kopf.set_column_count(len(COLUMNS), f"Filter this column: {PLACEHOLDER}")
+        # Die Icon-Spalte hat keinen Text, nach dem sich filtern ließe.
+        icon_feld = kopf.filter_edit(ICON_COL)
+        icon_feld.setEnabled(False)
+        icon_feld.setPlaceholderText("")
+        icon_feld.setToolTip("")
+        kopf.filter_changed.connect(self._on_filter_field_changed)
+        kopf.field_focused.connect(self._build_column_filter_edit)
+        self._pending_field_filters: dict[int, str] = {}
+        self._field_filter_debounce = QTimer(self)
+        self._field_filter_debounce.setSingleShot(True)
+        self._field_filter_debounce.setInterval(self.SEARCH_DEBOUNCE_MS)
+        self._field_filter_debounce.timeout.connect(self._apply_pending_field_filters)
+        for col, expr in self._load_column_filters().items():
+            self.proxy.set_column_filter(col, expr)
+            kopf.set_filter_text_silently(col, expr)
+
+    def _load_column_filters(self) -> dict[int, str]:
+        """Über den Spalten-NAMEN gespeichert, nicht die Nummer: Kommt eine
+        Spalte dazu, rutschte ein gemerkter Filter sonst in die falsche."""
+        stored = self._settings().value(self._COLUMN_FILTERS_SETTING_KEY)
+        if not stored:
+            return {}
+        try:
+            roh = json.loads(str(stored))
+        except ValueError:
+            return {}
+        if not isinstance(roh, dict):
+            return {}
+        return {COLUMNS.index(name): expr.strip() for name, expr in roh.items()
+                if name in COLUMNS and COLUMNS.index(name) > ICON_COL
+                and isinstance(expr, str) and expr.strip()}
+
+    def _save_column_filters(self) -> None:
+        self._settings().setValue(
+            self._COLUMN_FILTERS_SETTING_KEY,
+            json.dumps({COLUMNS[c]: self.proxy.column_filter(c)
+                        for c in sorted(self.proxy.filtered_columns())}))
+
+    def _on_filter_field_changed(self, col: int, text: str) -> None:
+        self._pending_field_filters[col] = text
+        self._field_filter_debounce.start()
+
+    def _apply_pending_field_filters(self) -> None:
+        pending, self._pending_field_filters = self._pending_field_filters, {}
+        for col, text in pending.items():
+            self.proxy.set_column_filter(col, text)
+        if pending:
+            self._column_filters_changed()
+
     def _build_column_filter_edit(self, col: int) -> QLineEdit:
-        """Eingabefeld für den Spalten-Filter im Header-Rechtsklick-Menü,
-        inklusive Autovervollständigen über die tatsächlich in dieser
-        Spalte vorkommenden Werte (Peter, 2026-08-02: "eine Art
+        """Das Feld der Spalte im Kopf, mit Vorschlägen aus den Werten, die
+        JETZT in der Spalte stehen (Peter, 2026-08-02: "eine Art
         Autovervollständigen mit Combobox über die Items in der Spalte").
-        Eigene Methode statt inline in ``_on_table_header_menu``, damit sie
-        ohne den blockierenden ``QMenu.exec()`` testbar ist."""
-        return build_filter_edit(self.proxy.column_filter(col),
-                                 self.table_model.distinct_values(col))
+        Geholt, sobald das Feld den Fokus bekommt — nicht vorab für alle
+        Spalten, siehe ``FilterHeader.field_focused``."""
+        self._filter_header.set_suggestions(col, self.table_model.distinct_values(col))
+        return self._filter_header.filter_edit(col)
 
     def _on_table_header_menu(self, pos) -> None:
         header = self.table.horizontalHeader()
         clicked_col = header.logicalIndexAt(pos)
         menu = QMenu(self.table)
-        # Excel-artiger Spalten-Filter für die angeklickte Spalte
-        # ("z. B. 20% Quality oder iLvl <45"). Übernahme
-        # mit Enter; aktive Filter tragen 🔍 im Spalten-Header.
-        if clicked_col > ICON_COL:
-            title = menu.addAction(f"Filter \"{COLUMNS[clicked_col]}\" (Enter applies):")
-            title.setEnabled(False)
-            edit = self._build_column_filter_edit(clicked_col)
-            edit.returnPressed.connect(
-                lambda c=clicked_col, e=edit, m=menu: (
-                    self._apply_column_filter(c, e.text()), m.close()))
-            field = QWidgetAction(menu)
-            field.setDefaultWidget(edit)
-            menu.addAction(field)
-            if self.proxy.filtered_columns():
-                clear_action = menu.addAction("✕ Clear All Column Filters")
-                clear_action.triggered.connect(self._clear_column_filters)
+        # Das Filterfeld stand bis 2026-10-02 hier im Menü; seither sitzt
+        # es in der Zeile unter den Spaltennamen (§_setup_filter_row).
+        # Geblieben ist das Löschen aller Filter auf einmal.
+        if clicked_col > ICON_COL and self.proxy.filtered_columns():
+            clear_action = menu.addAction("✕ Clear All Column Filters")
+            clear_action.triggered.connect(self._clear_column_filters)
             menu.addSeparator()
         visible_names = {name for name, visible in self._load_column_config() if visible}
         for i, name in enumerate(COLUMNS):
@@ -2301,7 +2506,14 @@ class MainWindow(QMainWindow):
         menu.exec(header.mapToGlobal(pos))
 
     def _apply_column_filter(self, col: int, expr: str) -> None:
+        """Von außen gesetzt (Pin, Test): sofort, und das Feld zeigt ihn."""
+        self._pending_field_filters.pop(col, None)
+        self._filter_header.set_filter_text_silently(col, (expr or "").strip())
         self.proxy.set_column_filter(col, expr)
+        self._column_filters_changed()
+
+    def _column_filters_changed(self) -> None:
+        self._save_column_filters()
         shown, total = self.proxy.rowCount(), self.table_model.rowCount()
         active = ", ".join(f"{COLUMNS[c]} {self.proxy.column_filter(c)}"
                            for c in sorted(self.proxy.filtered_columns()))
@@ -2311,7 +2523,11 @@ class MainWindow(QMainWindow):
         self._update_summaries()
 
     def _clear_column_filters(self) -> None:
+        self._pending_field_filters.clear()
+        for col in range(len(COLUMNS)):
+            self._filter_header.set_filter_text_silently(col, "")
         self.proxy.clear_column_filters()
+        self._save_column_filters()
         self._status_msg.setText(
             f"All column filters cleared — {self.table_model.rowCount()} items")
         self._update_summaries()
@@ -2644,6 +2860,8 @@ class MainWindow(QMainWindow):
             return  # Header-Zeile ist nicht anwählbar, aber sicherheitshalber abgefangen
         self._current_league = league
         self._settings().setValue(self._LAST_LEAGUE_SETTING_KEY, league)
+        if self._pending_view is not None and self._pending_view["league"] != league:
+            self._pending_view = None  # andere Liga gewählt: nichts mehr zurückholen
         self._showing_aggregate = False
         self._current_stash_id = None  # Fach-IDs gelten nur innerhalb einer Liga
         self._current_character_name = None
@@ -2774,6 +2992,7 @@ class MainWindow(QMainWindow):
     def _apply_character_league_filter(self) -> None:
         filtered = [c for c in self._all_characters if c.league == self._current_league]
         self.character_list.set_characters(filtered)
+        self._restore_view()
 
     def _activate_stash_tree(self, stashes: list[StashTab]) -> None:
         """Baum rendern + abgeflachte Liste aktualisieren — für Live- und
@@ -2790,6 +3009,7 @@ class MainWindow(QMainWindow):
         # Live- wie Cache-Daten. Damit sind Programmstart, Liga-Wechsel
         # und ein neuer Fach-Abruf mit einem Aufruf abgedeckt (§4.45).
         self._update_favourites()
+        self._restore_view()
 
     def _item_counts_for_current_league(self) -> dict[str, int]:
         """stash_id → tatsächlich geladene Item-Anzahl — überschreibt im Baum
@@ -2941,10 +3161,14 @@ class MainWindow(QMainWindow):
         stillen Refresh derselben Ansicht, dort soll ein aktiver Filter auf
         anderen Spalten (Name, Value, …) bestehen bleiben."""
         if self.proxy.filtered_columns() & {TAB_COL, POSITION_COL}:
-            self.proxy.set_column_filter(TAB_COL, "")
-            self.proxy.set_column_filter(POSITION_COL, "")
+            for col in (TAB_COL, POSITION_COL):
+                self._pending_field_filters.pop(col, None)
+                self._filter_header.set_filter_text_silently(col, "")
+                self.proxy.set_column_filter(col, "")
+            self._save_column_filters()
 
     def _on_stash_selected(self, stash_id: str, name: str) -> None:
+        self._remember_view("stash", stash_id)
         self._clear_view_relative_column_filters()
         self._showing_aggregate = False
         self._search_all_active = False  # Baum-Klick beendet die liga-weite Suchansicht
@@ -3877,6 +4101,7 @@ class MainWindow(QMainWindow):
         wie bei Stash-Fächern: Cache-Treffer zeigen sofort an, sonst wird
         einmalig nachgeladen (kein automatisches Neuladen bei jedem Klick,
         Doku §4.4/§5)."""
+        self._remember_view("character", char.name)
         self._clear_view_relative_column_filters()
         self._search_all_active = False  # Charakter-Klick beendet die liga-weite Suchansicht
         self._large_search_items = None
@@ -5584,7 +5809,10 @@ class MainWindow(QMainWindow):
             league=self._current_league_of_play(
                 {r.area_id: r for r in records}),
             reload=self._load_zone_records)
-        self._zone_table_dialog.show()
+        dialog = self._zone_table_dialog
+        self._restore_zone_table_state(dialog)
+        dialog.finished.connect(lambda _result, d=dialog: self._save_zone_table_state(d))
+        dialog.show()
 
     def _load_zone_records(self) -> list | None:
         """Den Katalog aus der Client.txt auffrischen und als Liste
@@ -6438,6 +6666,12 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------ #
 
     def closeEvent(self, event) -> None:  # noqa: N802
+        self._save_window_layout()
+        # Ein offenes Zonen-Fenster geht mit dem Hauptfenster zu, ohne
+        # ``finished`` zu senden — sein Stand wird deshalb hier gesichert.
+        zonen = getattr(self, "_zone_table_dialog", None)
+        if zonen is not None and zonen.isVisible():
+            self._save_zone_table_state(zonen)
         if self._raw_data_viewer is not None:
             self._raw_data_viewer.close()
         if self._poe2_viewer is not None:

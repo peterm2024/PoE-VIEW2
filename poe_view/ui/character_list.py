@@ -48,6 +48,19 @@ class CharacterList(QListWidget):
             if char.name == ausgewaehlt:
                 self.setCurrentItem(item)
 
+    def select_name(self, name: str):
+        """Markiert den Charakter dieses Namens, ohne ``itemClicked`` —
+        für die Wiederherstellung beim Start (§MainWindow._restore_view).
+        Gibt den Charakter zurück, oder ``None``, wenn es ihn hier nicht
+        (mehr) gibt."""
+        for row in range(self.count()):
+            item = self.item(row)
+            char = item.data(_DATA_ROLE)
+            if char.name == name:
+                self.setCurrentItem(item)
+                return char
+        return None
+
     def _on_click(self, item: QListWidgetItem) -> None:
         self.character_selected.emit(item.data(_DATA_ROLE))
 

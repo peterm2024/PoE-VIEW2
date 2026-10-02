@@ -11095,3 +11095,273 @@ def test_the_next_level_line_uses_the_pace_of_the_last_combat_zone(
                                            (400 * 3600, "> 99 h")])
 def test_the_duration_is_shown_to_the_minute(sekunden, text) -> None:
     assert MainWindow._format_duration(sekunden) == text
+
+
+# --- Gemerkte Ansicht (Peter, 2026-10-02) ------------------------------- #
+# "Was wir noch machen könnten ist uns die verschiedenen Settings merken,
+# Fensterposition, maximiert, welcher character ausgewählt, was angepinnt,
+# bei Zones: welche filter ausgewählt, gruppe".
+
+def _schliessen(win) -> None:
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def _vorab_einstellen(**werte) -> None:
+    """Einstellungen setzen, BEVOR ein Fenster entsteht — wie nach dem
+    Beenden einer früheren Sitzung."""
+    settings = MainWindow._settings(None)
+    for key, value in werte.items():
+        settings.setValue(key.replace("__", "/"), value)
+    settings.sync()
+
+
+def test_a_pinned_column_filter_survives_a_restart_and_shows_in_its_field(qapp) -> None:
+    from poe_view.ui.item_table import COLUMNS
+    name_col = COLUMNS.index("Name")
+    win = MainWindow()
+    win._apply_column_filter(name_col, "=Chaos Orb")
+    assert win._filter_header.filter_text(name_col) == "=Chaos Orb"
+    _schliessen(win)
+
+    neu = MainWindow()
+    try:
+        assert neu.proxy.column_filter(name_col) == "=Chaos Orb"
+        assert neu._filter_header.filter_text(name_col) == "=Chaos Orb"
+    finally:
+        _schliessen(neu)
+
+
+def test_typing_in_the_filter_row_filters_after_the_pause_and_is_remembered(qapp) -> None:
+    from poe_view.ui.item_table import BASE_COL
+    win = MainWindow()
+    win.table_model.set_items([
+        Item.model_validate({"typeLine": "Chaos Orb", "baseType": "Chaos Orb"}),
+        Item.model_validate({"typeLine": "Exalted Orb", "baseType": "Exalted Orb"})])
+    win._filter_header.filter_edit(BASE_COL).setText("Chaos")
+    # Gedämpft wie das Suchfeld: Noch ist nichts gefiltert.
+    assert win.proxy.rowCount() == 2
+    assert win._field_filter_debounce.isActive()
+
+    win._apply_pending_field_filters()
+
+    assert win.proxy.rowCount() == 1
+    _schliessen(win)
+    neu = MainWindow()
+    try:
+        assert neu.proxy.column_filter(BASE_COL) == "Chaos"
+    finally:
+        _schliessen(neu)
+
+
+def test_clearing_all_filters_empties_the_fields_and_the_setting(qapp) -> None:
+    from poe_view.ui.item_table import BASE_COL
+    win = MainWindow()
+    win._apply_column_filter(BASE_COL, "Chaos")
+    win._clear_column_filters()
+    assert win._filter_header.filter_text(BASE_COL) == ""
+    _schliessen(win)
+    neu = MainWindow()
+    try:
+        assert neu.proxy.filtered_columns() == set()
+    finally:
+        _schliessen(neu)
+
+
+def test_switching_the_view_also_empties_the_tab_field(qapp) -> None:
+    """Der Tab-Filter gehört zur Ansicht (§_clear_view_relative_column_
+    filters) — das Feld darf ihn danach nicht weiter anzeigen."""
+    from poe_view.ui.item_table import TAB_COL
+    win = MainWindow()
+    win._apply_column_filter(TAB_COL, "=MainInventory")
+    win._clear_view_relative_column_filters()
+    try:
+        assert win.proxy.column_filter(TAB_COL) == ""
+        assert win._filter_header.filter_text(TAB_COL) == ""
+    finally:
+        _schliessen(win)
+
+
+def test_a_broken_filter_setting_is_ignored(qapp) -> None:
+    _vorab_einstellen(item_table__column_filters="{kaputt")
+    win = MainWindow()
+    try:
+        assert win.proxy.filtered_columns() == set()
+    finally:
+        _schliessen(win)
+
+
+def test_the_filter_field_suggests_the_values_in_its_column(qapp) -> None:
+    """Die Vorschläge kommen, sobald das Feld den Fokus bekommt."""
+    from poe_view.ui.item_table import BASE_COL
+    win = MainWindow()
+    win.table_model.set_items([Item.model_validate({"typeLine": "Chaos Orb",
+                                                    "baseType": "Chaos Orb"})])
+    from PySide6.QtCore import QCoreApplication, QEvent, Qt
+    from PySide6.QtGui import QFocusEvent
+    feld = win._filter_header.filter_edit(BASE_COL)
+    assert feld.completer() is None   # vorab nichts gesammelt
+    QCoreApplication.sendEvent(feld, QFocusEvent(QEvent.Type.FocusIn,
+                                                 Qt.FocusReason.MouseFocusReason))
+    try:
+        completer = win._filter_header.filter_edit(BASE_COL).completer()
+        assert completer is not None
+        assert completer.model().index(0, 0).data() == "Chaos Orb"
+    finally:
+        _schliessen(win)
+
+
+def test_the_item_sort_survives_a_restart(qapp) -> None:
+    from PySide6.QtCore import Qt
+    from poe_view.ui.item_table import COLUMNS
+    name_col = COLUMNS.index("Name")
+    win = MainWindow()
+    win.table.sortByColumn(name_col, Qt.SortOrder.DescendingOrder)
+    _schliessen(win)
+
+    neu = MainWindow()
+    try:
+        kopf = neu.table.horizontalHeader()
+        assert kopf.sortIndicatorSection() == name_col
+        assert kopf.sortIndicatorOrder() == Qt.SortOrder.DescendingOrder
+    finally:
+        _schliessen(neu)
+
+
+def test_without_a_stored_sort_the_table_sorts_by_value(qapp) -> None:
+    from poe_view.ui.item_table import VALUE_COL
+    win = MainWindow()
+    try:
+        assert win.table.horizontalHeader().sortIndicatorSection() == VALUE_COL
+    finally:
+        _schliessen(win)
+
+
+def test_window_geometry_and_splitters_survive_a_restart(qapp) -> None:
+    win = MainWindow()
+    win.setGeometry(40, 50, 760, 540)
+    win.show()
+    qapp.processEvents()
+    # Deutlich weg von der Voreinstellung (Verlauf auf eine Zeile) —
+    # der linke Bereich taugt dafür offscreen nicht: Er steht auf seiner
+    # Mindestbreite, setSizes bliebe dort wirkungslos und der Test sähe
+    # auch ohne Wiederherstellung denselben Wert.
+    win._table_splitter.setSizes([150, 150])
+    qapp.processEvents()
+    vorher = win._table_splitter.sizes()
+    assert vorher[1] >= 100   # Verlauf weit aufgezogen
+    win._save_window_layout()
+    win.hide()
+    _schliessen(win)
+
+    neu = MainWindow()
+    try:
+        neu.show()
+        qapp.processEvents()
+        assert neu.geometry().size() == win.geometry().size()
+        assert neu._table_splitter.sizes() == vorher
+    finally:
+        neu.hide()
+        _schliessen(neu)
+
+
+def test_the_last_character_is_selected_again_with_its_pinned_tab_filter(qapp) -> None:
+    """Peter: "welcher character ausgewählt, was angepinnt". Der Tab-Pin
+    gehört zur Ansicht und würde beim Anwählen weggeräumt — er muss den
+    Neustart trotzdem überleben."""
+    from poe_view.ui.item_table import TAB_COL
+    _vorab_einstellen(
+        view__last=json.dumps({"league": "Standard", "kind": "character",
+                               "key": "WitchOfPeter"}),
+        item_table__column_filters=json.dumps({"Tab": "=MainInventory"}))
+    win = MainWindow()
+    win._current_league = "Standard"
+    win._character_items["WitchOfPeter"] = [Item.model_validate({"typeLine": "Chaos Orb"})]
+    try:
+        win._on_characters([make_char("PeterM", "Standard"),
+                            make_char("WitchOfPeter", "Standard")])
+
+        assert win._current_character_name == "WitchOfPeter"
+        assert win.character_list.currentItem().text().startswith("WitchOfPeter")
+        assert win.proxy.column_filter(TAB_COL) == "=MainInventory"
+        assert win._filter_header.filter_text(TAB_COL) == "=MainInventory"
+    finally:
+        _schliessen(win)
+
+
+def test_the_last_stash_tab_is_selected_again(qapp) -> None:
+    _vorab_einstellen(view__last=json.dumps(
+        {"league": "Standard", "kind": "stash", "key": "t2"}))
+    win = MainWindow()
+    win._current_league = "Standard"
+    tabs = [_make_leaf("t1", "Currency"), _make_leaf("t2", "Maps")]
+    win._stash_trees["Standard"] = tabs
+    win._items["Standard"] = {"t2": [Item.model_validate({"typeLine": "Atoll Map"})]}
+    try:
+        win._activate_stash_tree(tabs)
+
+        assert win._current_stash_id == "t2"
+        assert win.tree.currentItem() is win.tree._stash_nodes["t2"]
+    finally:
+        _schliessen(win)
+
+
+def test_selecting_something_remembers_it(qapp) -> None:
+    win = MainWindow()
+    win._current_league = "Standard"
+    win._character_items["PeterM"] = []
+    win._on_character_selected(make_char("PeterM", "Standard"))
+    try:
+        gespeichert = json.loads(str(win._settings().value("view/last")))
+        assert gespeichert == {"league": "Standard", "kind": "character", "key": "PeterM"}
+    finally:
+        _schliessen(win)
+
+
+def test_a_click_before_the_data_arrives_wins_over_the_restore(qapp) -> None:
+    _vorab_einstellen(view__last=json.dumps(
+        {"league": "Standard", "kind": "character", "key": "WitchOfPeter"}))
+    win = MainWindow()
+    win._current_league = "Standard"
+    win._character_items["PeterM"] = []
+    win._character_items["WitchOfPeter"] = []
+    try:
+        win._on_character_selected(make_char("PeterM", "Standard"))
+        win._on_characters([make_char("PeterM", "Standard"),
+                            make_char("WitchOfPeter", "Standard")])
+        assert win._current_character_name == "PeterM"
+    finally:
+        _schliessen(win)
+
+
+def test_another_league_drops_the_pending_selection(qapp) -> None:
+    _vorab_einstellen(view__last=json.dumps(
+        {"league": "Standard", "kind": "character", "key": "WitchOfPeter"}))
+    win = MainWindow()
+    try:
+        assert win._pending_view is not None
+        win._on_league_changed("Hardcore")
+        assert win._pending_view is None
+    finally:
+        _schliessen(win)
+
+
+def test_the_zone_table_state_is_saved_and_applied_through_the_settings(qapp) -> None:
+    class _Dialog:
+        def __init__(self):
+            self.applied = None
+
+        def view_state(self):
+            return {"group": "Map"}
+
+        def apply_view_state(self, state):
+            self.applied = state
+
+    win = MainWindow()
+    try:
+        win._save_zone_table_state(_Dialog())
+        ziel = _Dialog()
+        win._restore_zone_table_state(ziel)
+        assert ziel.applied == {"group": "Map"}
+    finally:
+        _schliessen(win)

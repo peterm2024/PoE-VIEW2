@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import re
 
-from PySide6.QtCore import QRect, Qt, Signal
+from PySide6.QtCore import QEvent, QRect, Qt, Signal
 from PySide6.QtWidgets import QCompleter, QHeaderView, QLineEdit, QWidget
 
 _NUM_RE = re.compile(r"-?\d+(?:[.,]\d+)?")
@@ -160,6 +160,11 @@ class FilterHeader(QHeaderView):
     Feld, auch dort, wo zwischen zwei Feldern ein Pixel frei ist."""
 
     filter_changed = Signal(int, str)
+    # Ein Feld bekommt den Fokus — der Moment, die Vorschläge zu holen.
+    # In der Item-Liste stehen bis zu 20.000 Zeilen hinter einer Spalte;
+    # die Werte aller Spalten nach jedem Abruf vorab zu sammeln, kostete
+    # bei jedem Takt, wofür nur das Feld zahlen soll, in das jemand tippt.
+    field_focused = Signal(int)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(Qt.Orientation.Horizontal, parent)
@@ -184,6 +189,7 @@ class FilterHeader(QHeaderView):
                 edit.setToolTip(tooltip)
             edit.textChanged.connect(
                 lambda text, c=col: self.filter_changed.emit(c, text))
+            edit.installEventFilter(self)
             self._edits.append(edit)
         self.updateGeometries()
 
@@ -199,9 +205,24 @@ class FilterHeader(QHeaderView):
         if edit is not None:
             edit.setText(text)
 
+    def set_filter_text_silently(self, col: int, text: str) -> None:
+        """Das Feld zeigt einen Filter, den jemand anderes schon gesetzt
+        hat (ein Pin, ein gespeicherter Stand) — ohne ``filter_changed``,
+        sonst liefe derselbe Filter ein zweites Mal durch."""
+        edit = self.filter_edit(col)
+        if edit is not None and edit.text() != text:
+            edit.blockSignals(True)
+            edit.setText(text)
+            edit.blockSignals(False)
+
     def clear_filters(self) -> None:
         for edit in self._edits:
             edit.clear()
+
+    def eventFilter(self, watched, event) -> bool:  # noqa: N802 (Qt-API)
+        if event.type() == QEvent.Type.FocusIn and watched in self._edits:
+            self.field_focused.emit(self._edits.index(watched))
+        return super().eventFilter(watched, event)
 
     def set_suggestions(self, col: int, values: list[str]) -> None:
         """Vervollständigung wie im Kopfmenü der Item-Liste: inline über
@@ -210,6 +231,10 @@ class FilterHeader(QHeaderView):
         if edit is None:
             return
         edit.set_suggestions(values)
+        if not values:
+            # Kein leerer Completer, der bei jedem Tastendruck nichts findet.
+            edit.setCompleter(None)
+            return
         completer = QCompleter(values, edit)
         completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
         completer.setFilterMode(Qt.MatchFlag.MatchContains)

@@ -130,10 +130,14 @@ delve depth 0, where nobody dies) from the depths below it.
   set either in the settings dialog (checkboxes and drag & drop) or via
   a quick toggle in the header's right-click menu. The choice is saved
   between sessions.
-- **Column filters** via right-click on a column header, supporting
-  comparison expressions such as `>=20` for quality or `<45` for item
-  level, with autocomplete over the values actually present in that
-  column.
+- **Column filters** in a row of fields right below the column names,
+  supporting comparison expressions such as `>=20` for quality or `<45`
+  for item level, with autocomplete over the values actually present in
+  that column. Filters, including pinned ones, are kept between sessions.
+- **Picks up where you left off**: window position and size (including
+  maximised), the dividers between the panels, the selected character
+  or stash tab, the sort order, and in the zone table the group,
+  search, filters, sort order, expanded areas and window size.
 - **Search like the in-game stash search**: several keywords separated
   by spaces must all match, so `life resistance` finds items carrying
   both even though the two words never stand next to each other.
