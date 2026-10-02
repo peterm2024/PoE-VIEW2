@@ -6,6 +6,8 @@ nach [SemVer](https://semver.org/lang/de/).
 
 ## [Unveröffentlicht]
 
+## [0.20.0] - 2026-10-02
+
 ### Neu
 
 - **Tooltip je Balken im XP-Graphen:** Zone (bei Maps mit Tier und
