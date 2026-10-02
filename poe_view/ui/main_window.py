@@ -2131,6 +2131,12 @@ class MainWindow(QMainWindow):
         inzwischen fehlt."""
         stored = self._settings().value(self._WINDOW_GEOMETRY_KEY)
         if stored:
+            # ERST das native Fenster anlegen (FALLSTRICKE #93): Vor dem
+            # ersten Anzeigen verwirft Windows eine Lage auf einem Monitor
+            # links vom Hauptmonitor (negative Koordinaten) — an Peters
+            # vier Monitoren landete das Fenster so immer auf dem
+            # Hauptmonitor.
+            self.winId()
             self.restoreGeometry(QByteArray.fromBase64(str(stored).encode("ascii")))
 
     def _restore_splitters(self) -> None:

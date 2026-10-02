@@ -1943,3 +1943,37 @@ die vor dem Startwert begann, und macht die erste Änderung zur Basis.
 das Wissen über "davor". Wer am Dateiende zu lesen beginnt, muss den
 Zustand, in dem er einsteigt, eigens nachladen.
 
+## 93. Das Fenster kam immer auf dem Hauptmonitor zurück — Lage vor dem ersten Anzeigen gesetzt
+
+**Symptom.** Peter, 2026-10-02, am ersten Abend der gemerkten Ansicht
+(§4.58): "der Monitor passt nicht nach dem Neustart." Das Fenster
+stand auf einem Monitor links vom Hauptmonitor; nach dem Neustart kam
+es auf dem Hauptmonitor wieder, normal wie maximiert.
+
+**Ursache.** `restoreGeometry` lief im Konstruktor, also bevor es ein
+natives Fenster gab. Unter Windows verwirft Qt eine solche Lage, wenn
+sie auf einem Monitor mit negativen Koordinaten liegt — das Fenster
+wird beim Anzeigen auf dem Hauptmonitor angelegt. An Peters vier
+Monitoren (Hauptmonitor bei x=0, ein Monitor bei x=-2560, zwei
+hochkant bei x=-4000) nativ gemessen: mit dieser Reihenfolge landete
+JEDE gemerkte Lage auf dem Hauptmonitor. Offscreen ist das nicht zu
+sehen — dort gibt es nur einen Bildschirm.
+
+**Lösung.** Vor dem Wiederherstellen `self.winId()`: Das legt das
+native Fenster an, ohne es zu zeigen, und die Lage bleibt. Drei
+Varianten gemessen — `winId()` vorab, Wiederherstellen nach `show()`,
+Wiederherstellen im `showEvent` —, alle drei richtig auf allen vier
+Monitoren; `winId()` gewählt, weil das Fenster dabei nicht sichtbar
+springt. Der Zonen-Dialog braucht es nicht: mit und ohne Elternfenster
+gemessen, er bleibt auch so auf seinem Monitor.
+
+**Test.** Offscreen lässt sich nur die Reihenfolge prüfen: Ein Spion
+auf `restoreGeometry` hält fest, ob das native Fenster schon besteht
+(`test_the_native_window_exists_before_the_geometry_is_restored`).
+Ohne `winId()` fällt er; nativ fällt in dem Fall auch die Messung
+(Fenster auf dem Hauptmonitor statt auf Q27G4).
+
+**Lehre:** Bei Fenstern zählt nicht nur, WAS wiederhergestellt wird,
+sondern WANN. Und eine Mehrmonitor-Frage lässt sich nur am echten
+Aufbau beantworten.
+

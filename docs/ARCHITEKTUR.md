@@ -7989,7 +7989,7 @@ genau das, was man zuletzt eingestellt hat:
 NAMEN, nicht ihrer Nummer: Kommt eine Spalte dazu, landete ein Filter
 sonst in der falschen.
 
-**`restoreGeometry`** bringt "maximiert" mit und holt ein Fenster auf
+**`restoreGeometry`** (nach `winId()`, FALLSTRICKE #93) bringt "maximiert" mit und holt ein Fenster auf
 einen vorhandenen Bildschirm zurück, wenn der zweite Monitor fehlt. Es
 läuft nach `_build_ui()`, damit es die Voreinstellung aus `resize()`
 überschreibt, nicht umgekehrt; die Trennbalken entsprechend nach ihren

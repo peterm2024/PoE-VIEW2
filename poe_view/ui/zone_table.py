@@ -768,6 +768,10 @@ class ZoneTableDialog(QDialog):
             self._restore_expanded({a for a in offen if isinstance(a, str)})
         fenster = state.get("geometry")
         if isinstance(fenster, str) and fenster:
+            # Anders als das Hauptfenster (FALLSTRICKE #93) braucht der
+            # Dialog kein vorgezogenes winId(): An Peters vier Monitoren
+            # gemessen, mit und ohne Elternfenster, bleibt er auch so auf
+            # dem Monitor links vom Hauptmonitor.
             self.restoreGeometry(QByteArray.fromBase64(fenster.encode("ascii")))
 
     # --- Aktualisieren ------------------------------------------------- #

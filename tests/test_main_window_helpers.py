@@ -11365,3 +11365,27 @@ def test_the_zone_table_state_is_saved_and_applied_through_the_settings(qapp) ->
         assert ziel.applied == {"group": "Map"}
     finally:
         _schliessen(win)
+
+
+def test_the_native_window_exists_before_the_geometry_is_restored(qapp, monkeypatch) -> None:
+    """FALLSTRICKE #93: Vor dem ersten Anzeigen verwirft Windows eine Lage
+    links vom Hauptmonitor — das Fenster landete bei Peter immer auf dem
+    Hauptmonitor. Offscreen gibt es nur einen Bildschirm, gemessen wird
+    deshalb die Reihenfolge: natives Fenster zuerst, dann die Lage."""
+    from PySide6.QtCore import Qt
+    win = MainWindow()
+    win._save_window_layout()
+    _schliessen(win)
+    gesehen = []
+    original = MainWindow.restoreGeometry
+
+    def spion(self, geometry):
+        gesehen.append(self.testAttribute(Qt.WidgetAttribute.WA_WState_Created))
+        return original(self, geometry)
+
+    monkeypatch.setattr(MainWindow, "restoreGeometry", spion)
+    neu = MainWindow()
+    try:
+        assert gesehen == [True]
+    finally:
+        _schliessen(neu)
