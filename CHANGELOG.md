@@ -20,6 +20,13 @@ nach [SemVer](https://semver.org/lang/de/).
 
 ### Behoben
 
+- **Die Schnitt-Linie im XP-Graphen lief nach einer langen Pause bis
+  zum Jetzt weiter.** Ein einziger 2,5-Minuten-Balken von vor drei
+  Stunden stand als „⌀ 5M · 2 h 58 min" mit dicker Linie über die volle
+  Breite da. Liegt der letzte Abschnitt mehr als eine halbe Stunde
+  zurück, endet der Zeitraum jetzt mit ihm (dieselbe Pausenregel wie am
+  Anfang); danach ist die Linie nur noch gestrichelt.
+
 - **Nadeln im XP-Graphen nach einem Programmstart mitten in einer
   Kampfzone.** Der Zonen-Beobachter kannte den Aufenthalt nicht, in dem
   der Charakter beim Start schon stand, und die erste Veröffentlichung

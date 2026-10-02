@@ -255,8 +255,9 @@ delve depth 0, where nobody dies) from the depths below it.
   in red, capped at a quarter of the height so one death cannot squash
   the rest. A line across the graph marks your average rate and says which
   stretch it covers: it begins at your last level-up, or after a break of
-  more than half an hour, whichever came later, and is drawn solid and
-  green over exactly that stretch — dashed before it, where it is only a
+  more than half an hour, whichever came later, ends with your last
+  section once you have stopped playing for more than half an hour, and
+  is drawn solid and green over exactly that stretch — dashed before it, where it is only a
   yardstick for the older bars. How long the stretch is stands next to
   the number. If you lost experience in that stretch, the line names two
   rates — "⌀ 85K net · 34M gross · 22 min": what you actually kept, and
