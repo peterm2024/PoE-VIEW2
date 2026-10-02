@@ -271,7 +271,9 @@ delve depth 0, where nobody dies) from the depths below it.
   combat, the experience gained and the rate, the level penalty at that
   area level, deaths in that stretch, and for a map left and re-entered
   the total for the whole map. Loot is deliberately not in it — it is
-  the one number that could not be told reliably.
+  the one number that could not be told reliably. The bar the tooltip
+  describes is marked with a light band over its whole time span, so
+  even a bar only two pixels tall is easy to find.
 - **The maps you ran before starting PoE-VIEW2** show up as well, drawn
   fainter than the measured ones. Their length comes from the game's own
   `Client.txt` and is exact; the experience gained while the program was

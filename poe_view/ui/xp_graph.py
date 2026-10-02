@@ -64,6 +64,18 @@ _GROUP_COLOR = blend(QColor(DASH_OK), QColor("#000000"), 0.55)
 _DEATH_MARK_W = 9.0
 _DEATH_MARK_H = 6.0
 
+# Die Markierung des Balkens unter der Maus (Peter, 2026-10-02: "Können
+# wir den Bereich markieren der für den Tooltip verwendet wird?"): ein
+# heller Streifen über die volle Höhe seiner Zeitspanne — so ist auch ein
+# flacher Balken auszumachen, der nur zwei Pixel hoch ist — und ein
+# Rahmen um den Balken selbst. Beides in der TEXTFARBE des Systems, nicht
+# in festem Weiß: Im hellen Windows-Design wäre ein weißer Streifen auf
+# weißem Grund unsichtbar (der Test unter der hellen Offscreen-Palette hat
+# genau das gezeigt). Der Streifen ist durchscheinend, damit Flächen und
+# Balken darunter ihre Farbe behalten; nativ gemessen auf Peters dunklem
+# Grund #1e1e1e → #3c3c3c.
+_HOVER_BAND_ALPHA = 34
+
 # Die gestrichelte Gesamtrate. Bewusst nicht grün: Sie ist eine
 # Bezugslinie, kein weiterer Messwert.
 _AVERAGE_COLOR = "#c9c9c9"
@@ -576,6 +588,12 @@ class XpGraph(QWidget):
         self._now = 0.0
         self._now_wall = 0.0
         self._deaths: list[float] = []
+        # Wo die Maus steht (x), nicht welcher Balken: Die Punkte wechseln
+        # bei jedem Abruf, ein gemerkter Index zeigte danach auf den
+        # falschen. Aus der Lage wird er beim Zeichnen neu bestimmt — mit
+        # derselben Regel wie für den Tooltip (§bar_at).
+        self._hover_x: float | None = None
+        self.setMouseTracking(True)
         self.setMinimumHeight(_MIN_HEIGHT)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
@@ -619,6 +637,19 @@ class XpGraph(QWidget):
         gruppe = next((g for g in group_by_instance(gezeigt) if punkt in g), [punkt])
         return point_tooltip(punkt, gruppe, self._now, self._now_wall)
 
+    def hovered_bar(self, layout: Layout) -> int | None:
+        return None if self._hover_x is None else bar_at(layout, self._hover_x)
+
+    def mouseMoveEvent(self, event) -> None:  # noqa: N802 (Qt-API)
+        self._hover_x = event.position().x()
+        self.update()
+        super().mouseMoveEvent(event)
+
+    def leaveEvent(self, event) -> None:  # noqa: N802 (Qt-API)
+        self._hover_x = None
+        self.update()
+        super().leaveEvent(event)
+
     def event(self, event) -> bool:  # noqa: N802 (Qt-API)
         if event.type() == QEvent.Type.ToolTip:
             text = self.tooltip_at(event.position().x()
@@ -657,6 +688,13 @@ class XpGraph(QWidget):
             for x, y, w, h in layout.groups:
                 painter.fillRect(QRectF(x, y, w, h), QColor(_GROUP_COLOR))
 
+            markiert = self.hovered_bar(layout)
+            if markiert is not None:
+                x, _y, w, _h, _rate = layout.bars[markiert]
+                band = QColor(self.palette().windowText().color())
+                band.setAlpha(_HOVER_BAND_ALPHA)
+                painter.fillRect(QRectF(x, 0.0, w, plot_h), band)
+
             for index, (x, y, w, h, rate) in enumerate(layout.bars):
                 # Grün nach oben, Rot nach unten: Ein Abschnitt, in dem
                 # unterm Strich Erfahrung verloren ging (Tod ab Akt 5),
@@ -667,6 +705,12 @@ class XpGraph(QWidget):
                     # (§_ESTIMATED_ALPHA): dieselbe Form, halbe Kraft.
                     farbe.setAlphaF(_ESTIMATED_ALPHA)
                 painter.fillRect(QRectF(x, y, w, h), farbe)
+
+            if markiert is not None:
+                x, y, w, h, _rate = layout.bars[markiert]
+                painter.setPen(QPen(self.palette().windowText().color(), 1))
+                painter.setBrush(Qt.BrushStyle.NoBrush)
+                painter.drawRect(QRectF(x - 0.5, y - 0.5, w + 1, h + 1))
 
             # Die Gesamtrate über alles Sichtbare als gestrichelte Linie.
             # Sie steht ruhig, während die einzelnen Abschnitte springen,

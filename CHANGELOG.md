@@ -15,6 +15,8 @@ nach [SemVer](https://semver.org/lang/de/).
   Summe für die ganze Map. Geschätzte Balken sagen, dass sie geschätzt
   sind. Ohne Beute — die wäre die einzige unzuverlässige Zahl darin.
   Balken von vor dieser Version zeigen nur Zeit und Rate.
+  Der Balken, von dem der Tooltip spricht, wird markiert: ein heller
+  Streifen über die volle Höhe seiner Zeitspanne und ein Rahmen.
 
 ### Behoben
 

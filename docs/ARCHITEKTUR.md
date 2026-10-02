@@ -7828,6 +7828,19 @@ breit. Nativ angesehen: Ein Bergwerk auf Tiefe 55 zeigt für einen
 Charakter auf Stufe 79 "1.7% XP" — die Strafe, die Peter beim Delven
 bezahlt, stand bis dahin nirgends.
 
+**Markierung** (Peter: "Können wir den Bereich markieren der für den
+Tooltip verwendet wird?"): ein durchscheinender Streifen über die volle
+Höhe der Zeitspanne des Balkens, dazu ein Rahmen um den Balken. Der
+Streifen, weil ein Balken oft nur zwei Pixel hoch ist; der Rahmen, weil
+ein Streifen hinter einem hohen Balken verschwindet. Beides in der
+Textfarbe des Systems statt in festem Weiß — die Tests laufen unter der
+hellen Offscreen-Palette und zeigten, dass Weiß im hellen Design
+unsichtbar bliebe. Nativ auf Peters Grund: #1e1e1e → #3c3c3c. Gemerkt
+wird die Maus-x-Lage, nicht der Balken-Index; der Index wird beim
+Zeichnen mit `bar_at` neu bestimmt, derselben Regel wie für den Tooltip,
+sodass Markierung und Text nie auseinanderlaufen, auch wenn ein Abruf
+die Punkte austauscht.
+
 Getestet: `tests/test_xp_graph.py` (Zone mit Tier und Strafe, keine
 Strafe, mehrere Zonen, Tode/Map-Summe/Schätzung, alter Punkt ohne
 Zonen, Escaping, Treffen auch neben einem schmalen Balken, Widget

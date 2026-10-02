@@ -743,3 +743,52 @@ def test_the_widget_answers_with_the_tooltip_of_the_hovered_bar(qapp) -> None:
     x, _, w, _, _ = layout.bars[0]
     assert "Port (tier 3" in graph.tooltip_at(x + w / 2)
     assert graph.tooltip_at(5) is None
+
+
+# --- Markierung des Balkens unter der Maus (Peter, 2026-10-02: "Können
+# wir den Bereich markieren der für den Tooltip verwendet wird?") ------- #
+
+def _graph_mit_flachem_balken(qapp):
+    graph = XpGraph()
+    graph.resize(600, 120)
+    punkte = [XpPoint(at=_NOW - 2400, seconds=561, rate=40_000),     # flach
+              XpPoint(at=_NOW - 900, seconds=300, rate=1_200_000)]
+    graph.set_points(punkte, _NOW, now_wall=_WALL)
+    layout = graph_layout(punkte, _NOW, graph.width(), graph._plot_height())
+    return graph, layout
+
+
+def test_moving_the_mouse_marks_the_bar_of_the_tooltip(qapp) -> None:
+    from PySide6.QtCore import QPoint
+    from PySide6.QtTest import QTest
+
+    graph, layout = _graph_mit_flachem_balken(qapp)
+    graph.show()
+    x, _y, w, _h, _r = layout.bars[0]
+    QTest.mouseMove(graph, QPoint(int(x + w / 2), 10))
+    qapp.processEvents()
+    assert graph.hovered_bar(layout) == 0
+    # Dieselbe Regel wie der Tooltip: Markiert ist, wovon er spricht.
+    assert graph.tooltip_at(graph._hover_x) == graph.tooltip_at(x + w / 2)
+
+    from PySide6.QtCore import QEvent
+    graph.leaveEvent(QEvent(QEvent.Type.Leave))
+    assert graph.hovered_bar(layout) is None
+
+
+def test_the_marked_span_is_lighter_over_its_full_height(qapp) -> None:
+    """Auch über einem Balken, der nur ein paar Pixel hoch ist, ist die
+    markierte Spanne zu sehen — der Streifen reicht bis oben."""
+    graph, layout = _graph_mit_flachem_balken(qapp)
+    x, y, w, _h, _r = layout.bars[0]
+    mitte = int(x + w / 2)
+    ohne = graph.grab().toImage().pixelColor(mitte, 5)
+    graph._hover_x = x + w / 2
+    mit = graph.grab().toImage().pixelColor(mitte, 5)
+    # Unterschied statt "heller": Die Offscreen-Palette der Tests ist
+    # hell, dort wird der Streifen dunkler — genau wie im hellen
+    # Windows-Design.
+    assert abs(mit.lightness() - ohne.lightness()) > 10
+    # Neben der Spanne bleibt alles, wie es war.
+    daneben = int(x + w + 20)
+    assert graph.grab().toImage().pixelColor(daneben, 5) == ohne
