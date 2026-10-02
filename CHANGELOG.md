@@ -6,6 +6,8 @@ nach [SemVer](https://semver.org/lang/de/).
 
 ## [Unveröffentlicht]
 
+## [0.19.0] - 2026-10-02
+
 ### Geändert
 
 - **Zonen-Tabelle: „Visits" zählt jetzt Karten, nicht Eintritte.** Wer
