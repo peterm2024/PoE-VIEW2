@@ -1904,3 +1904,42 @@ alte API durchgehen — Python merkt es erst, wenn die Zeile läuft. Und
 ein Bedienelement ohne Test ist nach einem Umbau ungeprüft, egal wie
 klein die Änderung aussah.
 
+---
+
+## 92. Zwei Nadeln von 431 und 204 Mio. XP/h — der Beobachter kannte die Zone nicht, in der das Programm startete
+
+**Symptom.** Peter, 2026-10-02, zu seinem Graphen: "die beiden Peaks
+sind auffällig, aber ich weiß nicht, was da los war". Zwei einzelne
+Striche, der höchste skalierte die y-Achse auf 432 M, der Rest des
+Verlaufs (um 1 Mio./h) lag als flache Linie am Boden.
+
+**Ursache.** Beide fielen auf die erste Veröffentlichung nach einem
+Programmstart (12:42 Login-Test der neuen Version, 13:25 Umstieg auf
+v0.19.0), beide Male stand der Charakter schon im Bergwerk:
+
+```
+12:40:41  Azurite Mine betreten (Tiefe 55)
+12:42:43  Programmstart, Startwert gelesen
+12:50:02  nächster Knoten
+12:50:04  +108.725 in 1s in Kampfzonen — 431,7 Mio. XP/h
+```
+
+Der Zonen-Beobachter beginnt am Dateiende; die Aufenthaltsliste des
+Fensters begann deshalb erst mit dem Knoten von 12:50:02. Der lag nach
+dem Startwert, und `_baseline_starts_the_interval` prüft genau das —
+"jede Kampfzone des Fensters wurde nach dem Startwert betreten" —,
+also galt der Startwert als gültiger Vorgänger. Gezählt wurde die eine
+Sekunde im neuen Knoten. Der Test für "Startwert mitten in der Zone"
+gab es zwar, er meldete die Zone aber VOR dem Start an — die Lücke, die
+es im echten Start gibt, kam darin nicht vor.
+
+**Lösung.** `MainWindow._seed_running_stay`: Beim Einrichten des
+Beobachters wird der letzte, noch offene Aufenthalt aus der Client.txt
+in die Liste eingetragen (Monotonie-Zeit zurückgerechnet), sofern er
+jünger als das Graph-Fenster ist. Die Regel sieht dann eine Kampfzone,
+die vor dem Startwert begann, und macht die erste Änderung zur Basis.
+
+**Lehre:** Eine Regel, die prüft "lag etwas davor?", ist nur so gut wie
+das Wissen über "davor". Wer am Dateiende zu lesen beginnt, muss den
+Zustand, in dem er einsteigt, eigens nachladen.
+

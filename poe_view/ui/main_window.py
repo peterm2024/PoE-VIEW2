@@ -4286,6 +4286,49 @@ class MainWindow(QMainWindow):
         while len(self._zone_stays) > 1 and (self._zone_stays[0].until or now) <= cutoff:
             self._zone_stays.pop(0)
 
+    def _seed_running_stay(self, log_path: Path) -> None:
+        """Den Aufenthalt nachtragen, in dem der Charakter beim
+        Programmstart schon steht.
+
+        Peter, 2026-10-02, zu zwei Nadeln im Graphen: "die beiden Peaks
+        sind auffällig, aber ich weiß nicht, was da los war". Sein Log:
+
+            12:40:41  Azurite Mine betreten (Tiefe 55)
+            12:42:43  Programmstart, Startwert gelesen
+            12:50:02  nächster Knoten
+            12:50:04  +108.725 in 1s in Kampfzonen — 431,7 Mio. XP/h
+
+        Der Beobachter beginnt am Dateiende und kannte den Aufenthalt
+        von 12:40:41 nicht. Die Liste begann mit dem Knoten von 12:50:02 —
+        und der lag NACH dem Startwert, also hielt
+        ``_baseline_starts_the_interval`` den Startwert für einen
+        gültigen Vorgänger und teilte neuneinhalb Minuten Erfahrung durch
+        eine Sekunde. Dasselbe um 13:27 nach dem Neustart auf v0.19.0
+        (204 Mio. XP/h).
+
+        Mit dem nachgetragenen Aufenthalt sieht die Regel, was sie sehen
+        muss: Eine Kampfzone lief schon vor dem Startwert, wie viel davon
+        vorher verdient wurde, ist unbekannt — die erste Änderung wird
+        Basis, keine Rate. Nur wenn die Liste noch leer ist (ein Wechsel
+        der Einstellungen darf nichts doppelt eintragen) und der
+        Aufenthalt jünger als das Graph-Fenster ist; ältere könnte ohnehin
+        keine Rate mehr berühren."""
+        if self._zone_stays:
+            return
+        aufenthalte = zone_stays(log_path, datetime.now() - timedelta(seconds=GRAPH_SPAN_S))
+        if not aufenthalte or aufenthalte[-1].left is not None:
+            return
+        letzter = aufenthalte[-1]
+        alter = time.time() - letzter.entered.timestamp()
+        if not 0 <= alter <= GRAPH_SPAN_S:
+            return
+        self._zone_stays.append(_ZoneStay(
+            at=time.monotonic() - alter, until=None, name=letzter.name,
+            area_id=letzter.area_id, instance=letzter.instance,
+            level=letzter.level))
+        log.info("Zonen-Verlauf: beim Start bereits in %s (%s, Stufe %d) seit "
+                 "%.0f s.", letzter.name, letzter.area_id or "?", letzter.level, alter)
+
     def _stays_since(self, since: float, now: float) -> list[_ZoneStay]:
         """Die Aufenthalte, die im Fenster ``(since, now]`` noch liefen."""
         return [stay for stay in self._zone_stays if (stay.until or now) > since]
@@ -5271,6 +5314,7 @@ class MainWindow(QMainWindow):
         self._zone_watcher.zone_changed.connect(self._on_zone_changed)
         self._zone_watcher.inventory_event.connect(self._on_inventory_event)
         self._zone_watcher.death_seen.connect(self._on_death_seen)
+        self._seed_running_stay(resolved)
         # Die letzten 24 h aus der Datei nachladen, damit der Zaehler einen
         # App-Neustart uebersteht — der Watcher selbst beginnt am Dateiende.
         self._deaths = deaths_since(resolved, datetime.now() - self.DEATH_WINDOW)

@@ -10948,3 +10948,70 @@ def test_a_failing_zone_table_refresh_does_not_break_the_zone_change(
         win._zone_table_dialog.close()
         win.worker.stop()
         win.worker.wait(5000)
+
+
+# --- Programmstart mitten in einer Kampfzone (Peter, 2026-10-02) -------- #
+
+def _start_mitten_in_der_mine(tmp_path, monkeypatch, vor_sekunden: float):
+    """Peters Fall: seit ``vor_sekunden`` im Bergwerk (Tiefe 55), dann
+    startet das Programm. Liefert Fenster und die beiden Uhren."""
+    wall = [1_790_000_000.0]
+    mono = [10_000.0]
+    monkeypatch.setattr("poe_view.ui.main_window.time.monotonic", lambda: mono[0])
+    monkeypatch.setattr("poe_view.ui.main_window.time.time", lambda: wall[0])
+    log = tmp_path / "Client.txt"
+    _client_log(log, wall[0], [(vor_sekunden + 60, "HideoutSlum", "1", "Backstreet Hideout"),
+                               (vor_sekunden, "Delve_Main", "2", "Azurite Mine")])
+    win = MainWindow()
+    win._apply_zone_watcher_config(True, str(log))
+    return win, wall, mono
+
+
+def test_a_stay_running_at_program_start_is_known(qapp, tmp_path, monkeypatch) -> None:
+    win, wall, mono = _start_mitten_in_der_mine(tmp_path, monkeypatch, 122.0)
+    try:
+        assert len(win._zone_stays) == 1
+        stay = win._zone_stays[0]
+        assert (stay.name, stay.area_id, stay.until) == ("Azurite Mine", "Delve_Main", None)
+        assert stay.at == pytest.approx(mono[0] - 122.0, abs=1.0)
+    finally:
+        win.worker.stop()
+        win.worker.wait(5000)
+
+
+def test_starting_inside_a_combat_zone_does_not_produce_a_spike(
+        qapp, tmp_path, monkeypatch) -> None:
+    """Die beiden Nadeln in Peters Graph (431,7 und 204 Mio. XP/h): Der
+    Beobachter kannte den laufenden Aufenthalt nicht, der Startwert galt
+    als gültiger Vorgänger, und neuneinhalb Minuten Erfahrung wurden
+    durch eine Sekunde geteilt. Richtig ist: keine Rate — wie viel vor
+    dem Start verdient wurde, ist unbekannt."""
+    win, wall, mono = _start_mitten_in_der_mine(tmp_path, monkeypatch, 122.0)
+    try:
+        win._on_character_snapshot("WitchOfPeter", 79, 842_000_000)
+        mono[0] += 441.0
+        wall[0] += 441.0
+        _betritt(win, "Azurite Mine", "Delve_Main", "3")
+        mono[0] += 1.0
+        wall[0] += 1.0
+        win._on_character_snapshot("WitchOfPeter", 79, 842_108_725)
+
+        assert win._xp_per_hour("WitchOfPeter") is None
+        assert not [p for p in win._xp_watch["WitchOfPeter"].history
+                    if not p.estimated]
+    finally:
+        win.worker.stop()
+        win.worker.wait(5000)
+
+
+def test_an_old_last_entry_is_not_taken_for_a_running_stay(
+        qapp, tmp_path, monkeypatch) -> None:
+    """Älter als das Graph-Fenster: Das Spiel lief vermutlich gar nicht
+    mehr, und berühren könnte der Aufenthalt ohnehin keine Rate."""
+    win, wall, mono = _start_mitten_in_der_mine(
+        tmp_path, monkeypatch, xp_graph.GRAPH_SPAN_S + 600)
+    try:
+        assert win._zone_stays == []
+    finally:
+        win.worker.stop()
+        win.worker.wait(5000)

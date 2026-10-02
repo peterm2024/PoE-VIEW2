@@ -6,6 +6,16 @@ nach [SemVer](https://semver.org/lang/de/).
 
 ## [Unveröffentlicht]
 
+### Behoben
+
+- **Nadeln im XP-Graphen nach einem Programmstart mitten in einer
+  Kampfzone.** Der Zonen-Beobachter kannte den Aufenthalt nicht, in dem
+  der Charakter beim Start schon stand, und die erste Veröffentlichung
+  danach wurde durch eine Sekunde geteilt — an Peters Log 431,7 und
+  204 Mio. XP/h statt rund 1 Mio. Der laufende Aufenthalt wird jetzt
+  beim Start aus der Client.txt nachgetragen; die erste Änderung danach
+  wird Basis statt Rate.
+
 ## [0.19.0] - 2026-10-02
 
 ### Geändert
