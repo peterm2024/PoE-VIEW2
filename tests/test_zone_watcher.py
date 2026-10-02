@@ -625,3 +625,24 @@ def test_the_watcher_keeps_the_seed_of_the_last_area(tmp_path, qapp) -> None:
                 '"2_9_1" with seed 2711539918\n')
     watcher.check_now()
     assert watcher.last_area_seed == "2711539918"
+
+
+
+def test_kill_readings_come_with_the_login_they_belong_to(tmp_path) -> None:
+    from poe_view.services.zone_watcher import kill_readings
+    log = tmp_path / "Client.txt"
+    _write(log, "".join([
+        "2026/10/02 20:00:00 1 c [INFO Client 7] Async connecting to fra.login.pathofexile.com:20488\n",
+        _KILLS_LINE,
+        "2026/10/02 21:40:00 1 c [INFO Client 7] : You have killed 131.950 monsters.\n",
+        "2026/10/02 22:00:00 1 c [INFO Client 8] Async connecting to fra.login.pathofexile.com:20488\n",
+        "2026/10/02 22:05:00 1 c [INFO Client 8] : You have killed 12 monsters.\n",
+    ]))
+    gelesen = kill_readings(log)
+    assert [(r.total, r.session) for r in gelesen] == [(131404, 1), (131950, 1), (12, 2)]
+    assert gelesen[0].at == datetime(2026, 10, 2, 21, 32, 8)
+
+
+def test_kill_readings_of_a_missing_file_are_empty(tmp_path) -> None:
+    from poe_view.services.zone_watcher import kill_readings
+    assert kill_readings(tmp_path / "fehlt.txt") == []

@@ -93,9 +93,9 @@ def _league_choices(records: list[ZoneRecord]) -> list[str]:
 # "wird hier jeder Besuch gezählt (auch Händlerbesuche) oder die gesamte
 # Map?" — und dann: "Ja bitte beide Spalten", §zone_catalog.LevelStats).
 COLUMNS = ("Group", "Zone", "Tier", "Monster Level", "Visits", "Entries",
-           "Deaths", "Avg. time", "Last seen", "Area id")
+           "Deaths", "Monsters", "Avg. time", "Last seen", "Area id")
 (_GROUP_COL, _NAME_COL, _TIER_COL, _LEVEL_COL, _VISITS_COL, _ENTRIES_COL,
- _DEATHS_COL, _TIME_COL, _SEEN_COL, _ID_COL) = range(10)
+ _DEATHS_COL, _MONSTERS_COL, _TIME_COL, _SEEN_COL, _ID_COL) = range(11)
 
 _HEADER_TOOLTIPS = {
     _VISITS_COL: "Separate runs. Going back into the same map — after a "
@@ -105,7 +105,31 @@ _HEADER_TOOLTIPS = {
                   "same map.\nMany entries per visit mean many trips out "
                   "and back in.",
     _TIME_COL: "Average time per visit, all entries of a map added up.",
+    _MONSTERS_COL: "Monsters killed per visit, from your /kills readings in "
+                   "Client.txt:\nthe pace measured between two readings with "
+                   "exactly one map in between,\ntimes the average time per "
+                   "visit. Empty until such a pair of readings exists.",
 }
+
+
+def _monster_text(zahlen) -> str:
+    """"884" — oder leer, solange nichts gemessen ist (§zone_catalog.
+    attribute_kills). Ohne Durchschnittszeit lässt sich nicht je Besuch
+    hochrechnen; dann steht das Tempo da, damit die Messung nicht
+    verschwindet."""
+    if not zahlen.kill_seconds:
+        return ""
+    if zahlen.average_seconds:
+        return str(round(zahlen.monsters_per_visit))
+    return f"{zahlen.kills_per_minute:.0f}/min"
+
+
+def _monster_tooltip(zahlen) -> str | None:
+    if not zahlen.kill_seconds:
+        return None
+    return (f"{zahlen.kills_per_minute:.1f} kills per minute, measured over "
+            f"{_dauer_text(zahlen.kill_seconds) or '0 s'} ({zahlen.kills} kills)."
+            "\nPer visit = this pace × the average time per visit.")
 
 # Sortierrolle wie in der Item-Tabelle: "70–77" ist als Text sinnlos
 # sortierbar, als Zahl (höchster gesehener Level) nicht.
@@ -266,6 +290,7 @@ class ZoneTreeModel(QAbstractItemModel):
                     record.level_text(self._league),
                     str(zahlen.visits), str(zahlen.entries),
                     str(zahlen.deaths) if zahlen.deaths else "",
+                    _monster_text(zahlen),
                     _dauer_text(zahlen.average_seconds),
                     zahlen.last_seen.replace("T", " "),
                     record.area_id)[col]
@@ -282,12 +307,16 @@ class ZoneTreeModel(QAbstractItemModel):
                 return zahlen.entries
             if col == _DEATHS_COL:
                 return zahlen.deaths
+            if col == _MONSTERS_COL:
+                return zahlen.monsters_per_visit if zahlen.kill_seconds else -1
             if col == _TIME_COL:
                 return zahlen.average_seconds
             return (self._zone_data(record, col, Qt.ItemDataRole.DisplayRole)
                     or "").lower()
         if role == Qt.ItemDataRole.ToolTipRole and col == _LEVEL_COL:
             return self._level_tooltip(record)
+        if role == Qt.ItemDataRole.ToolTipRole and col == _MONSTERS_COL:
+            return _monster_tooltip(zahlen)
         if role == Qt.ItemDataRole.ToolTipRole and col == _TIME_COL:
             return (f"{zahlen.visits} visits ({zahlen.entries} entries), "
                     f"{_dauer_text(zahlen.seconds) or '0 s'} in total"
@@ -309,6 +338,7 @@ class ZoneTreeModel(QAbstractItemModel):
                     str(level) if level != NO_LEVEL else "–",
                     str(zahlen.visits), str(zahlen.entries),
                     str(zahlen.deaths) if zahlen.deaths else "",
+                    _monster_text(zahlen),
                     _dauer_text(zahlen.average_seconds),
                     zahlen.last_seen.replace("T", " "), "")[col]
         if role == NUMERIC_SORT_ROLE:
@@ -322,6 +352,8 @@ class ZoneTreeModel(QAbstractItemModel):
                 return zahlen.entries
             if col == _DEATHS_COL:
                 return zahlen.deaths
+            if col == _MONSTERS_COL:
+                return zahlen.monsters_per_visit if zahlen.kill_seconds else -1
             if col == _TIME_COL:
                 return zahlen.average_seconds
             return level
@@ -329,6 +361,8 @@ class ZoneTreeModel(QAbstractItemModel):
             return (f"{zahlen.visits} visits ({zahlen.entries} entries), "
                     f"{_dauer_text(zahlen.seconds) or '0 s'} in total"
                     if zahlen.seconds else None)
+        if role == Qt.ItemDataRole.ToolTipRole and col == _MONSTERS_COL:
+            return _monster_tooltip(zahlen)
         if role == Qt.ItemDataRole.ToolTipRole and col == _LEVEL_COL \
                 and self._character_level and level != NO_LEVEL:
             anteil = experience_multiplier(self._character_level, level)
@@ -507,7 +541,9 @@ def export_zones(path: str, records: list[ZoneRecord],
         schreiber = csv.writer(datei, delimiter=";")
         schreiber.writerow(["League", "Group", "Zone", "Area id", "Tier",
                             "Monster level", "Visits", "Entries", "Deaths",
-                            "Total seconds", "Average seconds", "Last seen"])
+                            "Total seconds", "Average seconds", "Last seen",
+                            "Kills counted", "Kill seconds", "Kills per minute",
+                            "Monsters per visit"])
         for record in records:
             namen = [league] if league is not None else sorted(record.leagues)
             for name in namen:
@@ -521,6 +557,11 @@ def export_zones(path: str, records: list[ZoneRecord],
                         w.visits, w.entries, w.deaths, round(w.seconds),
                         round(w.average_seconds),
                         w.last_seen.replace("T", " "),
+                        w.kills if w.kill_seconds else "",
+                        round(w.kill_seconds) if w.kill_seconds else "",
+                        round(w.kills_per_minute, 1) if w.kill_seconds else "",
+                        round(w.monsters_per_visit) if w.kill_seconds
+                        and w.average_seconds else "",
                     ])
 
 

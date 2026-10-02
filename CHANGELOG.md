@@ -23,6 +23,14 @@ nach [SemVer](https://semver.org/lang/de/).
   Antwort in der Client.txt steht. Jede Antwort landet in
   `kills-log.csv` im Log-Ordner, mit dem Unterschied zur vorigen und den
   Kampfzonen dazwischen — Rohdaten für eine spätere Auswertung.
+- **Spalte „Monsters" in der Zonen-Tabelle:** getötete Monster je
+  Besuch, aus den `/kills`-Antworten in der Client.txt — das Tempo
+  zwischen zwei Ablesungen mit genau einer Karte dazwischen, mal die
+  Durchschnittszeit je Besuch. Rückwirkend auch für ältere Ablesungen;
+  der Tooltip nennt Tempo und gemessene Zeit, der CSV-Export die
+  Rohwerte. Zwei Karten zwischen zwei Ablesungen lassen sich nicht
+  aufteilen und fallen weg, ebenso Ablesungen über eine Anmeldung hinweg
+  und Aufenthalte über einer Stunde.
 - **Filterzeile in der Item-Tabelle** wie in der Zonen-Tabelle: ein
   Feld je Spalte direkt unter den Namen, mit derselben
   Vervollständigung. Ein Pin steht danach in seinem Feld. Das

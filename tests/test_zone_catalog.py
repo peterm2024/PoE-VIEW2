@@ -533,3 +533,164 @@ def test_a_version_4_catalog_is_rebuilt_instead_of_reinterpreted(tmp_path) -> No
          "leagues": {"A": {"levels": {"70": {"visits": 72}}}}}]}),
         encoding="utf-8")
     assert zk.load(pfad) == {}
+
+
+
+# --- Monster je Karte aus /kills (§attribute_kills) --------------------- #
+# Peter, 2026-10-03: "Wir können jetzt für die Zones auch eine
+# Monsters-Spalte einführen."
+
+from poe_view.services.zone_watcher import KillReading  # noqa: E402
+
+
+def _zeit(minute: int, sekunde: int = 0) -> datetime:
+    return datetime(2026, 9, 26, 12, minute, sekunde)
+
+
+def _ablesung(minute: int, total: int, sekunde: int = 0, session: int = 1) -> KillReading:
+    return KillReading(_zeit(minute, sekunde), total, session)
+
+
+def _karte(area_id: str, von: int, bis: int, seed: str, level: int = 77,
+           von_s: int = 0, bis_s: int = 0) -> ZoneStay:
+    return ZoneStay(entered=_zeit(von, von_s), left=_zeit(bis, bis_s), name=area_id,
+                    area_id=area_id, instance="1", level=level, seed=seed)
+
+
+def _hideout(von: int, bis: int, von_s: int = 0, bis_s: int = 0) -> ZoneStay:
+    return ZoneStay(entered=_zeit(von, von_s), left=_zeit(bis, bis_s), name="Hideout",
+                    area_id="HideoutSlum", instance="1", level=60, seed="1")
+
+
+def _katalog(stays) -> dict:
+    records: dict = {}
+    zk.merge_stays(records, stays)
+    return records
+
+
+def test_two_readings_in_the_same_map_count_for_that_map() -> None:
+    """Peters 01:04 und 01:19 in der Haunted Mansion — beide Ablesungen in
+    derselben Karte. Die erste Fassung (über die eigene Mitschrift)
+    ordnete das keiner Zone zu."""
+    stays = [_karte("MapWorldsAtoll", 0, 20, "222")]
+    records = _katalog(stays)
+    zk.attribute_kills(records, stays, [_ablesung(1, 1000), _ablesung(16, 1600)])
+    stufe = records["MapWorldsAtoll"].stats(UNKNOWN).by_level[77]
+    assert stufe.kills == 600
+    assert stufe.kill_seconds == 15 * 60
+    assert stufe.kills_per_minute == 40
+
+
+def test_the_reminder_routine_counts_the_previous_map_and_drops_the_first_seconds() -> None:
+    """Ablesung ein paar Sekunden nach dem Betreten jeder neuen Karte: Der
+    Abschnitt enthält die ganze vorige Karte samt Hideout-Gängen und zehn
+    Sekunden der neuen — die fallen weg, statt ihn zu verwerfen."""
+    stays = [_karte("MapWorldsAtoll", 0, 6, "222"), _hideout(6, 7),
+             _karte("MapWorldsAtoll", 7, 10, "222"), _hideout(10, 11),
+             _karte("MapWorldsCells", 11, 20, "333", level=68)]
+    records = _katalog(stays)
+    zk.attribute_kills(records, stays, [_ablesung(0, 1000, sekunde=10),
+                                        _ablesung(11, 1700, sekunde=10)])
+    atoll = records["MapWorldsAtoll"].stats(UNKNOWN).by_level[77]
+    assert atoll.kills == 700
+    assert atoll.kill_seconds == 9 * 60 - 10      # 6 + 3 Minuten, ab der Ablesung
+    assert records["MapWorldsCells"].stats(UNKNOWN).by_level[68].kills == 0
+
+
+def test_two_maps_between_readings_cannot_be_split_and_count_for_neither() -> None:
+    stays = [_karte("MapWorldsAtoll", 0, 6, "222"), _hideout(6, 7),
+             _karte("MapWorldsCells", 7, 12, "333", level=68)]
+    records = _katalog(stays)
+    zk.attribute_kills(records, stays, [_ablesung(0, 0), _ablesung(13, 900)])
+    assert records["MapWorldsAtoll"].stats(UNKNOWN).kills == 0
+    assert records["MapWorldsCells"].stats(UNKNOWN).kills == 0
+
+
+def test_the_same_map_twice_with_another_seed_is_two_maps() -> None:
+    stays = [_karte("MapWorldsAtoll", 0, 6, "222"), _hideout(6, 7),
+             _karte("MapWorldsAtoll", 7, 12, "999")]
+    records = _katalog(stays)
+    zk.attribute_kills(records, stays, [_ablesung(0, 0), _ablesung(13, 900)])
+    assert records["MapWorldsAtoll"].stats(UNKNOWN).kills == 0
+
+
+def test_readings_across_a_login_are_never_compared() -> None:
+    """Dazwischen kann ein anderer Charakter spielen — sein Zähler hat mit
+    dem vorigen nichts zu tun."""
+    stays = [_karte("MapWorldsAtoll", 0, 20, "222")]
+    records = _katalog(stays)
+    zk.attribute_kills(records, stays, [_ablesung(1, 1000, session=1),
+                                        _ablesung(16, 1600, session=2)])
+    assert records["MapWorldsAtoll"].stats(UNKNOWN).kills == 0
+
+
+def test_a_falling_counter_is_skipped() -> None:
+    stays = [_karte("MapWorldsAtoll", 0, 20, "222")]
+    records = _katalog(stays)
+    zk.attribute_kills(records, stays, [_ablesung(1, 5000), _ablesung(16, 1600)])
+    assert records["MapWorldsAtoll"].stats(UNKNOWN).kill_seconds == 0
+
+
+def test_a_break_in_the_map_keeps_the_pace_out() -> None:
+    """Underground Sea in Peters Log: 11 Kills/min über 2,8 Stunden — eine
+    Pause, kein Spiel. Dieselbe Grenze wie für die Durchschnittszeit."""
+    stays = [ZoneStay(entered=datetime(2026, 9, 26, 10, 0), left=datetime(2026, 9, 26, 12, 0),
+                      name="Sea", area_id="MapWorldsUndergroundSea", instance="1",
+                      level=73, seed="5")]
+    records = _katalog(stays)
+    zk.attribute_kills(records, stays, [
+        KillReading(datetime(2026, 9, 26, 10, 1), 0, 1),
+        KillReading(datetime(2026, 9, 26, 11, 59), 1800, 1)])
+    assert records["MapWorldsUndergroundSea"].stats(UNKNOWN).kills == 0
+
+
+def test_already_counted_readings_are_not_counted_again() -> None:
+    stays = [_karte("MapWorldsAtoll", 0, 20, "222")]
+    records = _katalog(stays)
+    ablesungen = [_ablesung(1, 1000), _ablesung(16, 1600)]
+    bis = zk.attribute_kills(records, stays, ablesungen)
+    assert bis == "2026-09-26T12:16:00"
+    zk.attribute_kills(records, stays, ablesungen, since=bis)
+    assert records["MapWorldsAtoll"].stats(UNKNOWN).kills == 600
+
+
+def test_monsters_per_visit_is_the_pace_times_the_average_time() -> None:
+    stufe = zk.LevelStats(seconds=1200, timed_visits=2, kills=300, kill_seconds=300)
+    assert stufe.kills_per_minute == 60
+    assert stufe.monsters_per_visit == 600
+
+
+def test_kills_survive_saving_and_loading(tmp_path) -> None:
+    stays = [_karte("MapWorldsAtoll", 0, 20, "222")]
+    records = _katalog(stays)
+    zk.attribute_kills(records, stays, [_ablesung(1, 1000), _ablesung(16, 1600)])
+    pfad = tmp_path / "katalog.json"
+    zk.save(pfad, records, "2026-09-26T12:16:00")
+    wieder = zk.load(pfad)
+    stufe = wieder["MapWorldsAtoll"].stats(UNKNOWN).by_level[77]
+    assert (stufe.kills, stufe.kill_seconds) == (600, 900)
+    assert zk._load_kills_until(pfad) == "2026-09-26T12:16:00"
+
+
+def _kills_zeile(zeit: str, total: str) -> str:
+    return f"2026/09/26 {zeit} 123 abc [INFO Client 1] : You have killed {total} monsters."
+
+
+def test_refresh_counts_kills_once_even_when_called_again(tmp_path) -> None:
+    pfad = _log(tmp_path, [*_eintritt("12:00:00", 77, "MapWorldsAtoll", "Atoll", seed="222"),
+                           _kills_zeile("12:00:20", "1.000"),
+                           _kills_zeile("12:09:20", "1.540"),
+                           *_eintritt("12:10:00", 60, "HideoutSlum", "Hideout")])
+    zk.refresh_from_log(pfad, "TestAccount#1234")
+    records = zk.refresh_from_log(pfad, "TestAccount#1234")
+    stufe = records["MapWorldsAtoll"].stats(UNKNOWN).by_level[77]
+    assert stufe.kills == 540
+    assert stufe.kill_seconds == 9 * 60
+
+
+def test_kills_add_up_over_all_leagues() -> None:
+    eintrag = zk.ZoneRecord("MapWorldsAtoll", "Atoll", zk.MAP, leagues={
+        "Mirage": zk.LeagueStats(by_level={70: zk.LevelStats(kills=100, kill_seconds=60)}),
+        "Allflame": zk.LeagueStats(by_level={70: zk.LevelStats(kills=200, kill_seconds=120)})})
+    gesamt = eintrag.stats(None)
+    assert (gesamt.kills, gesamt.kill_seconds) == (300, 180)

@@ -149,7 +149,10 @@ belonged to is worked out from the character named in level-up and death
 lines; times before the running season are marked <i>(earlier)</i>,
 because characters move to the permanent league once a season ends.</p>
 <p><b>Tier</b>, <b>Deaths</b> and <b>Avg. time</b> come from the same
-log. A stay longer than an hour counts as a visit but not towards the
+log. <b>Monsters</b> counts the monsters killed per visit from the answers
+to <code>/kills</code>: two readings with exactly one map in between give
+a pace, and the pace times the average visit gives the number. Readings
+with two maps in between cannot be split and are left out. A stay longer than an hour counts as a visit but not towards the
 average — the game writes nothing when you quit, so the last zone of an
 evening would otherwise run until the next start.
 The zone display next to it names the level of the zone you are in, and

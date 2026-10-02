@@ -104,7 +104,12 @@ delve depth 0, where nobody dies) from the depths below it.
   of Exile's own `Client.txt`, which names the area level on every single
   zone entry, and it keeps what it has seen even after the game
   truncates that log. Columns: group, map tier, monster level, visits,
-  entries, deaths and the average time per visit.
+  entries, deaths, monsters and the average time per visit.
+  **Monsters** is the number killed per visit, worked out from
+  the game's own `/kills` answers in that log: the pace between two
+  readings with exactly one map in between, times the average time per
+  visit. It fills in as you use `/kills` — including any readings you
+  took before installing PoE-VIEW2.
   **A visit is one map**, however often you went in and out of it:
   walking to a vendor and back through the portal is still the same
   visit. The game writes a seed for every area it generates, and the

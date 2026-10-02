@@ -28,8 +28,9 @@ _LEVEL_COL = 3
 _VISITS_COL = 4
 _ENTRIES_COL = 5
 _DEATHS_COL = 6
-_TIME_COL = 7
-_ID_COL = 9
+_MONSTERS_COL = 7
+_TIME_COL = 8
+_ID_COL = 10
 
 ALLFLAME = "Allflame"
 MIRAGE = "SSF Ruthless (earlier)"
@@ -938,3 +939,56 @@ def test_a_broken_view_state_leaves_the_defaults(qapp, unsinn) -> None:
         assert dialog._view.header().sortIndicatorSection() == _GROUP_COL
     finally:
         dialog.deleteLater()
+
+
+
+# --- Monsters (§zone_catalog.attribute_kills) --------------------------- #
+
+def _mit_kills(kills: int, kill_seconds: float) -> list[ZoneRecord]:
+    zonen = beispiel()
+    atoll = zonen[0].leagues[ALLFLAME].by_level[77]
+    atoll.seconds, atoll.timed_visits = 36 * 600.0, 36
+    atoll.kills, atoll.kill_seconds = kills, kill_seconds
+    return zonen
+
+
+def test_the_monsters_column_shows_the_pace_times_the_average_visit(qapp) -> None:
+    model = ZoneTreeModel(_mit_kills(1200, 900.0), league=ALLFLAME)
+    zeile = next(r for r in range(model.rowCount()) if model.index(r, _NAME_COL).data() == "Atoll")
+    zelle = model.index(zeile, _MONSTERS_COL)
+    assert zelle.data() == "800"                 # 80/min × 10 min
+    assert zelle.data(NUMERIC_SORT_ROLE) == 800
+    assert "80.0 kills per minute" in zelle.data(Qt.ItemDataRole.ToolTipRole)
+
+
+def test_each_level_row_has_its_own_monsters_and_the_zone_row_combines_them(qapp) -> None:
+    bazaar = _bazaar()
+    stufen = bazaar.leagues[ALLFLAME].by_level
+    stufen[71].kills, stufen[71].kill_seconds = 500, 300.0     # 100/min
+    stufen[72].kills, stufen[72].kill_seconds = 300, 300.0     # 60/min
+    model = ZoneTreeModel([bazaar], league=ALLFLAME)
+    eltern = model.index(0, 0)
+    werte = {model.index(r, _LEVEL_COL, eltern).data(): model.index(r, _MONSTERS_COL, eltern).data()
+             for r in range(model.rowCount(eltern))}
+    assert werte == {"71": "417", "72": "246"}       # 100/min × 250 s, 60/min × 246 s
+    # Zusammen: 800 Kills in 10 min = 80/min, mal 248 s Schnitt.
+    assert model.index(0, _MONSTERS_COL).data() == "331"
+
+
+def test_without_readings_the_monsters_column_stays_empty_and_sorts_last(qapp) -> None:
+    model = ZoneTreeModel(beispiel(), league=ALLFLAME)
+    zelle = model.index(0, _MONSTERS_COL)
+    assert zelle.data() == ""
+    assert zelle.data(NUMERIC_SORT_ROLE) == -1
+    assert zelle.data(Qt.ItemDataRole.ToolTipRole) is None
+
+
+def test_the_csv_carries_the_kill_columns(tmp_path) -> None:
+    pfad = tmp_path / "zonen.csv"
+    export_zones(str(pfad), _mit_kills(1200, 900.0), league=ALLFLAME)
+    zeilen = list(csv.reader(pfad.open(encoding="utf-8-sig"), delimiter=";"))
+    kopf = zeilen[0]
+    atoll = next(z for z in zeilen if z[2] == "Atoll")
+    assert atoll[kopf.index("Kills counted")] == "1200"
+    assert atoll[kopf.index("Kills per minute")] == "80.0"
+    assert atoll[kopf.index("Monsters per visit")] == "800"

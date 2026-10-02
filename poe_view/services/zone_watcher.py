@@ -327,6 +327,52 @@ def zone_stays(log_path: Path, since: datetime) -> list[ZoneStay]:
     return [s for s in stays if s.left is None or s.left > since]
 
 
+class KillReading(NamedTuple):
+    """Eine ``/kills``-Ablesung aus der Client.txt. ``session`` zählt die
+    Anmeldungen am Login-Server mit (§kill_readings): Zwei Ablesungen mit
+    verschiedener Sitzung werden nie gegeneinander gerechnet."""
+
+    at: datetime
+    total: int
+    session: int
+
+
+# "… [INFO Client 21176] Async connecting to fra.login.pathofexile.com:20488"
+# — steht beim Spielstart vor dem ersten Eintritt (in Peters Log 268-mal).
+# Danach kann ein ANDERER Charakter spielen; sein Zähler hat mit dem des
+# vorigen nichts zu tun.
+_LOGIN_MARK = ".login.pathofexile.com"
+
+
+def kill_readings(log_path: Path) -> list[KillReading]:
+    """Alle ``/kills``-Ablesungen der Datei, aufsteigend (§kills_log).
+
+    Peter, 2026-10-03: "Wir können jetzt für die Zones auch eine
+    Monsters-Spalte einführen." Gelesen wird die Client.txt, nicht die
+    eigene Mitschrift: Sie enthält jede Ablesung und jeden Zonenwechsel,
+    auch aus Zeiten, in denen PoE-VIEW2 nicht lief oder neu gestartet
+    wurde — an Peters erstem Abend fehlte der Mitschrift genau deshalb
+    eine Zeile."""
+    try:
+        raw = log_path.read_bytes()
+    except OSError:
+        log.warning("Kill-Ablesungen: Client.txt nicht lesbar: %s", log_path)
+        return []
+    gefunden: list[KillReading] = []
+    sitzung = 0
+    for line in raw.decode("utf-8", errors="replace").splitlines():
+        if _LOGIN_MARK in line and "connecting to" in line:
+            sitzung += 1
+            continue
+        if "You have killed" not in line:
+            continue
+        zahl = parse_kills(line)
+        zeit = _line_time(line)
+        if zahl is not None and zeit is not None:
+            gefunden.append(KillReading(zeit, zahl, sitzung))
+    return gefunden
+
+
 def resolve_client_log_path(configured_path: str) -> Path | None:
     """Peter darf entweder direkt die Client.txt angeben oder nur den
     PoE-Installationsordner — beides wird akzeptiert (erst die Datei

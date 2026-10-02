@@ -8144,6 +8144,66 @@ schreibt den Unterschied, Ablesung im Hideout deckt alles),
 `tests/test_settings_dialog.py`. Gegenprobe mit neun Sabotagen, alle
 fallen.
 
+#### 4.59.1 Die Spalte "Monsters" (`zone_catalog.attribute_kills`)
+
+Peter, 2026-10-03, nach den ersten Abenden mit der Erinnerung: "Wir
+können jetzt für die Zones auch eine Monsters-Spalte einführen."
+
+**Quelle ist die Client.txt, nicht `kills-log.csv`.** Die eigene
+Mitschrift hatte am ersten Abend zwei Lücken: Eine zweite Ablesung in
+derselben Map (Peter, 01:04 und 01:19 in der Haunted Mansion) ordnete
+sie keiner Zone zu, weil sie mit Ablesungen am Anfang einer Map
+rechnete; und nach einem Neustart von PoE-VIEW2 fehlte der Unterschied
+ganz. Die Client.txt enthält jede Ablesung und jeden Zonenwechsel,
+unabhängig davon, ob das Programm lief — wie der übrige Katalog
+(§4.56). Nebeneffekt: Peters 224 Ablesungen seit August zählen
+rückwirkend mit (81 Stufen mit Werten bei der ersten Durchsicht).
+
+**Ein Abschnitt zählt nur mit genau einer Karte.** Zwei
+aufeinanderfolgende Ablesungen (`zone_watcher.kill_readings`) bilden
+einen Abschnitt; Karten darin werden an (Kennung, Stufe, Seed)
+erkannt, Ruhezonen zählen nicht mit. Bei zwei Karten ist nicht zu
+sagen, welche wie viele hatte — der Abschnitt fällt weg, statt nach
+Zeit geteilt zu werden (das unterstellte gleiches Tempo, also genau
+das, was gemessen werden soll). Damit die Erinnerungs-Routine
+(Ablesung ein paar Sekunden nach dem Betreten der NEUEN Karte)
+überhaupt Abschnitte liefert, zählt eine Karte mit unter 30 s im
+Abschnitt nicht als zweite (`_KILL_GRACE_S`).
+
+**Ausschlüsse**, jeder mit einem Grund aus Peters Log:
+- **Eine Anmeldung dazwischen** (`Async connecting to
+  fra.login.pathofexile.com`, beim Spielstart, 268-mal im Log): Danach
+  kann ein anderer Charakter spielen. Dass die Zeile auch beim Wechsel
+  über die Charakterauswahl kommt, ist angenommen, nicht gemessen; ein
+  **fallender Zähler** wird zusätzlich übergangen.
+- **Ein Aufenthalt über `_MAX_DWELL_S`** (eine Stunde, wie bei der
+  Durchschnittszeit): Underground Sea stand sonst mit 11 Kills/min über
+  2,8 Stunden da, Primordial Pool mit 14 — Pausen, kein Spiel. Ohne sie
+  92 und 76 je Minute.
+
+**Gespeichert wird ein Tempo, kein Wert je Besuch:** `kills` und
+`kill_seconds` je Stufe, die Zeit in der Karte innerhalb der
+Abschnitte. Wer mitten in der Map abliest, deckt nur einen Teil ab; eine
+Summe je Besuch wäre dann zu klein. Die Spalte zeigt `kills_per_minute
+× average_seconds` — hochgerechnet, und der Tooltip sagt es. Ohne
+Durchschnittszeit steht das Tempo da ("85/min"), damit die Messung
+nicht verschwindet. Leer, solange es keinen Abschnitt gibt; sortiert
+dann ans Ende.
+
+**Inkrementell wie der übrige Katalog:** `kills_until` im
+Katalog-JSON hält die zuletzt eingearbeitete Ablesung; ein neues Feld
+ohne Versionssprung — fehlt es, werden alle Ablesungen der Datei einmal
+eingearbeitet. Ein zweiter Aufruf zählt nichts doppelt.
+
+Getestet: `tests/test_zone_catalog.py` (zwei Ablesungen in einer Karte,
+Erinnerungs-Routine mit Schonfrist, zwei Karten, gleiche Karte mit
+anderem Seed, Anmeldung, fallender Zähler, Pause, kein Doppelzählen,
+Hochrechnung, Speichern und Laden, Summe über Ligen, `refresh_from_log`
+zweimal), `tests/test_zone_watcher.py` (Ablesungen mit Anmeldung,
+fehlende Datei), `tests/test_zone_table.py` (Spalte, Kindzeilen und
+Zusammenfassung, leer und Sortierung, CSV). Gegenprobe mit zehn
+Sabotagen, alle fallen.
+
 ---
 
 ## 8. Entwicklungsstand

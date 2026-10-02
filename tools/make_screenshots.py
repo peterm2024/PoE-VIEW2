@@ -667,15 +667,28 @@ _DEMO_ZONES = [
 ]
 
 
+# Kills je Minute für die Spalte "Monsters" (§zone_catalog.attribute_kills),
+# erfunden in der Spanne, die Peters echte Ablesungen zeigen (45–110 je
+# Minute in Maps). Gemessen gilt je Stufe ein Drittel der Kartenzeit — die
+# Ablesungen decken nie alles ab. Zonen ohne Eintrag bleiben leer, wie
+# ohne Ablesung.
+_DEMO_KILLS_PER_MIN = {"MapWorldsBazaar": 78, "MapWorldsChateau": 52,
+                       "MapWorldsCells": 91, "MapWorldsDunes": 87,
+                       "MapWorldsSiege": 70, "Delve_Main": 112}
+
+
 def _demo_zone_records() -> list[ZoneRecord]:
     records = []
     for area_id, name, kategorie, stufen in _DEMO_ZONES:
         nach_level = {}
         for level, (besuche, eintritte, tode, sekunden) in stufen.items():
+            tempo = _DEMO_KILLS_PER_MIN.get(area_id, 0)
+            gemessen = sekunden / 3 if tempo else 0.0
             nach_level[level] = LevelStats(
                 visits=besuche, entries=eintritte, deaths=tode, seconds=sekunden,
                 timed_visits=besuche if sekunden else 0,
-                last_seen=f"2026-09-2{level % 7 + 1}T21:0{level % 6}:11")
+                last_seen=f"2026-09-2{level % 7 + 1}T21:0{level % 6}:11",
+                kills=round(tempo * gemessen / 60), kill_seconds=gemessen)
         records.append(ZoneRecord(area_id=area_id, name=name,
                                   category=kategorie,
                                   leagues={_DEMO_LEAGUE: LeagueStats(nach_level)}))

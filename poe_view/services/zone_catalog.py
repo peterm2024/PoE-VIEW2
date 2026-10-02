@@ -43,7 +43,7 @@ from pathlib import Path
 from poe_view import config
 from poe_view.services.atomic_json import write_json
 from poe_view.services.league_log import UNKNOWN
-from poe_view.services.zone_watcher import is_rest_area, zone_stays
+from poe_view.services.zone_watcher import is_rest_area, kill_readings, zone_stays
 
 log = logging.getLogger(__name__)
 
@@ -230,6 +230,11 @@ class LevelStats:
     entries: int = 0             # jeder einzelne Eintritt
     last_seed: str = ""
     last_seed_timed: bool = False
+    # /kills (§attribute_kills): getötete Monster und die Zeit in dieser
+    # Stufe, über die sie gezählt sind. Eine RATE, kein Zähler je Besuch —
+    # eine Ablesung mitten in der Map deckt nur einen Teil davon ab.
+    kills: int = 0
+    kill_seconds: float = 0.0
 
     @property
     def average_seconds(self) -> float:
@@ -237,6 +242,16 @@ class LevelStats:
         sonst zöge ein einziger Feierabend den Schnitt einer Karte auf
         eine Stunde hoch."""
         return self.seconds / self.timed_visits if self.timed_visits else 0.0
+
+    @property
+    def kills_per_minute(self) -> float:
+        return self.kills * 60 / self.kill_seconds if self.kill_seconds else 0.0
+
+    @property
+    def monsters_per_visit(self) -> float:
+        """Hochgerechnet: Tempo × durchschnittliche Dauer eines Besuchs.
+        0, wenn eins von beiden fehlt."""
+        return self.kills_per_minute * self.average_seconds / 60
 
 
 @dataclass
@@ -293,6 +308,22 @@ class LeagueStats:
     def average_seconds(self) -> float:
         return self.seconds / self.timed_visits if self.timed_visits else 0.0
 
+    @property
+    def kills(self) -> int:
+        return sum(w.kills for w in self.by_level.values())
+
+    @property
+    def kill_seconds(self) -> float:
+        return sum(w.kill_seconds for w in self.by_level.values())
+
+    @property
+    def kills_per_minute(self) -> float:
+        return self.kills * 60 / self.kill_seconds if self.kill_seconds else 0.0
+
+    @property
+    def monsters_per_visit(self) -> float:
+        return self.kills_per_minute * self.average_seconds / 60
+
 
 @dataclass
 class ZoneRecord:
@@ -324,6 +355,8 @@ class ZoneRecord:
                 ziel.deaths += werte.deaths
                 ziel.seconds += werte.seconds
                 ziel.timed_visits += werte.timed_visits
+                ziel.kills += werte.kills
+                ziel.kill_seconds += werte.kill_seconds
                 ziel.last_seen = max(ziel.last_seen, werte.last_seen)
         return gesamt
 
@@ -469,7 +502,9 @@ def load(path: Path) -> dict[str, ZoneRecord]:
                             last_seen=str(w.get("last_seen") or ""),
                             entries=int(w.get("entries") or 0),
                             last_seed=str(w.get("last_seed") or ""),
-                            last_seed_timed=bool(w.get("last_seed_timed")))
+                            last_seed_timed=bool(w.get("last_seed_timed")),
+                            kills=int(w.get("kills") or 0),
+                            kill_seconds=float(w.get("kill_seconds") or 0.0))
                         for level, w in (werte.get("levels") or {}).items()})
                     for name, werte in (zeile.get("leagues") or {}).items()
                 },
@@ -479,13 +514,17 @@ def load(path: Path) -> dict[str, ZoneRecord]:
     return records
 
 
-def save(path: Path, records: dict[str, ZoneRecord]) -> None:
+def save(path: Path, records: dict[str, ZoneRecord], kills_until: str = "") -> None:
     # Wie die Mod-Sammlung: Der Ordner kann beim allerersten Speichern
     # noch fehlen (``config.ensure_dirs`` lief nur für den echten Start,
     # nicht für einen Test mit gepatchtem APP_DATA_DIR).
     path.parent.mkdir(parents=True, exist_ok=True)
     write_json(path, {
         "version": VERSION,
+        # Bis wohin die /kills-Ablesungen eingearbeitet sind (§attribute_
+        # kills). Ein neues Feld ohne Versionssprung: Fehlt es, werden
+        # einfach alle Ablesungen der Datei einmal eingearbeitet.
+        "kills_until": kills_until,
         "zones": [
             {"area_id": r.area_id, "name": r.name, "category": r.category,
              "leagues": {
@@ -496,7 +535,9 @@ def save(path: Path, records: dict[str, ZoneRecord]) -> None:
                                   "last_seen": w.last_seen,
                                   "entries": w.entries,
                                   "last_seed": w.last_seed,
-                                  "last_seed_timed": w.last_seed_timed}
+                                  "last_seed_timed": w.last_seed_timed,
+                                  "kills": w.kills,
+                                  "kill_seconds": round(w.kill_seconds, 1)}
                      for level, w in sorted(werte.by_level.items())}}
                  for name, werte in sorted(r.leagues.items())}}
             for r in sorted(records.values(), key=lambda r: r.area_id)
@@ -507,7 +548,7 @@ def save(path: Path, records: dict[str, ZoneRecord]) -> None:
 def _fingerabdruck(records: dict[str, ZoneRecord]) -> str:
     return json.dumps([(r.area_id, sorted(r.leagues), r.stats(None).visits,
                         r.stats(None).entries, r.stats(None).deaths,
-                        sorted(r.stats(None).levels))
+                        r.stats(None).kills, sorted(r.stats(None).levels))
                        for r in sorted(records.values(), key=lambda r: r.area_id)])
 
 
@@ -521,6 +562,7 @@ def refresh_from_log(log_path: Path, account_name: str,
     nur, wenn sich etwas geändert hat."""
     pfad = catalog_path(account_name)
     records = load(pfad)
+    kills_bis = _load_kills_until(pfad) if records else ""
     vorher = _fingerabdruck(records)
     # Der Katalog zählt Besuche ab dem Beginn der Datei; ohne Grenze
     # würde jeder Aufruf dieselben Aufenthalte erneut zählen. Deshalb
@@ -532,17 +574,103 @@ def refresh_from_log(log_path: Path, account_name: str,
     # wurde er nie nachgetragen. Wer die Tabelle mitten in einer Map
     # öffnete, verlor deren Dauer und Tode für immer.
     seit = _newest(records)
-    merge_stays(records, [s for s in zone_stays(log_path, datetime.min)
+    alle = zone_stays(log_path, datetime.min)
+    merge_stays(records, [s for s in alle
                           if s.left is not None
                           and s.entered.isoformat(timespec="seconds") > seit],
                 league_of, deaths)
+    kills_neu = attribute_kills(records, alle, kill_readings(log_path),
+                                league_of, kills_bis)
     nachher = _fingerabdruck(records)
-    if nachher != vorher:
+    if nachher != vorher or kills_neu != kills_bis:
         try:
-            save(pfad, records)
+            save(pfad, records, kills_neu)
         except OSError as fehler:
             log.warning("Zonen-Katalog nicht speicherbar (%s): %s", pfad, fehler)
     return records
+
+
+# Wie lange darf eine zweite Karte in einem Ablese-Abschnitt stehen, ohne
+# ihn unbrauchbar zu machen? Wer der Erinnerung folgt (§kills_reminder),
+# liest ein paar Sekunden nach dem Betreten der NEUEN Map ab — der
+# Abschnitt enthält dann die ganze vorige Map und diese paar Sekunden.
+# In ihnen fällt kaum ein Monster; sie fallen weg, statt den Abschnitt
+# zu verwerfen.
+_KILL_GRACE_S = 30.0
+
+
+def _load_kills_until(path: Path) -> str:
+    try:
+        roh = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return ""
+    wert = roh.get("kills_until") if isinstance(roh, dict) else ""
+    return wert if isinstance(wert, str) else ""
+
+
+def attribute_kills(records: dict[str, ZoneRecord], stays, readings,
+                    league_of=None, since: str = "") -> str:
+    """Die ``/kills``-Ablesungen den Karten zuordnen, zwischen denen sie
+    liegen; liefert den Zeitpunkt der letzten eingearbeiteten Ablesung.
+
+    Je zwei aufeinanderfolgende Ablesungen derselben Anmeldung bilden
+    einen Abschnitt; ihr Unterschied sind die Monster darin. Zählen darf
+    ein Abschnitt nur, wenn in ihm genau EINE Karte gespielt wurde —
+    erkannt an Kennung, Stufe und Seed, Hideout und Städte zählen nicht
+    mit (§is_rest_area). Bei zwei Karten ließe sich nicht sagen, welche
+    wie viele hatte; der Abschnitt fällt weg. Eine Karte mit weniger als
+    ``_KILL_GRACE_S`` im Abschnitt zählt dabei nicht als zweite.
+
+    Gezählt werden Monster UND die Zeit in der Karte innerhalb des
+    Abschnitts. Daraus wird ein Tempo, kein Wert je Besuch: Wer mitten in
+    der Map abliest, deckt nur einen Teil von ihr ab, und eine Summe je
+    Besuch wäre dann zu klein. Ein negativer Unterschied (ein anderer
+    Charakter ohne erkannte Anmeldung dazwischen) wird übergangen.
+
+    ``since`` ist die zuletzt eingearbeitete Ablesung (ISO): Abschnitte,
+    die davor endeten, sind schon gezählt."""
+    letzte = since
+    kampf = [s for s in stays if s.area_id and not is_rest_area(s.area_id, s.level)]
+    for vorher, nachher in zip(readings, readings[1:]):
+        ende = nachher.at.isoformat(timespec="seconds")
+        if ende <= since:
+            continue
+        letzte = max(letzte, ende)
+        if vorher.session != nachher.session:
+            continue
+        unterschied = nachher.total - vorher.total
+        if unterschied < 0:
+            continue
+        anteile: dict[tuple, list] = {}
+        for stay in kampf:
+            bis = stay.left or nachher.at
+            beginn, schluss = max(stay.entered, vorher.at), min(bis, nachher.at)
+            dauer = (schluss - beginn).total_seconds()
+            if dauer <= 0:
+                continue
+            schluessel = (stay.area_id, stay.level, getattr(stay, "seed", ""))
+            eintrag = anteile.setdefault(schluessel, [0.0, stay])
+            eintrag[0] += dauer
+        karten = {k: v for k, v in anteile.items() if v[0] >= _KILL_GRACE_S}
+        if len(karten) != 1:
+            continue
+        # Ein Aufenthalt über ``_MAX_DWELL_S`` ist eine Pause, kein Spiel —
+        # dieselbe Regel wie für die Durchschnittszeit. An Peters Log:
+        # Underground Sea mit 11 Kills/min über 2,8 Stunden.
+        if any(stay.seconds > _MAX_DWELL_S for stay in kampf
+               if stay.left is not None and stay.entered < nachher.at
+               and stay.left > vorher.at
+               and (stay.area_id, stay.level, getattr(stay, "seed", "")) in karten):
+            continue
+        (area_id, level, _seed), (sekunden, stay) = next(iter(karten.items()))
+        eintrag = records.get(area_id)
+        if eintrag is None:
+            continue
+        liga = (league_of(stay.entered) if league_of else UNKNOWN) or UNKNOWN
+        stufe = eintrag.leagues.setdefault(liga, LeagueStats()).at(level or NO_LEVEL)
+        stufe.kills += unterschied
+        stufe.kill_seconds += sekunden
+    return letzte
 
 
 def _newest(records: dict[str, ZoneRecord]) -> str:
