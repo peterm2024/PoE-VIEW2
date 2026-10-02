@@ -39,6 +39,11 @@ from poe_view import config
 log = logging.getLogger(__name__)
 
 AUTO_HIDE_MS = 30_000
+# Auffällig soll es sein (§KillsReminder): Schrift und Abstände doppelt so
+# groß wie im übrigen Programm, ein dicker roter Rahmen.
+GROESSE = 2
+RAHMEN_PX = 5
+RAHMEN_FARBE = "#e53935"
 # Abstand vom oberen Bildschirmrand als Anteil der Höhe (§KillsReminder.pop).
 _OBEN_ANTEIL = 0.12
 
@@ -145,15 +150,28 @@ class KillsReminder(QWidget):
         # Rahmen aus dem Stylesheet nicht (nativ gesehen: kein Rahmen).
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground)
         # Eigene Fläche mit Rahmen: Ohne Fensterrahmen ginge das Fenster
-        # sonst auf einem dunklen Spielbild unter.
+        # sonst auf einem dunklen Spielbild unter. Peter, 2026-10-03: "Mach
+        # den Rahmen rot und dicker und das Fenster doppelt so groß. Es muss
+        # ins Auge stechen." Das Rot ist gerechnet: gegen den dunklen Grund
+        # 3,94:1, gegen den hellen 3,71:1 — beide über 3:1 für Bedien-
+        # elemente; grellere Töne (#ff3b30) fielen hell auf 3,1.
         self.setStyleSheet(
-            "#killsReminder { background: palette(window); "
-            "border: 2px solid palette(highlight); border-radius: 6px; }")
+            f"#killsReminder {{ background: palette(window); "
+            f"border: {RAHMEN_PX}px solid {RAHMEN_FARBE}; border-radius: 10px; }}")
+        # Die Schrift an jede Beschriftung einzeln: Mit einem Stylesheet am
+        # Fenster gibt Qt ein setFont() des Fensters nicht an die Kinder
+        # weiter (nativ gemessen: Fenster 18 pt, Beschriftungen 9 pt).
+        schrift = self.font()
+        schrift.setPointSizeF(schrift.pointSizeF() * GROESSE)
+        fett = self.font()
+        fett.setPointSizeF(schrift.pointSizeF())
+        fett.setBold(True)
         self._titel = QLabel()
-        self._titel.setStyleSheet("font-weight: 600;")
+        self._titel.setFont(fett)
         self._text = QLabel("Type <b>/kills</b> in chat")
+        self._text.setFont(schrift)
         aufbau = QVBoxLayout(self)
-        aufbau.setContentsMargins(14, 10, 14, 10)
+        aufbau.setContentsMargins(14 * GROESSE, 10 * GROESSE, 14 * GROESSE, 10 * GROESSE)
         aufbau.addWidget(self._titel)
         aufbau.addWidget(self._text)
         self._timer = QTimer(self)

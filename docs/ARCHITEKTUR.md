@@ -8112,12 +8112,18 @@ nicht"):** Zuerst saß es unten rechts auf dem Hauptbildschirm, PoE lief
 aber auf dem Monitor links davon. Die Testsuite fragt das echte
 Spielfenster nie ab (Autouse-Fixture). Es schließt sich bei der Ablesung, nach 30 s oder bei
 einem Klick. Über dem Spiel liegt es nur, wenn PoE im Fenster oder in
-"Windowed Fullscreen" läuft. Rahmen in der Akzentfarbe des Systems
-(`palette(highlight)`, an Peters Windows `#0078d4` auf `#1e1e1e`,
-3,68:1, über der Schwelle von 3:1 für Bedienelemente). **Falle:** Eine
-eigene `QWidget`-Unterklasse malt Hintergrund und Rahmen aus dem
-Stylesheet erst mit `WA_StyledBackground` — nativ fehlte der Rahmen
-zunächst ganz.
+"Windowed Fullscreen" läuft. Zuerst mit 2 px Rahmen in der
+Akzentfarbe; Peter, 2026-10-03: "Mach den Rahmen rot und dicker und das
+Fenster doppelt so groß. Es muss ins Auge stechen." Jetzt 5 px
+`#e53935` (gerechnet: 3,94:1 gegen den dunklen, 3,71:1 gegen den hellen
+Grund, beide über 3:1 für Bedienelemente; das grellere `#ff3b30` fiel
+hell auf 3,1) und Schrift wie Abstände doppelt so groß (`GROESSE`),
+nativ 301×110 statt 143×58 Pixel. **Zwei Fallen:** Eine eigene
+`QWidget`-Unterklasse malt Hintergrund und Rahmen aus dem Stylesheet
+erst mit `WA_StyledBackground` — nativ fehlte der Rahmen zunächst ganz.
+Und mit einem Stylesheet am Fenster erben die Beschriftungen ein
+`setFont()` des Fensters nicht (gemessen: Fenster 18 pt, Beschriftungen
+9 pt); die Schrift wird deshalb an jeder einzeln gesetzt.
 
 **Der Gong** wird gerechnet (vier Teiltöne im Verhältnis einer Glocke,
 1,1 s, Spitze 32 % der Vollaussteuerung) und einmal als

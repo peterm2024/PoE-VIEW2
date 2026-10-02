@@ -144,3 +144,20 @@ def test_the_reminder_sits_top_centre_below_the_boss_bar(qapp) -> None:
         assert 75 + 100 < punkt.y() < 75 + 300
     finally:
         fenster.close()
+
+
+def test_the_reminder_is_twice_the_size_with_a_thick_red_frame(qapp) -> None:
+    """Peter, 2026-10-03: "Mach den Rahmen rot und dicker und das Fenster
+    doppelt so groß. Es muss ins Auge stechen." Die Schrift muss an den
+    Beschriftungen selbst ankommen — mit Stylesheet am Fenster erbten sie
+    ein setFont() des Fensters nicht (nativ gemessen)."""
+    from PySide6.QtWidgets import QApplication
+    fenster = kills_reminder.KillsReminder()
+    try:
+        grund = QApplication.font().pointSizeF()
+        assert fenster._titel.font().pointSizeF() == 2 * grund
+        assert fenster._text.font().pointSizeF() == 2 * grund
+        assert fenster._titel.font().bold()
+        assert "5px solid #e53935" in fenster.styleSheet()
+    finally:
+        fenster.close()
