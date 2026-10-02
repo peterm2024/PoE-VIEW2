@@ -113,3 +113,34 @@ def test_a_click_closes_the_reminder(qapp) -> None:
                      QPoint(5, 5))
     assert not fenster.isVisible()
     fenster.close()
+
+
+def test_the_reminder_goes_to_the_screen_of_the_game(qapp, monkeypatch) -> None:
+    """Peter, 2026-10-03: "Das Fenster sehe ich nicht" — es stand auf dem
+    Hauptmonitor, PoE lief auf dem links daneben."""
+    from PySide6.QtCore import QRect
+    from PySide6.QtGui import QGuiApplication
+    haupt = QGuiApplication.primaryScreen()
+    monkeypatch.setattr(kills_reminder, "game_window_rect",
+                        lambda: QRect(haupt.geometry().center(), haupt.geometry().center()))
+    ausweich = object()   # nicht der Hauptbildschirm — sonst sähe der Test nichts
+    assert kills_reminder.target_screen(ausweich) is haupt
+
+
+def test_without_a_game_window_the_fallback_screen_is_used(qapp, monkeypatch) -> None:
+    from PySide6.QtGui import QGuiApplication
+    monkeypatch.setattr(kills_reminder, "game_window_rect", lambda: None)
+    ausweich = QGuiApplication.primaryScreen()
+    assert kills_reminder.target_screen(ausweich) is ausweich
+
+
+def test_the_reminder_sits_top_centre_below_the_boss_bar(qapp) -> None:
+    from PySide6.QtCore import QRect
+    fenster = kills_reminder.KillsReminder()
+    try:
+        fenster.adjustSize()
+        punkt = fenster.position_on(QRect(-2560, 75, 2560, 1440))
+        assert punkt.x() + fenster.width() // 2 in range(-1281, -1278)
+        assert 75 + 100 < punkt.y() < 75 + 300
+    finally:
+        fenster.close()

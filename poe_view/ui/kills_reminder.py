@@ -30,8 +30,8 @@ import sys
 import wave
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QGuiApplication
+from PySide6.QtCore import QPoint, QRect, Qt, QTimer
+from PySide6.QtGui import QGuiApplication, QScreen
 from PySide6.QtWidgets import QApplication, QLabel, QVBoxLayout, QWidget
 
 from poe_view import config
@@ -39,6 +39,8 @@ from poe_view import config
 log = logging.getLogger(__name__)
 
 AUTO_HIDE_MS = 30_000
+# Abstand vom oberen Bildschirmrand als Anteil der Höhe (§KillsReminder.pop).
+_OBEN_ANTEIL = 0.12
 
 _RATE = 44_100
 _DAUER_S = 1.1
@@ -93,8 +95,45 @@ def play_gong() -> None:
         QApplication.beep()
 
 
+def game_window_rect() -> QRect | None:
+    """Wo das Spielfenster liegt — oder ``None``, wenn keins offen ist.
+
+    Peter, 2026-10-03: "Gong ist gekommen und passt. Das Fenster sehe ich
+    nicht." Es stand unten rechts auf dem Hauptmonitor; PoE lief auf dem
+    Monitor links davon (Fenster bei x=-2560, nativ ausgelesen). Gelesen
+    wird nur die Lage des Fensters über seinen Klassennamen, nichts
+    sonst — PoE-VIEW2 schreibt weiterhin nie ins Spiel."""
+    if sys.platform != "win32":
+        return None
+    try:
+        import ctypes
+        from ctypes import wintypes
+        user32 = ctypes.windll.user32
+        hwnd = user32.FindWindowW("POEWindowClass", None)
+        if not hwnd or not user32.IsWindowVisible(hwnd):
+            return None
+        rect = wintypes.RECT()
+        if not user32.GetWindowRect(hwnd, ctypes.byref(rect)):
+            return None
+        return QRect(rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top)
+    except Exception:  # noqa: BLE001 — dann eben der Ausweich-Bildschirm
+        log.exception("Kill-Erinnerung: Spielfenster nicht gefunden")
+        return None
+
+
+def target_screen(fallback: QScreen | None) -> QScreen | None:
+    """Der Bildschirm, auf dem das Spiel liegt; sonst ``fallback`` (der
+    von PoE-VIEW2), sonst der Hauptbildschirm."""
+    spiel = game_window_rect()
+    if spiel is not None:
+        bildschirm = QGuiApplication.screenAt(spiel.center())
+        if bildschirm is not None:
+            return bildschirm
+    return fallback or QGuiApplication.primaryScreen()
+
+
 class KillsReminder(QWidget):
-    """Das kleine Fenster unten rechts auf dem Hauptbildschirm."""
+    """Das kleine Fenster oben mittig auf dem Bildschirm des Spiels."""
 
     def __init__(self) -> None:
         super().__init__(None, Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint
@@ -122,17 +161,22 @@ class KillsReminder(QWidget):
         self._timer.setInterval(AUTO_HIDE_MS)
         self._timer.timeout.connect(self.hide)
 
-    def pop(self, zone_name: str) -> None:
+    def pop(self, zone_name: str, screen: QScreen | None = None) -> None:
+        """Oben mittig, etwas unter dem oberen Rand: Unten rechts liegen im
+        Spiel Skill-Leiste und Mana-Kugel, ganz oben die Lebensleiste eines
+        Bosses — knapp darunter verdeckt das Fenster am wenigsten."""
         self._titel.setText(f"⚔ {zone_name}")
         self.adjustSize()
-        bildschirm = QGuiApplication.primaryScreen()
+        bildschirm = screen or QGuiApplication.primaryScreen()
         if bildschirm is not None:
-            frei = bildschirm.availableGeometry()
-            self.move(frei.right() - self.width() - 24,
-                      frei.bottom() - self.height() - 24)
+            self.move(self.position_on(bildschirm.geometry()))
         self.show()
         self.raise_()
         self._timer.start()
+
+    def position_on(self, flaeche: QRect) -> QPoint:
+        return QPoint(flaeche.x() + (flaeche.width() - self.width()) // 2,
+                      flaeche.y() + int(flaeche.height() * _OBEN_ANTEIL))
 
     def mousePressEvent(self, event) -> None:  # noqa: N802 (Qt-API)
         self.hide()

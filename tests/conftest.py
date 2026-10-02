@@ -53,3 +53,6 @@ def _isolated_local_state(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     # Kein Gong aus der Testsuite (§kills_reminder): Ein Test, der die
     # Erinnerung einschaltet, soll prüfen, DASS sie klingt, nicht klingen.
     monkeypatch.setattr("poe_view.ui.kills_reminder.play_gong", lambda: None)
+    # ... und kein Blick auf ein echtes, gerade laufendes Spielfenster:
+    # Ob PoE nebenher offen ist, darf kein Testergebnis ändern.
+    monkeypatch.setattr("poe_view.ui.kills_reminder.game_window_rect", lambda: None)

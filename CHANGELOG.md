@@ -18,7 +18,7 @@ nach [SemVer](https://semver.org/lang/de/).
   die Liga nicht, sie folgt weiter der zuletzt gespielten.
 - **Erinnerung an `/kills`** (Settings > Zone Refresh, standardmäßig
   aus): Beim Betreten einer neuen Kampfzone ein kurzer Gong und ein
-  kleines Fenster unten rechts, das zur Eingabe von `/kills` auffordert.
+  kleines Fenster oben mittig auf dem Monitor des Spiels, das zur Eingabe von `/kills` auffordert.
   Es nimmt dem Spiel die Tastatur nicht weg und schließt sich, sobald die
   Antwort in der Client.txt steht. Jede Antwort landet in
   `kills-log.csv` im Log-Ordner, mit dem Unterschied zur vorigen und den

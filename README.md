@@ -353,8 +353,8 @@ delve depth 0, where nobody dies) from the depths below it.
   an estimate wherever it appears.
 - **Optional `/kills` reminder** (off by default, *Settings > Zone
   Refresh*): on entering a new combat zone — not on returning to the
-  same map through a portal — a short gong sounds and a small window in
-  the corner asks you to type `/kills` in chat. It does not take the
+  same map through a portal — a short gong sounds and a small window at
+  the top of the game's screen asks you to type `/kills` in chat. It does not take the
   keyboard away from the game, and closes itself once the answer shows
   up in `Client.txt`. Every answer is written to `kills-log.csv` in the
   log folder, with the difference to the previous one and the combat

@@ -8102,8 +8102,15 @@ nicht geworfen.
 **Das Fenster** (`KillsReminder`) darf dem Spiel den Fokus nicht
 nehmen: Werkzeugfenster ohne Rahmen, immer oben,
 `WA_ShowWithoutActivating`, keine Fokus-Policy; nativ gemessen ist es
-nach dem Zeigen nicht aktiv. Es sitzt unten rechts auf dem
-Hauptbildschirm, schließt sich bei der Ablesung, nach 30 s oder bei
+nach dem Zeigen nicht aktiv. Es sitzt oben mittig (12 % der Höhe
+unter dem Rand: ganz oben liegt die Lebensleiste eines Bosses, unten
+rechts Skill-Leiste und Mana-Kugel) auf dem Bildschirm, auf dem das
+Spielfenster liegt — gefunden über den Klassennamen `POEWindowClass`,
+nur dessen Lage wird gelesen. Ohne Spielfenster der Bildschirm von
+PoE-VIEW2. **Falle (Peter, 2026-10-03: "Das Fenster sehe ich
+nicht"):** Zuerst saß es unten rechts auf dem Hauptbildschirm, PoE lief
+aber auf dem Monitor links davon. Die Testsuite fragt das echte
+Spielfenster nie ab (Autouse-Fixture). Es schließt sich bei der Ablesung, nach 30 s oder bei
 einem Klick. Über dem Spiel liegt es nur, wenn PoE im Fenster oder in
 "Windowed Fullscreen" läuft. Rahmen in der Akzentfarbe des Systems
 (`palette(highlight)`, an Peters Windows `#0078d4` auf `#1e1e1e`,

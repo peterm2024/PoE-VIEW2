@@ -5394,7 +5394,7 @@ class MainWindow(QMainWindow):
         if getattr(self, "_kills_popup", None) is None:
             self._kills_popup = kills_reminder.KillsReminder()
         kills_reminder.play_gong()
-        self._kills_popup.pop(zone_name)
+        self._kills_popup.pop(zone_name, kills_reminder.target_screen(self.screen()))
 
     def _active_character_name(self) -> str:
         """Wie ``_active_character_level``: der Charakter mit der jüngsten
