@@ -22,6 +22,14 @@ nach [SemVer](https://semver.org/lang/de/).
   Filterfeld im Rechtsklick-Menü des Spaltenkopfs entfällt; dort
   bleiben die Spaltenauswahl und „Clear All Column Filters".
 
+### Behoben
+
+- **Der Item-Verlauf sprang zwischen Zeilen hin und her**, mehrmals pro
+  Sekunde und auch nach dem Loslassen, sobald man beim Anklicken einer
+  Zeile die Maus um ein Pixel bewegte. Ursache war das automatische
+  Scrollen beim Ziehen, das in einem Bereich von einer Zeile Höhe in
+  beide Richtungen zugleich anschlug; es ist für den Verlauf jetzt aus.
+
 ## [0.20.0] - 2026-10-02
 
 ### Neu

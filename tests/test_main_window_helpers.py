@@ -11389,3 +11389,50 @@ def test_the_native_window_exists_before_the_geometry_is_restored(qapp, monkeypa
         assert gesehen == [True]
     finally:
         _schliessen(neu)
+
+
+def test_a_click_with_a_tiny_drag_does_not_set_the_history_scrolling(qapp) -> None:
+    """FALLSTRICKE #94, Peter: "Wenn ich draufklick und ein Pixel nach
+    unten ziehe fängt es an" — und es lief nach dem Loslassen weiter,
+    mehrmals pro Sekunde. Der Verlauf steht zusammengeklappt auf einer
+    Zeile; mit Autoscroll sprang er hier offscreen wie an Peters
+    Bildschirm (zwölf Wechsel in zwei Sekunden)."""
+    import time as _time
+    from PySide6.QtCore import QPoint, Qt
+    from PySide6.QtTest import QTest
+    from poe_view.ui.item_history import HistoryEntry
+    win = MainWindow()
+    jetzt = datetime.now(timezone.utc)
+    win.history_model.set_entries([
+        HistoryEntry(jetzt, "removed", "WitchOfPeter",
+                     Item.model_validate({"typeLine": f"Item {i}"})) for i in range(12)])
+    win.show()
+    try:
+        for _ in range(10):
+            qapp.processEvents()
+        vp = win.history_table.viewport()
+        # Genau eine Zeile hoch wie an Peters Bildschirm (30 px). Offscreen
+        # misst der Kopf anders, der Bereich stünde sonst bei 52 px — dort
+        # liegt die Mitte außerhalb des Autoscroll-Rands, und der Test sähe
+        # auch MIT Autoscroll nichts springen.
+        verlauf = win.history_table
+        verlauf.setMaximumHeight(verlauf.height() - vp.height() + verlauf.rowHeight(0))
+        for _ in range(10):
+            qapp.processEvents()
+        assert vp.height() == win.history_table.rowHeight(0)
+        punkt = QPoint(300, vp.height() // 2)
+        QTest.mousePress(vp, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, punkt)
+        QTest.mouseMove(vp, punkt + QPoint(0, 1))
+        QTest.mouseRelease(vp, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier,
+                           punkt + QPoint(0, 1))
+        leiste = win.history_table.verticalScrollBar()
+        werte = []
+        ende = _time.monotonic() + 1.5
+        while _time.monotonic() < ende:
+            qapp.processEvents()
+            werte.append(leiste.value())
+            _time.sleep(0.02)
+        assert set(werte) == {werte[0]}
+    finally:
+        win.hide()
+        _schliessen(win)

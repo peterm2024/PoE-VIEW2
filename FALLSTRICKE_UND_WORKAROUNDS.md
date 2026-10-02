@@ -1977,3 +1977,38 @@ Ohne `winId()` fällt er; nativ fällt in dem Fall auch die Messung
 sondern WANN. Und eine Mehrmonitor-Frage lässt sich nur am echten
 Aufbau beantworten.
 
+## 94. Der Item-Verlauf sprang mehrmals pro Sekunde zwischen zwei Zeilen — Autoscroll in einem eine Zeile hohen Bereich
+
+**Symptom.** Peter, 2026-10-02, mit zwei Screenshots (21:23:40
+"Pecoraro" und 21:35:13 "Golden Kris"): "Wenn ich auf die History
+Zeile klicke, also die Zeile markiere, wechseln die beiden Screenshots
+permanent abwechselnd durch." Auf Nachfrage: auch nach dem Loslassen,
+mehrmals pro Sekunde, zusammengeklappt wie aufgezogen, und: "Wenn ich
+draufklick und ein Pixel nach unten ziehe fängt es an."
+
+**Falsche Spur zuerst:** ein Neuaufbau des Modells bei jedem Abruf.
+Der Log widerlegte das — zwischen 21:25 und 21:35 kam kein einziger
+Verlaufseintrag hinzu, trotzdem sprang die Zeile.
+
+**Ursache.** Qts Autoscroll in `QAbstractItemView`: Wer beim Markieren
+zieht, lässt die Ansicht scrollen, sobald die Maus im Rand von 16 px
+oben oder unten steht. Zusammengeklappt ist der Verlauf genau eine
+Zeile hoch (30 px) — der GANZE Bereich ist Rand, oben wie unten, und
+die Ansicht scrollt abwechselnd in beide Richtungen. Mit einem Pixel
+Ziehen nachgestellt, nativ und offscreen gleich: zwölf Wechsel in zwei
+Sekunden, und sie liefen nach dem Loslassen weiter. Ohne Autoscroll:
+keiner.
+
+**Lösung.** `history_table.setAutoScroll(False)`. Der Verlauf hat
+höchstens 120 Zeilen; Mausrad und Scrollbalken reichen.
+
+**Test.** `test_a_click_with_a_tiny_drag_does_not_set_the_history_
+scrolling`: Klick, ein Pixel Ziehen, Loslassen, 1,5 s beobachten. Der
+Test muss den Verlauf eigens auf eine Zeilenhöhe begrenzen — offscreen
+steht er sonst bei 52 px, die Mitte liegt außerhalb des Rands, und der
+erste Entwurf blieb auch ohne den Fix grün (Gegenprobe hielt).
+
+**Lehre:** Ein Qt-Verhalten, das für große Ansichten gedacht ist, kann
+in einer sehr kleinen kippen. Und "auch nach dem Loslassen" war die
+Angabe, die den Neuaufbau als Ursache ausschloss — nachfragen lohnt.
+

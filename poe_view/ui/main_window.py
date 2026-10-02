@@ -1553,6 +1553,13 @@ class MainWindow(QMainWindow):
         self.history_table.setModel(self.history_model)
         self.history_table.setSelectionBehavior(QTableView.SelectionBehavior.SelectRows)
         self.history_table.verticalHeader().hide()
+        # Kein Autoscroll (FALLSTRICKE #94): Zusammengeklappt ist der
+        # Verlauf eine Zeile hoch, der ganze Bereich liegt damit im
+        # Autoscroll-Rand. Ein Klick mit einem Pixel Ziehen ließ die Zeilen
+        # mehrmals pro Sekunde hin- und herspringen — auch nach dem
+        # Loslassen weiter (Peter, 2026-10-02/03). Mausrad und Scrollbalken
+        # reichen für 120 Zeilen.
+        self.history_table.setAutoScroll(False)
         # Spaltenbreiten wie bei der Item-Tabelle von Hand: die Qt-Vorgabe
         # (überall 100px) verschenkt Platz an Icon/Event und schneidet
         # dafür lange Item-Namen ab ("Awakened Deadly Ailments Support").

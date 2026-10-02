@@ -764,6 +764,9 @@ def test_moving_the_mouse_marks_the_bar_of_the_tooltip(qapp) -> None:
 
     graph, layout = _graph_mit_flachem_balken(qapp)
     graph.show()
+    # Erst bewegen, wenn das Fenster steht: Lief davor ein Test mit
+    # Mausklicks (Verlauf, FALLSTRICKE #94), kam die Bewegung sonst nicht an.
+    assert QTest.qWaitForWindowExposed(graph)
     x, _y, w, _h, _r = layout.bars[0]
     QTest.mouseMove(graph, QPoint(int(x + w / 2), 10))
     qapp.processEvents()
