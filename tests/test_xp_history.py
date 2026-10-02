@@ -288,3 +288,47 @@ def test_geschaetzte_punkte_bleiben_beim_neustart_geschaetzt():
                                 P(at=950.0, seconds=50.0, rate=2.0)])
 
     assert [z["estimated"] for z in zurueck["Held"]] == [True, False]
+
+
+# --- Tooltip-Angaben (Peter, 2026-10-02) ---------------------------------
+
+class Z(NamedTuple):
+    at: float
+    seconds: float
+    rate: float
+    instance: str = ""
+    level: int = 0
+    estimated: bool = False
+    zones: tuple = ()
+    deaths: int = 0
+
+
+def test_zonen_und_tode_fahren_mit():
+    punkt = Z(at=900.0, seconds=560.0, rate=1e6, level=79,
+              zones=(("Azurite Mine", "Delve_Main", 55, 500.0),
+                     ("Port", "MapWorldsPort", 70, 60.0)),
+              deaths=1)
+    zurueck = _hin_und_zurueck([punkt])["Held"][0]
+    assert zurueck["zones"] == (("Azurite Mine", "Delve_Main", 55, 500.0),
+                                ("Port", "MapWorldsPort", 70, 60.0))
+    assert zurueck["deaths"] == 1
+
+
+def test_eine_aeltere_zeile_ohne_zonen_bleibt_ladbar():
+    """Kein Versionssprung: Peters Verlauf von vor dem Tooltip bleibt,
+    seine Balken sagen nur weniger."""
+    zurueck = _hin_und_zurueck([P(at=900.0, seconds=60.0, rate=1e6)])["Held"][0]
+    assert zurueck["zones"] == ()
+    assert zurueck["deaths"] == 0
+
+
+def test_kaputte_zoneneintraege_fallen_still_heraus():
+    payload = xp_history.to_payload({"Held": [Z(at=900.0, seconds=60.0, rate=1e6)]},
+                                    now_mono=1000.0, now_wall=50_000.0)
+    payload["characters"]["Held"][0]["zones"] = [["Port", "MapWorldsPort", 70, 60.0],
+                                                 ["kaputt"], "auch kaputt"]
+    payload["characters"]["Held"][0]["deaths"] = "zwei"
+    zurueck = xp_history.from_payload(payload, now_mono=42.0, now_wall=50_000.0,
+                                      span_s=SPAN)["Held"][0]
+    assert zurueck["zones"] == (("Port", "MapWorldsPort", 70, 60.0),)
+    assert zurueck["deaths"] == 0

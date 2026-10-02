@@ -656,3 +656,90 @@ def test_the_caption_still_fits_the_panel(qapp) -> None:
 
     lang = average_caption(-89_000, 331_000_000, 3 * 3600)
     assert QFontMetrics(schrift).horizontalAdvance(lang) < 520 - 4, lang
+
+
+# --- Tooltip je Balken (Peter, 2026-10-02: "für jede Area ein Mouseover
+# ... welche Map oder Zone, wieviel XP/h, wieviel XP-Malus") ------------- #
+
+from poe_view.ui.xp_graph import XpPoint, bar_at, graph_layout, point_tooltip  # noqa: E402
+
+_NOW = 10_000.0
+_WALL = 1_790_000_000.0   # 2026-09-21 irgendwann — nur die Uhrzeit zählt
+
+
+def test_the_tooltip_names_zone_tier_rate_and_penalty() -> None:
+    punkt = XpPoint(at=_NOW - 60, seconds=600, rate=6_000_000, level=79,
+                    zones=(("Port", "MapWorldsPort", 70, 600.0),))
+    text = point_tooltip(punkt, [punkt], _NOW, _WALL)
+    assert "Port (tier 3, level 70)" in text
+    assert "10:00 in combat" in text
+    assert "+1 000 000 XP" in text
+    assert "6.00 M XP/h" in text
+    # Sicherheitsabstand bei 79: 7 Level; 9 Level Abstand → 91 %
+    assert "Character level 79 in area level 70: 91% XP" in text
+
+
+def test_no_penalty_is_said_plainly() -> None:
+    punkt = XpPoint(at=_NOW, seconds=60, rate=600_000, level=79,
+                    zones=(("Azurite Mine", "Delve_Main", 78, 60.0),))
+    text = point_tooltip(punkt, [punkt], _NOW, _WALL)
+    assert "Azurite Mine (level 78)" in text          # keine Tier im Bergwerk
+    assert "tier" not in text
+    assert "no penalty" in text
+
+
+def test_several_zones_are_listed_with_their_time() -> None:
+    punkt = XpPoint(at=_NOW, seconds=660, rate=1e6, level=79,
+                    zones=(("Port", "MapWorldsPort", 70, 600.0),
+                           ("Ancient Catacomb", "MapSideArea4_2", 81, 60.0)))
+    text = point_tooltip(punkt, [punkt], _NOW, _WALL)
+    assert "Port + Ancient Catacomb" in text
+    assert "Port (tier 3, level 70): 10:00" in text
+    assert "Ancient Catacomb (tier 14, level 81): 1:00" in text
+
+
+def test_deaths_group_and_estimate_are_mentioned() -> None:
+    a = XpPoint(at=_NOW - 900, seconds=300, rate=2e6, instance="7", level=79,
+                zones=(("Port", "MapWorldsPort", 70, 300.0),), deaths=2,
+                estimated=True)
+    b = XpPoint(at=_NOW, seconds=300, rate=4e6, instance="7", level=79)
+    text = point_tooltip(a, [a, b], _NOW, _WALL)
+    assert "☠ 2 deaths" in text
+    assert "Whole map, 2 sections: 10:00 · 3.00 M XP/h" in text
+    assert "Estimated" in text
+
+
+def test_an_old_point_without_zones_still_gets_a_tooltip() -> None:
+    punkt = XpPoint(at=_NOW, seconds=120, rate=900_000, level=79)
+    text = point_tooltip(punkt, [punkt], _NOW, _WALL)
+    assert "2:00 in combat" in text
+    assert "900 K XP/h" in text
+    assert "penalty" not in text and "area level" not in text
+
+
+def test_the_zone_name_is_escaped() -> None:
+    punkt = XpPoint(at=_NOW, seconds=60, rate=1e6,
+                    zones=(("<b>Evil</b>", "MapWorldsPort", 70, 60.0),))
+    assert "<b>Evil</b>" not in point_tooltip(punkt, [punkt], _NOW, _WALL)
+
+
+def test_the_bar_under_the_mouse_is_found_also_next_to_a_thin_one() -> None:
+    punkte = [XpPoint(at=_NOW - 3000, seconds=600, rate=1e6),
+              XpPoint(at=_NOW - 100, seconds=1, rate=1e6)]   # schmal
+    layout = graph_layout(punkte, _NOW, 1000, 100)
+    (x0, _, w0, _, _), (x1, _, w1, _, _) = layout.bars
+    assert bar_at(layout, x0 + w0 / 2) == 0
+    assert bar_at(layout, x1 + w1 + 2) == 1                   # knapp daneben
+    assert bar_at(layout, (x0 + w0 + x1) / 2) is None          # in der Lücke
+
+
+def test_the_widget_answers_with_the_tooltip_of_the_hovered_bar(qapp) -> None:
+    graph = XpGraph()
+    graph.resize(600, 120)
+    punkt = XpPoint(at=_NOW - 60, seconds=600, rate=6_000_000, level=79,
+                    zones=(("Port", "MapWorldsPort", 70, 600.0),))
+    graph.set_points([punkt], _NOW, now_wall=_WALL)
+    layout = graph_layout([punkt], _NOW, graph.width(), graph._plot_height())
+    x, _, w, _, _ = layout.bars[0]
+    assert "Port (tier 3" in graph.tooltip_at(x + w / 2)
+    assert graph.tooltip_at(5) is None

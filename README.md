@@ -266,6 +266,12 @@ delve depth 0, where nobody dies) from the depths below it.
   since the last update counts, not just the one you left last. The graph
   survives a restart: measured sections are stored per account and drawn
   again next time, so closing the program does not empty it.
+  **Hover over a bar** to see what it was: the zone (with map tier and
+  area level, or several zones with their times), when, how long in
+  combat, the experience gained and the rate, the level penalty at that
+  area level, deaths in that stretch, and for a map left and re-entered
+  the total for the whole map. Loot is deliberately not in it — it is
+  the one number that could not be told reliably.
 - **The maps you ran before starting PoE-VIEW2** show up as well, drawn
   fainter than the measured ones. Their length comes from the game's own
   `Client.txt` and is exact; the experience gained while the program was

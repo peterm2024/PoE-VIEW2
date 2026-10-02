@@ -8559,6 +8559,9 @@ def test_maps_before_the_start_become_estimated_bars(qapp, tmp_path, monkeypatch
     assert punkte[0].rate == pytest.approx(punkte[1].rate)
     assert sum(p.gain for p in punkte) == pytest.approx(3_000_000)
     assert [p.instance for p in punkte] == ["2", "4"]
+    # Auch der blasse Balken sagt im Tooltip, welche Map es war.
+    assert [p.zones for p in punkte] == [(("Cage", "MapWorldsCage", 70, 600.0),),
+                                         (("Port", "MapWorldsPort", 70, 300.0),)]
 
     win.worker.stop()
     win.worker.wait(5000)
@@ -11012,6 +11015,42 @@ def test_an_old_last_entry_is_not_taken_for_a_running_stay(
         tmp_path, monkeypatch, xp_graph.GRAPH_SPAN_S + 600)
     try:
         assert win._zone_stays == []
+    finally:
+        win.worker.stop()
+        win.worker.wait(5000)
+
+
+def test_a_graph_point_carries_its_zones_and_deaths(qapp, monkeypatch) -> None:
+    """Peter, 2026-10-02: ein Mouseover je Balken mit Zone, Rate und
+    Strafe. Die Angaben entstehen hier, beim Aufzeichnen — später weiß
+    niemand mehr, welche Zonen im Fenster lagen."""
+    mono = [10_000.0]
+    wall = [1_790_000_000.0]
+    monkeypatch.setattr("poe_view.ui.main_window.time.monotonic", lambda: mono[0])
+    monkeypatch.setattr("poe_view.ui.main_window.time.time", lambda: wall[0])
+
+    def warte(sekunden):
+        mono[0] += sekunden
+        wall[0] += sekunden
+
+    win = MainWindow()
+    try:
+        win._on_character_snapshot("WitchOfPeter", 79, 1_000_000)
+        warte(30)
+        win._zone_watcher = _KennungsWatcher()
+        win._zone_watcher.last_area_level = 70
+        _betritt(win, "Port", "MapWorldsPort", "7")
+        warte(400)
+        win._deaths["WitchOfPeter"] = [datetime.fromtimestamp(wall[0])]
+        warte(200)
+        win._zone_watcher.last_area_level = 60
+        _betritt(win, "Backstreet Hideout", "HideoutSlum", "1")
+        warte(2)
+        win._on_character_snapshot("WitchOfPeter", 79, 2_000_000)
+
+        punkt = win._xp_watch["WitchOfPeter"].history[-1]
+        assert punkt.zones == (("Port", "MapWorldsPort", 70, 600.0),)
+        assert punkt.deaths == 1
     finally:
         win.worker.stop()
         win.worker.wait(5000)

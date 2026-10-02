@@ -37,13 +37,19 @@ Fehler in einer Zeichenroutine findet man sonst nur mit dem Auge.
 
 from __future__ import annotations
 
+import html
+import time
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import NamedTuple, Sequence
 
-from PySide6.QtCore import QPointF, QRectF, Qt
+from PySide6.QtCore import QEvent, QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QPainter, QPen, QPolygonF
-from PySide6.QtWidgets import QSizePolicy, QWidget
+from PySide6.QtWidgets import QSizePolicy, QToolTip, QWidget
 
+from poe_view.services.experience import experience_multiplier
+from poe_view.services.zone_catalog import (TIER_CATEGORIES, categorise,
+                                            map_tier_from_level)
 from poe_view.ui.theme import DASH_BAD, DASH_OK, blend, dimmed_text
 
 # Die Fläche hinter den Balken einer zusammengehörenden Map: dasselbe
@@ -140,7 +146,15 @@ class XpPoint(NamedTuple):
     zwischen dem letzten bekannten Erfahrungsstand und dem Programmstart
     liefen (``MainWindow._estimated_points``). Ihre Dauer ist exakt, die
     Verteilung der Erfahrung auf sie ist eine Annahme — deshalb werden
-    sie blasser gezeichnet."""
+    sie blasser gezeichnet.
+
+    ``zones`` und ``deaths`` sind nur für den Tooltip da (Peter,
+    2026-10-02: "für jede Area ein Mouseover ... mit Erklärungen, z.B.
+    welche Map oder Zone, wieviel XP/h, wieviel XP-Malus"). ``zones``
+    sind die Kampfzonen des Abschnitts als ``(Name, Gebiets-Kennung,
+    Gebietslevel, Sekunden)``, längste zuerst; ``deaths`` die Tode des
+    Charakters im Abschnitt. Beides fehlt bei Punkten, die vor dem
+    2026-10-02 gespeichert wurden — der Tooltip sagt dann weniger."""
 
     at: float
     seconds: float
@@ -148,6 +162,8 @@ class XpPoint(NamedTuple):
     instance: str = ""
     level: int = 0
     estimated: bool = False
+    zones: tuple = ()
+    deaths: int = 0
 
     @property
     def gain(self) -> float:
@@ -440,6 +456,102 @@ def graph_layout(points: Sequence[XpPoint], now: float, width: float, height: fl
                   clipped=clipped, estimated=estimated)
 
 
+def bar_at(layout: Layout, x: float, slack: float = 3.0) -> int | None:
+    """Der Balken unter der Maus — Index in ``layout.bars``.
+
+    Nur die x-Lage zählt: Ein Balken ist oft nur ein paar Pixel hoch, ihn
+    auch in der Höhe treffen zu müssen machte den Tooltip zur
+    Geschicklichkeitsübung. Liegt die Maus in keiner Spanne, gilt der
+    nächste Balken innerhalb von ``slack`` Pixeln — ein Zwei-Pixel-Balken
+    wäre sonst kaum zu erwischen."""
+    bester, abstand = None, slack
+    for index, (bx, _y, bw, _h, _rate) in enumerate(layout.bars):
+        if bx <= x <= bx + bw:
+            return index
+        weg = min(abs(x - bx), abs(x - (bx + bw)))
+        if weg <= abstand:
+            bester, abstand = index, weg
+    return bester
+
+
+def _dauer(seconds: float) -> str:
+    seconds = max(0, round(seconds))
+    if seconds < 60:
+        return f"{seconds} s"
+    stunden, rest = divmod(seconds, 3600)
+    minuten, sekunden = divmod(rest, 60)
+    return (f"{stunden}:{minuten:02d}:{sekunden:02d}" if stunden
+            else f"{minuten}:{sekunden:02d}")
+
+
+def _rate_text(rate: float) -> str:
+    if abs(rate) >= 1_000_000:
+        return f"{rate / 1_000_000:.2f} M XP/h"
+    return f"{rate / 1_000:.0f} K XP/h"
+
+
+def _zone_line(name: str, area_id: str, level: int) -> str:
+    """"Port (map tier 3, level 70)" — die Tier nur, wo es eine gibt
+    (§zone_catalog.TIER_CATEGORIES); "Azurite Mine (level 55)"."""
+    teile = []
+    tier = (map_tier_from_level(level)
+            if area_id and categorise(area_id) in TIER_CATEGORIES else None)
+    if tier:
+        teile.append(f"tier {tier}")
+    if level:
+        teile.append(f"level {level}")
+    return f"{name or area_id or 'Unknown zone'}" + (f" ({', '.join(teile)})" if teile else "")
+
+
+def point_tooltip(point: XpPoint, group: Sequence[XpPoint],
+                  now: float, now_wall: float) -> str:
+    """Der Text zu einem Balken (Peter, 2026-10-02). Bewusst ohne Beute:
+    Die wäre die einzige Zahl darin, die nicht stimmt — unidentifizierte
+    Items tragen keine Mods, Delve-Händlergänge sind unsichtbar, und was
+    in der Map aufgehoben wird, erscheint erst im Hideout (§4.56.6).
+
+    ``group`` sind alle Abschnitte derselben Map (§group_by_instance);
+    bei mehr als einem steht die Summe darunter. ``now``/``now_wall``
+    sind dieselbe Gegenwart auf beiden Uhren — die Punkte laufen auf
+    ``time.monotonic()``, angezeigt wird Wanduhrzeit."""
+    def uhr(mono: float) -> str:
+        return datetime.fromtimestamp(now_wall - (now - mono)).strftime("%H:%M")
+
+    zeilen = []
+    zonen = list(point.zones)
+    if len(zonen) == 1:
+        name, area_id, level, _sek = zonen[0]
+        zeilen.append(f"<b>{html.escape(_zone_line(name, area_id, level))}</b>")
+    elif zonen:
+        zeilen.append("<b>" + html.escape(" + ".join(z[0] or z[1] for z in zonen)) + "</b>")
+        # Eingerückt mit festen Leerzeichen — gewöhnliche fasst HTML zu
+        # einem zusammen, und die Zeilen stünden bündig unter dem Titel.
+        zeilen += ["&nbsp;&nbsp;&nbsp;" + html.escape(f"{_zone_line(n, a, lv)}: {_dauer(s)}")
+                   for n, a, lv, s in zonen]
+    zeilen.append(f"{uhr(point.at - point.seconds)} – {uhr(point.at)} · "
+                  f"{_dauer(point.seconds)} in combat")
+    gewinn = round(point.gain)
+    zeilen.append(f"{gewinn:+,} XP · {_rate_text(point.rate)}".replace(",", " "))
+    stufen = {z[2] for z in zonen if z[2]}
+    if point.level and stufen:
+        for stufe in sorted(stufen):
+            anteil = experience_multiplier(point.level, stufe)
+            wirkung = ("no penalty" if anteil >= 0.995
+                       else f"{anteil:.1%} XP" if anteil < 0.1 else f"{anteil:.0%} XP")
+            zeilen.append(f"Character level {point.level} in area level {stufe}: {wirkung}")
+    if point.deaths:
+        zeilen.append(f"☠ {point.deaths} {'death' if point.deaths == 1 else 'deaths'}")
+    if len(group) > 1:
+        gesamt = sum(p.seconds for p in group)
+        zeilen.append(f"<br>Whole map, {len(group)} sections: {_dauer(gesamt)} · "
+                      f"{_rate_text(combined_rate(group))}")
+    if point.estimated:
+        zeilen.append("<br><i>Estimated: played before the program started. The "
+                      "time comes from Client.txt,<br>the experience of that "
+                      "stretch is spread evenly over its maps.</i>")
+    return "<br>".join(zeilen)
+
+
 def axis_label(rate: float) -> str:
     """Beschriftung der Spitze — bewusst gröber als
     ``MainWindow._format_xp_rate``: An einer Achse steht die
@@ -462,12 +574,14 @@ class XpGraph(QWidget):
         super().__init__()
         self._points: list[XpPoint] = []
         self._now = 0.0
+        self._now_wall = 0.0
         self._deaths: list[float] = []
         self.setMinimumHeight(_MIN_HEIGHT)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
     def set_points(self, points: Sequence[XpPoint], now: float,
-                   deaths: Sequence[float] = ()) -> None:
+                   deaths: Sequence[float] = (),
+                   now_wall: float | None = None) -> None:
         """``now`` kommt von außen mit, statt hier ``time.monotonic()`` zu
         rufen: Der Aufrufer hat es ohnehin gerade gelesen, und ein Widget,
         das seine eigene Uhr befragt, lässt sich nicht ohne Warten
@@ -475,11 +589,47 @@ class XpGraph(QWidget):
         (§graph_layout)."""
         self._points = list(points)
         self._now = now
+        # Die Wanduhr zum selben Augenblick, für die Uhrzeiten im Tooltip.
+        # Ohne Angabe die eigene — der Fehler ist dann der Abstand
+        # zwischen zwei Aufrufen, also Millisekunden.
+        self._now_wall = time.time() if now_wall is None else now_wall
         self._deaths = list(deaths)
         self.update()
 
     def clear(self) -> None:
         self.set_points([], 0.0)
+
+    def _plot_height(self) -> float:
+        """Dieselbe Rechnung wie in ``paintEvent`` — der Tooltip muss
+        dieselben Balken treffen, die gezeichnet wurden."""
+        font = self.font()
+        font.setPointSizeF(max(7.0, font.pointSizeF() - 1.5))
+        from PySide6.QtGui import QFontMetrics
+        return max(0.0, self.height() - QFontMetrics(font).height())
+
+    def tooltip_at(self, x: float) -> str | None:
+        """Der Tooltip-Text für die Mausposition ``x`` oder ``None``."""
+        layout = graph_layout(self._points, self._now, self.width(),
+                              self._plot_height(), deaths=self._deaths)
+        index = bar_at(layout, x)
+        if index is None:
+            return None
+        gezeigt = visible_points(self._points, self._now)
+        punkt = gezeigt[index]
+        gruppe = next((g for g in group_by_instance(gezeigt) if punkt in g), [punkt])
+        return point_tooltip(punkt, gruppe, self._now, self._now_wall)
+
+    def event(self, event) -> bool:  # noqa: N802 (Qt-API)
+        if event.type() == QEvent.Type.ToolTip:
+            text = self.tooltip_at(event.position().x()
+                                   if hasattr(event, "position") else event.pos().x())
+            if text:
+                QToolTip.showText(event.globalPos(), text, self)
+            else:
+                QToolTip.hideText()
+                event.ignore()
+            return True
+        return super().event(event)
 
     def paintEvent(self, event) -> None:  # noqa: N802 (Qt-Namensschema)
         painter = QPainter(self)

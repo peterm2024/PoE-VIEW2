@@ -339,6 +339,10 @@ class _XpWatch:
     # Client.txt keine Kennung liefert. Gruppiert die Balken im Graphen
     # (§4.40).
     interval_instance: str = ""
+    # Für den Tooltip des Balkens (§xp_graph.point_tooltip): die
+    # Kampfzonen des Abschnitts und die Tode darin.
+    interval_zones: tuple = ()
+    interval_deaths: int = 0
     # Der Verlauf für den Graphen (§4.40): je abgeschlossenem Abschnitt
     # ein Punkt, begrenzt auf das gezeichnete Zeitfenster. Session-lokal
     # wie alles andere hier — ein aus der Datei geladener Verlauf zeigte
@@ -3999,6 +4003,9 @@ class MainWindow(QMainWindow):
             # alten Verengung auf die zuletzt verlassene Zone (§_XpWatch).
             aktiv = (self._active_seconds(watch.previous_change_at, now)
                      if watch.previous_change_at is not None else None)
+            if watch.previous_change_at is not None:
+                watch.interval_zones = self._combat_zones(watch.previous_change_at, now)
+                watch.interval_deaths = self._deaths_between(name, watch.previous_change_at, now)
             if aktiv is not None:
                 watch.interval_seconds, watch.interval_instance = aktiv
                 watch.interval_source = "in Kampfzonen"
@@ -4168,14 +4175,15 @@ class MainWindow(QMainWindow):
             # Verlauf (§xp_history) — der Graph rechnet in monotonic.
             at = now - (now_wall - ende.timestamp())
             if dauer > 0 and at > now - GRAPH_SPAN_S:
-                abschnitte.append((at, dauer, stay.instance))
+                abschnitte.append((at, dauer, stay))
         gesamt = sum(dauer for _, dauer, _ in abschnitte)
         if gesamt <= 0:
             return []
         rate = gain / (gesamt / 3600)
-        return [XpPoint(at=at, seconds=dauer, rate=rate, instance=instance,
-                        level=level, estimated=True)
-                for at, dauer, instance in abschnitte]
+        return [XpPoint(at=at, seconds=dauer, rate=rate, instance=stay.instance,
+                        level=level, estimated=True,
+                        zones=((stay.name, stay.area_id, stay.level, dauer),))
+                for at, dauer, stay in abschnitte]
 
     def _last_seen_for(self, name: str) -> tuple[int, float] | None:
         """Der Anker aus der Datei, beim ersten Gebrauch gelesen."""
@@ -4257,7 +4265,9 @@ class MainWindow(QMainWindow):
             return
         watch.history.append(XpPoint(at=now, seconds=watch.interval_seconds, rate=rate,
                                      instance=watch.interval_instance,
-                                     level=watch.level))
+                                     level=watch.level,
+                                     zones=watch.interval_zones,
+                                     deaths=watch.interval_deaths))
         cutoff = now - GRAPH_SPAN_S
         while watch.history and watch.history[0].at <= cutoff:
             watch.history.pop(0)
@@ -4285,6 +4295,32 @@ class MainWindow(QMainWindow):
         cutoff = now - GRAPH_SPAN_S
         while len(self._zone_stays) > 1 and (self._zone_stays[0].until or now) <= cutoff:
             self._zone_stays.pop(0)
+
+    def _combat_zones(self, since: float, now: float) -> tuple:
+        """Die Kampfzonen im Fenster ``(since, now]`` für den Tooltip:
+        ``(Name, Kennung, Level, Sekunden)``, je Gebiet und Level
+        zusammengezählt, längste zuerst — dieselbe Zuschneidung wie in
+        ``_active_seconds``, damit Tooltip und Rate dieselbe Zeit meinen."""
+        summen: dict[tuple[str, str, int], float] = {}
+        for stay in self._stays_since(since, now):
+            if stay.resting:
+                continue
+            anfang = max(stay.at, since)
+            ende = min(stay.until if stay.until is not None else now, now)
+            if ende > anfang:
+                schluessel = (stay.name, stay.area_id, stay.level)
+                summen[schluessel] = summen.get(schluessel, 0.0) + (ende - anfang)
+        return tuple((n, a, lv, s) for (n, a, lv), s in
+                     sorted(summen.items(), key=lambda e: -e[1]))
+
+    def _deaths_between(self, name: str, since: float, now: float) -> int:
+        """Tode dieses Charakters im Fenster, aus der Client.txt
+        (``self._deaths`` hält Wanduhrzeiten, das Fenster läuft auf
+        ``time.monotonic()``)."""
+        versatz = time.time() - now
+        von = datetime.fromtimestamp(since + versatz)
+        bis = datetime.fromtimestamp(now + versatz)
+        return sum(1 for zeit in self._deaths.get(name, ()) if von < zeit <= bis)
 
     def _seed_running_stay(self, log_path: Path) -> None:
         """Den Aufenthalt nachtragen, in dem der Charakter beim

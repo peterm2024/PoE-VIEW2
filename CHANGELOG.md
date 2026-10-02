@@ -6,6 +6,16 @@ nach [SemVer](https://semver.org/lang/de/).
 
 ## [Unveröffentlicht]
 
+### Neu
+
+- **Tooltip je Balken im XP-Graphen:** Zone (bei Maps mit Tier und
+  Gebietslevel, bei mehreren Zonen jede mit ihrer Zeit), Zeitraum,
+  Kampfzeit, XP-Zuwachs und Rate, die Level-Strafe bei diesem
+  Gebietslevel, Tode im Abschnitt und bei einer unterbrochenen Map die
+  Summe für die ganze Map. Geschätzte Balken sagen, dass sie geschätzt
+  sind. Ohne Beute — die wäre die einzige unzuverlässige Zahl darin.
+  Balken von vor dieser Version zeigen nur Zeit und Rate.
+
 ### Behoben
 
 - **Nadeln im XP-Graphen nach einem Programmstart mitten in einer

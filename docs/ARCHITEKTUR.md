@@ -7786,6 +7786,58 @@ Log gegengerechnet: 360 Karten, 1.131 Eintritte.
 
 ---
 
+#### 4.56.8 Tooltip je Balken im XP-Graphen
+
+Peter, 2026-10-02, zu zwei Nadeln, die er nicht deuten konnte (sie waren
+ein Fehler, FALLSTRICKE #92): "Wir könnten die XP-Anzeige in Areas
+unterteilen und für jede Area ein Mouseover machen mit Erklärungen,
+z.B. welche Map oder Zone, wieviel XP/h, wieviel XP-Malus". Unterteilt
+war der Graph schon (ein Balken je Abschnitt, Flächen je Map); gefehlt
+hat, was ein Balken war.
+
+**Die Angaben entstehen beim Aufzeichnen**, nicht beim Anzeigen:
+`XpPoint` trägt seither `zones` (Kampfzonen des Abschnitts als Name,
+Kennung, Gebietslevel, Sekunden — je Gebiet und Level zusammengezählt,
+längste zuerst) und `deaths`. Hinterher wüsste niemand mehr, welche
+Zonen im Fenster lagen; die Aufenthaltsliste reicht nur so weit zurück
+wie der Graph. `_combat_zones` schneidet dabei genauso zu wie
+`_active_seconds`, damit Tooltip und Rate dieselbe Zeit meinen. Auch die
+geschätzten Balken vor dem Programmstart bekommen ihre Map mit.
+
+**Gespeichert ohne Versionssprung** (`xp_history`): Die Felder sind
+zusätzlich und optional, ältere Zeilen laden mit leeren Werten. Peters
+Verlauf bleibt dadurch erhalten; seine alten Balken zeigen nur Zeit und
+Rate.
+
+**Inhalt** (`xp_graph.point_tooltip`, reine Funktion, ohne Fenster
+prüfbar): Zone mit Tier (nur wo es eine gibt, §zone_catalog
+.TIER_CATEGORIES) und Level, Uhrzeit von–bis, Kampfzeit, Zuwachs und
+Rate, die Strafe je vorkommendem Gebietslevel (`experience
+.experience_multiplier`, "no penalty" statt "100 %"), Tode, bei einer
+unterbrochenen Map die Summe aller Abschnitte, bei geschätzten Balken
+der Hinweis darauf. **Keine Beute** — auf Peters Rückfrage gemeinsam
+entschieden: Unidentifizierte Items tragen keine Mods, Delve-
+Händlergänge sind unsichtbar, und die Beute einer Map erscheint erst im
+Hideout (§4.56.6). Sie wäre die einzige Zahl im Tooltip, die nicht
+stimmt. Ebenfalls nicht drin: der Anteil am Level — dafür fehlt dem
+Projekt die Erfahrungstabelle der 100 Stufen.
+
+**Treffen** (`bar_at`): nur die x-Lage zählt, mit drei Pixeln Spielraum
+neben einem Balken — ein Balken ist oft nur ein paar Pixel hoch oder
+breit. Nativ angesehen: Ein Bergwerk auf Tiefe 55 zeigt für einen
+Charakter auf Stufe 79 "1.7% XP" — die Strafe, die Peter beim Delven
+bezahlt, stand bis dahin nirgends.
+
+Getestet: `tests/test_xp_graph.py` (Zone mit Tier und Strafe, keine
+Strafe, mehrere Zonen, Tode/Map-Summe/Schätzung, alter Punkt ohne
+Zonen, Escaping, Treffen auch neben einem schmalen Balken, Widget
+liefert den Text des Balkens unter der Maus), `tests/test_xp_history.py`
+(Zonen und Tode überleben das Speichern, alte Zeile ladbar, kaputte
+Einträge fallen still heraus), `tests/test_main_window_helpers.py`
+(Punkt trägt Zonen und Tode, geschätzte Balken tragen ihre Map).
+Gegenprobe mit acht Sabotagen; eine hielt zuerst (Schätzbalken ohne
+Zone), der Test ist verschärft.
+
 ### 4.57 Hinweis auf neue Versionen (`services/update_check.py`)
 
 Peter, 2026-09-28: "Haben wir eigentlich eine

@@ -75,6 +75,8 @@ class _Point(Protocol):
     instance: str
     level: int
     estimated: bool
+    # Dazu, falls vorhanden, ``zones`` und ``deaths`` (§xp_graph.XpPoint)
+    # — optional gelesen, ein Punkt ohne sie bleibt speicherbar.
 
 
 def path_for(account_name: str) -> Path:
@@ -103,7 +105,12 @@ def to_payload(histories: dict[str, Sequence[_Point]], *,
                    "rate": p.rate,
                    "instance": p.instance,
                    "level": p.level,
-                   "estimated": bool(p.estimated)}
+                   "estimated": bool(p.estimated),
+                   # Für den Tooltip (2026-10-02). Ohne Versionssprung:
+                   # Ältere Zeilen haben die Felder nicht und werden mit
+                   # leeren Werten geladen — der Verlauf bleibt erhalten.
+                   "zones": [list(z) for z in getattr(p, "zones", ())],
+                   "deaths": int(getattr(p, "deaths", 0))}
                   for p in points]
         if zeilen:
             characters[name] = zeilen
@@ -154,12 +161,30 @@ def _restore_row(row: object, now_mono: float, now_wall: float,
         return None
     instance = row.get("instance", "")
     level = row.get("level", 0)
+    deaths = row.get("deaths", 0)
     return {"at": now_mono - alter,
             "seconds": seconds,
             "rate": rate,
             "instance": instance if isinstance(instance, str) else "",
             "level": level if isinstance(level, int) else 0,
-            "estimated": bool(row.get("estimated"))}
+            "estimated": bool(row.get("estimated")),
+            "zones": _restore_zones(row.get("zones")),
+            "deaths": deaths if isinstance(deaths, int) else 0}
+
+
+def _restore_zones(roh: object) -> tuple:
+    """``[[Name, Kennung, Level, Sekunden], …]`` zurück in Tupel; was nicht
+    passt, fällt still heraus — es ist nur Tooltip-Text."""
+    if not isinstance(roh, list):
+        return ()
+    zonen = []
+    for eintrag in roh:
+        try:
+            name, area_id, level, sekunden = eintrag
+            zonen.append((str(name), str(area_id), int(level), float(sekunden)))
+        except (TypeError, ValueError):
+            continue
+    return tuple(zonen)
 
 
 def save(histories: dict[str, Sequence[_Point]], path: Path, *,
