@@ -6,6 +6,8 @@ nach [SemVer](https://semver.org/lang/de/).
 
 ## [Unveröffentlicht]
 
+## [0.21.0] - 2026-10-03
+
 ### Neu
 
 - **Das Programm merkt sich die Ansicht:** Fensterlage und -größe
