@@ -110,6 +110,12 @@ delve depth 0, where nobody dies) from the depths below it.
   readings with exactly one map in between, times the average time per
   visit. It fills in as you use `/kills` — including any readings you
   took before installing PoE-VIEW2.
+  **XP/h** is what your character would earn there *now*: the pace
+  measured before the level penalty, times today's penalty, so it stays
+  right as you level up. It fills in from now on, from publications that
+  cover exactly one zone. The **monster level** cell is shaded by how
+  much experience you still get there: green at 100 %, yellow from 50 %,
+  red below.
   **A visit is one map**, however often you went in and out of it:
   walking to a vendor and back through the portal is still the same
   visit. The game writes a seed for every area it generates, and the

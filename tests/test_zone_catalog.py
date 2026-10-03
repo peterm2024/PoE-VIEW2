@@ -694,3 +694,35 @@ def test_kills_add_up_over_all_leagues() -> None:
         "Allflame": zk.LeagueStats(by_level={70: zk.LevelStats(kills=200, kill_seconds=120)})})
     gesamt = eintrag.stats(None)
     assert (gesamt.kills, gesamt.kill_seconds) == (300, 180)
+
+
+
+# --- XP je Stufe, vor der Strafe (§add_experience) ---------------------- #
+
+def test_experience_is_added_to_its_level_and_kept_on_disk() -> None:
+    zk.add_experience("TestAccount#1234", "Allflame", "MapWorldsAtoll", "Atoll", 77,
+                      3_000_000, 600)
+    zk.add_experience("TestAccount#1234", "Allflame", "MapWorldsAtoll", "Atoll", 77,
+                      1_000_000, 300)
+    records = zk.load(zk.catalog_path("TestAccount#1234"))
+    stufe = records["MapWorldsAtoll"].stats("Allflame").by_level[77]
+    assert (stufe.xp_base, stufe.xp_seconds) == (4_000_000, 900)
+    assert stufe.base_xp_per_hour == 16_000_000
+
+
+def test_adding_experience_keeps_the_kills_marker(tmp_path) -> None:
+    pfad = zk.catalog_path("TestAccount#1234")
+    stays = [stay("MapWorldsAtoll", seed="2")]
+    records: dict = {}
+    zk.merge_stays(records, stays)
+    zk.save(pfad, records, "2026-09-26T12:16:00")
+    zk.add_experience("TestAccount#1234", UNKNOWN, "MapWorldsAtoll", "Atoll", 68, 1, 1)
+    assert zk._load_kills_until(pfad) == "2026-09-26T12:16:00"
+
+
+def test_experience_adds_up_over_all_leagues() -> None:
+    eintrag = zk.ZoneRecord("MapWorldsAtoll", "Atoll", zk.MAP, leagues={
+        "Mirage": zk.LeagueStats(by_level={70: zk.LevelStats(xp_base=100, xp_seconds=60)}),
+        "Allflame": zk.LeagueStats(by_level={70: zk.LevelStats(xp_base=200, xp_seconds=120)})})
+    gesamt = eintrag.stats(None).by_level[70]
+    assert (gesamt.xp_base, gesamt.xp_seconds) == (300, 180)

@@ -7902,6 +7902,68 @@ ohne Hochrechnung), `tests/test_main_window_helpers.py` (in der Stadt
 gilt die letzte Kampfzone, Dauer auf die Minute). Gegenprobe mit sieben
 Sabotagen.
 
+#### 4.56.10 XP je Zone und die Ampel der Level-Zelle
+
+Peter, 2026-10-03: "Wir könnten in der "Zones"-Tabelle die Zonen, in
+denen sich momentan Leveling lohnt (100%) grün einfärben, die Zonen,
+welche noch mehr als 50% oder 60 % bringen gelb, die anderen rot ...
+Evtl auch eine Spalte XP/min oder so." Entschieden: 50 %, XP je Stunde
+wie überall sonst in der Anwendung.
+
+**Die Formel ist seit dem Vortag belegt** (poe-verhalten §4: drei
+Abschnitte mit Strafen von 2 bis 77 % ergaben denselben Gem-Anteil).
+Neu dazu kam der **wirksame Monsterlevel über 70**
+(`experience.effective_monster_level`, Wiki: `-0,03·L² + 5,17·L −
+144,9`). Folge, bewusst so gelassen: Zone 71 wirkt wie 70,94 und liegt
+für einen Charakter auf 78 um 0,06 Stufen außerhalb der Sicherheitszone
+— 99,998 %. Die Ampel zählt ab 99,9 % als grün.
+
+**Die Ampel tönt nur die Zelle "Monster Level"**, nicht die Zeile: Bei
+einem Charakter auf 80 wären fast alle Story-Zeilen rot, und eine
+überwiegend rote Tabelle sagt nichts mehr auf einen Blick. Hintergrund
+statt Schrift, mit der Ampel der Anwendung (`DASH_OK/WARN/BAD`) zu 40 %
+in den Grund gemischt — gerechnet gegen die echte Palette: dunkel Text
+6,2–8,9:1 auf der Tönung, hell 12–15:1, Abstand zum ungetönten Grund ΔE
+22–33. Als Schriftfarbe fiele Rot dunkel auf 3,2:1, Gelb hell auf 2,2:1.
+Eine zugeklappte Zone zeigt ihre BESTE Stufe (die Frage ist "lohnt es
+sich hier irgendwo"), Ruhezonen und eine unbekannte Charakterstufe
+bleiben ungetönt.
+
+**XP/h wird vor der Strafe gespeichert** (`LevelStats.xp_base`,
+`xp_seconds`; `zone_catalog.add_experience`), gezeigt wird Tempo ×
+heutige Strafe des Charakters. So bleibt die Zahl beim Aufstieg
+richtig, ohne alte Messungen zu verwerfen. Die Zusammenfassung einer
+Zone rechnet jede Stufe mit IHRER Strafe und zählt dann zusammen.
+Gebucht wird live in `MainWindow._note_zone_experience`, nach jedem
+XP-Punkt, nur wenn er genau EINE Kampfzone abdeckt, keinen Tod enthält,
+einen Zuwachs hat, nicht geschätzt ist, höchstens eine Stunde dauert
+und die Strafe mindestens 2 % lässt (darunter vergrößert das
+Zurückrechnen jeden Messfehler um das Fünfzig- bis Hundertfache, und
+die Formel kennt eine Untergrenze von 1 %, unter der die wahre Strafe
+liegen kann). Die Liga ist die des Charakters. **Anders als der übrige
+Katalog lässt sich das nicht aus der Client.txt nachbauen** — sie
+kennt keine Erfahrung. Wechselt die Katalog-VERSION, beginnt die
+Spalte von vorn.
+
+**Bewusst NICHT gebaut: Map-Mods.** Peters Einwand, als ich die
+Zuordnung verschwundener Karten-Items vorschlug: "die Maps [bekommen]
+ihre Mods erst oft im Map Device ... ohne Screen-Capture [würde] nichts
+klappen." Die Client.txt nennt keine Mods, die API zeigt das Map Device
+nicht, und das Overlay mitzulesen hieße, den Bildschirm aufzunehmen —
+für die Minikarte sogar erst nach einem Umschalten. Die einzige
+billigere Quelle wäre die Zwischenablage (Strg+C über der Karte im
+Device kopiert ihren Text samt Mods); das ist aber ein Handgriff vor
+jeder Map. Offen gelassen, bis sich zeigt, ob die übrigen Zahlen ohne
+Mods genug sagen.
+
+Getestet: `tests/test_experience.py` (wirksamer Level, Sicherheitszone),
+`tests/test_zone_catalog.py` (Buchen und Speichern, Kills-Marke bleibt,
+Summe über Ligen), `tests/test_main_window_helpers.py` (vor der Strafe
+gebucht, sechs Ausschlüsse, Verdrahtung über eine echte
+Veröffentlichung), `tests/test_zone_table.py` (Spalte mit heutiger
+Strafe und Zusammenfassung, leer, drei Farben, Hideout und unbekannte
+Stufe, beste Stufe). Gegenprobe mit zwölf Sabotagen, alle fallen.
+
 ### 4.57 Hinweis auf neue Versionen (`services/update_check.py`)
 
 Peter, 2026-09-28: "Haben wir eigentlich eine

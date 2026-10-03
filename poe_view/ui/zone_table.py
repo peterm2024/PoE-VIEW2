@@ -41,8 +41,8 @@ from pathlib import Path
 
 from PySide6.QtCore import (QAbstractItemModel, QByteArray, QModelIndex,
                             QSortFilterProxyModel, Qt)
-from PySide6.QtGui import QGuiApplication
-from PySide6.QtWidgets import (QComboBox, QDialog, QFileDialog, QHBoxLayout,
+from PySide6.QtGui import QBrush, QColor, QGuiApplication, QPalette
+from PySide6.QtWidgets import (QApplication, QComboBox, QDialog, QFileDialog, QHBoxLayout,
                                QHeaderView, QLabel, QLineEdit, QMenu,
                                QMessageBox, QPushButton, QTreeView,
                                QVBoxLayout, QWidget)
@@ -52,7 +52,8 @@ from poe_view.ui.column_filter import (PLACEHOLDER, FilterHeader,
                                        expression_matches)
 from poe_view.services.experience import experience_multiplier
 from poe_view.services.league_log import UNKNOWN
-from poe_view.services.zone_catalog import (CATEGORIES, NO_LEVEL,
+from poe_view.ui.theme import DASH_BAD, DASH_OK, DASH_WARN, blend
+from poe_view.services.zone_catalog import (CATEGORIES, NO_LEVEL, REST,
                                             TIER_CATEGORIES, ZoneRecord,
                                             map_tier_from_level)
 
@@ -93,9 +94,9 @@ def _league_choices(records: list[ZoneRecord]) -> list[str]:
 # "wird hier jeder Besuch gezählt (auch Händlerbesuche) oder die gesamte
 # Map?" — und dann: "Ja bitte beide Spalten", §zone_catalog.LevelStats).
 COLUMNS = ("Group", "Zone", "Tier", "Monster Level", "Visits", "Entries",
-           "Deaths", "Monsters", "Avg. time", "Last seen", "Area id")
+           "Deaths", "Monsters", "XP/h", "Avg. time", "Last seen", "Area id")
 (_GROUP_COL, _NAME_COL, _TIER_COL, _LEVEL_COL, _VISITS_COL, _ENTRIES_COL,
- _DEATHS_COL, _MONSTERS_COL, _TIME_COL, _SEEN_COL, _ID_COL) = range(11)
+ _DEATHS_COL, _MONSTERS_COL, _XP_COL, _TIME_COL, _SEEN_COL, _ID_COL) = range(12)
 
 _HEADER_TOOLTIPS = {
     _VISITS_COL: "Separate runs. Going back into the same map — after a "
@@ -105,11 +106,57 @@ _HEADER_TOOLTIPS = {
                   "same map.\nMany entries per visit mean many trips out "
                   "and back in.",
     _TIME_COL: "Average time per visit, all entries of a map added up.",
+    _XP_COL: "Experience per hour your character would get here NOW: the pace "
+             "measured before the\nlevel penalty, times today's penalty. "
+             "Measured from publications covering exactly one zone,\n"
+             "without a death. Fills in as you play.",
+    _LEVEL_COL: "Shaded by how much experience your character still gets "
+                "here:\ngreen 100 %, yellow 50 % or more, red below. A "
+                "collapsed zone shows its best level.",
     _MONSTERS_COL: "Monsters killed per visit, from your /kills readings in "
                    "Client.txt:\nthe pace measured between two readings with "
                    "exactly one map in between,\ntimes the average time per "
                    "visit. Empty until such a pair of readings exists.",
 }
+
+
+# Die Tönung der Level-Zelle (Peter, 2026-10-03: "die Zonen, in denen sich
+# momentan Leveling lohnt (100%) grün einfärben, die Zonen, welche noch
+# mehr als 50% ... bringen gelb, die anderen rot"). Die Ampel der Anwendung
+# zu 40 % in den Grund gemischt, Schrift unverändert. Gerechnet, nativ:
+# dunkel Text 6,2–8,9:1 auf der Tönung, hell 12–15:1; Abstand zum
+# ungetönten Grund ΔE 22–33. Als reine Schriftfarbe fiele Rot dunkel auf
+# 3,2:1 und Gelb hell auf 2,2:1.
+_AMPEL_ANTEIL = 0.4
+_GELB_AB = 0.5
+
+
+def _ampel(anteil: float) -> str:
+    if anteil >= 0.999:
+        return DASH_OK
+    return DASH_WARN if anteil >= _GELB_AB else DASH_BAD
+
+
+def _ampel_brush(anteil: float) -> QBrush:
+    grund = QApplication.palette().color(QPalette.ColorRole.Base)
+    return QBrush(blend(grund, QColor(_ampel(anteil)), _AMPEL_ANTEIL))
+
+
+def _xp_now(by_level: dict, character_level: int) -> tuple[float, float]:
+    """(XP pro Stunde für den Charakter jetzt, gemessene Sekunden) über
+    die gegebenen Stufen — jede mit IHRER Strafe, dann zusammengezählt.
+    Ohne Charakterstufe gilt keine Strafe (``experience_multiplier``
+    liefert dann 1,0)."""
+    xp = sum(w.xp_base * experience_multiplier(character_level, lv)
+             for lv, w in by_level.items() if lv != NO_LEVEL)
+    sekunden = sum(w.xp_seconds for lv, w in by_level.items() if lv != NO_LEVEL)
+    return (xp * 3600 / sekunden if sekunden else 0.0), sekunden
+
+
+def _xp_text(rate: float, sekunden: float) -> str:
+    if not sekunden:
+        return ""
+    return f"{rate / 1e6:.1f} M" if rate >= 1e5 else f"{rate / 1e3:.0f} k"
 
 
 def _monster_text(zahlen) -> str:
@@ -291,6 +338,7 @@ class ZoneTreeModel(QAbstractItemModel):
                     str(zahlen.visits), str(zahlen.entries),
                     str(zahlen.deaths) if zahlen.deaths else "",
                     _monster_text(zahlen),
+                    _xp_text(*_xp_now(zahlen.by_level, self._character_level)),
                     _dauer_text(zahlen.average_seconds),
                     zahlen.last_seen.replace("T", " "),
                     record.area_id)[col]
@@ -309,6 +357,9 @@ class ZoneTreeModel(QAbstractItemModel):
                 return zahlen.deaths
             if col == _MONSTERS_COL:
                 return zahlen.monsters_per_visit if zahlen.kill_seconds else -1
+            if col == _XP_COL:
+                rate, sekunden = _xp_now(zahlen.by_level, self._character_level)
+                return rate if sekunden else -1
             if col == _TIME_COL:
                 return zahlen.average_seconds
             return (self._zone_data(record, col, Qt.ItemDataRole.DisplayRole)
@@ -317,11 +368,35 @@ class ZoneTreeModel(QAbstractItemModel):
             return self._level_tooltip(record)
         if role == Qt.ItemDataRole.ToolTipRole and col == _MONSTERS_COL:
             return _monster_tooltip(zahlen)
+        if role == Qt.ItemDataRole.ToolTipRole and col == _XP_COL:
+            return self._xp_tooltip(zahlen.by_level)
+        if role == Qt.ItemDataRole.BackgroundRole and col == _LEVEL_COL:
+            anteile = [experience_multiplier(self._character_level, lv)
+                       for lv in record.stats(self._league).levels]
+            return self._shade(record, max(anteile, default=None))
         if role == Qt.ItemDataRole.ToolTipRole and col == _TIME_COL:
             return (f"{zahlen.visits} visits ({zahlen.entries} entries), "
                     f"{_dauer_text(zahlen.seconds) or '0 s'} in total"
                     if zahlen.seconds else None)
         return None
+
+    def _shade(self, record: ZoneRecord, anteil: float | None):
+        """Tönung nur mit bekannter Charakterstufe und nur für Zonen mit
+        Monstern — Hideout und Städte bleiben ungefärbt."""
+        if not self._character_level or anteil is None or record.category == REST:
+            return None
+        return _ampel_brush(anteil)
+
+    def _xp_tooltip(self, by_level: dict) -> str | None:
+        rate, sekunden = _xp_now(by_level, self._character_level)
+        if not sekunden:
+            return None
+        basis = sum(w.xp_base for lv, w in by_level.items() if lv != NO_LEVEL) * 3600 / sekunden
+        wer = (f"at character level {self._character_level}"
+               if self._character_level else "without a character level, so no penalty")
+        return (f"{rate / 1e6:.2f} M XP per hour {wer}.\n"
+                f"Measured before the penalty: {basis / 1e6:.2f} M per hour "
+                f"over {_dauer_text(sekunden) or '0 s'}.")
 
     def _child_data(self, record: ZoneRecord, level: int, col: int, role):
         """Eine Kindzeile: dieselben Spalten, aber nur die Zahlen DIESER
@@ -339,6 +414,7 @@ class ZoneTreeModel(QAbstractItemModel):
                     str(zahlen.visits), str(zahlen.entries),
                     str(zahlen.deaths) if zahlen.deaths else "",
                     _monster_text(zahlen),
+                    _xp_text(*_xp_now({level: zahlen}, self._character_level)),
                     _dauer_text(zahlen.average_seconds),
                     zahlen.last_seen.replace("T", " "), "")[col]
         if role == NUMERIC_SORT_ROLE:
@@ -354,6 +430,9 @@ class ZoneTreeModel(QAbstractItemModel):
                 return zahlen.deaths
             if col == _MONSTERS_COL:
                 return zahlen.monsters_per_visit if zahlen.kill_seconds else -1
+            if col == _XP_COL:
+                rate, sekunden = _xp_now({level: zahlen}, self._character_level)
+                return rate if sekunden else -1
             if col == _TIME_COL:
                 return zahlen.average_seconds
             return level
@@ -363,6 +442,11 @@ class ZoneTreeModel(QAbstractItemModel):
                     if zahlen.seconds else None)
         if role == Qt.ItemDataRole.ToolTipRole and col == _MONSTERS_COL:
             return _monster_tooltip(zahlen)
+        if role == Qt.ItemDataRole.ToolTipRole and col == _XP_COL:
+            return self._xp_tooltip({level: zahlen})
+        if role == Qt.ItemDataRole.BackgroundRole and col == _LEVEL_COL:
+            return self._shade(record, experience_multiplier(self._character_level, level)
+                               if level != NO_LEVEL else None)
         if role == Qt.ItemDataRole.ToolTipRole and col == _LEVEL_COL \
                 and self._character_level and level != NO_LEVEL:
             anteil = experience_multiplier(self._character_level, level)
@@ -543,7 +627,8 @@ def export_zones(path: str, records: list[ZoneRecord],
                             "Monster level", "Visits", "Entries", "Deaths",
                             "Total seconds", "Average seconds", "Last seen",
                             "Kills counted", "Kill seconds", "Kills per minute",
-                            "Monsters per visit"])
+                            "Monsters per visit", "Base XP per hour",
+                            "XP seconds"])
         for record in records:
             namen = [league] if league is not None else sorted(record.leagues)
             for name in namen:
@@ -562,6 +647,8 @@ def export_zones(path: str, records: list[ZoneRecord],
                         round(w.kills_per_minute, 1) if w.kill_seconds else "",
                         round(w.monsters_per_visit) if w.kill_seconds
                         and w.average_seconds else "",
+                        round(w.base_xp_per_hour) if w.xp_seconds else "",
+                        round(w.xp_seconds) if w.xp_seconds else "",
                     ])
 
 

@@ -677,6 +677,14 @@ _DEMO_KILLS_PER_MIN = {"MapWorldsBazaar": 78, "MapWorldsChateau": 52,
                        "MapWorldsSiege": 70, "Delve_Main": 112}
 
 
+# Erfahrung je Stunde VOR der Strafe für die Spalte "XP/h"
+# (§zone_catalog.add_experience), erfunden in der Größenordnung von
+# Peters Messungen (rund 30 M/h in Maps um Level 72).
+_DEMO_BASE_XP_PER_H = {"MapWorldsBazaar": 28e6, "MapWorldsCells": 33e6,
+                       "MapWorldsDunes": 31e6, "MapWorldsSiege": 26e6,
+                       "2_9_1": 60e6}
+
+
 def _demo_zone_records() -> list[ZoneRecord]:
     records = []
     for area_id, name, kategorie, stufen in _DEMO_ZONES:
@@ -688,7 +696,9 @@ def _demo_zone_records() -> list[ZoneRecord]:
                 visits=besuche, entries=eintritte, deaths=tode, seconds=sekunden,
                 timed_visits=besuche if sekunden else 0,
                 last_seen=f"2026-09-2{level % 7 + 1}T21:0{level % 6}:11",
-                kills=round(tempo * gemessen / 60), kill_seconds=gemessen)
+                kills=round(tempo * gemessen / 60), kill_seconds=gemessen,
+                xp_base=_DEMO_BASE_XP_PER_H.get(area_id, 0) * sekunden / 2 / 3600,
+                xp_seconds=sekunden / 2 if area_id in _DEMO_BASE_XP_PER_H else 0.0)
         records.append(ZoneRecord(area_id=area_id, name=name,
                                   category=kategorie,
                                   leagues={_DEMO_LEAGUE: LeagueStats(nach_level)}))

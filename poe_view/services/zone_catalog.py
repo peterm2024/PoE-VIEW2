@@ -235,6 +235,12 @@ class LevelStats:
     # eine Ablesung mitten in der Map deckt nur einen Teil davon ab.
     kills: int = 0
     kill_seconds: float = 0.0
+    # Erfahrung VOR der Level-Strafe und die Zeit, in der sie fiel
+    # (§add_experience). Vor der Strafe, damit die Zahl über Stufen des
+    # Charakters hinweg gilt: Was er JETZT bekäme, rechnet die Tabelle mit
+    # seiner heutigen Strafe aus.
+    xp_base: float = 0.0
+    xp_seconds: float = 0.0
 
     @property
     def average_seconds(self) -> float:
@@ -252,6 +258,10 @@ class LevelStats:
         """Hochgerechnet: Tempo × durchschnittliche Dauer eines Besuchs.
         0, wenn eins von beiden fehlt."""
         return self.kills_per_minute * self.average_seconds / 60
+
+    @property
+    def base_xp_per_hour(self) -> float:
+        return self.xp_base * 3600 / self.xp_seconds if self.xp_seconds else 0.0
 
 
 @dataclass
@@ -357,6 +367,8 @@ class ZoneRecord:
                 ziel.timed_visits += werte.timed_visits
                 ziel.kills += werte.kills
                 ziel.kill_seconds += werte.kill_seconds
+                ziel.xp_base += werte.xp_base
+                ziel.xp_seconds += werte.xp_seconds
                 ziel.last_seen = max(ziel.last_seen, werte.last_seen)
         return gesamt
 
@@ -504,7 +516,9 @@ def load(path: Path) -> dict[str, ZoneRecord]:
                             last_seed=str(w.get("last_seed") or ""),
                             last_seed_timed=bool(w.get("last_seed_timed")),
                             kills=int(w.get("kills") or 0),
-                            kill_seconds=float(w.get("kill_seconds") or 0.0))
+                            kill_seconds=float(w.get("kill_seconds") or 0.0),
+                            xp_base=float(w.get("xp_base") or 0.0),
+                            xp_seconds=float(w.get("xp_seconds") or 0.0))
                         for level, w in (werte.get("levels") or {}).items()})
                     for name, werte in (zeile.get("leagues") or {}).items()
                 },
@@ -537,7 +551,9 @@ def save(path: Path, records: dict[str, ZoneRecord], kills_until: str = "") -> N
                                   "last_seed": w.last_seed,
                                   "last_seed_timed": w.last_seed_timed,
                                   "kills": w.kills,
-                                  "kill_seconds": round(w.kill_seconds, 1)}
+                                  "kill_seconds": round(w.kill_seconds, 1),
+                                  "xp_base": round(w.xp_base),
+                                  "xp_seconds": round(w.xp_seconds, 1)}
                      for level, w in sorted(werte.by_level.items())}}
                  for name, werte in sorted(r.leagues.items())}}
             for r in sorted(records.values(), key=lambda r: r.area_id)
@@ -671,6 +687,33 @@ def attribute_kills(records: dict[str, ZoneRecord], stays, readings,
         stufe.kills += unterschied
         stufe.kill_seconds += sekunden
     return letzte
+
+
+def add_experience(account_name: str, league: str, area_id: str, name: str,
+                   level: int, base_xp: float, seconds: float) -> None:
+    """Einen XP-Abschnitt einer Stufe gutschreiben und speichern.
+
+    Peter, 2026-10-03: "Evtl auch eine Spalte XP/min oder so." Die
+    Client.txt kennt keine Erfahrung, die API nur den Stand des
+    Charakters — eine Zone bekommt ihre XP deshalb live, bei jeder
+    Veröffentlichung, die genau EINE Zone abdeckt
+    (§MainWindow._note_zone_experience). Anders als der übrige Katalog
+    lässt sich das nicht aus der Client.txt nachbauen: Geht der Katalog
+    verloren oder wechselt seine VERSION, beginnt die Spalte von vorn.
+
+    Fehlt die Zone noch im Katalog (der Aufenthalt läuft, der Katalog
+    nimmt nur beendete auf), wird sie angelegt."""
+    pfad = catalog_path(account_name)
+    records = load(pfad)
+    kills_bis = _load_kills_until(pfad) if records else ""
+    eintrag = records.get(area_id)
+    if eintrag is None:
+        eintrag = ZoneRecord(area_id=area_id, name=name, category=categorise(area_id))
+        records[area_id] = eintrag
+    stufe = eintrag.leagues.setdefault(league or UNKNOWN, LeagueStats()).at(level or NO_LEVEL)
+    stufe.xp_base += base_xp
+    stufe.xp_seconds += seconds
+    save(pfad, records, kills_bis)
 
 
 def _newest(records: dict[str, ZoneRecord]) -> str:

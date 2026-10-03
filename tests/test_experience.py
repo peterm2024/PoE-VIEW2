@@ -21,7 +21,23 @@ def test_the_safe_zone_grows_with_the_character_level() -> None:
 
 def test_inside_the_safe_zone_nothing_is_lost() -> None:
     for zone in range(78 - safe_zone(78), 78 + safe_zone(78) + 1):
-        assert experience_multiplier(78, zone) == 1.0
+        # Über Level 70 zählt der WIRKSAME Monsterlevel (§effective_monster_
+        # level): Zone 71 wirkt wie 70,94 und liegt damit 0,06 Stufen
+        # außerhalb der Sicherheitszone von 78 — 99,998 %, kein Verlust,
+        # den man spürt. Zone 85 wirkt wie 77,8 und ist damit drin.
+        assert experience_multiplier(78, zone) == pytest.approx(1.0, abs=1e-4)
+
+
+def test_monsters_above_level_70_count_lower() -> None:
+    """PoE-Wiki "Experience": -0,03·L² + 5,17·L − 144,9 über Level 70."""
+    from poe_view.services.experience import effective_monster_level
+    assert effective_monster_level(70) == 70
+    assert effective_monster_level(72) == pytest.approx(71.82)
+    assert effective_monster_level(83) == pytest.approx(77.54)
+    # Ein Charakter auf 68 in einer Level-83-Map: mit dem nackten Level
+    # 15 Stufen Abstand, wirksam 9,54 — weit weniger Strafe.
+    nackt = ((68 + 5) / (68 + 5 + (15 - safe_zone(68)) ** 2.5)) ** 1.5
+    assert experience_multiplier(68, 83) > 2 * nackt
 
 
 def test_the_share_falls_the_further_the_zone_is_below_the_character() -> None:

@@ -6,6 +6,24 @@ nach [SemVer](https://semver.org/lang/de/).
 
 ## [Unveröffentlicht]
 
+### Neu
+
+- **Zonen-Tabelle: Spalte „XP/h"** — was der Charakter dort *jetzt*
+  bekäme: das Tempo vor der Level-Strafe, gemessen an jeder
+  Veröffentlichung aus genau einer Zone ohne Tod, mal die heutige
+  Strafe. Bleibt beim Aufstieg richtig; füllt sich ab jetzt.
+- **Zonen-Tabelle: Tönung der Monsterlevel-Zelle** nach der
+  XP-Ausbeute für den Charakter — grün 100 %, gelb ab 50 %, rot
+  darunter. Eine zugeklappte Zone zeigt ihre beste Stufe; Hideout und
+  Städte bleiben ungefärbt.
+
+### Geändert
+
+- **Level-Strafe über Monsterlevel 70** mit dem wirksamen Monsterlevel
+  laut Wiki (72 wirkt wie 71,8, 83 wie 77,5). Betrifft Charaktere, die
+  deutlich unter hohen Maps liegen; vorher zeigte die Anzeige dort zu
+  viel Strafe.
+
 ## [0.21.0] - 2026-10-03
 
 ### Neu

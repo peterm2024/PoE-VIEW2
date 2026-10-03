@@ -152,7 +152,11 @@ because characters move to the permanent league once a season ends.</p>
 log. <b>Monsters</b> counts the monsters killed per visit from the answers
 to <code>/kills</code>: two readings with exactly one map in between give
 a pace, and the pace times the average visit gives the number. Readings
-with two maps in between cannot be split and are left out. A stay longer than an hour counts as a visit but not towards the
+with two maps in between cannot be split and are left out.
+<b>XP/h</b> is what your character would get there now: the pace measured
+before the level penalty, times today's penalty. The <b>Monster Level</b>
+cell is shaded green where you still get all the experience, yellow from
+50 %, red below. A stay longer than an hour counts as a visit but not towards the
 average — the game writes nothing when you quit, so the last zone of an
 evening would otherwise run until the next start.
 The zone display next to it names the level of the zone you are in, and

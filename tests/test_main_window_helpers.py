@@ -11563,3 +11563,94 @@ def test_a_reading_in_the_hideout_covers_every_zone_since(qapp, monkeypatch) -> 
         assert win._kills_zones == []
     finally:
         _schliessen(win)
+
+
+
+# --- Zonen-XP vor der Strafe (§_note_zone_experience) -------------------- #
+
+def _zonen_xp(win, punkt):
+    from poe_view.services import zone_catalog
+    win._account_name = "TestAccount#1234"
+    win._all_characters = [make_char("WitchOfPeter", "Allflame")]
+    win._note_zone_experience("WitchOfPeter", punkt)
+    records = zone_catalog.load(zone_catalog.catalog_path("TestAccount#1234"))
+    eintrag = records.get("2_9_1")
+    return eintrag.stats("Allflame").by_level.get(61) if eintrag else None
+
+
+def _punkt(**aenderung):
+    from poe_view.ui.xp_graph import XpPoint
+    werte = dict(at=1000.0, seconds=150.0, rate=4_800_000.0, instance="1", level=79,
+                 zones=(("The Blood Aqueduct", "2_9_1", 61, 150.0),), deaths=0)
+    werte.update(aenderung)
+    return XpPoint(**werte)
+
+
+def test_one_zone_without_death_is_credited_before_the_penalty(qapp) -> None:
+    """Peters Aqueduct: 4,8 M/h bei 7,2 % — vor der Strafe rund 67 M/h."""
+    from poe_view.services.experience import experience_multiplier
+    win = MainWindow()
+    try:
+        stufe = _zonen_xp(win, _punkt())
+        assert stufe.xp_seconds == 150
+        assert stufe.xp_base == pytest.approx(200_000 / experience_multiplier(79, 61))
+    finally:
+        _schliessen(win)
+
+
+@pytest.mark.parametrize("aenderung", [
+    {"deaths": 1},
+    {"estimated": True},
+    {"rate": -1_000_000.0},
+    {"zones": (("The Blood Aqueduct", "2_9_1", 61, 80.0), ("Atoll", "MapWorldsAtoll", 77, 70.0))},
+    {"level": 95},          # Strafe unter 2 % — Teilen vergrößerte jeden Fehler
+    {"zones": (("The Blood Aqueduct", "2_9_1", 61, 4000.0),)},   # Pause
+])
+def test_these_stretches_are_not_credited(qapp, aenderung) -> None:
+    win = MainWindow()
+    try:
+        assert _zonen_xp(win, _punkt(**aenderung)) is None
+    finally:
+        _schliessen(win)
+
+
+def test_a_real_publication_credits_its_zone(qapp, monkeypatch) -> None:
+    """Die Verdrahtung: Nach einer Veröffentlichung aus genau einer Zone
+    landet die Erfahrung im Katalog — ohne dass jemand die Methode von
+    Hand ruft."""
+    from poe_view.services import zone_catalog
+    mono = [10_000.0]
+    wall = [1_790_000_000.0]
+    monkeypatch.setattr("poe_view.ui.main_window.time.monotonic", lambda: mono[0])
+    monkeypatch.setattr("poe_view.ui.main_window.time.time", lambda: wall[0])
+
+    def warte(sekunden):
+        mono[0] += sekunden
+        wall[0] += sekunden
+
+    win = MainWindow()
+    win._account_name = "TestAccount#1234"
+    try:
+        win._on_character_snapshot("WitchOfPeter", 79, 1_000_000)
+        warte(30)
+        win._zone_watcher = _KennungsWatcher()
+        win._zone_watcher.last_area_level = 75
+        _betritt(win, "Port", "MapWorldsPort", "7")
+        warte(600)
+        win._zone_watcher.last_area_level = 60
+        _betritt(win, "Backstreet Hideout", "HideoutSlum", "1")
+        warte(2)
+        win._on_character_snapshot("WitchOfPeter", 79, 6_000_000)
+
+        records = zone_catalog.load(zone_catalog.catalog_path("TestAccount#1234"))
+        stufe = records["MapWorldsPort"].stats(league_log_unknown()).by_level[75]
+        assert stufe.xp_seconds == 600
+        assert stufe.xp_base == pytest.approx(5_000_000)    # Stufe 75 bei 79: keine Strafe
+    finally:
+        win.worker.stop()
+        win.worker.wait(5000)
+
+
+def league_log_unknown():
+    from poe_view.services.league_log import UNKNOWN
+    return UNKNOWN

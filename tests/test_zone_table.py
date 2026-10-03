@@ -29,8 +29,9 @@ _VISITS_COL = 4
 _ENTRIES_COL = 5
 _DEATHS_COL = 6
 _MONSTERS_COL = 7
-_TIME_COL = 8
-_ID_COL = 10
+_XP_COL = 8
+_TIME_COL = 9
+_ID_COL = 11
 
 ALLFLAME = "Allflame"
 MIRAGE = "SSF Ruthless (earlier)"
@@ -992,3 +993,75 @@ def test_the_csv_carries_the_kill_columns(tmp_path) -> None:
     assert atoll[kopf.index("Kills counted")] == "1200"
     assert atoll[kopf.index("Kills per minute")] == "80.0"
     assert atoll[kopf.index("Monsters per visit")] == "800"
+
+
+
+# --- XP/h und Tönung der Level-Zelle (Peter, 2026-10-03) ----------------- #
+
+def _bazaar_mit_xp():
+    bazaar = _bazaar()
+    stufen = bazaar.leagues[ALLFLAME].by_level
+    stufen[71].xp_base, stufen[71].xp_seconds = 10_000_000, 1200.0   # 30 M/h
+    stufen[72].xp_base, stufen[72].xp_seconds = 5_000_000, 600.0     # 30 M/h
+    return bazaar
+
+
+def test_the_xp_column_shows_what_the_character_would_get_now(qapp) -> None:
+    from poe_view.services.experience import experience_multiplier
+    model = ZoneTreeModel([_bazaar_mit_xp()], character_level=85, league=ALLFLAME)
+    eltern = model.index(0, 0)
+    stufe71 = next(model.index(r, _XP_COL, eltern) for r in range(model.rowCount(eltern))
+                   if model.index(r, _LEVEL_COL, eltern).data() == "71")
+    erwartet = 30_000_000 * experience_multiplier(85, 71)
+    assert stufe71.data(NUMERIC_SORT_ROLE) == pytest.approx(erwartet)
+    assert stufe71.data() == f"{erwartet / 1e6:.1f} M"
+    assert "Measured before the penalty: 30.00 M" in stufe71.data(Qt.ItemDataRole.ToolTipRole)
+    # Die Zusammenfassung zählt jede Stufe mit IHRER Strafe.
+    gesamt = (10_000_000 * experience_multiplier(85, 71)
+              + 5_000_000 * experience_multiplier(85, 72)) * 3600 / 1800
+    assert model.index(0, _XP_COL).data(NUMERIC_SORT_ROLE) == pytest.approx(gesamt)
+
+
+def test_without_measurements_the_xp_column_is_empty(qapp) -> None:
+    model = ZoneTreeModel(beispiel(), character_level=80, league=ALLFLAME)
+    assert model.index(0, _XP_COL).data() == ""
+    assert model.index(0, _XP_COL).data(NUMERIC_SORT_ROLE) == -1
+
+
+def _farbe(model, zeile, eltern=None):
+    from PySide6.QtCore import QModelIndex
+    pinsel = model.index(zeile, _LEVEL_COL, eltern or QModelIndex()).data(
+        Qt.ItemDataRole.BackgroundRole)
+    return None if pinsel is None else pinsel.color().name()
+
+
+def test_the_level_cell_is_shaded_green_yellow_red(qapp) -> None:
+    """Peter: grün 100 %, gelb ab 50 %, rot darunter."""
+    from poe_view.ui import zone_table as zt
+    zonen = [record("MapWorldsCells", "Cells", MAP, {ALLFLAME: ({80}, 1, "2026-09-26T10:00:00")}),
+             record("MapWorldsAtoll", "Atoll", MAP, {ALLFLAME: ({68}, 1, "2026-09-26T10:00:00")}),
+             record("2_9_1", "The Blood Aqueduct", STORY, {ALLFLAME: ({61}, 1, "2026-09-26T10:00:00")})]
+    model = ZoneTreeModel(zonen, character_level=80, league=ALLFLAME)
+    farben = {model.index(r, _NAME_COL).data(): _farbe(model, r) for r in range(model.rowCount())}
+    erwartet = {name: zt._ampel_brush(anteil).color().name()
+                for name, anteil in (("Cells", 1.0), ("Atoll", 0.6), ("The Blood Aqueduct", 0.1))}
+    assert farben == erwartet
+    assert len(set(farben.values())) == 3
+
+
+def test_hideouts_and_an_unknown_character_stay_unshaded(qapp) -> None:
+    zonen = [record("HideoutSlum", "Backstreet Hideout", REST, {ALLFLAME: ({60}, 9, "2026-09-26T10:00:00")}),
+             record("2_9_1", "The Blood Aqueduct", STORY, {ALLFLAME: ({61}, 1, "2026-09-26T10:00:00")})]
+    mit = ZoneTreeModel(zonen, character_level=80, league=ALLFLAME)
+    zeile = next(r for r in range(mit.rowCount()) if mit.index(r, _NAME_COL).data() == "Backstreet Hideout")
+    assert _farbe(mit, zeile) is None
+    ohne = ZoneTreeModel(zonen, character_level=0, league=ALLFLAME)
+    assert all(_farbe(ohne, r) is None for r in range(ohne.rowCount()))
+
+
+def test_a_collapsed_zone_shows_its_best_level(qapp) -> None:
+    from poe_view.ui import zone_table as zt
+    siege = record_by_level("MapWorldsSiege", "Siege", MAP, {ALLFLAME: {
+        60: LevelStats(visits=1), 80: LevelStats(visits=1)}})
+    model = ZoneTreeModel([siege], character_level=80, league=ALLFLAME)
+    assert _farbe(model, 0) == zt._ampel_brush(1.0).color().name()

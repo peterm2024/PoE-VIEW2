@@ -36,7 +36,8 @@ from poe_view.services import (cache_backup, cache_writer, data_cache, gem_xp_lo
                                icon_cache, mod_collection, mod_knowledge,
                                league_log, poe2_probe, price_cache,
                                season_log, xp_history, zone_catalog)
-from poe_view.services.experience import penalty_caption, time_to_next_level
+from poe_view.services.experience import (experience_multiplier, penalty_caption,
+                                          time_to_next_level)
 from poe_view.services.instance_lock import InstanceLock
 from poe_view.services import kills_log, update_check, zone_loot_log
 from poe_view.services.zone_watcher import (ZoneWatcher, deaths_since,
@@ -4262,6 +4263,10 @@ class MainWindow(QMainWindow):
                 watch.interval_source = ("in der verlassenen Zone" if zone_seconds is not None
                                          else "(volles Intervall)")
             self._record_xp_point(watch, now)
+            # Der eben entstandene Punkt (falls einer entstand — ohne Rate
+            # legt _record_xp_point keinen an).
+            if watch.history and watch.history[-1].at == now:
+                self._note_zone_experience(name, watch.history[-1])
             self._log_xp_publication(name, watch)
             # ERST den Stand fortschreiben, dann speichern: In die Datei
             # gehört der Stand, der jetzt gilt, nicht der davor.
@@ -4495,6 +4500,40 @@ class MainWindow(QMainWindow):
             # darf die laufende Messung nicht stören.
             log.warning("XP-Verlauf konnte nicht gespeichert werden.",
                         exc_info=True)
+
+    # Unter diesem Anteil wird ein Abschnitt nicht in die Zonen-XP
+    # zurückgerechnet (§_note_zone_experience): Bei 1–2 % vergrößert das
+    # Teilen durch die Strafe jede kleine Messabweichung hundertfach, und
+    # die Formel kennt unten eine Untergrenze von 1 %, unter der die
+    # wahre Strafe liegen kann.
+    _ZONE_XP_MIN_SHARE = 0.02
+
+    def _note_zone_experience(self, name: str, point: XpPoint) -> None:
+        """Die Erfahrung eines Abschnitts seiner Zone gutschreiben — vor der
+        Strafe (§zone_catalog.add_experience).
+
+        Nur ein Abschnitt aus genau EINER Kampfzone, ohne Tod, mit
+        Zuwachs und nicht geschätzt: Zwei Zonen ließen sich nicht teilen,
+        ein Tod zöge die Zahl ins Minus (Sulphur Vents, 2026-10-03), ein
+        geschätzter Abschnitt ist keine Messung. Länger als eine Stunde
+        heißt Pause, wie überall im Katalog. Ein Fehler hier darf die
+        XP-Rechnung nicht stören."""
+        if point.estimated or point.deaths or len(point.zones) != 1 or point.level <= 0:
+            return
+        zone, area_id, level, sekunden = point.zones[0]
+        gewinn = point.gain
+        if not area_id or level <= 0 or gewinn <= 0 or not 0 < sekunden <= 3600:
+            return
+        anteil = experience_multiplier(point.level, level)
+        if anteil < self._ZONE_XP_MIN_SHARE:
+            return
+        liga = next((c.league for c in self._all_characters
+                     if c.name == name and c.league), league_log.UNKNOWN)
+        try:
+            zone_catalog.add_experience(self._account_name or "", liga, area_id,
+                                        zone, level, gewinn / anteil, sekunden)
+        except Exception:  # noqa: BLE001 — siehe Docstring
+            log.exception("Zonen-XP nicht gespeichert (%s, Stufe %d)", area_id, level)
 
     @staticmethod
     def _record_xp_point(watch: "_XpWatch", now: float) -> None:

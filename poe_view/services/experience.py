@@ -35,6 +35,19 @@ def safe_zone(character_level: int) -> int:
     return 3 + character_level // 16
 
 
+def effective_monster_level(zone_level: int) -> float:
+    """Über Level 70 zählt ein Monster für die Strafe niedriger, als es
+    ist (PoE-Wiki, "Experience"): ``-0,03·L² + 5,17·L − 144,9``, also
+    72 → 71,82, 78 → 75,84, 83 → 77,54. Darunter der Level selbst.
+
+    Peter, 2026-10-03, für die Einfärbung der Zonen-Tabelle; vorher
+    rechnete die Formel mit dem nackten Level und hätte einem Charakter
+    unter Level 77 in hohen Maps zu viel Strafe angezeigt."""
+    if zone_level <= 70:
+        return float(zone_level)
+    return -0.03 * zone_level ** 2 + 5.17 * zone_level - 144.9
+
+
 def experience_multiplier(character_level: int, zone_level: int) -> float:
     """Der Anteil der Erfahrung, der bei diesem Gebietslevel ankommt
     (1.0 = voll). Community-Formel, siehe Modulkopf.
@@ -44,7 +57,8 @@ def experience_multiplier(character_level: int, zone_level: int) -> float:
     nichts behaupten."""
     if character_level <= 0 or zone_level <= 0:
         return 1.0
-    diff = max(abs(zone_level - character_level) - safe_zone(character_level), 0)
+    diff = max(abs(effective_monster_level(zone_level) - character_level)
+               - safe_zone(character_level), 0)
     anteil = ((character_level + 5)
               / (character_level + 5 + diff ** 2.5)) ** 1.5
     if character_level >= _EXTRA_PENALTY_FROM_LEVEL:
