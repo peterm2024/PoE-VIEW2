@@ -335,9 +335,36 @@ gained**
 — which is exactly what the rule predicts once the penalty crushes the
 character's share to about a hundredth while the gems keep their full
 10 %. The constant comes from the wiki, the variation from our data, and
-the two fit; neither alone would have shown this. Still filed under
-*Unconfirmed* below, because a single session cannot establish the 10 %
-independently.
+the two fit; neither alone would have shown this.
+
+**Confirmed 2026-10-02: the 10 % and the community penalty formula
+together.** Since 2026-09-26 the gem log carries the character's own
+experience, and the zone log the area level (§7). One day of play gave
+three clean stretches at three very different penalties. Solving
+`gem/character = k ÷ multiplier` for `k`, with the multiplier from the
+formula:
+
+| Stretch (local time) | Zone, area level | Character | Formula | gem/character | k |
+|---|---|---|---|---|---|
+| 11:59–12:36 | Colosseum, 69 | 79 | 77 % | 12.3 % | 9.5 % |
+| 14:18–14:21 | The Blood Aqueduct, 61 | 79 | 7.2 % | 132 % | 9.5 % |
+| 12:41–14:15 | Azurite Mine, 55–57 | 79 | 2–3 % | 501 % | ≈ 10 % |
+
+A penalty spanning a factor of 35 and the same `k` each time: had the
+formula been wrong anywhere in that range, `k` would have moved with it.
+Both halves therefore hold — gems get about 10 % of the experience
+**before** the penalty, and the formula gives the penalty. The
+measurement that prompted this: in The Blood Aqueduct the character
+made 4.1–4.7 million XP per hour at 7.2 %, i.e. 57–65 million before
+the penalty, which looked implausible next to about 30 million per hour
+in unpenalised level-72 maps the following day. The gems say it is
+real: they gained 6.4 million per hour there, against 1.1 million in
+the Colosseum. That zone is simply that much faster to clear for this
+build — the penalty is not mis-modelled.
+
+The 18.5–21 % ratios in maps from August (table above) imply a penalty
+of about 50 % there; the zone levels of those maps were not yet logged,
+so they cannot be checked against the formula after the fact.
 
 Differing **levels of progress** between gems come purely from history:
 
@@ -597,8 +624,10 @@ read as "not demonstrable with these means".
   in the raw data nor in the public documentation. What looks like it is
   fully explained by the two known cases: gem taken out, or bar full and
   not clicked.
-- **The exact formula for the experience penalty** by character level
-  and zone level. That one exists is known. What we can now do is
+- ~~**The exact formula for the experience penalty**~~ — **answered
+  2026-10-02**, see §4: the community formula and the wiki's 10 % fit
+  three stretches whose penalty differs by a factor of 35. The history
+  of the question is kept below. That one exists is known. What we can now do is
   *measure the current penalty* from the gem/character ratio (§4) — but
   that rests on the wiki's 10 %, which our own data cannot confirm
   independently. Deriving it would need a character low enough to have
