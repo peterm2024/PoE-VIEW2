@@ -714,7 +714,10 @@ def _zone_table(win: MainWindow) -> None:
     liest den echten Katalog, und den gibt es hier absichtlich nicht
     (§_TMP)."""
     app = QApplication.instance()
-    dlg = ZoneTableDialog(_demo_zone_records(), win, character_level=92,
+    # Stufe 80 statt der 92 des Haupt-Charakters: Damit zeigt die Ampel
+    # der Level-Zelle alle drei Farben (Story rot, 68 und 71 gelb, ab 72
+    # gruen) — auf 92 waere die ganze Spalte rot.
+    dlg = ZoneTableDialog(_demo_zone_records(), win, character_level=80,
                           account_name="", league=_DEMO_LEAGUE)
     # Hoehe knapp am Inhalt: Ein Bild, dessen untere Haelfte leer ist,
     # verschenkt in der README und im Forum genau den Platz, der die

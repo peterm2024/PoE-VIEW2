@@ -6,6 +6,8 @@ nach [SemVer](https://semver.org/lang/de/).
 
 ## [Unveröffentlicht]
 
+## [0.22.0] - 2026-10-03
+
 ### Neu
 
 - **Zonen-Tabelle: Spalte „XP/h"** — was der Charakter dort *jetzt*
