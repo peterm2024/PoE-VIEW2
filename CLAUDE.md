@@ -1,28 +1,29 @@
 Diese Datei liest Claude Code automatisch bei jeder Session in diesem
-Repo. Sie soll knapp halten, was sonst jedes Mal neu erklärt werden
-müsste — Ausführliches steht in den verlinkten Dateien, hier nur der
-Wegweiser dorthin plus die Fallen, die sich nicht aus dem Code ableiten
-lassen.
+Repo. Sie hält knapp fest, was sich nicht aus dem Code ableiten lässt —
+Ausführliches steht in den verlinkten Dateien. Persönliches (Namen,
+Konto, Arbeitsweise des Maintainers) steht in einer gitignoreten
+`CLAUDE.local.md`, die Claude Code zusätzlich liest, falls vorhanden.
 
 ## Was das Projekt ist
 
 PoE-VIEW2: PySide6-Desktop-Viewer für Path of Exile über die offizielle
-GGG-API. Öffentliches Repo, MIT-Lizenz, in aktivem Alltagseinsatz bei
-Peter. Startpunkt der Doku: [README.md](README.md).
+GGG-API. Öffentliches Repo, MIT-Lizenz. Startpunkt der Doku:
+[README.md](README.md).
 
-## Environment — die eine Falle, die sofort zuschlägt
+## Environment
 
-**`python`/`pytest` ohne Pfad treffen NICHT dieses Projekt.** Das System-
-`python` zeigt auf ein fremdes venv. Immer explizit:
+**`python`/`pytest` immer aus dem Projekt-venv aufrufen**, nicht über den
+`PATH` — auf der Entwicklungsmaschine zeigt das System-`python` auf ein
+fremdes venv:
 
 ```bash
 .venv/Scripts/python.exe -m pytest
 .venv/Scripts/python.exe main.py
 ```
 
-Volle Testsuite dauert 2–3 Minuten (aktuell ~1150 Tests). Vor jeder
-größeren Aussage "die Tests sind grün" tatsächlich laufen lassen, nicht
-aus einem Teillauf schließen.
+Die volle Testsuite dauert rund sieben Minuten (gut 2000 Tests). Vor der
+Aussage "die Tests sind grün" tatsächlich laufen lassen, nicht aus einem
+Teillauf schließen.
 
 ## Sprache
 
@@ -34,49 +35,31 @@ bewusst Englisch (siehe Datei-Kopf dort).
 
 ## Bevor irgendetwas an einen Screenshot, Testdaten oder einen Commit geht
 
-- **Kein echter Charaktername ins Repo.** Peters echte Charaktere heißen
-  `KRN_RF_*`/`KRN_LZ_*` — nie in Tests, Screenshots oder Doku verwenden.
-  Erfundene Namen benutzen (`WitchOfPeter`, `PeterM`, `TestAccount#1234`,
-  `Demo Ranger`, …).
-- **Keine private E-Mail ins Repo.** Der Projekt-Alias
-  (`config.DEFAULT_CONTACT_EMAIL`) ist dagegen bewusst öffentlich. Hier
-  absichtlich nicht ausgeschrieben: Die Adresse enthält den
-  Programmnamen in EINEM Wort, und als einzige Stelle damit war diese
-  Datei 2026-10-04 der einzige Google-Treffer bei der Suche danach.
-  Den Namen hier also nie zusammengeschrieben verwenden.
-- Der Kontoname `Gandol#4338` darf öffentlich sein (Peters Entscheidung).
+- **Keine echten Konto- oder Charakternamen ins Repo** — in Tests,
+  Screenshots und Doku erfundene Namen benutzen (`WitchOfPeter`,
+  `PeterM`, `TestAccount#1234`, `Demo Ranger`, …).
+- **Keine privaten E-Mail-Adressen ins Repo.**
 - Screenshots/Demo-Daten: `tools/make_screenshots.py` erzeugt sie aus
   erfundenen Daten, ohne Zugriff auf den echten Cache. Nie von Hand
   aufnehmen — das ist der Weg, auf dem echte Namen versehentlich in die
   README geraten sind.
-- **Keine Git-History-Rewrites** ohne ausdrückliche Ansage — hier schon
-  einmal nötig gewesen (`git-filter-repo` vor dem Öffentlichschalten),
-  seither Ausnahme, keine Routine.
-- `ToDo.md`, `.env`, `config.json`, `*.token` sind gitignored. `ToDo.md`
-  ist Peters Notizfeld — lesen, aber der Inhalt gehört nicht automatisch
-  in Commits oder Doku.
-- **Ein lokaler Hook blockiert `git commit`**, wenn die staged
-  Änderungen ein bekanntes privates Muster enthalten (Charakternamen-
-  Präfix `KRN_`, private E-Mail) — siehe `.claude/hooks/
-  check_private_strings.py` und `.claude/private-strings.txt`. Beides
-  liegt unter dem gitignoreten `.claude/`-Ordner, reist also NICHT mit
-  dem Repo mit und existiert nur auf Peters Maschine, auf der er
-  eingerichtet wurde. Ein blockierter Commit mit dieser Meldung ist kein
-  Fehler — das Muster gehört raus, nicht der Hook umgangen.
+- `ToDo.md`, `.env`, `config.json`, `*.token`, `CLAUDE.local.md` sind
+  gitignored.
 
 ## Tests
 
-- **Schreiben Peters echten `%LOCALAPPDATA%\PoE-VIEW2\` niemals an** —
-  die Autouse-Fixture in `tests/conftest.py` patcht `APP_DATA_DIR` und
-  `LOG_DIR`. Ein neues Modul, das aus `config.*` einen Pfad ableitet und
-  hineinschreibt, MUSS diesen Schutz kennen und als Funktion (nicht als
-  eingefrorene Modul-Konstante) implementiert sein — siehe FALLSTRICKE
-  #ähnliche Fälle unten.
+- **Schreiben das echte `%LOCALAPPDATA%\PoE-VIEW2\` niemals an** — die
+  Autouse-Fixture in `tests/conftest.py` patcht `APP_DATA_DIR`, `LOG_DIR`
+  und alle Downloads. Ein neues Modul, das aus `config.*` einen Pfad
+  ableitet und hineinschreibt, MUSS ihn als Funktion bilden (nicht als
+  beim Import eingefrorene Modul-Konstante), sonst greift der Schutz
+  nicht.
 - **UI-Größen/-Farben nicht offscreen messen.** `QT_QPA_PLATFORM=
   offscreen` (das Testsetup) hat eine andere Schriftbreite, eine helle
-  Palette und andere Qt-Untergrenzen als Peters echtes Windows. Für
-  Pixel-/Kontrast-/Breitenfragen ohne die Umgebungsvariable messen.
-  Einzelheiten: FALLSTRICKE #55, #71.
+  Palette und andere Qt-Untergrenzen als ein echtes Windows. Für
+  Pixel-/Kontrast-/Breitenfragen ohne die Umgebungsvariable messen,
+  das gemalte Pixel prüfen, nicht den gesetzten Wert. Einzelheiten:
+  FALLSTRICKE #55, #71, #95.
 - **Nach jedem Fix eine Gegenprobe:** Fix kurz herausnehmen, der neue
   Test muss fallen. Sonst ist unklar, ob der Test die Regression
   überhaupt fängt.
@@ -86,8 +69,7 @@ bewusst Englisch (siehe Datei-Kopf dort).
 ## Vor dem Commit/Release
 
 - Commit-Messages enden mit `Co-Authored-By: Claude <noreply@anthropic.com>`
-  (Modellname anpassen). Nur committen/pushen, wenn ausdrücklich
-  gewünscht.
+  (Modellname anpassen).
 - Release-Ablauf, inklusive der Schritte, die schon mehrfach vergessene
   Features gefunden haben (README gegen Changelog lesen): siehe
   [RELEASING.md](RELEASING.md).
@@ -103,13 +85,6 @@ bewusst Englisch (siehe Datei-Kopf dort).
 | Wie released man? | [RELEASING.md](RELEASING.md) |
 | Was sieht ein Nutzer/Fremder zuerst? | [README.md](README.md) |
 
-## Arbeitsweise mit Peter
-
-Peter ist kein Python-Programmierer, beurteilt Verhalten und Spielwissen,
-nicht Code. Rhythmus: Feature umsetzen → Tests + Gegenprobe → Doku
-(ARCHITEKTUR + FALLSTRICKE) nachziehen → knappe Zusammenfassung → auf
-Feedback warten. Bei Architektur-/UX-Fragen: kurze Empfehlung mit
-Trade-off geben, dann entscheiden lassen, nicht ungefragt umsetzen. Bei
-Bug-Reports zuerst den echten Log (`%LOCALAPPDATA%\PoE-VIEW2\logs\
-poe-view2.log`) bzw. den echten Cache ansehen, nicht aus der Beschreibung
-raten.
+Bei Bug-Reports zuerst den echten Log (`%LOCALAPPDATA%\PoE-VIEW2\logs\
+poe-view2.log`) bzw. den echten Cache ansehen, nicht aus der
+Beschreibung raten.

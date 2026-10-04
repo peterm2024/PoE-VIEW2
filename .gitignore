@@ -31,3 +31,7 @@ data-cache.json
 
 # Lokaler Arbeits-Spickzettel, nicht fuer die Oeffentlichkeit bestimmt
 ToDo.md
+
+# Persoenliche Anweisungen fuer Claude Code (Namen, Konto, Arbeitsweise) —
+# liest Claude Code automatisch, gehoert aber nicht ins oeffentliche Repo
+CLAUDE.local.md
