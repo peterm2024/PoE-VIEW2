@@ -6,6 +6,16 @@ nach [SemVer](https://semver.org/lang/de/).
 
 ## [Unveröffentlicht]
 
+### Neu
+
+- **`/kills`-Erinnerung auch beim Programmstart mitten in einer Map:**
+  Steht der Charakter beim Start schon in einer Kampfzone (das Spiel
+  läuft, der Eintritt ist höchstens eine Stunde her), kommen Gong und
+  Fenster trotzdem — mit gelbem Rahmen, und nach drei Sekunden ist es
+  wieder weg. Ob man für diese Runde abliest, entscheidet man selbst;
+  eine Ablesung mitten in der Map zählt richtig, weil die Spalte
+  „Monsters" ein Tempo rechnet.
+
 ## [0.22.0] - 2026-10-03
 
 ### Neu

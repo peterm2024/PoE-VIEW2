@@ -5435,6 +5435,48 @@ class MainWindow(QMainWindow):
         kills_reminder.play_gong()
         self._kills_popup.pop(zone_name, kills_reminder.target_screen(self.screen()))
 
+    def _remind_kills_at_start(self, log_path: Path) -> None:
+        """Steht der Charakter beim Programmstart schon in einer Kampfzone:
+        dieselbe Erinnerung, aber gelb und nach drei Sekunden weg.
+
+        Peter, 2026-10-04: "Hab gerade das Tool gestartet, aber erst als
+        ich in die Map gegangen bin. Wir sollten das so machen, dass dann
+        überprüft wird, ob ich schon in einer Map bin, der Gong und das
+        Fenster dann trotzdem aufpoppt, aber der Rahmen des Fensters gelb
+        ist und nach 3 Sekunden automatisch verschwindet."
+
+        "Schon in einer Map" heißt: Der letzte Aufenthalt der Client.txt
+        ist noch offen, liegt in einer Kampfzone, ist höchstens eine Stunde
+        alt (länger gilt auch sonst als Pause, §zone_catalog._MAX_DWELL_S)
+        und das Spiel läuft — ohne Spielfenster ist der letzte Eintrag nur
+        der Stand vom letzten Spielen. Der Seed wird vorgemerkt wie bei
+        einem echten Zonenwechsel: Ein Portal zurück in dieselbe Map gongt
+        nicht noch einmal, und ein späterer Wechsel der Einstellungen (der
+        den Beobachter neu aufsetzt) auch nicht."""
+        grenze = datetime.now() - timedelta(seconds=zone_catalog._MAX_DWELL_S)
+        aufenthalte = zone_stays(log_path, grenze)
+        if not aufenthalte:
+            return
+        letzter = aufenthalte[-1]
+        # ``zone_stays`` liefert auch den Aufenthalt, der vor ``grenze``
+        # begann und noch lief — das Alter deshalb eigens prüfen.
+        if (letzter.left is not None or not letzter.area_id or letzter.resting
+                or letzter.entered < grenze):
+            return
+        if letzter.seed and letzter.seed == getattr(self, "_kills_last_seed", ""):
+            return
+        if kills_reminder.game_window_rect() is None:
+            return
+        self._kills_last_seed = letzter.seed
+        self._kills_zones.append(letzter.name)
+        if not self._load_kills_reminder_enabled():
+            return
+        if getattr(self, "_kills_popup", None) is None:
+            self._kills_popup = kills_reminder.KillsReminder()
+        kills_reminder.play_gong()
+        self._kills_popup.pop(letzter.name, kills_reminder.target_screen(self.screen()),
+                              late=True)
+
     def _active_character_name(self) -> str:
         """Wie ``_active_character_level``: der Charakter mit der jüngsten
         Veröffentlichung, sonst der gerade angezeigte."""
@@ -5766,6 +5808,7 @@ class MainWindow(QMainWindow):
         self._zone_watcher.death_seen.connect(self._on_death_seen)
         self._zone_watcher.kills_reported.connect(self._on_kills_reported)
         self._seed_running_stay(resolved)
+        self._remind_kills_at_start(resolved)
         # Die letzten 24 h aus der Datei nachladen, damit der Zaehler einen
         # App-Neustart uebersteht — der Watcher selbst beginnt am Dateiende.
         self._deaths = deaths_since(resolved, datetime.now() - self.DEATH_WINDOW)

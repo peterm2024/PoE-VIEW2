@@ -2012,3 +2012,26 @@ erste Entwurf blieb auch ohne den Fix grün (Gegenprobe hielt).
 in einer sehr kleinen kippen. Und "auch nach dem Loslassen" war die
 Angabe, die den Neuaufbau als Ursache ausschloss — nachfragen lohnt.
 
+
+## 95. Der Rahmen blieb rot, obwohl das Stylesheet gelb sagte — zweites `setStyleSheet` ohne neues Polieren
+
+**Symptom.** Die gelbe Kurz-Erinnerung (ARCHITEKTUR §4.59.2) war in
+allen Tests gelb — sie prüften das Attribut und das Stylesheet. Das
+native `grab()` zeigte am Rand `#e53935`, das alte Rot.
+
+**Ursache.** `KillsReminder` setzt im Konstruktor ein Stylesheet mit
+rotem Rahmen, `pop(late=True)` setzt ein zweites mit gelbem. Qt malte
+das zweite nicht, solange das Widget nicht neu poliert wurde — auch bei
+einem Widget, das noch nie sichtbar war (nativ nachgestellt: Stylesheet
+gelb, Pixel rot; nach `unpolish`/`polish` gelb).
+
+**Lösung.** `KillsReminder._rahmen` ruft nach `setStyleSheet`
+`style().unpolish(self)`, `style().polish(self)` und `update()`.
+
+**Test.** `test_the_painted_frame_really_changes_colour` liest das
+Pixel am Rand aus `grab()`, einmal gelb, danach wieder rot. Ohne das
+Polieren fällt er.
+
+**Lehre:** Bei Farbe aus einem Stylesheet das gemalte Pixel prüfen, nicht
+den gesetzten Wert — derselbe Fall wie der fehlende Rahmen ohne
+`WA_StyledBackground` (§4.59).

@@ -11654,3 +11654,126 @@ def test_a_real_publication_credits_its_zone(qapp, monkeypatch) -> None:
 def league_log_unknown():
     from poe_view.services.league_log import UNKNOWN
     return UNKNOWN
+
+
+# --- /kills: schon in der Map beim Programmstart (Peter, 2026-10-04) ----- #
+
+def _laufende_map(pfad, eintritte) -> None:
+    """Client.txt mit Eintritten ``(Minuten vor jetzt, Kennung, Level,
+    Name, Seed)``; der letzte ist noch offen."""
+    zeilen = []
+    for vor_min, area, level, name, seed in eintritte:
+        stempel = (datetime.now() - timedelta(minutes=vor_min)).strftime("%Y/%m/%d %H:%M:%S")
+        zeilen += [f"{stempel} 1 abc [DEBUG Client 1] Client-Safe Instance ID = 1",
+                   f'{stempel} 1 abc [DEBUG Client 1] Generating level {level} '
+                   f'area "{area}" with seed {seed}',
+                   f"{stempel} 1 abc [INFO Client 1] : You have entered {name}."]
+    pfad.write_text("\n".join(zeilen) + "\n", encoding="utf-8")
+
+
+def _start_in_map(qapp, monkeypatch, tmp_path, eintritte, *, erinnern=True, spiel=True):
+    from PySide6.QtCore import QRect
+    from poe_view.ui import kills_reminder
+    win, gongs = _kill_fenster(qapp, monkeypatch, erinnern=erinnern)
+    monkeypatch.setattr(kills_reminder, "game_window_rect",
+                        lambda: QRect(0, 0, 800, 600) if spiel else None)
+    log = tmp_path / "Client.txt"
+    _laufende_map(log, eintritte)
+    win._remind_kills_at_start(log)
+    return win, gongs
+
+
+_HIDEOUT_DANN_ATOLL = [(10, "HideoutSlum", 60, "Backstreet Hideout", "1"),
+                       (5, "MapWorldsAtoll", 77, "Atoll", "222")]
+
+
+def test_already_in_a_map_at_start_rings_with_a_short_yellow_reminder(qapp, monkeypatch,
+                                                                      tmp_path) -> None:
+    from poe_view.ui import kills_reminder
+    win, gongs = _start_in_map(qapp, monkeypatch, tmp_path, _HIDEOUT_DANN_ATOLL)
+    try:
+        assert gongs == [1]
+        popup = win._kills_popup
+        assert popup.isVisible()
+        assert popup.border_color in (kills_reminder.SPAET_FARBE_DUNKEL,
+                                      kills_reminder.SPAET_FARBE_HELL)
+        assert popup._timer.interval() == kills_reminder.SPAET_MS == 3000
+        assert win._kills_zones == ["Atoll"]
+        # Portal zurück in dieselbe Map: kein zweiter Gong.
+        _betritt_mit_seed(win, "Atoll", "MapWorldsAtoll", 77, "222")
+        assert gongs == [1]
+        # Die nächste Map erinnert wieder rot und lange.
+        _betritt_mit_seed(win, "Cells", "MapWorldsCells", 77, "333")
+        assert gongs == [1, 1]
+        assert popup.border_color == kills_reminder.RAHMEN_FARBE
+        assert popup._timer.interval() == kills_reminder.AUTO_HIDE_MS
+    finally:
+        win._kills_popup and win._kills_popup.close()
+        _schliessen(win)
+
+
+@pytest.mark.parametrize("eintritte, spiel", [
+    ([(5, "HideoutSlum", 60, "Backstreet Hideout", "1")], True),       # im Hideout
+    (_HIDEOUT_DANN_ATOLL, False),                                      # Spiel zu
+    ([(90, "MapWorldsAtoll", 77, "Atoll", "222")], True),              # über eine Stunde alt
+])
+def test_no_start_reminder_outside_a_running_map(qapp, monkeypatch, tmp_path,
+                                                 eintritte, spiel) -> None:
+    win, gongs = _start_in_map(qapp, monkeypatch, tmp_path, eintritte, spiel=spiel)
+    try:
+        assert gongs == []
+        assert win._kills_popup is None
+    finally:
+        _schliessen(win)
+
+
+def test_start_reminder_switched_off_still_notes_the_map(qapp, monkeypatch, tmp_path) -> None:
+    win, gongs = _start_in_map(qapp, monkeypatch, tmp_path, _HIDEOUT_DANN_ATOLL, erinnern=False)
+    try:
+        assert gongs == []
+        assert win._kills_popup is None
+        assert win._kills_zones == ["Atoll"]
+        assert win._kills_last_seed == "222"
+    finally:
+        _schliessen(win)
+
+
+def test_starting_the_zone_watch_checks_for_a_running_map(qapp, monkeypatch, tmp_path) -> None:
+    """Verdrahtung: Das Aufsetzen des Beobachters prüft — einmal. Ein
+    zweites Aufsetzen (Einstellungen gespeichert) gongt nicht erneut."""
+    from PySide6.QtCore import QRect
+    from poe_view.ui import kills_reminder
+    win, gongs = _kill_fenster(qapp, monkeypatch, erinnern=True)
+    monkeypatch.setattr(kills_reminder, "game_window_rect", lambda: QRect(0, 0, 800, 600))
+    log = tmp_path / "Client.txt"
+    _laufende_map(log, _HIDEOUT_DANN_ATOLL)
+    win._zone_watcher = None   # der Ersatz aus _kill_fenster kennt kein setParent
+    try:
+        win._apply_zone_watcher_config(True, str(log))
+        assert gongs == [1]
+        win._apply_zone_watcher_config(True, str(log))
+        assert gongs == [1]
+    finally:
+        win._kills_popup and win._kills_popup.close()
+        _schliessen(win)
+
+
+def test_the_painted_frame_really_changes_colour(qapp) -> None:
+    """Nicht nur das Stylesheet, das gemalte Pixel: Nach einem zweiten
+    setStyleSheet malte Qt ohne neues Polieren weiter rot (FALLSTRICKE
+    #95)."""
+    from PySide6.QtGui import QColor
+    from poe_view.ui import kills_reminder
+
+    def rand(popup) -> str:
+        bild = popup.grab().toImage()
+        return bild.pixelColor(2, bild.height() // 2).name()
+
+    popup = kills_reminder.KillsReminder()
+    try:
+        popup.pop("Atoll", late=True)
+        assert rand(popup) == QColor(popup.border_color).name() != kills_reminder.RAHMEN_FARBE
+        popup.pop("Cells")
+        assert rand(popup) == kills_reminder.RAHMEN_FARBE
+    finally:
+        popup.close()

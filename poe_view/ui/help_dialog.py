@@ -250,7 +250,9 @@ own clicks need.</p>
 new combat zone plays a short gong and shows a small window asking you to
 type <code>/kills</code> in chat. It closes once the game has answered;
 the answers, with the difference to the previous one, go to
-<code>kills-log.csv</code> in the log folder.</p>
+<code>kills-log.csv</code> in the log folder. Started while already in
+a map, you get the same gong with a yellow frame that disappears after
+three seconds.</p>
 <p>After a character refresh the table marks what moved:</p>
 {_REFRESH_LEGEND}
 <p>An item that left the inventory stays visible for one more cycle,

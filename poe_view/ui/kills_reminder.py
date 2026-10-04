@@ -31,7 +31,7 @@ import wave
 from pathlib import Path
 
 from PySide6.QtCore import QPoint, QRect, Qt, QTimer
-from PySide6.QtGui import QGuiApplication, QScreen
+from PySide6.QtGui import QGuiApplication, QPalette, QScreen
 from PySide6.QtWidgets import QApplication, QLabel, QVBoxLayout, QWidget
 
 from poe_view import config
@@ -44,6 +44,15 @@ AUTO_HIDE_MS = 30_000
 GROESSE = 2
 RAHMEN_PX = 5
 RAHMEN_FARBE = "#e53935"
+# Schon in der Map, als PoE-VIEW2 startete (§KillsReminder.pop, ``late``):
+# gelb statt rot und nach drei Sekunden wieder weg. Peter, 2026-10-04:
+# "...so dass es am Spieler hängt, ob er für diese Runde die Kills zählen
+# will." Zwei Gelbs, je nach Grund gerechnet: #fbc02d auf dem dunklen
+# Fenstergrund 10,1:1, auf dem hellen nur 1,45:1 — dort #b8860b mit
+# 2,86:1, das hellste Gelb, das dem Rot (3,71:1) nahekommt.
+SPAET_MS = 3_000
+SPAET_FARBE_DUNKEL = "#fbc02d"
+SPAET_FARBE_HELL = "#b8860b"
 # Abstand vom oberen Bildschirmrand als Anteil der Höhe (§KillsReminder.pop).
 _OBEN_ANTEIL = 0.12
 
@@ -155,9 +164,7 @@ class KillsReminder(QWidget):
         # ins Auge stechen." Das Rot ist gerechnet: gegen den dunklen Grund
         # 3,94:1, gegen den hellen 3,71:1 — beide über 3:1 für Bedien-
         # elemente; grellere Töne (#ff3b30) fielen hell auf 3,1.
-        self.setStyleSheet(
-            f"#killsReminder {{ background: palette(window); "
-            f"border: {RAHMEN_PX}px solid {RAHMEN_FARBE}; border-radius: 10px; }}")
+        self._rahmen(RAHMEN_FARBE)
         # Die Schrift an jede Beschriftung einzeln: Mit einem Stylesheet am
         # Fenster gibt Qt ein setFont() des Fensters nicht an die Kinder
         # weiter (nativ gemessen: Fenster 18 pt, Beschriftungen 9 pt).
@@ -179,10 +186,35 @@ class KillsReminder(QWidget):
         self._timer.setInterval(AUTO_HIDE_MS)
         self._timer.timeout.connect(self.hide)
 
-    def pop(self, zone_name: str, screen: QScreen | None = None) -> None:
+    def _rahmen(self, farbe: str) -> None:
+        self.border_color = farbe
+        self.setStyleSheet(
+            f"#killsReminder {{ background: palette(window); "
+            f"border: {RAHMEN_PX}px solid {farbe}; border-radius: 10px; }}")
+        # Ohne neues Polieren malt Qt nach einem ZWEITEN setStyleSheet
+        # weiter den alten Rahmen (nativ gemessen: Stylesheet gelb, Pixel
+        # rot; FALLSTRICKE #95).
+        self.style().unpolish(self)
+        self.style().polish(self)
+        self.update()
+
+    def pop(self, zone_name: str, screen: QScreen | None = None,
+            late: bool = False) -> None:
         """Oben mittig, etwas unter dem oberen Rand: Unten rechts liegen im
         Spiel Skill-Leiste und Mana-Kugel, ganz oben die Lebensleiste eines
-        Bosses — knapp darunter verdeckt das Fenster am wenigsten."""
+        Bosses — knapp darunter verdeckt das Fenster am wenigsten.
+
+        ``late``: Die Map lief schon, als das Programm startete. Eine
+        Ablesung jetzt zählt trotzdem richtig (die Zuordnung rechnet ein
+        Tempo über die Zeit ab der Ablesung, §zone_catalog.attribute_kills),
+        aber der Spieler steckt womöglich mitten im Kampf — also nur ein
+        kurzer, gelber Hinweis statt der roten Aufforderung."""
+        if late:
+            dunkel = self.palette().color(QPalette.ColorRole.Window).lightnessF() < 0.5
+            self._rahmen(SPAET_FARBE_DUNKEL if dunkel else SPAET_FARBE_HELL)
+        else:
+            self._rahmen(RAHMEN_FARBE)
+        self._timer.setInterval(SPAET_MS if late else AUTO_HIDE_MS)
         self._titel.setText(f"⚔ {zone_name}")
         self.adjustSize()
         bildschirm = screen or QGuiApplication.primaryScreen()

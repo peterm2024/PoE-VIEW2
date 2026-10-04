@@ -8266,6 +8266,49 @@ fehlende Datei), `tests/test_zone_table.py` (Spalte, Kindzeilen und
 Zusammenfassung, leer und Sortierung, CSV). Gegenprobe mit zehn
 Sabotagen, alle fallen.
 
+#### 4.59.2 Start mitten in einer Map: gelb und kurz
+
+Peter, 2026-10-04: "Hab gerade das Tool gestartet, aber erst als ich
+in die Map gegangen bin. Wir sollten das so machen, dass dann überprüft
+wird, ob ich schon in einer Map bin, der Gong und das Fenster dann
+trotzdem aufpoppt, aber der Rahmen des Fensters gelb ist und nach 3
+Sekunden automatisch verschwindet, so dass es am Spieler hängt, ob er
+für diese Runde die Kills zählen will."
+
+Der Beobachter beginnt am Dateiende und sah den Eintritt nie.
+`MainWindow._remind_kills_at_start` liest beim Aufsetzen des Beobachters
+den letzten Aufenthalt der Client.txt (dieselbe Quelle wie
+`_seed_running_stay`, FALLSTRICKE #92) und erinnert, wenn er noch offen
+ist, in einer Kampfzone liegt, höchstens `_MAX_DWELL_S` (eine Stunde)
+alt ist und **das Spielfenster existiert**. Die letzte Bedingung ist die
+wichtige: Ohne laufendes Spiel ist der letzte Eintrag nur der Stand vom
+letzten Spielen, und das Programm gongte beim Start nach jedem Abend in
+einer Map. `zone_stays` liefert auch einen Aufenthalt, der VOR der
+Grenze begann — das Alter wird deshalb eigens geprüft (erster Testlauf:
+eine 90 Minuten alte Map gongte).
+
+Der Seed wird vorgemerkt wie bei einem echten Zonenwechsel. Damit gongt
+weder ein Portal zurück in dieselbe Map noch ein Speichern der
+Einstellungen, das den Beobachter neu aufsetzt.
+
+**Warum eine späte Ablesung überhaupt taugt:** `attribute_kills` rechnet
+Monster und Zeit IN der Karte innerhalb des Abschnitts, also ein Tempo
+(§4.59.1). Eine Ablesung mitten in der Map deckt den Rest der Map
+richtig ab. Gelb und drei Sekunden heißt deshalb nicht "ungültig",
+sondern "nicht nötig, wenn du gerade kämpfst".
+
+Das Gelb ist gerechnet und hängt vom Fenstergrund ab: `#fbc02d` auf dem
+dunklen Grund 10,1:1, auf dem hellen nur 1,45:1 — dort `#b8860b` mit
+2,86:1. Ein Gelb mit 3:1 auf Hellgrau gibt es nicht; es wäre Ocker.
+Beim nächsten normalen Gong stellt `pop` Rot und 30 Sekunden wieder her.
+
+Getestet: `tests/test_main_window_helpers.py` (gelb und 3 s, Portal
+zurück ohne Gong, nächste Map wieder rot; nicht im Hideout, nicht ohne
+Spiel, nicht nach über einer Stunde; ausgeschaltet nur vorgemerkt;
+Verdrahtung über `_apply_zone_watcher_config`, zweimal aufgesetzt
+gongt einmal; das gemalte Rahmen-Pixel). Gegenprobe mit zehn
+Sabotagen, alle fallen.
+
 ---
 
 ## 8. Entwicklungsstand

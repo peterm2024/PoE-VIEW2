@@ -371,6 +371,9 @@ delve depth 0, where nobody dies) from the depths below it.
   log folder, with the difference to the previous one and the combat
   zones in between. The window sits above the game in windowed or
   windowed-fullscreen mode, not in exclusive fullscreen.
+  If you start PoE-VIEW2 while already inside a map, you get the same
+  gong with a yellow frame that disappears after three seconds — your
+  call whether to take a reading for that run.
 - **Offline mode**: during GGG maintenance or a lost connection, the
   app shows the last known state from the cache, clearly marked as such
   (📴). A dot in the status bar carries the same information at a
