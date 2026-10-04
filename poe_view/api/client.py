@@ -134,6 +134,11 @@ class PoeApiClient:
         # Einmal je Sitzung schreibt ``_log_character_fields`` die Felder
         # der Charakter-Antwort mit.
         self._character_fields_logged = False
+        # Der Passiv-Baum aus derselben Antwort (§4.60): Name → (passives,
+        # ruthless oder None). Abgeholt von ``api_worker`` direkt nach dem
+        # Abruf; ein Attribut statt eines vierten Rückgabewerts, damit
+        # ``get_character_items`` für alle übrigen Aufrufer gleich bleibt.
+        self.last_trees: dict[str, tuple[dict, bool | None]] = {}
         self._http = httpx.Client(
             base_url=config.API_BASE,
             headers={"User-Agent": config.user_agent()},
@@ -231,6 +236,10 @@ class PoeApiClient:
         data = self._get(f"/character/{quote(name)}")
         char = data.get("character", {})
         self._log_character_fields(name, char)
+        passives = char.get("passives")
+        if isinstance(passives, dict) and passives:
+            ruthless = char.get("ruthless")
+            self.last_trees[name] = (passives, ruthless if isinstance(ruthless, bool) else None)
         items = (char.get("equipment", []) + char.get("inventory", [])
                  + char.get("jewels", []) + char.get("rucksack", []))
         return (char.get("level", 0), char.get("experience", 0),

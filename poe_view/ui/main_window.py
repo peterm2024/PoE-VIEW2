@@ -39,7 +39,8 @@ from poe_view.services import (cache_backup, cache_writer, data_cache, gem_xp_lo
 from poe_view.services.experience import (experience_multiplier, penalty_caption,
                                           time_to_next_level)
 from poe_view.services.instance_lock import InstanceLock
-from poe_view.services import kills_log, update_check, zone_loot_log
+from poe_view.services import (kills_log, passive_tree, tree_history, update_check,
+                               zone_loot_log)
 from poe_view.services.zone_watcher import (ZoneWatcher, deaths_since,
                                               is_rest_area,
                                               resolve_client_log_path, zone_stays)
@@ -2564,6 +2565,7 @@ class MainWindow(QMainWindow):
         w.stash_children_loaded.connect(self._on_stash_children)
         w.character_items_loaded.connect(self._on_character_items)
         w.character_snapshot_loaded.connect(self._on_character_snapshot)
+        w.character_tree_loaded.connect(self._on_character_tree)
         w.icon_loaded.connect(self._on_icon)
         w.poe2_probe_loaded.connect(self._on_poe2_probe_loaded)
         w.rate_limit_changed.connect(self._on_rate_limit_changed)
@@ -4184,6 +4186,31 @@ class MainWindow(QMainWindow):
         # _all_characters wandert genau so in den Datei-Cache (§4.7).
         self._persist_cache()
 
+    # --- Passiv-Baum (§4.60) ------------------------------------------- #
+
+    def _trees(self) -> dict:
+        """Die gespeicherten Bäume des Kontos, beim ersten Zugriff geladen."""
+        konto = self._account_name or ""
+        if getattr(self, "_trees_account", None) != konto:
+            self._trees_account = konto
+            self._trees_data = tree_history.load(tree_history.path_for(konto))
+        return self._trees_data
+
+    def _on_character_tree(self, name: str, passives: dict, ruthless) -> None:
+        """Bei jedem Charakter-Abruf; gespeichert wird nur eine Änderung."""
+        char = next((c for c in self._all_characters if c.name == name), None)
+        if not isinstance(ruthless, bool):
+            ruthless = passive_tree.is_ruthless({}, char.league if char else "")
+        watch = self._xp_watch.get(name)
+        level = watch.level if watch and watch.level else (char.level if char else 0)
+        baeume = self._trees()
+        if not tree_history.record(baeume, name, passives, level=level, ruthless=ruthless):
+            return
+        try:
+            tree_history.save(tree_history.path_for(self._account_name or ""), baeume)
+        except OSError:
+            log.exception("Passiv-Baum: Speichern fehlgeschlagen")
+
     def _on_character_snapshot(self, name: str, level: int, experience: int) -> None:
         """Läuft bei JEDEM Abruf von ``/character/{name}`` mit, egal ob
         gerade angezeigt oder ein stiller Hintergrund-Refresh — anders als
@@ -4871,10 +4898,13 @@ class MainWindow(QMainWindow):
                 "to load its equipment.")
             return
         watch = self._xp_watch.get(char.name)
+        baum = tree_history.current(self._trees(), char.name)
         text = build_character_sheet(
             char, items,
             level=watch.level if watch else None,
-            experience=watch.current_experience if watch else None)
+            experience=watch.current_experience if watch else None,
+            tree_entry=baum,
+            tree=passive_tree.load(bool(baum.get("ruthless"))) if baum else None)
         default_name = f"{char.league or 'league'}-{char.name}-character-sheet.md"
         default_path = str(config.downloads_dir() / default_name)
         path, _selected_filter = QFileDialog.getSaveFileName(

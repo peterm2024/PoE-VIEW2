@@ -11777,3 +11777,59 @@ def test_the_painted_frame_really_changes_colour(qapp) -> None:
         assert rand(popup) == kills_reminder.RAHMEN_FARBE
     finally:
         popup.close()
+
+
+# --- Passiv-Baum: speichern und exportieren (§4.60) ---------------------- #
+
+_MINI_BAUM = {
+    "classes": [{"name": "Scion", "ascendancies": []},
+                {"name": "Marauder", "ascendancies": [{"id": "Juggernaut", "name": "Juggernaut"}]}],
+    "nodes": {
+        "1": {"name": "MARAUDER", "classStartIndex": 1, "out": ["10"], "in": []},
+        "10": {"name": "Strength", "stats": ["+10 to Strength"], "out": ["12"], "in": []},
+        "12": {"name": "Iron Heart", "isNotable": True, "stats": ["+20 to maximum Life"],
+               "out": [], "in": []},
+    },
+}
+
+
+def test_a_character_refresh_stores_the_tree_once(qapp) -> None:
+    from poe_view.services import tree_history
+    win = MainWindow()
+    try:
+        win._account_name = "TestAccount#1234"
+        win._all_characters = [make_char("WitchOfPeter", "SSF R Allflame")]
+        win._on_character_tree("WitchOfPeter", {"hashes": [10]}, None)
+        pfad = tree_history.path_for("TestAccount#1234")
+        gespeichert = tree_history.load(pfad)["WitchOfPeter"]["current"]
+        # Ohne API-Kennung entscheidet der Liga-Name: "SSF R ..." ist Ruthless.
+        assert gespeichert["ruthless"] is True
+        assert gespeichert["passives"] == {"hashes": [10]}
+        stand = pfad.stat().st_mtime_ns
+        win._on_character_tree("WitchOfPeter", {"hashes": [10]}, None)
+        assert pfad.stat().st_mtime_ns == stand          # unverändert: nicht neu geschrieben
+    finally:
+        _schliessen(win)
+
+
+def test_the_exported_sheet_contains_the_tree(qapp, monkeypatch, tmp_path) -> None:
+    from poe_view.services import passive_tree
+    passive_tree.tree_dir().mkdir(parents=True)
+    (passive_tree.tree_dir() / "ruthless.json").write_text(json.dumps(_MINI_BAUM), encoding="utf-8")
+    win = MainWindow()
+    try:
+        win._account_name = "TestAccount#1234"
+        char = Character.model_validate({"name": "WitchOfPeter", "class": "Juggernaut",
+                                         "level": 30, "league": "SSF R Allflame"})
+        win._all_characters = [char]
+        win._on_character_items("WitchOfPeter", [], False)
+        win._on_character_tree("WitchOfPeter", {"hashes": [10]}, True)
+        ziel = tmp_path / "sheet.md"
+        monkeypatch.setattr("poe_view.ui.main_window.QFileDialog.getSaveFileName",
+                            staticmethod(lambda *a, **k: (str(ziel), "Markdown files (*.md)")))
+        win._on_character_sheet_requested(char)
+        text = ziel.read_text(encoding="utf-8")
+        assert "Ruthless tree · 1 points allocated" in text
+        assert "- **Iron Heart** (notable, 1 point) — +20 to maximum Life" in text
+    finally:
+        _schliessen(win)

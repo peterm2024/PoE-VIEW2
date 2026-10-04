@@ -191,6 +191,14 @@ delve depth 0, where nobody dies) from the depths below it.
   No computed stats (life, resistances, DPS): the API doesn't provide
   them, they come from the game client simulating the full passive
   tree.
+  The sheet ends with the **passive tree**: ascendancy, keystones,
+  notables and masteries with their values, the small passives added
+  up, your jewels, and **what is within reach** — every notable,
+  keystone and jewel socket at most four more points away, with the
+  path. Paste it into an AI chat or a forum post to get advice on
+  where to put your next points. Ruthless characters get GGG's Ruthless
+  tree with its own values. The tree data comes from GGG's
+  `skilltree-export` on GitHub and is refreshed weekly.
 - **Enlarged item view** (double-click an item): large icon and the full
   property and mod text without the compact detail panel's line
   clipping. Divination cards show their real artwork from GGG's own CDN

@@ -890,3 +890,20 @@ def test_a_404_on_something_else_stays_an_error(qapp, monkeypatch) -> None:
     assert missing == []
     assert len(errors) == 1
     worker.client.close()
+
+
+def test_character_items_dispatch_emits_the_passive_tree(qapp, monkeypatch) -> None:
+    """§4.60: Den Baum holt der Worker aus ``client.last_trees`` — einmal."""
+    worker = ApiWorker()
+
+    def abruf(name):
+        worker.client.last_trees[name] = ({"hashes": [5]}, None)
+        return (30, 1, [])
+
+    monkeypatch.setattr(worker.client, "get_character_items", abruf)
+    baeume: list = []
+    worker.character_tree_loaded.connect(lambda *a: baeume.append(a))
+    worker._dispatch(FetchCharacterItemsJob("WitchOfPeter"))
+    assert baeume == [("WitchOfPeter", {"hashes": [5]}, None)]
+    assert worker.client.last_trees == {}
+    worker.client.close()

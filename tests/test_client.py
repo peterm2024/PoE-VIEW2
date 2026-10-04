@@ -351,3 +351,16 @@ def test_a_familiar_answer_stays_quiet(monkeypatch, caplog) -> None:
 
     assert _zeilen(caplog, "NEUE Felder") == []
     client.close()
+
+
+def test_get_character_items_keeps_the_passive_tree_for_the_worker(monkeypatch) -> None:
+    """§4.60: Der Baum aus derselben Antwort, samt Ruthless-Kennung."""
+    client = PoeApiClient(RateLimitManager())
+    response = {"character": {"ruthless": True, "passives": {"hashes": [1, 2]}}}
+    monkeypatch.setattr(client, "_get", lambda path, policy_hint=None: response)
+    client.get_character_items("WitchOfPeter")
+    assert client.last_trees["WitchOfPeter"] == ({"hashes": [1, 2]}, True)
+    response["character"] = {"passives": {}}
+    client.get_character_items("Leer")
+    assert "Leer" not in client.last_trees
+    client.close()

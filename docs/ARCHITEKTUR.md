@@ -8309,6 +8309,92 @@ Verdrahtung über `_apply_zone_watcher_config`, zweimal aufgesetzt
 gongt einmal; das gemalte Rahmen-Pixel). Gegenprobe mit zehn
 Sabotagen, alle fallen.
 
+### 4.60 Der Passiv-Baum (`services/passive_tree.py`, `services/tree_history.py`)
+
+Peter, 2026-10-04: "wir könnten mal an den Skill-Points-Tree rangehen" —
+und nach dem Vorschlag: "Wir sollten für den Baum auch eine Export-
+Funktion integrieren um z.B. eine Einschätzung von dir zur
+Skillpunktvergabe holen zu können." Er spielt Ruthless SSF ohne Guide:
+"ich muss nehmen, was kommt."
+
+**Woher die Daten kommen.** Den vergebenen Baum liefert
+`/character/<name>` seit jeher im Feld `passives` mit (`hashes`,
+`hashes_ex`, `mastery_effects`, `jewel_data`, Bandit, Pantheon) — er
+wurde bisher weggeworfen. `PoeApiClient.get_character_items` legt ihn
+jetzt in `last_trees` ab, `ApiWorker` holt ihn direkt danach ab und
+sendet `character_tree_loaded`; die Rückgabe von `get_character_items`
+blieb für alle übrigen Aufrufer gleich. Was die Nummern bedeuten,
+veröffentlicht GGG in `grindinggear/skilltree-export` (`data.json`,
+`ruthless.json`, je 6,6 MB). **Das Repo trägt keine Lizenz** — die
+Dateien kommen deshalb wie das Mod-Wissen zur Laufzeit (im selben Job,
+`FetchModKnowledgeJob`) und werden eine Woche vorgehalten.
+
+**Ruthless hat einen eigenen Baum** mit gleicher Form, aber 118 Knoten
+mit anderen Werten (gemessen 2026-10-04: Aspect of Carnage 25 statt 40 %
+more Damage, Unwavering Faith 30 statt 50 %). Für eine Einschätzung
+wäre der falsche Baum schlimmer als keiner. Entschieden wird über das
+API-Feld `ruthless`; fehlt es, über den Liga-Namen ("SSF R Allflame",
+"Ruthless …").
+
+**Der Export ist ein Abschnitt im Charakterbogen** (§4.46), kein eigener
+Menüpunkt — Peters Entscheidung. Ob ein Knoten sich lohnt, hängt an
+Skill, Waffe und Defensive; die stehen im selben Bogen. Geschrieben für
+einen Leser, der den Baum nicht vor sich hat: jeder vergebene große
+Knoten mit Werten, Masteries mit dem GEWÄHLTEN Effekt, die kleinen
+Knoten zusammengezählt (`summed_stats`: gleich bis auf die Zahlen),
+die Jewels, und **"Within reach"** — Notables, Keystones und
+Jewel-Sockel bis `REACH_POINTS` = 4 weitere Punkte, mit dem Weg.
+
+`within_reach` ist eine Breitensuche von allen vergebenen Knoten
+zugleich, jeder neue Knoten kostet einen Punkt. Nicht betreten werden
+Aszendenz-Knoten (eigene Punkte), Masteries (liegen auf keinem Weg) und
+fremde Klassen-Starts. Der eigene Start steht nie in `hashes`, ist aber
+Quelle — sonst fände ein frischer Charakter gar nichts. Die Klasse
+nennt die API als Aszendenz ("Juggernaut"); `Tree.class_starts` kennt
+deshalb Klasse UND Aszendenzen. Gegen den echten Baum geprüft: Vom
+Marauder-Start liegen Born to Fight und Warrior's Blood fünf Punkte
+weit, innerhalb von vier also nichts — richtig so.
+
+**Zeilenumbrüche in Werten** sind bei GGG mal eine zweite Eigenschaft
+(Divine Shield), mal ein Umbruch mitten im Satz (Untiring: "…Hits in
+the past\n10 seconds is Regenerated…"). Zerlegt hätte das den Satz
+zerrissen; `_lines` verbindet mit " / ".
+
+**Punkte:** Der Bogen nennt die vergebenen Punkte und "Level N gives
+N−1 points from levels, plus quest rewards". Eine Zahl freier Punkte
+steht bewusst nicht da: Die Quest-Punkte meldet die API nicht, und eine
+geschätzte Zahl würde für eine Einschätzung als Tatsache gelesen.
+
+**Der Verlauf** (`tree_history`, `passive-trees-<konto>.json`) schreibt
+nur bei einer Änderung: andere Knoten, Masteries, Bandit oder Pantheon
+legen einen Verlaufseintrag an; Level oder Jewels (`jewel_data`)
+schreiben nur den aktuellen Stand fort. Dieselben Knoten in anderer
+Reihenfolge sind keine Änderung, ein leeres `passives` (Feld fehlte)
+auch nicht — sonst sähe ein Abruf ohne Baum wie ein Komplett-Respec
+aus. Höchstens 500 Einträge je Charakter.
+
+**Vorbereitet, nicht gebaut: benannte Konfigurationen.** Peter: "Wir
+müssen uns auch eine Möglichkeit überlegen für den Baum verschiedene
+Konfigurationen zur Verfügung zu stellen. Das wechseln der Knoten
+kostet zwar Gold, aber ist oft die einzige Möglichkeit bestimmte Bosse
+zu legen ... eine Konfiguration für maximale Feuerresistenz oder
+maximalen Burst-Damage." Das Format lässt neben `current` Platz für
+`"configs": {"<name>": …}` ohne Versionssprung. Geplant: speichern,
+per Planer-/PoB-Link anlegen, die Respec-Liste "zurücknehmen / nehmen"
+zeigen; eine automatische Optimierung auf einen Wert später.
+
+Getestet: `tests/test_passive_tree.py` (Baum lesen, Kanten in beide
+Richtungen, Klassen-Starts; Reichweite mit Weg, Grenze, frischer
+Charakter, kein Weg durch fremde Starts oder die Aszendenz;
+Ruthless-Erkennung; Masteries in beiden Formaten; Summen; Download
+beider Bäume, Teil-Download schreibt nichts; Verlauf: einmal,
+Level-Aufstieg, Respec, leer, Deckel, Jewel-Tausch, Speichern und
+Version; Bogen-Abschnitt mit allen Teilen, ohne Baum, ohne Daten,
+fehlende Knoten, Jewels), `tests/test_client.py`,
+`tests/test_api_worker.py`, `tests/test_main_window_helpers.py`
+(speichert einmal, Liga-Fallback, Export enthält den Baum). Gegenprobe
+mit 19 Sabotagen.
+
 ---
 
 ## 8. Entwicklungsstand

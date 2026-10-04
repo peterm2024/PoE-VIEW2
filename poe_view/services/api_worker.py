@@ -24,7 +24,7 @@ from poe_view.api import ninja, oauth
 from poe_view.api.client import ApiError, AuthError, PoeApiClient
 from poe_view.api.models import StashTab
 from poe_view.api.rate_limiter import RateLimitManager
-from poe_view.services import (icon_cache, mod_knowledge, poe2_probe,
+from poe_view.services import (icon_cache, mod_knowledge, passive_tree, poe2_probe,
                                season_log, token_store, update_check)
 
 log = logging.getLogger(__name__)
@@ -266,6 +266,7 @@ class ApiWorker(QThread):
     # Terminal alle paar Sekunden eine Shiboken-Warnung auflief
     # (Peters Log vom 2026-08-16, 11:06:57, bei 2.151.302.311).
     character_snapshot_loaded = Signal(str, int, "qlonglong")  # Name, level, experience
+    character_tree_loaded = Signal(str, object, object)  # Name, passives, ruthless (bool|None)
     icon_loaded = Signal(str, object)          # url, bytes
     rate_limit_changed = Signal(str, object, float)  # policy, rules, wait_s
     job_error = Signal(str)                    # Fehlertext für die Statusbar
@@ -499,6 +500,9 @@ class ApiWorker(QThread):
                 level, experience, items = self.client.get_character_items(name)
                 self.character_items_loaded.emit(name, items, silent)
                 self.character_snapshot_loaded.emit(name, level, experience)
+                baum = self.client.last_trees.pop(name, None)
+                if baum is not None:
+                    self.character_tree_loaded.emit(name, baum[0], baum[1])
                 if not silent:
                     self.status.emit("Ready")
             case FetchIconJob(url=url):
@@ -520,6 +524,9 @@ class ApiWorker(QThread):
                 # Ebenfalls ohne Status-Text (§FetchPricesJob) — läuft
                 # unauffällig beim Programmstart, unabhängig vom Login.
                 mod_knowledge.ensure_fresh(self._repoe_http)
+                # Die Baumdaten im selben Zug (§passive_tree): ebenfalls
+                # GGG-Daten ohne Lizenz zum Mitliefern, ebenfalls eine Woche.
+                passive_tree.ensure_fresh(self._repoe_http)
                 self.mod_knowledge_loaded.emit(mod_knowledge.get(rebuild=True))
             case CheckUpdateJob():
                 release = update_check.check(self._github_http)

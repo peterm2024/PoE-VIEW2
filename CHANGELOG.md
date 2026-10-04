@@ -15,6 +15,19 @@ nach [SemVer](https://semver.org/lang/de/).
   wieder weg. Ob man für diese Runde abliest, entscheidet man selbst;
   eine Ablesung mitten in der Map zählt richtig, weil die Spalte
   „Monsters" ein Tempo rechnet.
+- **Passiv-Baum im Charakterbogen** (Rechtsklick auf den Charakter >
+  Export Character Sheet): vergebene Punkte, Aszendenz, Keystones,
+  Notables und Masteries mit ihren Werten, die kleinen Knoten
+  zusammengezählt, die Jewels — und „Within reach": jedes Notable,
+  jeder Keystone und Jewel-Sockel, der mit höchstens vier weiteren
+  Punkten erreichbar ist, samt Weg. Gedacht, um sich eine Einschätzung
+  zur Punktvergabe zu holen. Ruthless-Charaktere bekommen GGGs
+  Ruthless-Baum mit seinen eigenen Werten. Die Baumdaten lädt das
+  Programm von GGGs GitHub und hält sie eine Woche vor.
+- **Der Baum wird mitgeschrieben:** Jede Änderung (neue Punkte,
+  Respec) landet mit Zeit und Level in `passive-trees-<Konto>.json`
+  — die Grundlage für eine spätere Zeitleiste und für mehrere
+  benannte Baum-Konfigurationen je Charakter.
 
 ## [0.22.0] - 2026-10-03
 
