@@ -106,3 +106,44 @@ def record(characters: dict, name: str, passives: dict, *, level: int,
 def current(characters: dict, name: str) -> dict | None:
     eintrag = characters.get(name) or {}
     return eintrag.get("current")
+
+
+# --- Benannte Konfigurationen (§4.60.1) ----------------------------------- #
+#
+# Peter, 2026-10-04: "eine Konfiguration für maximale Feuerresistenz oder
+# maximalen Burst-Damage". Je Charakter unter "configs", ein Eintrag wie
+# "current" plus "source" (woher: "current", "link", "suggestion").
+
+def configs(characters: dict, name: str) -> dict[str, dict]:
+    return (characters.get(name) or {}).get("configs") or {}
+
+
+def save_config(characters: dict, name: str, config_name: str, passives: dict, *,
+                level: int, ruthless: bool, source: str,
+                now: datetime | None = None) -> None:
+    """Anlegen oder überschreiben."""
+    config_name = config_name.strip()
+    if not config_name:
+        raise ValueError("Konfiguration ohne Namen")
+    characters.setdefault(name, {}).setdefault("configs", {})[config_name] = {
+        "at": (now or datetime.now()).isoformat(timespec="seconds"),
+        "level": level, "ruthless": ruthless, "source": source,
+        "passives": passives}
+
+
+def delete_config(characters: dict, name: str, config_name: str) -> bool:
+    return configs(characters, name).pop(config_name, None) is not None
+
+
+def rename_config(characters: dict, name: str, old: str, new: str) -> bool:
+    """Umbenennen; ein vorhandener Name wird nicht überschrieben."""
+    alle = configs(characters, name)
+    new = new.strip()
+    if old not in alle or not new or new in alle:
+        return False
+    alle[new] = alle.pop(old)
+    return True
+
+
+def history(characters: dict, name: str) -> list[dict]:
+    return list((characters.get(name) or {}).get("history") or ())

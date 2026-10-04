@@ -199,6 +199,14 @@ delve depth 0, where nobody dies) from the depths below it.
   where to put your next points. Ruthless characters get GGG's Ruthless
   tree with its own values. The tree data comes from GGG's
   `skilltree-export` on GitHub and is refreshed weekly.
+- **Passive tree window** (right-click a character > *Passive tree…*):
+  the current tree, a history of every change, and **named
+  configurations** — say "Max fire res" for a boss that needs it. Save
+  the current tree as one, or import a link from the official tree
+  planner or Path of Building. For each configuration you get the
+  respec as a to-do list against your current tree (refund, allocate,
+  change mastery, number of points) and what it gains and loses in
+  stats. *Open in planner* shows any of them in the official planner.
 - **Enlarged item view** (double-click an item): large icon and the full
   property and mod text without the compact detail panel's line
   clipping. Divination cards show their real artwork from GGG's own CDN

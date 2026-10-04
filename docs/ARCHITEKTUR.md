@@ -8395,6 +8395,65 @@ fehlende Knoten, Jewels), `tests/test_client.py`,
 (speichert einmal, Liga-Fallback, Export enthält den Baum). Gegenprobe
 mit 19 Sabotagen.
 
+#### 4.60.1 Konfigurationen, Verlauf und das Fenster "Passive tree"
+
+Peters Wunsch (§4.60, letzter Absatz) als eigenes Fenster
+(`ui/passive_tree_dialog.py`, Rechtsklick "Passive tree…"): links
+aktueller Baum, Konfigurationen und Verlauf, rechts der Text zum
+Gewählten. Bei einer Konfiguration steht oben die **Respec-Liste
+gegenüber dem aktuellen Baum** (`passive_tree.compare`,
+`character_sheet.respec_section`), beim Verlauf die Änderung gegenüber
+dem Eintrag davor — dieselbe Liste, nur andere Enden.
+
+**Kein eigener Baum-Renderer.** "Open in planner" baut den Link des
+offiziellen Planers (`encode_url`) und öffnet ihn im Browser; GGG zeigt
+den Baum dort grafisch. Das Format ist das von GGG und PoB (Version 6:
+Version, Klasse, Aszendenz, Knoten, Cluster-Knoten, Mastery-Paare
+*Effekt, Knoten*), nachgeprüft an PoBs `PassiveSpec.lua` und an zwei
+echten Guide-Links von 2023: beide als Slayer gelesen, Keystones und
+alle Masteries gültig, Hin- und Rückweg identisch; von 129 Knoten aus
+3.22 fehlte im heutigen Baum einer. Zwei Einzelheiten, die man nicht
+errät: Im Aszendenz-Byte stehen in Bit 2–3 die Zweit-Aszendenz einer
+Liga-Mechanik (Wildwood, 3.23) — nur die unteren zwei Bits zählen; und
+ein geteilter Link trägt oft `?accountName=…`, das vor dem Lesen weg
+muss (Buchstaben darin überliest Base64, ein "/" darin nicht). **Eine
+Ruthless-Form des Links ist nicht belegt** — weder PoB noch die
+gesichteten Seiten kennen eine; der Link geht an den normalen Planer,
+der dieselben Knoten zeigt, aber die Werte des normalen Baums. Die
+Werte im Fenster selbst sind die des Ruthless-Baums.
+
+**Die Werte-Differenz** (`stat_delta`) zählt alle Werte beider Bäume
+nach Wortlaut zusammen (§summed_stats) und zieht ab. Vorzeichen: Bei
+"+#% to X" ersetzt das der Änderung das der Vorlage; beginnt die Zeile
+mit einem Wort ("Regenerate #% of Life"), steht die Änderung an der
+Stelle der Zahl ("Regenerate -1% …" — erst so geschrieben, nachdem der
+Test "-Regenerate 1%" zeigte). Zeilen ohne Zahl erscheinen als
+"gained:"/"lost:". Gewinn oder Verlust entscheidet das Vorzeichen der
+ersten Zahl, nicht der Zeilenanfang. **Punkte** zählt nur der normale
+Baum: Aszendenz-Wechsel laufen übers Labyrinth, nicht über Gold. Einen
+Goldpreis nennt das Fenster nicht — die Formel ist nicht gemessen.
+
+**Gespeichert** wird über `on_change` → `MainWindow._save_trees`; das
+Fenster ändert nur das übergebene Dict. Ein neuer Baum vom Server zieht
+ein offenes Fenster desselben Charakters nach. Ein Link einer anderen
+Klasse wird nur nach Rückfrage übernommen, ein vorhandener Name nur
+nach Rückfrage ersetzt.
+
+**Noch nicht gebaut:** eine automatische Optimierung ("höchstens N
+Umbauten, möglichst viel Fire Res") und der Goldpreis.
+
+Getestet: `tests/test_passive_tree.py` (Vergleich, Werte-Differenz mit
+beiden Vorzeichen-Lagen und Zeilen ohne Zahl; Links: Hin- und Rückweg,
+Starts ausgelassen, Version 6 Byte für Byte samt Zweit-Aszendenz,
+Versionen 4 und 5, kaputte Links, Anhang mit "/"; Konfigurationen
+anlegen, umbenennen, löschen, überleben neue Bäume; Respec-Text; das
+Fenster: Liste, Respec und Verlauf, Speichern samt Rückfrage, Import
+samt fremder Klasse und kaputtem Link, Umbenennen und Löschen,
+Zwischenablage, ohne Baumdaten), `tests/test_character_list.py`
+(Menüpunkt), `tests/test_main_window_helpers.py` (richtiger Baum,
+Speichern, Nachziehen). Gegenprobe mit 16 Sabotagen; eine hielt zuerst
+(Anhang ohne "/"), der Test wurde verschärft. Nativ angesehen.
+
 ---
 
 ## 8. Entwicklungsstand

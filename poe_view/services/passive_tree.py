@@ -139,6 +139,9 @@ class Tree:
     # Klasse UND jede ihrer Aszendenzen → Startknoten der Klasse; die API
     # nennt als ``class`` die Aszendenz, sobald eine gewählt ist.
     class_starts: dict[str, int] = field(default_factory=dict)
+    # Name → (Klassen-Index, Aszendenz-Index; 0 = keine), wie die Planer-
+    # Links sie kodieren (§encode_url); und umgekehrt.
+    class_ids: dict[str, tuple[int, int]] = field(default_factory=dict)
 
 
 def _kind(roh: dict) -> str:
@@ -192,14 +195,17 @@ def parse_tree(roh: dict, ruthless: bool) -> Tree:
                       for k, e in (roh.get("nodes") or {}).items()
                       if str(k).isdigit() and "classStartIndex" in e}
     starts: dict[str, int] = {}
+    ids: dict[str, tuple[int, int]] = {}
     for index, klasse in enumerate(roh.get("classes") or ()):
-        if index not in start_je_index:
-            continue
-        starts[str(klasse.get("name", ""))] = start_je_index[index]
-        for aszendenz in klasse.get("ascendancies") or ():
-            starts[str(aszendenz.get("name", aszendenz.get("id", "")))] = start_je_index[index]
+        ids[str(klasse.get("name", ""))] = (index, 0)
+        for nummer, aszendenz in enumerate(klasse.get("ascendancies") or (), start=1):
+            ids[str(aszendenz.get("name", aszendenz.get("id", "")))] = (index, nummer)
+        if index in start_je_index:
+            for name, (k, _a) in ids.items():
+                if k == index:
+                    starts[name] = start_je_index[index]
     return Tree(nodes=nodes, jewel_slots=[int(s) for s in roh.get("jewelSlots") or ()],
-                ruthless=ruthless, class_starts=starts)
+                ruthless=ruthless, class_starts=starts, class_ids=ids)
 
 
 # Geparst wird einmal je Datei-Stand: (Pfad, Änderungszeit) → Baum. Ein
@@ -312,27 +318,221 @@ def within_reach(tree: Tree, have: set[int], max_points: int = REACH_POINTS,
 _ZAHL = re.compile(r"\d+(?:\.\d+)?")
 
 
-def summed_stats(lines) -> list[str]:
-    """Gleichlautende Zeilen zusammenzählen: zweimal "+10 to Strength" wird
-    "+20 to Strength". Gleich heißt: gleich bis auf die Zahlen, und
-    gleich viele Zahlen."""
+def _totals(lines) -> dict[str, list[float]]:
+    """Vorlage (Zahlen durch ``#`` ersetzt) → zusammengezählte Zahlen.
+    Gleich heißt: gleich bis auf die Zahlen, und gleich viele Zahlen; eine
+    Zeile ohne Zahl zählt als 1 (wie oft sie vorkommt)."""
     summen: dict[str, list[float]] = {}
-    reihenfolge: list[str] = []
     for zeile in lines:
         vorlage = _ZAHL.sub("#", zeile)
-        werte = [float(z) for z in _ZAHL.findall(zeile)]
+        werte = [float(z) for z in _ZAHL.findall(zeile)] or [1.0]
         if vorlage not in summen:
             summen[vorlage] = werte
-            reihenfolge.append(vorlage)
         elif len(summen[vorlage]) == len(werte):
             summen[vorlage] = [a + b for a, b in zip(summen[vorlage], werte)]
-    ergebnis = []
-    for vorlage in reihenfolge:
-        werte = iter(summen[vorlage])
-        ergebnis.append(re.sub("#", lambda _m: _zahl_text(next(werte)), vorlage))
+    return summen
+
+
+def _fill(vorlage: str, werte) -> str:
+    werte = iter(werte)
+    return re.sub("#", lambda _m: _zahl_text(next(werte)), vorlage)
+
+
+def _by_wording(zeilen: list[str]) -> list[str]:
     # Sortiert nach dem ersten Wort, nicht nach Zahl oder Vorzeichen.
-    return sorted(ergebnis, key=lambda z: re.sub(r"^[^A-Za-z]+", "", _ZAHL.sub("", z)).lower())
+    return sorted(zeilen, key=lambda z: re.sub(r"^[^A-Za-z]+", "", _ZAHL.sub("", z)).lower())
+
+
+def summed_stats(lines) -> list[str]:
+    """Gleichlautende Zeilen zusammenzählen: zweimal "+10 to Strength" wird
+    "+20 to Strength" (§_totals)."""
+    return _by_wording([_fill(v, w) if "#" in v else v for v, w in _totals(lines).items()])
+
+
+# --- Zwei Bäume vergleichen (§4.60.1) ------------------------------------- #
+
+def all_stats(tree: Tree, passives: dict) -> list[str]:
+    """Alle Werte eines Baums: jeder vergebene Knoten (auch Aszendenz)
+    und der gewählte Effekt jeder Mastery."""
+    zeilen: list[str] = []
+    for h in sorted(allocated(passives)):
+        knoten = tree.nodes.get(h)
+        if knoten is not None and knoten.kind not in (START, MASTERY):
+            zeilen += knoten.stats
+    for knoten_id, effekt in mastery_choices(passives).items():
+        knoten = tree.nodes.get(knoten_id)
+        if knoten is not None:
+            zeilen += knoten.effects.get(effekt, ())
+    return zeilen
+
+
+def stat_delta(tree: Tree, current: dict, target: dict) -> list[str]:
+    """Was sich an Werten ändert, wenn man von ``current`` zu ``target``
+    umbaut: "+38% to Fire Resistance", "-10% increased maximum Life".
+    Zeilen ohne Zahl ("Deal no Non-Fire Damage") erscheinen als
+    "gained: …" oder "lost: …"."""
+    vorher, nachher = _totals(all_stats(tree, current)), _totals(all_stats(tree, target))
+    ergebnis = []
+    for vorlage in set(vorher) | set(nachher):
+        a, b = vorher.get(vorlage), nachher.get(vorlage)
+        if "#" not in vorlage:
+            if (a or [0])[0] != (b or [0])[0]:
+                ergebnis.append(("gained: " if b else "lost: ") + vorlage)
+            continue
+        a = a or [0.0] * len(b)
+        b = b or [0.0] * len(a)
+        if len(a) != len(b) or a == b:
+            continue
+        unterschied = [y - x for x, y in zip(a, b)]
+        if vorlage.lstrip("+-").startswith("#"):
+            # Das Vorzeichen der Vorlage ("+#% to X") weicht dem der
+            # Änderung: "+5% to X" heißt mehr, "-5% to X" weniger.
+            vorzeichen = "+" if sum(unterschied) > 0 else "-"
+            ergebnis.append(vorzeichen + _fill(vorlage.lstrip("+-"),
+                                               [abs(u) for u in unterschied]))
+        else:
+            # Beginnt die Zeile mit einem Wort ("Regenerate #% of Life"),
+            # steht die Änderung an der Stelle der Zahl: "Regenerate -1% ...".
+            werte = iter(unterschied)
+            ergebnis.append(re.sub("#", lambda _m: f"{next(werte):+g}", vorlage))
+    return _by_wording(ergebnis)
+
+
+@dataclass
+class Respec:
+    refund: list[Node]          # zurücknehmen
+    allocate: list[Node]        # neu nehmen
+    masteries: list[tuple[Node, tuple[str, ...], tuple[str, ...]]]  # Knoten, alt, neu
+    stats: list[str]
+
+    @property
+    def points(self) -> int:
+        """Rückzunehmende Punkte im normalen Baum — das, was Gold kostet.
+        Aszendenz-Wechsel laufen über das Labyrinth, nicht über Gold."""
+        return sum(1 for n in self.refund if not n.ascendancy)
+
+
+def compare(tree: Tree, current: dict, target: dict) -> Respec:
+    """Der Umbau von ``current`` zu ``target``: was zurück, was dazu, welche
+    Mastery anders, und was sich an Werten ändert."""
+    def knoten(ids) -> list[Node]:
+        gefunden = [tree.nodes[h] for h in ids if h in tree.nodes]
+        return sorted((n for n in gefunden if n.kind != START),
+                      key=lambda n: (bool(n.ascendancy), n.kind != KEYSTONE,
+                                     n.kind not in (NOTABLE, JEWEL), n.name))
+    a, b = allocated(current), allocated(target)
+    alt_wahl, neu_wahl = mastery_choices(current), mastery_choices(target)
+    masteries = []
+    for knoten_id in sorted(set(alt_wahl) & set(neu_wahl)):
+        if alt_wahl[knoten_id] != neu_wahl[knoten_id] and knoten_id in tree.nodes:
+            m = tree.nodes[knoten_id]
+            masteries.append((m, m.effects.get(alt_wahl[knoten_id], ()),
+                              m.effects.get(neu_wahl[knoten_id], ())))
+    return Respec(refund=knoten(a - b), allocate=knoten(b - a), masteries=masteries,
+                  stats=stat_delta(tree, current, target))
 
 
 def _zahl_text(wert: float) -> str:
     return str(int(wert)) if wert == int(wert) else f"{wert:g}"
+
+
+# --- Planer-Links (§4.60.1) ------------------------------------------------ #
+#
+# Der offizielle Planer und Path of Building teilen Bäume als
+# ``https://www.pathofexile.com/passive-skill-tree/<code>``. ``code`` ist
+# URL-sicheres Base64 über: Version (4 Byte), Klasse, Aszendenz, Anzahl
+# Knoten, je Knoten 2 Byte; ab Version 5 danach Anzahl und Knoten der
+# Cluster-Jewels (Kennung minus 65536), ab Version 6 Anzahl und Paare
+# (Effekt, Mastery-Knoten) zu je 2 + 2 Byte. Alle Zahlen Big-Endian.
+
+PLANNER_URL = "https://www.pathofexile.com/passive-skill-tree/"
+_CLUSTER_OFFSET = 65536
+
+
+class TreeLinkError(ValueError):
+    """Der Text ist kein lesbarer Baum-Link."""
+
+
+@dataclass
+class TreeLink:
+    class_index: int
+    ascendancy_index: int
+    passives: dict          # wie von der API: hashes, hashes_ex, mastery_effects
+
+
+def encode_url(tree: Tree, passives: dict, class_name: str) -> str:
+    """Der Planer-Link zu einem Baum (Version 6)."""
+    import base64
+    klasse, aszendenz = tree.class_ids.get(class_name, (0, 0))
+    knoten = [h for h in sorted(allocated(passives))
+              if h < _CLUSTER_OFFSET and (h not in tree.nodes or tree.nodes[h].kind != START)]
+    cluster = sorted(int(h) for h in passives.get("hashes_ex") or () if int(h) >= _CLUSTER_OFFSET)
+    wahl = sorted(mastery_choices(passives).items())
+    daten = bytearray((6).to_bytes(4, "big"))
+    daten += bytes([klasse, aszendenz, len(knoten)])
+    for h in knoten:
+        daten += h.to_bytes(2, "big")
+    daten.append(len(cluster))
+    for h in cluster:
+        daten += (h - _CLUSTER_OFFSET).to_bytes(2, "big")
+    daten.append(len(wahl))
+    for knoten_id, effekt in wahl:
+        daten += effekt.to_bytes(2, "big") + knoten_id.to_bytes(2, "big")
+    return PLANNER_URL + base64.urlsafe_b64encode(bytes(daten)).decode("ascii")
+
+
+def decode_url(text: str) -> TreeLink:
+    """Einen eingefügten Link (oder nur den Code) lesen; Versionen 4–6."""
+    import base64
+    import binascii
+    code = text.strip().split("?", 1)[0].split("#", 1)[0].rstrip("/").rsplit("/", 1)[-1]
+    if not code:
+        raise TreeLinkError("empty link")
+    try:
+        daten = base64.urlsafe_b64decode(code + "=" * (-len(code) % 4))
+    except (binascii.Error, ValueError) as exc:
+        raise TreeLinkError("not a tree link") from exc
+    if len(daten) < 7:
+        raise TreeLinkError("too short for a tree link")
+    version = int.from_bytes(daten[:4], "big")
+    if version not in (4, 5, 6):
+        raise TreeLinkError(f"unknown tree link version {version}")
+    # Unterste zwei Bits: die Aszendenz; Bits 2-3: eine zweite Aszendenz
+    # einer Liga-Mechanik (Wildwood, 3.23) — die zählt hier nicht.
+    klasse, aszendenz = daten[4], daten[5] & 3
+
+    def u16(pos: int) -> int:
+        if pos + 2 > len(daten):
+            raise TreeLinkError("tree link is cut off")
+        return int.from_bytes(daten[pos:pos + 2], "big")
+
+    if version == 4:
+        # Version 4: Byte 6 ist ein Vollbild-Merker, danach Knoten bis zum Ende.
+        hashes = [u16(i) for i in range(7, len(daten) - 1, 2)]
+        return TreeLink(klasse, aszendenz, {"hashes": hashes})
+    anzahl, pos = daten[6], 7
+    hashes = [u16(pos + 2 * i) for i in range(anzahl)]
+    pos += 2 * anzahl
+    cluster: list[int] = []
+    if pos < len(daten):
+        anzahl, pos = daten[pos], pos + 1
+        cluster = [u16(pos + 2 * i) + _CLUSTER_OFFSET for i in range(anzahl)]
+        pos += 2 * anzahl
+    wahl: dict[str, int] = {}
+    if version >= 6 and pos < len(daten):
+        anzahl, pos = daten[pos], pos + 1
+        for i in range(anzahl):
+            wahl[str(u16(pos + 4 * i + 2))] = u16(pos + 4 * i)
+    passives = {"hashes": hashes}
+    if cluster:
+        passives["hashes_ex"] = cluster
+    if wahl:
+        passives["mastery_effects"] = wahl
+    return TreeLink(klasse, aszendenz, passives)
+
+
+def class_name_of(tree: Tree, class_index: int, ascendancy_index: int) -> str:
+    for name, ids in tree.class_ids.items():
+        if ids == (class_index, ascendancy_index):
+            return name
+    return ""

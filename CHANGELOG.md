@@ -28,6 +28,16 @@ nach [SemVer](https://semver.org/lang/de/).
   Respec) landet mit Zeit und Level in `passive-trees-<Konto>.json`
   — die Grundlage für eine spätere Zeitleiste und für mehrere
   benannte Baum-Konfigurationen je Charakter.
+- **Fenster „Passive tree"** (Rechtsklick auf den Charakter): aktueller
+  Baum, Verlauf jeder Änderung (+/− Knoten, mit Level und Zeit) und
+  **benannte Konfigurationen** — etwa „Max fire res" für einen Boss.
+  Anlegen aus dem aktuellen Baum oder aus einem Link des offiziellen
+  Planers bzw. von Path of Building. Zu jeder Konfiguration die
+  Respec-Liste gegenüber dem aktuellen Baum (zurücknehmen, nehmen,
+  Mastery wechseln, Zahl der Punkte) und was sich an Werten ändert,
+  getrennt nach Gewinnen und Verlusten. „Open in planner" zeigt jeden
+  Baum grafisch im offiziellen Planer, „Copy as text" kopiert ihn für
+  eine Einschätzung.
 
 ## [0.22.0] - 2026-10-03
 

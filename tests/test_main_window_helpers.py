@@ -11833,3 +11833,32 @@ def test_the_exported_sheet_contains_the_tree(qapp, monkeypatch, tmp_path) -> No
         assert "- **Iron Heart** (notable, 1 point) — +20 to maximum Life" in text
     finally:
         _schliessen(win)
+
+
+def test_the_tree_window_opens_with_the_right_tree_and_saves_changes(qapp) -> None:
+    """§4.60.1: Rechtsklick "Passive tree…" — der Ruthless-Baum aus dem
+    aufgezeichneten Stand; Änderungen im Fenster landen in der Datei; ein
+    neuer Baum vom Server zieht das offene Fenster nach."""
+    from poe_view.services import passive_tree, tree_history
+    passive_tree.tree_dir().mkdir(parents=True)
+    (passive_tree.tree_dir() / "ruthless.json").write_text(json.dumps(_MINI_BAUM), encoding="utf-8")
+    win = MainWindow()
+    try:
+        win._account_name = "TestAccount#1234"
+        char = Character.model_validate({"name": "WitchOfPeter", "class": "Juggernaut",
+                                         "level": 30, "league": "SSF R Allflame"})
+        win._all_characters = [char]
+        win._on_character_tree("WitchOfPeter", {"hashes": [10]}, True)
+        win._on_character_tree_requested(char)
+        dialog = win._tree_dialog
+        assert dialog.isVisible() and dialog._tree is not None and dialog._tree.ruthless
+        tree_history.save_config(dialog._characters, "WitchOfPeter", "Boss",
+                                 {"hashes": [10, 12]}, level=30, ruthless=True, source="current")
+        dialog._on_change()
+        pfad = tree_history.path_for("TestAccount#1234")
+        assert "Boss" in tree_history.configs(tree_history.load(pfad), "WitchOfPeter")
+        win._on_character_tree("WitchOfPeter", {"hashes": [10, 12]}, True)
+        assert "+1 / −0" in " ".join(dialog.list.item(i).text() for i in range(dialog.list.count()))
+        dialog.close()
+    finally:
+        _schliessen(win)

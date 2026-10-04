@@ -84,6 +84,7 @@ from poe_view.ui.item_history import (BASE_COL as HISTORY_BASE_COL,
 from poe_view.ui.item_zoom import ItemZoomDialog
 from poe_view.ui.character_sheet import build_character_sheet
 from poe_view.ui.paperdoll import EQUIPPED_SLOTS, PaperdollDialog
+from poe_view.ui.passive_tree_dialog import PassiveTreeDialog
 from poe_view.ui.settings_dialog import SettingsDialog
 from poe_view.ui.rate_limit_dashboard import RateLimitDashboard
 from poe_view.ui.raw_data_viewer import RawDataViewer
@@ -1454,6 +1455,8 @@ class MainWindow(QMainWindow):
             self._on_character_paperdoll_requested)
         self.character_list.character_sheet_requested.connect(
             self._on_character_sheet_requested)
+        self.character_list.character_tree_requested.connect(
+            self._on_character_tree_requested)
         self.character_list.export_visible_requested.connect(self._export_csv)
         self.character_list.setMaximumHeight(220)
 
@@ -4206,10 +4209,28 @@ class MainWindow(QMainWindow):
         baeume = self._trees()
         if not tree_history.record(baeume, name, passives, level=level, ruthless=ruthless):
             return
+        self._save_trees()
+        dialog = getattr(self, "_tree_dialog", None)
+        if dialog is not None and dialog.isVisible() and dialog._name == name:
+            dialog.refresh()
+
+    def _save_trees(self) -> None:
         try:
-            tree_history.save(tree_history.path_for(self._account_name or ""), baeume)
+            tree_history.save(tree_history.path_for(self._account_name or ""), self._trees())
         except OSError:
             log.exception("Passiv-Baum: Speichern fehlgeschlagen")
+
+    def _on_character_tree_requested(self, char: Character) -> None:
+        """Rechtsklick "Passive tree…" — aktueller Baum, Verlauf und
+        Konfigurationen (§4.60.1). Der Baum (Ruthless oder nicht) folgt dem
+        aufgezeichneten Stand, sonst dem Liga-Namen."""
+        eintrag = tree_history.current(self._trees(), char.name)
+        ruthless = (bool(eintrag.get("ruthless")) if eintrag
+                    else passive_tree.is_ruthless({}, char.league or ""))
+        self._tree_dialog = PassiveTreeDialog(
+            char.name, char.class_, self._trees(), passive_tree.load(ruthless),
+            on_change=self._save_trees, parent=self)
+        self._tree_dialog.show()
 
     def _on_character_snapshot(self, name: str, level: int, experience: int) -> None:
         """Läuft bei JEDEM Abruf von ``/character/{name}`` mit, egal ob

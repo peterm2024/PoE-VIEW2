@@ -23,6 +23,7 @@ zweites Mal gepflegt werden.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Sequence
 
 from poe_view.api.models import (ENCHANT_MOD_FIELD, FRAME_TYPE_NAMES, Character,
@@ -121,10 +122,12 @@ def tree_section(entry: dict | None, tree: Tree | None, *, character_class: str,
             f"{len(normal)} points allocated · {len(aszendenz)} ascendancy points")
     if cluster:
         kopf += f" · {cluster} cluster jewel nodes"
-    zeilen.append(kopf)
+    # Jede Kopfzeile ein eigener Absatz — Markdown zieht aufeinanderfolgende
+    # Zeilen sonst zu einer zusammen (nativ gesehen im Baum-Fenster).
+    zeilen += [kopf, ""]
     if level:
-        zeilen.append(f"Level {level} gives {level - 1} points from levels, plus quest "
-                      "rewards (the API does not report those).")
+        zeilen += [f"Level {level} gives {level - 1} points from levels, plus quest "
+                   "rewards (the API does not report those).", ""]
     extras = []
     if passives.get("bandit_choice"):
         extras.append(f"Bandit: {passives['bandit_choice']}")
@@ -132,11 +135,10 @@ def tree_section(entry: dict | None, tree: Tree | None, *, character_class: str,
         extras.append(f"Pantheon: {passives['pantheon_major']}"
                       + (f" / {passives['pantheon_minor']}" if passives.get("pantheon_minor") else ""))
     if extras:
-        zeilen.append(" · ".join(extras))
+        zeilen += [" · ".join(extras), ""]
     if unbekannt:
-        zeilen.append(f"*{unbekannt} allocated nodes are missing from GGG's tree data "
-                      "(the download may be older than the last patch).*")
-    zeilen.append("")
+        zeilen += [f"*{unbekannt} allocated nodes are missing from GGG's tree data "
+                   "(the download may be older than the last patch).*", ""]
 
     def liste(titel: str, gruppe) -> None:
         if not gruppe:
@@ -265,3 +267,42 @@ def build_character_sheet(character: Character, items: Sequence[Item], *,
     baum = tree_section(tree_entry, tree, character_class=character.class_,
                         jewels=[i for i in items if i.inventoryId == "PassiveJewels"])
     return "\n".join(kopf + ausruestung + gems + baum).rstrip() + "\n"
+
+
+def respec_section(tree: Tree, current: dict, target: dict, *, title: str) -> list[str]:
+    """Der Umbau als Markdown: was zurücknehmen, was nehmen, welche Mastery
+    anders, was sich an Werten ändert (§4.60.1). Geschrieben als
+    Arbeitsliste für den Baum im Spiel."""
+    umbau = passive_tree.compare(tree, current, target)
+    zeilen = [f"## {title}", ""]
+    if not (umbau.refund or umbau.allocate or umbau.masteries):
+        return zeilen + ["*Same tree — nothing to change.*", ""]
+    zeilen.append(f"{umbau.points} points to refund in the main tree"
+                  + (" (plus ascendancy changes)" if any(n.ascendancy for n in
+                                                          umbau.refund + umbau.allocate) else ""))
+    zeilen.append("")
+    # Gewinn oder Verlust nach dem Vorzeichen der ersten Zahl — es steht
+    # vorn ("+5% to X") oder an der Stelle der Zahl ("Regenerate +1% ...").
+    gewinne = [z for z in umbau.stats if z.startswith("gained: ")
+               or (m := re.search(r"(?<!\w)([+-])\d", z)) is not None and m.group(1) == "+"]
+    verluste = [z for z in umbau.stats if z not in gewinne]
+
+    def knoten_zeile(n) -> str:
+        art = {KEYSTONE: "keystone", NOTABLE: "notable", JEWEL: "jewel socket"}.get(n.kind, "")
+        zusatz = f" ({'ascendancy ' if n.ascendancy else ''}{art})" if art or n.ascendancy else ""
+        return f"- **{n.name}**{zusatz} — {_stats_text(n.stats)}"
+
+    if umbau.refund:
+        zeilen += [f"### Refund ({len(umbau.refund)})", ""] + [knoten_zeile(n) for n in umbau.refund] + [""]
+    if umbau.allocate:
+        zeilen += [f"### Allocate ({len(umbau.allocate)})", ""] + [knoten_zeile(n) for n in umbau.allocate] + [""]
+    if umbau.masteries:
+        zeilen += ["### Change mastery", ""]
+        zeilen += [f"- **{m.name}**: {_stats_text(alt)} → {_stats_text(neu)}"
+                   for m, alt, neu in umbau.masteries]
+        zeilen.append("")
+    if gewinne:
+        zeilen += ["### Gains", ""] + [f"- {z}" for z in gewinne] + [""]
+    if verluste:
+        zeilen += ["### Losses", ""] + [f"- {z}" for z in verluste] + [""]
+    return zeilen

@@ -19,6 +19,7 @@ class CharacterList(QListWidget):
     character_refresh_requested = Signal(object)   # Character — Rechtsklick "Aktualisieren"
     character_paperdoll_requested = Signal(object)  # Character — Doppelklick
     character_sheet_requested = Signal(object)     # Character — Rechtsklick "Export character sheet…"
+    character_tree_requested = Signal(object)      # Character — Rechtsklick "Passive tree…" (§4.60.1)
     export_visible_requested = Signal()            # Rechtsklick-Kontextmenü, wie StashTree
 
     def __init__(self) -> None:
@@ -85,6 +86,8 @@ class CharacterList(QListWidget):
             action.triggered.connect(lambda: self.character_refresh_requested.emit(char))
             sheet_action = menu.addAction("📜 Export character sheet…")
             sheet_action.triggered.connect(lambda: self.character_sheet_requested.emit(char))
+            tree_action = menu.addAction("🌳 Passive tree…")
+            tree_action.triggered.connect(lambda: self.character_tree_requested.emit(char))
             menu.addSeparator()
         menu.addAction("💾 Export visible items").triggered.connect(
             self.export_visible_requested.emit)

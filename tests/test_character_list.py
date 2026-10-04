@@ -154,3 +154,16 @@ def test_neuaufbau_loest_keinen_abruf_aus(qapp) -> None:
     widget.set_characters([make_char("Beobachtet", 14)])
 
     assert received == []
+
+
+def test_context_menu_offers_the_passive_tree(qapp, monkeypatch) -> None:
+    """§4.60.1: Rechtsklick "Passive tree…"."""
+    widget = CharacterList()
+    char = make_char("Solo", 91)
+    widget.set_characters([char])
+    pos = widget.visualItemRect(widget.item(0)).center()
+    monkeypatch.setattr(character_list_module, "QMenu", _FakeMenu)
+    received = []
+    widget.character_tree_requested.connect(received.append)
+    widget._on_context_menu(pos)
+    assert received == [char]

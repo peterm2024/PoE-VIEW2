@@ -275,3 +275,287 @@ def test_a_jewel_swap_updates_the_current_tree_without_history() -> None:
                      ruthless=True)
     assert th.current(zeichen, "WitchOfPeter")["passives"]["jewel_data"] == {"0": "b"}
     assert zeichen["WitchOfPeter"]["history"][0]["passives"]["jewel_data"] == {"0": "a"}
+
+
+# --- Vergleich zweier Bäume (§4.60.1) ------------------------------------- #
+
+def test_compare_lists_refund_allocate_and_mastery_changes(baum) -> None:
+    umbau = pt.compare(baum, {"hashes": [10, 11, 12, 51], "mastery_effects": {"40": 777}},
+                       {"hashes": [10, 11, 20, 21], "mastery_effects": {"40": 778}})
+    assert [n.name for n in umbau.refund] == ["Iron Heart", "Unstoppable"]
+    assert [n.name for n in umbau.allocate] == ["Basic Jewel Socket", "Life"]
+    assert umbau.points == 1                        # die Aszendenz kostet kein Gold
+    assert [(m.name, alt, neu) for m, alt, neu in umbau.masteries] == [
+        ("Life Mastery", ("+50 to maximum Life",), ("10% reduced Mana Cost",))]
+
+
+def test_stat_delta_adds_up_and_signs_the_change(baum) -> None:
+    """Iron Heart weg (+20 Life, Regeneration), Life + Far Away + Life dazu."""
+    delta = pt.stat_delta(baum, {"hashes": [10, 11, 12]}, {"hashes": [10, 11, 14, 15, 20]})
+    assert sorted(delta) == sorted(["+5% to Fire Resistance", "-20 to maximum Life",
+                                    "+10% increased maximum Life",
+                                    "Regenerate -1% / of Life per second"])
+
+
+def test_lines_without_numbers_are_gained_or_lost(baum) -> None:
+    assert pt.stat_delta(baum, {"hashes": [10]}, {"hashes": [10, 13]}) == [
+        "gained: Strength's bonus applies"]
+    assert pt.stat_delta(baum, {"hashes": [10, 13]}, {"hashes": [10]}) == [
+        "lost: Strength's bonus applies"]
+
+
+def test_stat_delta_of_the_same_tree_is_empty(baum) -> None:
+    assert pt.stat_delta(baum, {"hashes": [10, 12]}, {"hashes": [12, 10]}) == []
+
+
+# --- Planer-Links --------------------------------------------------------- #
+
+def _code(daten: bytes) -> str:
+    import base64
+    return base64.urlsafe_b64encode(daten).decode()
+
+
+def test_a_link_survives_the_round_trip(baum) -> None:
+    passives = {"hashes": [10, 11, 12, 51], "hashes_ex": [65600], "mastery_effects": {"40": 777}}
+    link = pt.decode_url(pt.encode_url(baum, passives, "Juggernaut"))
+    assert (link.class_index, link.ascendancy_index) == (1, 1)
+    assert pt.allocated(link.passives) == {10, 11, 12, 51}
+    assert link.passives["hashes_ex"] == [65600]
+    assert pt.mastery_choices(link.passives) == {40: 777}
+    assert pt.class_name_of(baum, 1, 1) == "Juggernaut"
+
+
+def test_start_nodes_are_left_out_of_the_link(baum) -> None:
+    link = pt.decode_url(pt.encode_url(baum, {"hashes": [1, 50, 10]}, "Juggernaut"))
+    assert pt.allocated(link.passives) == {10}
+
+
+def test_version_6_layout_byte_by_byte() -> None:
+    """Wie GGG und PoB: Mastery als (Effekt, Knoten); Bits 2–3 des
+    Aszendenz-Bytes sind eine Liga-Zweitaszendenz und zählen nicht."""
+    daten = (bytes([0, 0, 0, 6, 4, 0b1101, 2]) + (300).to_bytes(2, "big") + (7).to_bytes(2, "big")
+             + bytes([1]) + (64).to_bytes(2, "big")
+             + bytes([1]) + (999).to_bytes(2, "big") + (300).to_bytes(2, "big"))
+    link = pt.decode_url("https://www.pathofexile.com/fullscreen-passive-skill-tree/"
+                         + _code(daten) + "?accountName=TestAccount")
+    assert (link.class_index, link.ascendancy_index) == (4, 1)
+    assert link.passives == {"hashes": [300, 7], "hashes_ex": [65600],
+                             "mastery_effects": {"300": 999}}
+
+
+def test_older_versions_4_and_5() -> None:
+    v4 = bytes([0, 0, 0, 4, 2, 1, 0]) + (5).to_bytes(2, "big") + (6).to_bytes(2, "big")
+    assert pt.decode_url(_code(v4)).passives == {"hashes": [5, 6]}
+    v5 = bytes([0, 0, 0, 5, 2, 1, 1]) + (5).to_bytes(2, "big") + bytes([0])
+    assert pt.decode_url(_code(v5)).passives == {"hashes": [5]}
+
+
+@pytest.mark.parametrize("text", ["", "hello world", _code(bytes([0, 0, 0, 9, 1, 1, 0])),
+                                  _code(bytes([0, 0, 0, 6, 1, 1, 5, 0, 1]))])
+def test_broken_links_are_refused(text) -> None:
+    with pytest.raises(pt.TreeLinkError):
+        pt.decode_url(text)
+
+
+# --- Konfigurationen ------------------------------------------------------ #
+
+def test_configs_can_be_saved_renamed_and_deleted() -> None:
+    zeichen: dict = {}
+    th.save_config(zeichen, "WitchOfPeter", " Max fire res ", {"hashes": [1]}, level=30,
+                   ruthless=True, source="link", now=datetime(2026, 10, 4, 20, 0))
+    assert th.configs(zeichen, "WitchOfPeter")["Max fire res"]["source"] == "link"
+    th.save_config(zeichen, "WitchOfPeter", "Burst", {"hashes": [2]}, level=30,
+                   ruthless=True, source="current")
+    assert not th.rename_config(zeichen, "WitchOfPeter", "Burst", "Max fire res")
+    assert th.rename_config(zeichen, "WitchOfPeter", "Burst", "Boss burst")
+    assert th.delete_config(zeichen, "WitchOfPeter", "Max fire res")
+    assert list(th.configs(zeichen, "WitchOfPeter")) == ["Boss burst"]
+    with pytest.raises(ValueError):
+        th.save_config(zeichen, "WitchOfPeter", "  ", {}, level=1, ruthless=True, source="x")
+
+
+def test_configs_survive_new_trees_and_saving() -> None:
+    zeichen: dict = {}
+    th.save_config(zeichen, "WitchOfPeter", "Burst", {"hashes": [2]}, level=30,
+                   ruthless=True, source="current")
+    th.record(zeichen, "WitchOfPeter", {"hashes": [3]}, level=31, ruthless=True)
+    pfad = th.path_for("TestAccount#1234")
+    th.save(pfad, zeichen)
+    assert "Burst" in th.configs(th.load(pfad), "WitchOfPeter")
+
+
+# --- Respec-Liste im Text ------------------------------------------------- #
+
+def test_the_respec_text_is_a_worklist(baum) -> None:
+    from poe_view.ui.character_sheet import respec_section
+    text = "\n".join(respec_section(baum, {"hashes": [10, 11, 12]},
+                                    {"hashes": [10, 11, 14, 15]}, title="Respec: a → b"))
+    assert "## Respec: a → b" in text
+    assert "1 points to refund in the main tree" in text
+    assert "### Refund (1)\n\n- **Iron Heart** (notable)" in text
+    assert "### Allocate (2)\n\n- **Far Away** (notable) — +5% to Fire Resistance" in text
+    gewinne = text[text.index("### Gains"):text.index("### Losses")]
+    verluste = text[text.index("### Losses"):]
+    assert "- +5% to Fire Resistance" in gewinne and "- +5% increased maximum Life" in gewinne
+    assert "- -20 to maximum Life" in verluste
+    assert "- Regenerate -1% / of Life per second" in verluste
+    umgekehrt = "\n".join(respec_section(baum, {"hashes": [10, 11, 14, 15]},
+                                         {"hashes": [10, 11, 12]}, title="b → a"))
+    assert "- Regenerate +1% / of Life per second" in umgekehrt[umgekehrt.index("### Gains"):
+                                                                umgekehrt.index("### Losses")]
+    gleich = "\n".join(respec_section(baum, {"hashes": [10]}, {"hashes": [10]}, title="x"))
+    assert "Same tree" in gleich
+
+
+# --- Das Fenster "Passive tree" ------------------------------------------- #
+
+def _fenster(qapp, baum, *, mit_baum=True, gespeichert=None):
+    from poe_view.ui.passive_tree_dialog import PassiveTreeDialog
+    zeichen: dict = {}
+    th.record(zeichen, "WitchOfPeter", {"hashes": [10, 11]}, level=29, ruthless=True,
+              now=datetime(2026, 10, 4, 18, 0))
+    th.record(zeichen, "WitchOfPeter", {"hashes": [10, 11, 12]}, level=30, ruthless=True,
+              now=datetime(2026, 10, 4, 19, 0))
+    aufrufe = gespeichert if gespeichert is not None else []
+    dialog = PassiveTreeDialog("WitchOfPeter", "Juggernaut", zeichen, baum if mit_baum else None,
+                               on_change=lambda: aufrufe.append(1))
+    return dialog, zeichen, aufrufe
+
+
+def _eintraege(dialog) -> list[str]:
+    return [dialog.list.item(i).text().strip() for i in range(dialog.list.count())]
+
+
+def test_the_window_lists_current_configurations_and_history(qapp, baum) -> None:
+    from poe_view.ui.passive_tree_dialog import CURRENT
+    dialog, zeichen, _ = _fenster(qapp, baum)
+    th.save_config(zeichen, "WitchOfPeter", "Max fire res", {"hashes": [10, 14, 15]}, level=30,
+                   ruthless=True, source="link")
+    dialog.refresh()
+    assert _eintraege(dialog) == ["Current tree", "Configurations", "Max fire res", "History",
+                                  "2026-10-04 19:00 · Level 30 · +1 / −0",
+                                  "2026-10-04 18:00 · Level 29 · first seen"]
+    assert dialog._selected() == (CURRENT, None)
+    assert "Iron Heart" in dialog.text.toPlainText()
+    dialog.close()
+
+
+def test_a_configuration_shows_the_respec_from_the_current_tree(qapp, baum) -> None:
+    from poe_view.ui.passive_tree_dialog import CONFIG, HISTORY
+    dialog, zeichen, _ = _fenster(qapp, baum)
+    th.save_config(zeichen, "WitchOfPeter", "Max fire res", {"hashes": [10, 11, 14, 15]},
+                   level=30, ruthless=True, source="link")
+    text = dialog.markdown_for((CONFIG, "Max fire res"))
+    assert text.startswith("## Respec: current tree → Max fire res")
+    assert "### Refund (1)\n\n- **Iron Heart**" in text
+    assert "## Configuration: Max fire res" in text
+    verlauf = dialog.markdown_for((HISTORY, 1))
+    assert verlauf.startswith("## Changes from the tree before")
+    assert "### Allocate (1)\n\n- **Iron Heart**" in verlauf
+    dialog.close()
+
+
+def test_save_current_as_a_configuration(qapp, baum, monkeypatch) -> None:
+    from poe_view.ui import passive_tree_dialog as modul
+    dialog, zeichen, gespeichert = _fenster(qapp, baum)
+    monkeypatch.setattr(modul.QInputDialog, "getText",
+                        staticmethod(lambda *a, **k: ("Mapping", True)))
+    dialog._save_current()
+    assert th.configs(zeichen, "WitchOfPeter")["Mapping"]["passives"] == {"hashes": [10, 11, 12]}
+    assert gespeichert == [1]
+    assert dialog._selected() == (modul.CONFIG, "Mapping")
+    # Ein vorhandener Name wird nur nach Rückfrage ersetzt.
+    monkeypatch.setattr(modul.QMessageBox, "question",
+                        staticmethod(lambda *a, **k: modul.QMessageBox.StandardButton.No))
+    dialog._save_current()
+    assert gespeichert == [1]
+    dialog.close()
+
+
+def test_import_a_planner_link(qapp, baum, monkeypatch) -> None:
+    from poe_view.ui import passive_tree_dialog as modul
+    dialog, zeichen, gespeichert = _fenster(qapp, baum)
+    link = pt.encode_url(baum, {"hashes": [10, 11, 14, 15]}, "Juggernaut")
+    antworten = iter([(link, True), ("Max fire res", True)])
+    monkeypatch.setattr(modul.QInputDialog, "getText", staticmethod(lambda *a, **k: next(antworten)))
+    dialog._import_link()
+    gespeichert_als = th.configs(zeichen, "WitchOfPeter")["Max fire res"]
+    assert pt.allocated(gespeichert_als["passives"]) == {10, 11, 14, 15}
+    assert gespeichert_als["source"] == "link"
+    assert gespeichert == [1]
+    dialog.close()
+
+
+def test_a_broken_link_or_another_class_is_not_imported_silently(qapp, baum, monkeypatch) -> None:
+    from poe_view.ui import passive_tree_dialog as modul
+    dialog, zeichen, gespeichert = _fenster(qapp, baum)
+    warnungen = []
+    monkeypatch.setattr(modul.QMessageBox, "warning", staticmethod(lambda *a, **k: warnungen.append(a)))
+    monkeypatch.setattr(modul.QInputDialog, "getText", staticmethod(lambda *a, **k: ("nonsense", True)))
+    dialog._import_link()
+    assert len(warnungen) == 1 and gespeichert == []
+    hexe = pt.encode_url(baum, {"hashes": [31]}, "Witch")
+    fragen = []
+    monkeypatch.setattr(modul.QInputDialog, "getText", staticmethod(lambda *a, **k: (hexe, True)))
+    monkeypatch.setattr(modul.QMessageBox, "question", staticmethod(
+        lambda *a, **k: fragen.append(a[2]) or modul.QMessageBox.StandardButton.No))
+    dialog._import_link()
+    assert "for a Witch, not a Juggernaut" in fragen[0]
+    assert gespeichert == [] and th.configs(zeichen, "WitchOfPeter") == {}
+    dialog.close()
+
+
+def test_rename_and_delete_a_configuration(qapp, baum, monkeypatch) -> None:
+    from poe_view.ui import passive_tree_dialog as modul
+    dialog, zeichen, gespeichert = _fenster(qapp, baum)
+    for name in ("Burst", "Fire"):
+        th.save_config(zeichen, "WitchOfPeter", name, {"hashes": [10]}, level=30,
+                       ruthless=True, source="current")
+    dialog.refresh((modul.CONFIG, "Burst"))
+    assert dialog.rename_button.isEnabled() and dialog.delete_button.isEnabled()
+    warnungen = []
+    monkeypatch.setattr(modul.QMessageBox, "warning", staticmethod(lambda *a, **k: warnungen.append(a)))
+    monkeypatch.setattr(modul.QInputDialog, "getText", staticmethod(lambda *a, **k: ("Fire", True)))
+    dialog._rename()
+    assert warnungen and sorted(th.configs(zeichen, "WitchOfPeter")) == ["Burst", "Fire"]
+    monkeypatch.setattr(modul.QInputDialog, "getText", staticmethod(lambda *a, **k: ("Boss", True)))
+    dialog._rename()
+    assert sorted(th.configs(zeichen, "WitchOfPeter")) == ["Boss", "Fire"]
+    monkeypatch.setattr(modul.QMessageBox, "question",
+                        staticmethod(lambda *a, **k: modul.QMessageBox.StandardButton.Yes))
+    dialog._delete()
+    assert list(th.configs(zeichen, "WitchOfPeter")) == ["Fire"]
+    assert gespeichert == [1, 1]
+    dialog.refresh((modul.CURRENT, None))
+    assert not dialog.rename_button.isEnabled() and not dialog.delete_button.isEnabled()
+    dialog.close()
+
+
+def test_links_and_text_go_to_the_clipboard(qapp, baum) -> None:
+    from PySide6.QtGui import QGuiApplication
+    from poe_view.ui.passive_tree_dialog import CURRENT
+    dialog, _zeichen, _ = _fenster(qapp, baum)
+    dialog._copy_link()
+    link = QGuiApplication.clipboard().text()
+    assert link.startswith(pt.PLANNER_URL)
+    assert pt.allocated(pt.decode_url(link).passives) == {10, 11, 12}
+    dialog._copy_text()
+    assert QGuiApplication.clipboard().text() == dialog.markdown_for((CURRENT, None))
+    dialog.close()
+
+
+def test_without_tree_data_the_window_says_so(qapp, baum) -> None:
+    dialog, _zeichen, _ = _fenster(qapp, baum, mit_baum=False)
+    assert "not been downloaded" in dialog.text.toPlainText()
+    assert not dialog.planner_button.isEnabled() and not dialog.import_button.isEnabled()
+    dialog.close()
+
+
+def test_the_query_after_the_code_is_cut_off() -> None:
+    """Geteilte Links tragen "?accountName=…&characterName=…". Buchstaben
+    darin schaden nicht (Base64 überliest sie, der Rest hängt hinten an);
+    ein "/" im Anhang aber ließe den Code beim letzten "/" beginnen."""
+    daten = bytes([0, 0, 0, 6, 1, 1, 1]) + (300).to_bytes(2, "big") + bytes([0, 0])
+    link = pt.decode_url(f"https://www.pathofexile.com/passive-skill-tree/{_code(daten)}"
+                         "?accountName=TestAccount&from=/forum/view-thread/1")
+    assert link.passives == {"hashes": [300]}
