@@ -5,7 +5,7 @@
 [![Release](https://img.shields.io/github/v/release/peterm2024/PoE-VIEW2?label=Release)](https://github.com/peterm2024/PoE-VIEW2/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-A desktop tool for **Path of Exile**. It displays characters and stash
+PoE-VIEW2 (PoEView2) is a desktop tool for **Path of Exile**. It displays characters and stash
 tabs through the official GGG API, searches them league-wide across all
 tabs, and keeps the data up to date automatically without exhausting the
 API rate limit. If the GGG API is unreachable, PoE-VIEW2 keeps working

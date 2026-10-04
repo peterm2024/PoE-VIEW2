@@ -39,7 +39,11 @@ bewusst Englisch (siehe Datei-Kopf dort).
   Erfundene Namen benutzen (`WitchOfPeter`, `PeterM`, `TestAccount#1234`,
   `Demo Ranger`, …).
 - **Keine private E-Mail ins Repo.** Der Projekt-Alias
-  `poeview2@gmx.net` ist dagegen bewusst öffentlich.
+  (`config.DEFAULT_CONTACT_EMAIL`) ist dagegen bewusst öffentlich. Hier
+  absichtlich nicht ausgeschrieben: Die Adresse enthält den
+  Programmnamen in EINEM Wort, und als einzige Stelle damit war diese
+  Datei 2026-10-04 der einzige Google-Treffer bei der Suche danach.
+  Den Namen hier also nie zusammengeschrieben verwenden.
 - Der Kontoname `Gandol#4338` darf öffentlich sein (Peters Entscheidung).
 - Screenshots/Demo-Daten: `tools/make_screenshots.py` erzeugt sie aus
   erfundenen Daten, ohne Zugriff auf den echten Cache. Nie von Hand
