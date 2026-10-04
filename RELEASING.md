@@ -178,3 +178,11 @@ genau der Fall, den die Mehrdeutigkeits-Regel oben verhindern soll.
 zunächst nichts. Sie bleiben trotzdem drin: `poeview` ist die bei GGG
 registrierte Client-ID aus dem User-Agent (siehe `poe_view/config.py`) —
 wer sie in einem Log sieht und danach sucht, soll hier landen.
+
+**Nachtrag 2026-10-04: `poeview2` dazu (17 von 20).** Eine Google-Suche
+nach dem Programmnamen in einem Wort fand nur `CLAUDE.md` — das Wort
+stand im Repo sonst nirgends, `PoE-VIEW2` zerlegt Google in "poe" und
+"view2". Seither steht die Schreibweise `PoEView2` im ersten Absatz der
+README und am Anfang der Repo-Beschreibung, und das Topic `poeview2`
+ist gesetzt. Die Repo-Beschreibung ist meist der Text, den Google unter
+dem Treffer der Repo-Seite zeigt.
