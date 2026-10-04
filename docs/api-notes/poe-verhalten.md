@@ -191,6 +191,33 @@ it is not demonstrable.** Peter suspected this first, from observation
 as unidentified — maybe only returning to base triggers it, and what we
 have seen so far was coincidence, or a favourable moment."
 
+### Forcing a publication after identifying: change the instance
+
+Peter found the way round it (2026-10-04): re-entering the hideout as a
+**new instance** (Ctrl+click on the waypoint, "New") publishes at once.
+`/hideout` while already in the hideout does nothing — there is no zone
+change. A round trip through another zone with its own chat command
+(`/menagerie`, then `/hideout`) works too, at the cost of a second
+loading screen.
+
+Both measured the same day, PoE-VIEW2 requesting the character within a
+second of each log line:
+
+```
+12:06:46.2  7 Items identified        request 0.3 s later: nothing changed
+12:06:52.2  entered Backstreet Hideout (re-port, hideout to hideout)
+            request 0.34 s later: all 7 items identified
+
+12:28:21.4  1 Item identified         request 0.3 s later: nothing changed
+12:28:38.3  entered The Menagerie
+            request 0.35 s later: the item identified
+```
+
+So the trigger is the instance change, not the zone: hideout to a new
+hideout counts. Two cases, both clean (no other zone change within 16 s).
+Whoever wants a hotkey for it: one key per chat command — GGG's rule is
+one server action per key press.
+
 ---
 
 ## 2. `Client.txt` as an event source
