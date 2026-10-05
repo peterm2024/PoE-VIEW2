@@ -38,6 +38,15 @@ nach [SemVer](https://semver.org/lang/de/).
   getrennt nach Gewinnen und Verlusten. „Open in planner" zeigt jeden
   Baum grafisch im offiziellen Planer, „Copy as text" kopiert ihn für
   eine Einschätzung.
+- **Baum nach Themen gegliedert** (Defence, Minions, Offence, Utility,
+  Other): Notables, die zusammengezählten kleinen Knoten und „Within
+  reach" — mit Zählung vorweg („10 Defence, 11 Minions, 2 Offence").
+  Im Fenster drei Reiter: „Respec" (nur bei Konfiguration und
+  Verlauf), „Overview" und „Within reach" als aufklappbare Tabelle mit
+  Punkten, Werten, Weg und einem Suchfeld („fire res").
+- **Charakterbogen: Gems nach Link-Gruppen** — welche Gems wirklich
+  miteinander verlinkt sind und welche allein stecken, dazu die Sockel
+  in der Schreibweise des Spiels („B-B W").
 
 ## [0.22.0] - 2026-10-03
 

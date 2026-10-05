@@ -11830,7 +11830,7 @@ def test_the_exported_sheet_contains_the_tree(qapp, monkeypatch, tmp_path) -> No
         win._on_character_sheet_requested(char)
         text = ziel.read_text(encoding="utf-8")
         assert "Ruthless tree · 1 points allocated" in text
-        assert "- **Iron Heart** (notable, 1 point) — +20 to maximum Life" in text
+        assert "- **Iron Heart** · 1 point — +20 to maximum Life" in text
     finally:
         _schliessen(win)
 

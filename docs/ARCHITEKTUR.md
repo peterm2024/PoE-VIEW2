@@ -8454,6 +8454,51 @@ Zwischenablage, ohne Baumdaten), `tests/test_character_list.py`
 Speichern, Nachziehen). Gegenprobe mit 16 Sabotagen; eine hielt zuerst
 (Anhang ohne "/"), der Test wurde verschärft. Nativ angesehen.
 
+#### 4.60.2 Themen, Reiter und Link-Gruppen
+
+Peter, 2026-10-05, nach dem ersten echten Export (Level 81: über 100
+Einträge "Within reach", 23 Notables in einer Liste): "Wir müssen
+unbedingt den Tree übersichtlicher hinbekommen."
+
+**Themen statt einer Liste.** `passive_tree.line_theme` ordnet jede
+Wertzeile nach Stichworten ein: Minions zuerst ("Minions have +15% to
+all Elemental Resistances" schützt nicht den Spieler), dann Zeilen über
+Gegner als Angriff ("Enemies Cursed by you have 50% reduced Life
+Regeneration" — vorher landete Last Rites wegen "Life Regeneration" im
+Schutz), dann Schutz, Nutzen, Angriff. Ein Knoten nimmt das wichtigste
+Thema seiner Zeilen, Schutz vor Minions vor Angriff vor Nutzen: Holy
+Dominion zählt wegen der Resistenzen zum Schutz, Retribution wegen
+"Minions deal 15%" zu den Minions. Über alle 783 Notables des
+Ruthless-Baums bleiben 10 ohne Thema (Valour, Stances, Marks). Grob mit
+Absicht — ein falsch einsortierter Knoten steht in der Nachbargruppe,
+er verschwindet nicht.
+
+**Im Fenster drei Reiter:** "Respec" (nur, wo es einen Umbau gibt —
+bei einer Konfiguration springt das Fenster dorthin), "Overview" (der
+Baum nach Themen, ohne Reichweite) und "Within reach" als
+`QTreeWidget`: Gruppen Keystones, Jewel-Sockel, dann die Themen, innen
+nach Punkten; Spalten Knoten, Punkte, Werte, Weg; ein Suchfeld, in dem
+jedes Wort in Name oder Werten vorkommen muss, mit "2 of 29" in der
+Gruppenzeile. Der Export und "Copy as text" bleiben Markdown mit
+derselben Gliederung.
+
+**Link-Gruppen im Charakterbogen.** Jedes Gem in `socketedItems` nennt
+seinen Sockel (`socket`), jeder Sockel seine Gruppe — in Peters Cache
+bei allen 474 Gems vorhanden. Der Bogen listet deshalb "Linked (4): A +
+B + C + D" bzw. "Alone: …" und die Sockel als "B-B W". Anlass war die
+erste Einschätzung: In seinen Handschuhen (W W W) steckte Trap and Mine
+Damage Support allein — ohne Link wirkt es nicht, und aus der flachen
+Liste war das nicht zu sehen. Fehlt einem Gem Sockel oder Kennung,
+bleibt es bei der flachen Liste statt einer halb richtigen Gruppierung.
+
+Getestet: `tests/test_passive_tree.py` (Thema je Zeile in neun Fällen,
+Vorrang je Knoten, Abschnitt mit Zählungen und Gruppen, ohne
+Reichweite, Reiter nur bei Umbau, Tabelle mit Gruppen, Filter mit
+"x of y" und allen Wörtern), `tests/test_character_sheet.py` (Link-
+Gruppen, flache Liste ohne Sockel-Nummern). Gegenprobe mit 11
+Sabotagen; eine hielt zuerst (Filter mit "irgendein Wort"), der Test
+wurde verschärft. Nativ am echten Baum angesehen.
+
 ---
 
 ## 8. Entwicklungsstand

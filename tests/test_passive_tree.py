@@ -243,9 +243,44 @@ def test_the_sheet_section_lists_nodes_masteries_sums_and_reach(baum) -> None:
     assert "### Ascendancy (Juggernaut)\n\n- **Unstoppable** — Action Speed cannot be slowed" in text
     assert "- **Iron Heart** — +20 to maximum Life; Regenerate 1% / of Life per second" in text
     assert "- **Life Mastery** — +50 to maximum Life" in text
-    assert "### Small passives (2), summed\n\n- +20 to Strength" in text
-    assert "- **Iron Will** (keystone, 1 point) — Strength's bonus applies" in text
-    assert "- **Basic Jewel Socket** (jewel socket, 2 points; via Life) — empty socket" in text
+    assert "### Notables (1): 1 Defence" in text and "#### Defence (1)" in text
+    assert "### Small passives (2), summed" in text and "- **Utility:** +20 to Strength" in text
+    assert "### Within reach (up to 4 more points): 1 Keystones, 1 Jewel sockets, 1 Defence" in text
+    assert "#### Keystones (1)" in text
+    assert "- **Iron Will** · 1 point — Strength's bonus applies" in text
+    assert "- **Basic Jewel Socket** · 2 points via Life — empty socket" in text
+    assert "- **Far Away** · 2 points via Life — +5% to Fire Resistance" in text
+
+
+def test_without_reach_the_section_ends_before_it(baum) -> None:
+    text = "\n".join(tree_section(_eintrag([10, 11, 12]), baum, character_class="Juggernaut",
+                                  include_reach=False))
+    assert "Iron Heart" in text and "Within reach" not in text
+
+
+@pytest.mark.parametrize("zeile, thema", [
+    ("Minions have +15% to all Elemental Resistances", pt.MINIONS),
+    ("+12% to all Elemental Resistances", pt.DEFENCE),
+    ("Enemies Cursed by you have 50% reduced Life Regeneration Rate", pt.OFFENCE),
+    ("24% increased Elemental Damage", pt.OFFENCE),
+    ("20% increased Mana Reservation Efficiency of Skills", pt.UTILITY),
+    ("+30 to Intelligence", pt.UTILITY),
+    ("+10 to Maximum Rage", pt.OFFENCE),
+    ("Your Offering Skills do not require a Corpse", pt.MINIONS),
+    ("+30 to maximum Valour", pt.OTHER),
+])
+def test_each_line_gets_a_theme(zeile, thema) -> None:
+    assert pt.line_theme(zeile) == thema
+
+
+def test_a_node_takes_its_most_important_theme() -> None:
+    """Holy Dominion: Resistenzen schlagen Elementarschaden; Retribution:
+    Minions schlagen eigenen Schaden."""
+    holy = pt.Node(1, "Holy Dominion", pt.NOTABLE,
+                   ("+12% to all Elemental Resistances", "24% increased Elemental Damage"))
+    vergeltung = pt.Node(2, "Retribution", pt.NOTABLE,
+                         ("15% increased Damage", "Minions deal 15% increased Damage"))
+    assert (pt.theme(holy), pt.theme(vergeltung)) == (pt.DEFENCE, pt.MINIONS)
 
 
 def test_the_sheet_section_without_tree_or_without_data(baum) -> None:
@@ -559,3 +594,45 @@ def test_the_query_after_the_code_is_cut_off() -> None:
     link = pt.decode_url(f"https://www.pathofexile.com/passive-skill-tree/{_code(daten)}"
                          "?accountName=TestAccount&from=/forum/view-thread/1")
     assert link.passives == {"hashes": [300]}
+
+
+def test_the_respec_tab_shows_only_for_a_configuration(qapp, baum) -> None:
+    from poe_view.ui.passive_tree_dialog import CONFIG, CURRENT
+    dialog, zeichen, _ = _fenster(qapp, baum)
+    th.save_config(zeichen, "WitchOfPeter", "Fire", {"hashes": [10, 11, 14, 15]}, level=30,
+                   ruthless=True, source="link")
+    dialog.refresh((CONFIG, "Fire"))
+    assert dialog.tabs.isTabVisible(0) and dialog.tabs.currentIndex() == 0
+    assert "Refund (1)" in dialog.respec_text.toPlainText()
+    dialog.refresh((CURRENT, None))
+    assert not dialog.tabs.isTabVisible(0) and dialog.tabs.currentIndex() == 1
+    assert "Within reach" not in dialog.text.toPlainText()
+    dialog.close()
+
+
+def _gruppen(dialog) -> dict[str, list[str]]:
+    ergebnis = {}
+    for i in range(dialog.reach.topLevelItemCount()):
+        g = dialog.reach.topLevelItem(i)
+        if not g.isHidden():
+            ergebnis[g.text(0)] = [g.child(j).text(0) for j in range(g.childCount())
+                                   if not g.child(j).isHidden()]
+    return ergebnis
+
+
+def test_within_reach_is_a_grouped_table_with_a_filter(qapp, baum) -> None:
+    dialog, _zeichen, _ = _fenster(qapp, baum)
+    assert _gruppen(dialog) == {"Keystones (1)": ["Iron Will"],
+                                "Jewel sockets (1)": ["Basic Jewel Socket"],
+                                "Defence (1)": ["Far Away"]}
+    zeile = dialog.reach.topLevelItem(2).child(0)
+    assert (zeile.text(1), zeile.text(3)) == ("2", "Life")
+    dialog.reach_filter.setText("fire res")
+    assert _gruppen(dialog) == {"Defence (1 of 1)": ["Far Away"]}
+    # Jedes Wort muss passen: "fire" steht bei Far Away, "strength" bei
+    # Iron Will — zusammen bei keinem.
+    dialog.reach_filter.setText("fire strength")
+    assert _gruppen(dialog) == {}
+    dialog.reach_filter.setText("")
+    assert len(_gruppen(dialog)) == 3
+    dialog.close()

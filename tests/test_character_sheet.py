@@ -184,3 +184,31 @@ def test_mehrere_gems_im_selben_item_stehen_untereinander():
         _gem("Erstes", "5", "I", progress=0.2), _gem("Zweites", "3", "I", progress=0.1)])
     text = build_character_sheet(_char(), [item])
     assert text.index("Erstes") < text.index("Zweites")
+
+
+def _gem_dict(name: str, socket: int, gem_id: str) -> dict:
+    return {"typeLine": name, "colour": "I", "frameType": 4, "id": gem_id, "socket": socket,
+            "properties": [{"name": "Level", "values": [["18", 0]]}]}
+
+
+def test_gems_are_listed_by_link_group():
+    """Peter, 2026-10-05: zur Einschätzung zählt, was verlinkt ist."""
+    handschuhe = _item("Gloves", "Soldier Gloves",
+                       sockets=[{"group": 0, "sColour": "B"}, {"group": 0, "sColour": "B"},
+                                {"group": 1, "sColour": "W"}],
+                       socketedItems=[_gem_dict("Raise Spectre", 0, "a"),
+                                      _gem_dict("Minion Damage Support", 1, "b"),
+                                      _gem_dict("Determination", 2, "c")])
+    text = build_character_sheet(_char(), [handschuhe])
+    assert "Sockets: B-B W" in text
+    assert "- Linked (2): Raise Spectre + Minion Damage Support" in text
+    assert "  - [Int] Raise Spectre" in text
+    assert "- Alone: [Int] Determination" in text
+
+
+def test_without_socket_numbers_the_gems_stay_a_flat_list():
+    helm = _item("Helm", "Bone Circlet", sockets=[{"group": 0, "sColour": "B"}],
+                 socketedItems=[{"typeLine": "Enfeeble", "colour": "I", "frameType": 4,
+                                 "properties": [{"name": "Level", "values": [["18", 0]]}]}])
+    text = build_character_sheet(_char(), [helm])
+    assert "- [Int] Enfeeble" in text and "Linked" not in text and "Sockets:" not in text

@@ -71,6 +71,29 @@ def _equipment_row(slot_label: str, item: Item | None) -> str:
     return f"| {slot_label} | {_item_label(item)} | {rarity} | {mods} |"
 
 
+def _gem_line(gem) -> str:
+    tag = _ATTRIBUTE_TAGS.get(gem.colour, "")
+    return f"{f'[{tag}] ' if tag else ''}{gem.tooltip()}"
+
+
+def _link_groups(item: Item, gems) -> list[list] | None:
+    """Die Gems nach Link-Gruppe ihres Sockels, in Sockel-Reihenfolge —
+    oder ``None``, wenn sich nicht jedes Gem einem Sockel zuordnen lässt
+    (ältere Daten ohne ``socket``, fehlende Gem-Kennung). Dann bleibt es
+    bei der flachen Liste statt einer halb richtigen Gruppierung."""
+    sockel = {str(g.get("id") or ""): g.get("socket")
+              for g in getattr(item, "socketedItems", None) or [] if isinstance(g, dict)}
+    if not item.sockets or "" in sockel:
+        return None
+    gruppen: dict[int, list] = {}
+    for gem in gems:
+        index = sockel.get(gem.gem_id)
+        if not isinstance(index, int) or not 0 <= index < len(item.sockets):
+            return None
+        gruppen.setdefault(item.sockets[index].group, []).append(gem)
+    return [gruppen[g] for g in sorted(gruppen)]
+
+
 def _gem_section(slot_label: str, item: Item | None) -> list[str]:
     # ``gem_progress_of`` kommt mit ``item=None`` (kein Slot belegt)
     # bereits von sich aus klar — ``getattr(None, ...)`` liefert dort den
@@ -79,10 +102,20 @@ def _gem_section(slot_label: str, item: Item | None) -> list[str]:
     if not gems:
         return []
     lines = [f"### {slot_label} — {_item_label(item)}", ""]
-    for gem in gems:
-        tag = _ATTRIBUTE_TAGS.get(gem.colour, "")
-        praefix = f"[{tag}] " if tag else ""
-        lines.append(f"- {praefix}{gem.tooltip()}")
+    gruppen = _link_groups(item, gems)
+    if gruppen is None:
+        lines += [f"- {_gem_line(gem)}" for gem in gems]
+    else:
+        # Nach Link-Gruppen (Peter, 2026-10-05, zur Einschätzung: welche
+        # Gems unterstützen einander wirklich?). "Sockets" in der
+        # Schreibweise des Spiels: R-G-B verlinkt, Leerzeichen trennt.
+        lines += [f"Sockets: {item.socket_string}", ""]
+        for gruppe in gruppen:
+            if len(gruppe) == 1:
+                lines.append(f"- Alone: {_gem_line(gruppe[0])}")
+                continue
+            lines.append(f"- Linked ({len(gruppe)}): " + " + ".join(g.name for g in gruppe))
+            lines += [f"  - {_gem_line(g)}" for g in gruppe]
     lines.append("")
     return lines
 
@@ -92,7 +125,7 @@ def _stats_text(stats) -> str:
 
 
 def tree_section(entry: dict | None, tree: Tree | None, *, character_class: str,
-                 jewels: Sequence[Item] = ()) -> list[str]:
+                 jewels: Sequence[Item] = (), include_reach: bool = True) -> list[str]:
     """Der Passiv-Baum als Markdown-Abschnitt (§4.60).
 
     Peter, 2026-10-04: "eine Export-Funktion ... um z.B. eine Einschätzung
@@ -151,7 +184,14 @@ def tree_section(entry: dict | None, tree: Tree | None, *, character_class: str,
     liste(f"Ascendancy ({character_class})", aszendenz)
     liste("Keystones", [n for n in normal if n.kind == KEYSTONE])
     notables = [n for n in normal if n.kind == NOTABLE]
-    liste(f"Notables ({len(notables)})", notables)
+    if notables:
+        # Nach Thema gegliedert (§4.60.2): Ein Blick zeigt, wohin die
+        # Punkte gegangen sind — "8 Defence, 11 Minions, 2 Offence".
+        zeilen += [f"### Notables ({len(notables)}): " + _theme_counts(notables), ""]
+        for thema, gruppe in _by_theme(notables):
+            zeilen += [f"#### {thema} ({len(gruppe)})", ""]
+            zeilen += [f"- **{n.name}** — {_stats_text(n.stats)}" for n in gruppe]
+            zeilen.append("")
 
     wahl = passive_tree.mastery_choices(passives)
     masteries = []
@@ -175,23 +215,63 @@ def tree_section(entry: dict | None, tree: Tree | None, *, character_class: str,
 
     kleine = [n for n in normal if n.kind == SMALL]
     if kleine:
+        summen = passive_tree.summed_stats([z for n in kleine for z in n.stats])
         zeilen += [f"### Small passives ({len(kleine)}), summed", ""]
-        zeilen += [f"- {z}" for z in
-                   passive_tree.summed_stats([z for n in kleine for z in n.stats])]
+        for thema in passive_tree.THEMES:
+            teil = [z for z in summen if passive_tree.line_theme(z) == thema]
+            if teil:
+                zeilen += [f"- **{thema}:** " + "; ".join(teil)]
         zeilen.append("")
 
-    reichweite = passive_tree.within_reach(tree, have, class_name=character_class)
-    zeilen += [f"### Within reach (up to {passive_tree.REACH_POINTS} more points)", ""]
-    if not reichweite:
-        zeilen.append("*Nothing notable within reach.*")
-    for r in reichweite:
-        art = {KEYSTONE: "keystone", JEWEL: "jewel socket"}.get(r.node.kind, "notable")
-        weg = f"; via {', '.join(n.name for n in r.via)}" if r.via else ""
-        werte = _stats_text(r.node.stats) if r.node.stats else (
-            "empty socket" if r.node.kind == JEWEL else "—")
-        punkte = "point" if r.cost == 1 else "points"
-        zeilen.append(f"- **{r.node.name}** ({art}, {r.cost} {punkte}{weg}) — {werte}")
-    zeilen.append("")
+    if include_reach:
+        zeilen += reach_section(tree, have, character_class)
+    return zeilen
+
+
+def _by_theme(nodes):
+    """(Thema, Knoten nach Name) in der festen Reihenfolge der Themen."""
+    gruppen: dict[str, list] = {}
+    for n in nodes:
+        gruppen.setdefault(passive_tree.theme(n), []).append(n)
+    return [(t, sorted(gruppen[t], key=lambda n: n.name))
+            for t in passive_tree.THEMES if t in gruppen]
+
+
+def _theme_counts(nodes) -> str:
+    return ", ".join(f"{len(g)} {t}" for t, g in _by_theme(nodes))
+
+
+def reach_groups(tree: Tree, have: set[int], character_class: str):
+    """Die Reichweite gegliedert: (Überschrift, [Reach, …]) — erst
+    Keystones und Jewel-Sockel (sie ändern den Build bzw. brauchen ein
+    Jewel), dann die Notables nach Thema; innen nach Punkten (§4.60.2)."""
+    alle = passive_tree.within_reach(tree, have, class_name=character_class)
+    gruppen = [("Keystones", [r for r in alle if r.node.kind == KEYSTONE]),
+               ("Jewel sockets", [r for r in alle if r.node.kind == JEWEL])]
+    notables = [r for r in alle if r.node.kind == NOTABLE]
+    for thema in passive_tree.THEMES:
+        gruppen.append((thema, [r for r in notables if passive_tree.theme(r.node) == thema]))
+    return [(titel, sorted(liste, key=lambda r: (r.cost, r.node.name)))
+            for titel, liste in gruppen if liste]
+
+
+def reach_line(r) -> str:
+    punkte = "point" if r.cost == 1 else "points"
+    weg = f" via {', '.join(n.name for n in r.via)}" if r.via else ""
+    werte = _stats_text(r.node.stats) if r.node.stats else (
+        "empty socket" if r.node.kind == JEWEL else "—")
+    return f"- **{r.node.name}** · {r.cost} {punkte}{weg} — {werte}"
+
+
+def reach_section(tree: Tree, have: set[int], character_class: str) -> list[str]:
+    gruppen = reach_groups(tree, have, character_class)
+    gesamt = sum(len(g) for _t, g in gruppen)
+    zeilen = [f"### Within reach (up to {passive_tree.REACH_POINTS} more points): "
+              + (", ".join(f"{len(g)} {t}" for t, g in gruppen) or "nothing"), ""]
+    if not gesamt:
+        return zeilen + ["*Nothing notable within reach.*", ""]
+    for titel, gruppe in gruppen:
+        zeilen += [f"#### {titel} ({len(gruppe)})", ""] + [reach_line(r) for r in gruppe] + [""]
     return zeilen
 
 

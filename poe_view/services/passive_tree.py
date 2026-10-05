@@ -349,6 +349,61 @@ def summed_stats(lines) -> list[str]:
     return _by_wording([_fill(v, w) if "#" in v else v for v, w in _totals(lines).items()])
 
 
+# --- Themen (§4.60.2) ----------------------------------------------------- #
+#
+# Peter, 2026-10-05, nach dem ersten echten Baum (über 100 Einträge
+# "Within reach"): "Wir müssen unbedingt den Tree übersichtlicher
+# hinbekommen." Jeder Knoten bekommt ein Thema; Baum, Summen und Reichweite
+# werden danach gegliedert. Grob mit Absicht — Stichworte im Wortlaut, kein
+# Verständnis der Mechanik. Ein falsch einsortierter Knoten steht dann in
+# der Nachbargruppe, er verschwindet nicht.
+
+DEFENCE, MINIONS, OFFENCE, UTILITY, OTHER = (
+    "Defence", "Minions", "Offence", "Utility", "Other")
+THEMES = (DEFENCE, MINIONS, OFFENCE, UTILITY, OTHER)
+
+_MINION_WORDS = re.compile(
+    r"\b(minions?|golems?|spectres?|zombies?|skeletons?|raging spirits?|offerings?)\b", re.I)
+_DEFENCE_WORDS = re.compile(
+    r"maximum life|\bof life\b|life regeneration|life recovery|life on kill|"
+    r"energy shield|armour|evasion|resistances?\b|\bblock|recoup|damage taken|"
+    r"damage reduction|\bstun|on you\b|suppress|leech|\bfortif", re.I)
+_UTILITY_WORDS = re.compile(
+    r"\bmana\b|strength|dexterity|intelligence|attributes|reservation|\baura|"
+    r"\bcurse|\bhex|duration|movement speed|charges?\b|flask|herald|\blink|"
+    r"\bbrand|\btotem|\btrap|\bmine\b|light radius|rarity|quantity", re.I)
+_ENEMY_WORDS = re.compile(r"\benem(y|ies)\b", re.I)
+_OFFENCE_WORDS = re.compile(
+    r"damage|critical|cast speed|attack speed|penetrat|accuracy|area of effect|"
+    r"\bignite|\bfreeze|\bshock|\bchill|wither|projectile|impale|bleed|poison|"
+    r"\brage\b|warcr|exert|retaliation|\bstrike skills", re.I)
+
+
+def line_theme(line: str) -> str:
+    """Das Thema EINER Zeile. Minion-Zeilen zuerst: "Minions have +15% to
+    all Elemental Resistances" ist kein Schutz für den Spieler."""
+    if _MINION_WORDS.search(line):
+        return MINIONS
+    # Was Gegnern geschieht ("Enemies Cursed by you have 50% reduced Life
+    # Regeneration Rate"), schützt nicht — das ist Angriff.
+    if _ENEMY_WORDS.search(line):
+        return OFFENCE
+    for thema, muster in ((DEFENCE, _DEFENCE_WORDS), (UTILITY, _UTILITY_WORDS),
+                          (OFFENCE, _OFFENCE_WORDS)):
+        if muster.search(line):
+            return thema
+    return OTHER
+
+
+def theme(node: Node) -> str:
+    """Das Thema eines Knotens: das wichtigste seiner Zeilen, Schutz vor
+    Minions vor Angriff vor Nutzen. Holy Dominion (+12% Resistenzen, 24%
+    Elementarschaden) zählt damit zum Schutz — die Resistenzen sind das,
+    was man dort nicht anders bekommt."""
+    themen = {line_theme(z) for z in node.stats}
+    return next((t for t in THEMES if t in themen), OTHER)
+
+
 # --- Zwei Bäume vergleichen (§4.60.1) ------------------------------------- #
 
 def all_stats(tree: Tree, passives: dict) -> list[str]:

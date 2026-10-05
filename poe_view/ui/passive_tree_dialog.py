@@ -24,13 +24,15 @@ from collections.abc import Callable
 
 from PySide6.QtCore import Qt, QUrl
 from PySide6.QtGui import QDesktopServices, QGuiApplication
-from PySide6.QtWidgets import (QDialog, QHBoxLayout, QInputDialog, QLabel, QListWidget,
-                               QListWidgetItem, QMessageBox, QPushButton, QSplitter,
-                               QTextBrowser, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QDialog, QHBoxLayout, QHeaderView, QInputDialog, QLabel,
+                               QLineEdit, QListWidget, QListWidgetItem, QMessageBox,
+                               QPushButton, QSplitter, QTabWidget, QTextBrowser,
+                               QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
 
 from poe_view.services import passive_tree, tree_history
 from poe_view.services.passive_tree import Tree, TreeLinkError
-from poe_view.ui.character_sheet import respec_section, tree_section
+from poe_view.ui.character_sheet import (reach_groups, respec_section, tree_section,
+                                         _stats_text)
 
 CURRENT, HISTORY, CONFIG = "current", "history", "config"
 
@@ -48,12 +50,40 @@ class PassiveTreeDialog(QDialog):
 
         self.list = QListWidget()
         self.list.currentItemChanged.connect(lambda *_: self._show_selected())
+        # Rechts drei Reiter (§4.60.2, Peter: "Wir müssen unbedingt den Tree
+        # übersichtlicher hinbekommen"): der Umbau (nur bei Konfiguration
+        # und Verlauf), der Baum nach Themen, und die Reichweite als
+        # aufklappbare Tabelle mit Suchfeld statt einer Liste von 100 Zeilen.
+        self.respec_text = QTextBrowser()
         self.text = QTextBrowser()
         self.text.setOpenExternalLinks(True)
+        self.reach_filter = QLineEdit()
+        self.reach_filter.setPlaceholderText("Filter, e.g. fire res, life, minion…")
+        self.reach_filter.setClearButtonEnabled(True)
+        self.reach_filter.textChanged.connect(self._apply_reach_filter)
+        self.reach = QTreeWidget()
+        self.reach.setHeaderLabels(["Node", "Points", "Stats", "Via"])
+        self.reach.setRootIsDecorated(True)
+        self.reach.setUniformRowHeights(True)
+        kopf = self.reach.header()
+        kopf.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        kopf.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        kopf.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        kopf.setSectionResizeMode(3, QHeaderView.ResizeMode.Interactive)
+        kopf.setStretchLastSection(False)
+        reichweite = QWidget()
+        r_aufbau = QVBoxLayout(reichweite)
+        r_aufbau.setContentsMargins(0, 0, 0, 0)
+        r_aufbau.addWidget(self.reach_filter)
+        r_aufbau.addWidget(self.reach, 1)
+        self.tabs = QTabWidget()
+        self.tabs.addTab(self.respec_text, "Respec")
+        self.tabs.addTab(self.text, "Overview")
+        self.tabs.addTab(reichweite, "Within reach")
 
         teiler = QSplitter()
         teiler.addWidget(self.list)
-        teiler.addWidget(self.text)
+        teiler.addWidget(self.tabs)
         teiler.setStretchFactor(1, 3)
 
         self.save_button = QPushButton("Save current as…")
@@ -190,9 +220,91 @@ class PassiveTreeDialog(QDialog):
             abschnitt[0] = f"## Configuration: {schluessel}"
         return "\n".join(zeilen + abschnitt)
 
+    def _respec_markdown(self, key) -> str:
+        eintrag = self._entry(key)
+        if eintrag is None or self._tree is None or not key:
+            return ""
+        art, schluessel = key
+        aktuell = tree_history.current(self._characters, self._name)
+        if art == CONFIG and aktuell:
+            return "\n".join(respec_section(
+                self._tree, aktuell.get("passives") or {}, eintrag.get("passives") or {},
+                title=f"Respec: current tree → {schluessel}"))
+        if art == HISTORY and schluessel > 0:
+            verlauf = tree_history.history(self._characters, self._name)
+            return "\n".join(respec_section(
+                self._tree, verlauf[schluessel - 1].get("passives") or {},
+                eintrag.get("passives") or {}, title="Changes from the tree before"))
+        return ""
+
+    def _overview_markdown(self, key) -> str:
+        eintrag = self._entry(key)
+        if eintrag is None or self._tree is None:
+            return self.markdown_for(key)
+        abschnitt = tree_section(eintrag, self._tree, character_class=self._class,
+                                 include_reach=False)
+        if key and key[0] == CONFIG:
+            abschnitt[0] = f"## Configuration: {key[1]}"
+        return "\n".join(abschnitt)
+
+    def _fill_reach(self, key) -> None:
+        self.reach.clear()
+        eintrag = self._entry(key)
+        if eintrag is None or self._tree is None:
+            return
+        have = passive_tree.allocated(eintrag.get("passives") or {})
+        for titel, gruppe in reach_groups(self._tree, have, self._class):
+            kopf = QTreeWidgetItem([f"{titel} ({len(gruppe)})"])
+            kopf.setData(0, Qt.ItemDataRole.UserRole, titel)
+            schrift = kopf.font(0)
+            schrift.setBold(True)
+            kopf.setFont(0, schrift)
+            kopf.setFirstColumnSpanned(False)
+            for r in gruppe:
+                werte = (_stats_text(r.node.stats) if r.node.stats
+                         else "empty socket" if r.node.kind == passive_tree.JEWEL else "—")
+                zeile = QTreeWidgetItem([r.node.name, str(r.cost), werte,
+                                         ", ".join(n.name for n in r.via)])
+                zeile.setToolTip(2, "\n".join(r.node.stats) or werte)
+                zeile.setToolTip(3, " → ".join(n.name for n in r.via))
+                zeile.setTextAlignment(1, Qt.AlignmentFlag.AlignCenter)
+                kopf.addChild(zeile)
+            self.reach.addTopLevelItem(kopf)
+        self.reach.expandAll()
+        self._apply_reach_filter(self.reach_filter.text())
+
+    def _apply_reach_filter(self, text: str) -> None:
+        """Jedes Wort muss in Name oder Werten vorkommen ("fire res" findet
+        "+8% to Fire Resistance"); leere Gruppen verschwinden."""
+        woerter = text.lower().split()
+        for i in range(self.reach.topLevelItemCount()):
+            gruppe = self.reach.topLevelItem(i)
+            sichtbar = 0
+            for j in range(gruppe.childCount()):
+                kind = gruppe.child(j)
+                heuhaufen = f"{kind.text(0)} {kind.toolTip(2)}".lower()
+                treffer = all(w in heuhaufen for w in woerter)
+                kind.setHidden(not treffer)
+                sichtbar += treffer
+            gruppe.setHidden(sichtbar == 0)
+            titel = gruppe.data(0, Qt.ItemDataRole.UserRole)
+            anzahl = gruppe.childCount()
+            gruppe.setText(0, f"{titel} ({sichtbar} of {anzahl})" if woerter
+                           else f"{titel} ({anzahl})")
+
     def _show_selected(self) -> None:
         key = self._selected()
-        self.text.setMarkdown(self.markdown_for(key))
+        umbau = self._respec_markdown(key)
+        self.respec_text.setMarkdown(umbau)
+        # Mit Umbau zeigt der Reiter "Respec" — er ist bei einer
+        # Konfiguration das, worum es geht; ohne Umbau verschwindet er.
+        self.tabs.setTabVisible(0, bool(umbau))
+        if umbau:
+            self.tabs.setCurrentIndex(0)
+        elif self.tabs.currentIndex() == 0:
+            self.tabs.setCurrentIndex(1)
+        self.text.setMarkdown(self._overview_markdown(key))
+        self._fill_reach(key)
         ist_konfig = bool(key) and key[0] == CONFIG
         self.rename_button.setEnabled(ist_konfig)
         self.delete_button.setEnabled(ist_konfig)
