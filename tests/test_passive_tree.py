@@ -806,3 +806,10 @@ def test_the_tooltip_comes_from_the_node_under_the_mouse(qapp) -> None:
     assert g.tooltip_at(mitte).startswith("Fire Heart (Notable)")
     assert g.items(mitte) and all(not i.toolTip() for i in g.items(mitte))
     assert g.tooltip_at(mitte + type(mitte)(150, 150)) is None
+
+
+def test_the_tree_window_can_be_maximised(qapp, baum) -> None:
+    from PySide6.QtCore import Qt
+    dialog, _z, _ = _fenster(qapp, baum)
+    assert dialog.windowFlags() & Qt.WindowType.WindowMaximizeButtonHint
+    dialog.close()

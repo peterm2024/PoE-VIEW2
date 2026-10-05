@@ -42,6 +42,11 @@ class PassiveTreeDialog(QDialog):
                  on_change: Callable[[], None], parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setWindowTitle(f"Passive tree — {name}")
+        # Ein QDialog hat unter Windows nur "Schließen"; für den Baum will
+        # man den ganzen Bildschirm (Peter, 2026-10-05: "bitte aktiviere
+        # auch den Maximieren-Knopf für das Fenster").
+        self.setWindowFlag(Qt.WindowType.WindowMaximizeButtonHint, True)
+        self.setWindowFlag(Qt.WindowType.WindowMinimizeButtonHint, True)
         self._name = name
         self._class = class_name
         self._characters = characters
