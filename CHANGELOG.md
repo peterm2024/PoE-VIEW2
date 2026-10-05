@@ -64,6 +64,20 @@ nach [SemVer](https://semver.org/lang/de/).
   Intelligenz blau, die Hybridklassen (Templar, Duelist, Shadow)
   gestreift aus beiden. Außen am Rand Klasse und Aszendenzen, die
   eigene in Gold.
+- **Konfigurationen im Baum-Bild bauen** — Klick nimmt einen Knoten
+  samt kürzestem Weg, Rechtsklick nimmt ihn zurück samt allem, was
+  danach abgeschnitten wäre (wie im offiziellen Planer). Klick auf eine
+  Mastery bietet ihre Effekte an. Der Tooltip sagt vorher, was ein Klick
+  kostet. Die Änderungen stehen als „✎ Unsaved changes" oben in der
+  Liste — mit Respec, Overview, Planer-Link wie jede Konfiguration —,
+  mit Undo, „Save as…", „Save to …" und „Discard changes"; Punkte und
+  Respec-Kosten in der Zeile darunter. Über einem Knoten zeigt der
+  Mauszeiger eine Hand (oder „verboten", wenn ein Klick nichts tut),
+  ein Ring markiert den Knoten. Lange Tooltips werden umbrochen und
+  nennen die Knoten-ID (GGGs Nummer, wie im Planer-Link); Strg+C
+  kopiert Name und ID des Knotens unter der Maus, Strg+Umschalt+C dazu
+  die Werte. Die Suche im Bild findet auch eine Knoten-ID und springt
+  dorthin.
 - **Charakterbogen: Gems nach Link-Gruppen** — welche Gems wirklich
   miteinander verlinkt sind und welche allein stecken, dazu die Sockel
   in der Schreibweise des Spiels („B-B W").

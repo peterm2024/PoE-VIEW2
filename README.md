@@ -215,7 +215,13 @@ delve depth 0, where nobody dies) from the depths below it.
   zoom, drag, search — and shows a configuration's respec in green and
   red right on the tree. The background marks each class's area (red
   Strength, green Dexterity, blue Intelligence, striped for hybrids),
-  with class and ascendancy names around the edge.
+  with class and ascendancy names around the edge. **Build
+  configurations right in the picture:** click a node to allocate it
+  with the shortest path, right-click to refund it (and whatever would
+  be cut off), click a mastery to pick its effect. The tooltip tells you
+  the cost first; changes stay a draft until you save them. Ctrl+C
+  copies the name and ID of the node under the mouse (Ctrl+Shift+C with
+  its stats); type an ID into the search to jump to that node.
 - **Enlarged item view** (double-click an item): large icon and the full
   property and mod text without the compact detail panel's line
   clipping. Divination cards show their real artwork from GGG's own CDN

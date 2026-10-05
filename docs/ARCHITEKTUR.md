@@ -8644,6 +8644,100 @@ Beschriftung mit Gold nur bei der eigenen Aszendenz, nicht mitzoomend,
 außen am Rand. Gegenprobe mit 9 Sabotagen, alle gefangen. Nativ dunkel
 angesehen; hell nur gerechnet.
 
+#### 4.60.6 Konfigurationen per Klick (Stufe 3)
+
+Peter hatte Stufe 3 (§4.60.4) befürwortet: "Klick nimmt einen Knoten
+samt kürzestem Weg, Rechtsklick nimmt ihn zurück".
+
+**Regeln** (`passive_tree`, reine Funktionen, jede liefert ein NEUES
+`passives`, Jewels/Bandit/Pantheon werden mitgenommen):
+
+- `path_to`: Breitensuche vom vergebenen Baum plus eigenem Start zum
+  Ziel, gesperrt wie bei der Reichweite (Aszendenz, Masteries, fremde
+  Starts). **Masteries sperren ist nötig:** 315 von 353 Masteries haben
+  in GGGs Daten Verbindungen; ohne Sperre kürzten Wege durch sie ab
+  (Test mit verbundener Mastery, erst danach fiel die Sabotage auf).
+- `cut_off` (Rechtsklick): der Knoten **und alles, was danach keinen
+  Weg mehr zum Start hat** — abweichend vom ursprünglichen Vorschlag
+  ("nur, wenn nichts abgeschnitten wird"), weil man sonst einen Ast
+  Blatt für Blatt abbauen müsste; so macht es auch der offizielle
+  Planer, Undo fängt Versehen auf, und der Tooltip nennt die Zahl
+  vorher ("Right-click: refund (5 points)"). Aszendenz bleibt
+  unberührt.
+- Masteries: wählbar mit einem vergebenen **Notable** ihrer Gruppe
+  (`mastery_allowed`; so bei allen sechs Masteries in Peters Baum),
+  jeder Effekt nur einmal je Baum — gleichnamige Masteries teilen sich
+  in GGGs Daten die Effekt-Kennungen. Fällt das letzte Notable weg,
+  fällt die Mastery mit.
+- `main_points`: Punkte im Hauptbaum (ohne Start und Aszendenz; Cluster-
+  Knoten aus `hashes_ex` zählen nicht mit).
+
+**Der Entwurf ist ein Listeneintrag** ("✎ Unsaved changes", Schlüssel
+`DRAFT`), nicht ein Sonderzustand des Bildes: Dadurch zeigen Respec,
+Overview, Within reach, "Open in planner" und "Copy link" ihn ohne
+eigenen Code. Er lebt nur im Fenster; gespeichert wird er als
+Konfiguration mit `source="edited"` ("Save as…", oder "Save to “X”",
+wenn er aus der Konfiguration X entstand). Ein Klick aus einem anderen
+Eintrag heraus fragt, bevor er einen bestehenden Entwurf ersetzt;
+Schließen (Esc, ×) fragt ebenso.
+
+**Im Bild bleiben:** Wählt man eine Konfiguration aus der Liste,
+springt das Fenster zum Reiter Respec. Ein Klick im Bild wechselt die
+Auswahl auf den Entwurf — und sprang anfangs ebenso dorthin (vom Test
+gefunden). Der Wechsel zählt jetzt nicht als neue Auswahl.
+
+**Klick oder Verschieben:** Ziehen verschiebt das Bild; als Klick gilt
+nur, was sich zwischen Drücken und Loslassen höchstens 4 Pixel bewegt.
+
+**Zeiger und Hover** (Peter: "Bitte noch unbedingt den Cursor ändern
+wenn der Mauscursor über der Node ist und evtl auch die Node hovern"):
+über einem Knoten Hand mit Zeigefinger, wenn ein Klick etwas tut,
+"verboten", wenn nicht (nicht erreichbar, Mastery ohne Notable), dazu
+ein weißer (hell: schwarzer) Ring außerhalb von Reichweiten- und
+Suchring. Daneben die offene Hand fürs Verschieben — nicht der Pfeil,
+den `unsetCursor` brächte. Das Verschieben setzt den Zeiger beim
+Loslassen selbst zurück; nach einem Klick wird der Knoten darum neu
+"gehovert". Die Klick-Info (Wegsuche) wird je Knoten einmal gerechnet,
+nicht bei jeder Mausbewegung, und nach jedem `show_tree` verworfen —
+sonst stünde nach dem Klick noch "allocate" am Knoten. Gegenprobe mit
+7 Sabotagen; eine hielt zuerst (der Test fragte einen zweiten Knoten
+ab und überschrieb damit den Zwischenspeicher), Test umgestellt.
+
+**Tooltip umbrechen, ID, Strg+C** (Peter: "Einige sind zu lang, da
+müssten wir den Text umbrechen. Gibt es auch eine Möglichkeit,
+eindeutige IDs den Knoten zuzuordnen? Und den Namen und/oder die ID per
+Strg+C zu kopieren?"): Ein Qt-Tooltip in reinem Text bricht nicht um —
+Wind Dancer stand in einer Zeile über die halbe Bildschirmbreite. Die
+Werte werden nach 70 Zeichen umbrochen (`TOOLTIP_BREITE`), ohne
+Einrückung der Folgezeilen: Qt stellte die führenden Leerzeichen nur in
+der ersten Folgezeile dar (nativ gesehen). **Eindeutige IDs gibt es
+schon:** GGGs Knotennummer (`skill`, hier `Node.id`), dieselbe, die der
+Planer-Link und Path of Building verwenden — sie steht jetzt im Tooltip.
+Strg+C kopiert vom Knoten unter der Maus "Name (ID n)", Strg+Umschalt+C
+dazu die Werte. Damit die Tasten im Bild ankommen und nicht im Suchfeld,
+holt sich das Bild den Fokus, sobald die Maus hineinfährt. Ohne Knoten
+unter der Maus bleibt die Zwischenablage unberührt. Gegenprobe mit 6
+Sabotagen, alle gefangen.
+
+**ID in der Suche** (Peter: "Wir könnten noch die ID in die Suche
+integrieren"): Ein Suchwort passt, wenn es im Namen oder in den Werten
+vorkommt **oder genau die Knoten-ID ist** — nicht ein Teilstück davon
+("1123" findet Wind Dancer 11239 nicht; als Teilstück hätten Zahlen
+quer durch den Baum getroffen). Eine Zahl kann darum beides treffen:
+"10" findet Knoten 10 und jeden mit "+10" im Text. Besteht die Suche
+aus genau einer ID, springt das Bild dorthin — nur beim Tippen
+(`highlight(..., center=True)`), nicht beim Neuzeichnen nach einem
+Klick, sonst risse jeder Klick die Ansicht zur Suche zurück. Gegenprobe
+mit 5 Sabotagen; eine hielt zuerst (ID als Teilstück — die kleinen
+Test-IDs unterschieden es nicht), Test verschärft.
+
+Gemessen am echten Baum: ein Klick samt Neuaufbau aller Reiter rund
+80 ms. Getestet: Wege und Sperren, Abschneiden ohne Aszendenz,
+Masteries (Notable, Effekt nur einmal, fällt mit), Entwurf → Speichern
+und Überschreiben, Undo, Fragen vor Verlust, Klick gegen Ziehen.
+Gegenprobe mit 14 Sabotagen; eine hielt zuerst (Masteries begehbar —
+die Test-Mastery hatte keine Verbindung), Test verschärft.
+
 ---
 
 ## 8. Entwicklungsstand

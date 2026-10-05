@@ -23,9 +23,10 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from PySide6.QtCore import Qt, QUrl
-from PySide6.QtGui import QBrush, QColor, QDesktopServices, QGuiApplication, QPalette
+from PySide6.QtGui import (QBrush, QColor, QCursor, QDesktopServices, QGuiApplication,
+                           QPalette)
 from PySide6.QtWidgets import (QCheckBox, QDialog, QHBoxLayout, QHeaderView, QInputDialog, QLabel,
-                               QLineEdit, QListWidget, QListWidgetItem, QMessageBox,
+                               QLineEdit, QListWidget, QListWidgetItem, QMenu, QMessageBox,
                                QPushButton, QSplitter, QTabWidget, QTextBrowser,
                                QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
 
@@ -35,6 +36,11 @@ from poe_view.ui import tree_report
 from poe_view.ui.tree_graph import TreeGraph
 
 CURRENT, HISTORY, CONFIG = "current", "history", "config"
+# Der Entwurf aus Klicks im Bild (§4.60.6) — nur im Fenster, bis er als
+# Konfiguration gespeichert wird.
+DRAFT = "draft"
+_GESPERRT_WEG = "Not reachable from your tree"
+_GESPERRT_MASTERY = "Needs a notable of this group first"
 
 
 class PassiveTreeDialog(QDialog):
@@ -52,6 +58,11 @@ class PassiveTreeDialog(QDialog):
         self._characters = characters
         self._tree = tree
         self._on_change = on_change
+        self._draft: dict | None = None          # passives des Entwurfs
+        self._draft_from: tuple | None = None    # woraus er entstand
+        self._undo: list[dict] = []
+        self._status = ""                        # Meldung zum letzten Klick
+        self._shown_key = None
 
         self.list = QListWidget()
         self.list.currentItemChanged.connect(lambda *_: self._show_selected())
@@ -91,9 +102,11 @@ class PassiveTreeDialog(QDialog):
         self.graph_reach.setChecked(True)
         self.graph_reach.toggled.connect(lambda *_: self._fill_graph(self._selected(), fit=False))
         self.graph_search = QLineEdit()
-        self.graph_search.setPlaceholderText("Find nodes, e.g. fire res…")
+        self.graph_search.setPlaceholderText("Find nodes, e.g. fire res, or a node ID…")
         self.graph_search.setClearButtonEnabled(True)
-        self.graph_search.textChanged.connect(self.graph.highlight)
+        self.graph_search.textChanged.connect(lambda t: self.graph.highlight(t, center=True))
+        self.graph.node_clicked.connect(self._on_node_clicked)
+        self.graph.click_hint = self._click_info
         self.graph_legend = QLabel()
         self.graph_legend.setWordWrap(True)
         leiste = QHBoxLayout()
@@ -124,6 +137,12 @@ class PassiveTreeDialog(QDialog):
         self.planner_button = QPushButton("Open in planner")
         self.link_button = QPushButton("Copy link")
         self.copy_button = QPushButton("Copy as text")
+        self.undo_button = QPushButton("Undo")
+        self.overwrite_button = QPushButton("Save")
+        self.discard_button = QPushButton("Discard changes")
+        self.undo_button.clicked.connect(self._undo_edit)
+        self.overwrite_button.clicked.connect(self._save_draft_over)
+        self.discard_button.clicked.connect(lambda: self._discard_draft(ask=True))
         self.save_button.clicked.connect(self._save_current)
         self.import_button.clicked.connect(self._import_link)
         self.rename_button.clicked.connect(self._rename)
@@ -132,7 +151,8 @@ class PassiveTreeDialog(QDialog):
         self.link_button.clicked.connect(self._copy_link)
         self.copy_button.clicked.connect(self._copy_text)
         knoepfe = QHBoxLayout()
-        for knopf in (self.save_button, self.import_button, self.rename_button,
+        for knopf in (self.save_button, self.overwrite_button, self.undo_button,
+                      self.discard_button, self.import_button, self.rename_button,
                       self.delete_button):
             knoepfe.addWidget(knopf)
         knoepfe.addStretch(1)
@@ -156,6 +176,8 @@ class PassiveTreeDialog(QDialog):
         self.list.blockSignals(True)
         self.list.clear()
         aktuell = tree_history.current(self._characters, self._name)
+        if self._draft is not None:
+            self._add("✎ Unsaved changes", (DRAFT, None), bold=True)
         if aktuell:
             self._add("Current tree", (CURRENT, None), bold=True)
         konfigs = tree_history.configs(self._characters, self._name)
@@ -216,6 +238,12 @@ class PassiveTreeDialog(QDialog):
         if not key:
             return None
         art, schluessel = key
+        if art == DRAFT:
+            if self._draft is None:
+                return None
+            basis = dict(tree_history.current(self._characters, self._name) or {})
+            basis["passives"] = self._draft
+            return basis
         if art == CURRENT:
             return tree_history.current(self._characters, self._name)
         if art == CONFIG:
@@ -233,10 +261,10 @@ class PassiveTreeDialog(QDialog):
             return []
         art, schluessel = key
         aktuell = tree_history.current(self._characters, self._name)
-        if art == CONFIG and aktuell:
+        if art in (CONFIG, DRAFT) and aktuell:
             return tree_report.respec_blocks(
                 self._tree, aktuell.get("passives") or {}, eintrag.get("passives") or {},
-                title=f"Respec: current tree → {schluessel}")
+                title=f"Respec: current tree → {schluessel if art == CONFIG else 'unsaved changes'}")
         if art == HISTORY and schluessel > 0:
             verlauf = tree_history.history(self._characters, self._name)
             return tree_report.respec_blocks(
@@ -250,6 +278,8 @@ class PassiveTreeDialog(QDialog):
                                           include_reach=include_reach)
         if key and key[0] == CONFIG:
             bloecke[0].title = f"Configuration: {key[1]}"
+        elif key and key[0] == DRAFT:
+            bloecke[0].title = "Unsaved changes"
         return bloecke
 
     def markdown_for(self, key) -> str:
@@ -307,7 +337,7 @@ class PassiveTreeDialog(QDialog):
             self.graph_legend.setText("")
             return
         vergleich = None
-        if key[0] == CONFIG:
+        if key[0] in (CONFIG, DRAFT):
             aktuell = tree_history.current(self._characters, self._name)
             vergleich = (aktuell or {}).get("passives")
         elif key[0] == HISTORY and key[1] > 0:
@@ -321,7 +351,8 @@ class PassiveTreeDialog(QDialog):
         self.graph_legend.setText(
             ("Green: allocate · red: refund · white: unchanged · " if vergleich is not None
              else "Filled: allocated (colour = theme) · ring: within reach · ")
-            + "hollow: not allocated · yellow ring: search match · wheel: zoom · drag: move\n"
+            + "hollow: not allocated · yellow ring: search match · wheel: zoom · drag: move · "
+            "click: allocate · right-click: refund\n"
             + "Background: red Strength · green Dexterity · blue Intelligence · "
             "striped: hybrid classes")
         if fit:
@@ -360,9 +391,13 @@ class PassiveTreeDialog(QDialog):
         # Mit Umbau zeigt der Reiter "Respec" — er ist bei einer
         # Konfiguration das, worum es geht; ohne Umbau verschwindet er.
         self.tabs.setTabVisible(0, bool(umbau))
-        if umbau:
+        # Nur beim Wechsel der Auswahl springen — wer im Bild klickt, bleibt
+        # im Bild (§4.60.6).
+        neu_gewaehlt = key != self._shown_key
+        self._shown_key = key
+        if umbau and neu_gewaehlt:
             self.tabs.setCurrentIndex(0)
-        elif self.tabs.currentIndex() == 0:
+        elif not umbau and self.tabs.currentIndex() == 0:
             self.tabs.setCurrentIndex(1)
         if self._entry(key) is None or self._tree is None:
             self.text.setMarkdown(self.markdown_for(key))
@@ -379,11 +414,31 @@ class PassiveTreeDialog(QDialog):
         self.planner_button.setEnabled(hat_baum)
         self.link_button.setEnabled(hat_baum)
         self.copy_button.setEnabled(self._entry(key) is not None)
+        ist_entwurf = bool(key) and key[0] == DRAFT
+        self.save_button.setText("Save as…" if ist_entwurf else "Save current as…")
         self.save_button.setEnabled(
             tree_history.current(self._characters, self._name) is not None)
+        herkunft = self._draft_from if ist_entwurf else None
+        self.overwrite_button.setVisible(bool(herkunft) and herkunft[0] == CONFIG)
+        if herkunft and herkunft[0] == CONFIG:
+            self.overwrite_button.setText(f"Save to “{herkunft[1]}”")
+        self.undo_button.setVisible(ist_entwurf)
+        self.undo_button.setEnabled(bool(self._undo))
+        self.discard_button.setVisible(ist_entwurf)
         self.import_button.setEnabled(self._tree is not None)
-        self.hint.setText("Ruthless tree" if self._tree is not None and self._tree.ruthless
-                          else "")
+        teile = ["Ruthless tree"] if self._tree is not None and self._tree.ruthless else []
+        if ist_entwurf and self._tree is not None:
+            aktuell = tree_history.current(self._characters, self._name) or {}
+            vorher = aktuell.get("passives") or {}
+            umbau_punkte = passive_tree.compare(self._tree, vorher, self._draft).points
+            teile.append(
+                f"Unsaved changes: {passive_tree.main_points(self._tree, self._draft)} points "
+                f"(current tree {passive_tree.main_points(self._tree, vorher)}) · "
+                f"respec: {umbau_punkte} {'point' if umbau_punkte == 1 else 'points'} "
+                "to refund")
+        if self._status:
+            teile.append(self._status)
+        self.hint.setText(" · ".join(teile))
 
     # --- Handlungen ----------------------------------------------------- #
 
@@ -399,7 +454,158 @@ class PassiveTreeDialog(QDialog):
             self, "Overwrite configuration",
             f"A configuration named “{name}” exists. Replace it?") == QMessageBox.StandardButton.Yes
 
+    # --- Bearbeiten im Bild (§4.60.6) ------------------------------------ #
+
+    def _ask(self, title: str, text: str) -> bool:
+        return QMessageBox.question(self, title, text) == QMessageBox.StandardButton.Yes
+
+    def _editing_base(self) -> dict | None:
+        """Woraus ein Klick baut: der Entwurf, sonst das Gewählte."""
+        key = self._selected()
+        if key and key[0] == DRAFT:
+            return self._draft
+        eintrag = self._entry(key)
+        return None if eintrag is None else (eintrag.get("passives") or {})
+
+    def _click_hint(self, node: int) -> str | None:
+        basis = self._editing_base()
+        if basis is None or self._tree is None or node not in self._tree.nodes:
+            return None
+        n = self._tree.nodes[node]
+        have = passive_tree.allocated(basis)
+        if n.kind == passive_tree.MASTERY:
+            if node in have:
+                return "Click: change effect · right-click: refund"
+            return ("Click: choose an effect" if passive_tree.mastery_allowed(
+                self._tree, have, node) else _GESPERRT_MASTERY)
+        if n.kind == passive_tree.START:
+            return None
+        if node in have:
+            weg = passive_tree.cut_off(self._tree, have, node, self._class)
+            return f"Right-click: refund ({len(weg)} {'point' if len(weg) == 1 else 'points'})"
+        weg = passive_tree.path_to(self._tree, have, node, self._class)
+        if weg is None:
+            return _GESPERRT_WEG
+        return f"Click: allocate ({len(weg)} {'point' if len(weg) == 1 else 'points'})"
+
+    def _click_info(self, node: int) -> tuple[str, bool] | None:
+        """Für das Bild: Zusatzzeile und ob ein Klick etwas tut (Zeiger
+        "Hand" oder "verboten")."""
+        text = self._click_hint(node)
+        return None if text is None else (text, text not in (_GESPERRT_WEG, _GESPERRT_MASTERY))
+
+    def _choose_effect(self, node: int, have_choice: dict[int, int]) -> int | None:
+        """Menü mit den Effekten der Mastery; schon anderswo gewählte sind
+        gesperrt (jeder Effekt nur einmal je Baum)."""
+        m = self._tree.nodes[node]
+        menue = QMenu(self)
+        anderswo = {e for k, e in have_choice.items() if k != node}
+        aktionen = {}
+        for effekt, werte in m.effects.items():
+            a = menue.addAction(" / ".join(werte) or str(effekt))
+            a.setCheckable(True)
+            a.setChecked(have_choice.get(node) == effekt)
+            a.setEnabled(effekt not in anderswo)
+            aktionen[a] = effekt
+        gewaehlt = menue.exec(QCursor.pos())
+        return aktionen.get(gewaehlt)
+
+    def _on_node_clicked(self, node: int, right: bool) -> None:
+        if self._tree is None or node not in self._tree.nodes:
+            return
+        key = self._selected()
+        basis = self._editing_base()
+        if basis is None:
+            return
+        n = self._tree.nodes[node]
+        if n.kind == passive_tree.MASTERY:
+            if right:
+                neu = passive_tree.edit_mastery(self._tree, basis, node, None)
+            elif not passive_tree.mastery_allowed(self._tree, passive_tree.allocated(basis), node):
+                self._set_status(f"{n.name}: needs a notable of this group first")
+                return
+            else:
+                effekt = self._choose_effect(node, passive_tree.mastery_choices(basis))
+                if effekt is None:
+                    return
+                neu = passive_tree.edit_mastery(self._tree, basis, node, effekt)
+        elif right:
+            neu = passive_tree.edit_refund(self._tree, basis, node, self._class)
+        else:
+            neu = passive_tree.edit_allocate(self._tree, basis, node, self._class)
+            if neu is None:
+                self._set_status(f"{n.name}: not reachable from your tree")
+                return
+        if neu is None or (passive_tree.allocated(neu) == passive_tree.allocated(basis)
+                           and passive_tree.mastery_choices(neu)
+                           == passive_tree.mastery_choices(basis)):
+            return
+        if key and key[0] != DRAFT:
+            # Ein neuer Entwurf aus dem Gewählten — ein alter ginge verloren.
+            if self._draft is not None and not self._ask(
+                    "Unsaved changes", "Discard the unsaved changes and start again from "
+                    "this tree?"):
+                return
+            self._draft_from = key
+            self._undo = []
+        else:
+            self._undo.append(basis)
+        self._draft = neu
+        self._status = ""
+        # Der Wechsel auf den Entwurf kommt vom Klick, nicht aus der Liste:
+        # im Bild bleiben.
+        self._shown_key = (DRAFT, None)
+        self.refresh((DRAFT, None))
+
+    def _set_status(self, text: str) -> None:
+        self._status = text
+        self._show_selected()
+
+    def _undo_edit(self) -> None:
+        if self._undo:
+            self._draft = self._undo.pop()
+            self._status = ""
+            self.refresh((DRAFT, None))
+
+    def _discard_draft(self, ask: bool) -> bool:
+        if self._draft is None:
+            return True
+        if ask and not self._ask("Discard changes", "Discard the unsaved changes?"):
+            return False
+        zurueck = self._draft_from or (CURRENT, None)
+        self._draft, self._draft_from, self._undo, self._status = None, None, [], ""
+        self.refresh(zurueck)
+        return True
+
+    def _store_draft(self, name: str) -> None:
+        aktuell = tree_history.current(self._characters, self._name) or {}
+        tree_history.save_config(self._characters, self._name, name, dict(self._draft),
+                                 level=aktuell.get("level") or 0,
+                                 ruthless=self._tree.ruthless if self._tree else False,
+                                 source="edited")
+        self._draft, self._draft_from, self._undo, self._status = None, None, [], ""
+        self._on_change()
+        self.refresh((CONFIG, name))
+
+    def _save_draft_over(self) -> None:
+        if self._draft is not None and self._draft_from and self._draft_from[0] == CONFIG:
+            self._store_draft(self._draft_from[1])
+
+    def reject(self) -> None:
+        # Schließen (Esc, ×) fragt, wenn ein Entwurf verloren ginge.
+        if self._draft is not None and not self._ask(
+                "Unsaved changes", "Close and discard the unsaved changes?"):
+            return
+        super().reject()
+
     def _save_current(self) -> None:
+        key = self._selected()
+        if key and key[0] == DRAFT and self._draft is not None:
+            herkunft = self._draft_from or (None, None)
+            name = self._ask_name("Save changes as", herkunft[1] if herkunft[0] == CONFIG else "")
+            if name and self._confirm_overwrite(name):
+                self._store_draft(name)
+            return
         aktuell = tree_history.current(self._characters, self._name)
         name = self._ask_name("Save current tree as") if aktuell else None
         if not name or not self._confirm_overwrite(name):

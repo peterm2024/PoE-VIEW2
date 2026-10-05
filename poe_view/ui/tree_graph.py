@@ -26,10 +26,11 @@ from __future__ import annotations
 import functools
 import html
 import math
+import textwrap
 
-from PySide6.QtCore import QPoint, QPointF, QRectF, Qt
-from PySide6.QtGui import (QBrush, QColor, QImage, QPainter, QPainterPath, QPalette, QPen,
-                           QPixmap, QTransform)
+from PySide6.QtCore import QPoint, QPointF, QRectF, Qt, Signal
+from PySide6.QtGui import (QBrush, QColor, QCursor, QGuiApplication, QImage, QPainter,
+                           QPainterPath, QPalette, QPen, QPixmap, QTransform)
 from PySide6.QtWidgets import (QGraphicsEllipseItem, QGraphicsItem, QGraphicsScene,
                                QGraphicsTextItem, QGraphicsView, QToolTip)
 
@@ -52,9 +53,9 @@ DIM, ALLOCATED, ALLOCATE, REFUND = "dim", "allocated", "allocate", "refund"
 # #b8860b — auf den getönten Bereichen (§4.60.5) unter 3:1.
 _FARBEN = {
     True: {"dim": "#7a7a7a", "edge": "#4f4f4f", "edge_on": "#d8d8d8",
-           "reach": "#4dd0e1", "search": "#ffd54f"},
+           "reach": "#4dd0e1", "search": "#ffd54f", "hover": "#ffffff"},
     False: {"dim": "#7e7e7e", "edge": "#d0d0d0", "edge_on": "#3a3a3a",
-            "reach": "#00838f", "search": "#9a7000"},
+            "reach": "#00838f", "search": "#9a7000", "hover": "#000000"},
 }
 
 # Bereiche der Klassen (§4.60.5, Peters Idee): Stärke dunkelrot,
@@ -68,6 +69,8 @@ _TOENUNG = {
 }
 # Streifen in Bildschirmpixeln (je Farbe), unabhängig vom Zoom.
 STREIFEN_PX = 8
+# Zeichen je Tooltip-Zeile, danach Umbruch.
+TOOLTIP_BREITE = 70
 # Beschriftung am Rand: Klasse, Aszendenzen, die eigene hervorgehoben.
 _SCHRIFT = {True: {"class": "#e0e0e0", "asc": "#b0b0b0"},
             False: {"class": "#202020", "asc": "#5f5f5f"}}
@@ -130,6 +133,9 @@ def class_areas(tree: Tree) -> tuple[list[tuple[ClassInfo, float, float, float]]
 
 
 class TreeGraph(QGraphicsView):
+    # Klick auf einen Knoten ohne zu ziehen (§4.60.6): Kennung, rechte Taste.
+    node_clicked = Signal(int, bool)
+
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.setScene(QGraphicsScene(self))
@@ -142,6 +148,7 @@ class TreeGraph(QGraphicsView):
         self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setMouseTracking(True)
         self.viewport().setMouseTracking(True)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self._mastery_theme: dict[int, str] = {}
         self.comparing = False
         self._tree: Tree | None = None
@@ -159,6 +166,14 @@ class TreeGraph(QGraphicsView):
         self.labels: list[tuple[QGraphicsTextItem, ClassInfo, float]] = []
         self.own_class: tuple[int, int] | None = None
         self._dark = True
+        # Zusatzzeile im Tooltip ("Click: allocate (3 points)") — setzt der
+        # Dialog, das Bild weiß nicht, was ein Klick bewirkt.
+        self.click_hint = None
+        self._press: QPoint | None = None
+        # Knoten unter der Maus (Ring, Zeiger) und seine Klick-Info.
+        self.hovered: int | None = None
+        self._hover_ring = None
+        self._hover_info: tuple | None = None
 
     # --- Aufbau --------------------------------------------------------- #
 
@@ -173,6 +188,7 @@ class TreeGraph(QGraphicsView):
         self._edges.clear()
         self._edge_items.clear()
         self._rings.clear()
+        self._hover_ring, self.hovered, self._hover_info = None, None, None
         self.areas = []
         self.labels = []
         if tree is None:
@@ -228,7 +244,19 @@ class TreeGraph(QGraphicsView):
         art = {KEYSTONE: "Keystone", NOTABLE: "Notable", JEWEL: "Jewel socket",
                MASTERY: "Mastery", START: "Class start"}.get(n.kind, "")
         kopf = f"{n.name} ({art})" if art else n.name
-        return "\n".join([kopf] + list(n.stats))
+        # Umbrechen (Peter, 2026-10-05: "Einige sind zu lang") — ein
+        # Qt-Tooltip in reinem Text bricht nicht selbst um; Wind Dancer
+        # stand in einer Zeile über die halbe Bildschirmbreite.
+        zeilen = [textwrap.fill(z, TOOLTIP_BREITE) for z in n.stats]
+        return "\n".join([kopf, f"ID {n.id}"] + zeilen)
+
+    def copy_text(self, h: int, full: bool = False) -> str:
+        """Was Strg+C kopiert: Name und ID; mit Umschalt alles mit Werten
+        (zum Weitergeben, etwa für eine Einschätzung)."""
+        n = self._tree.nodes[h]
+        if not full:
+            return f"{n.name} (ID {n.id})"
+        return "\n".join([f"{n.name} (ID {n.id})"] + list(n.stats))
 
     @staticmethod
     def _edge_path(a: Node, b: Node) -> QPainterPath:
@@ -290,20 +318,28 @@ class TreeGraph(QGraphicsView):
         self._shown = ziel
         self._dark = dark
         self.comparing = basis is not None
+        self._hover_info = None                   # Kosten eines Klicks neu rechnen
         self.own_class = tree.class_ids.get(class_name)
         self._paint()
 
-    def highlight(self, text: str) -> None:
-        """Suchtreffer: jedes Wort in Name oder Werten (wie die Tabelle)."""
+    def highlight(self, text: str, center: bool = False) -> None:
+        """Suchtreffer: jedes Wort in Name oder Werten (wie die Tabelle) —
+        oder genau die Knoten-ID (Peter, 2026-10-05: "Wir könnten noch die
+        ID in die Suche integrieren"). ``center``: beim Tippen einer ID
+        dorthin springen; nicht beim Neuzeichnen nach einem Klick."""
         woerter = text.lower().split()
         self.search_ids = set()
         if woerter and self._tree is not None:
             for h in self._items:
                 n = self._tree.nodes[h]
                 heu = f"{n.name} {' '.join(n.stats)}".lower()
-                if all(w in heu for w in woerter):
+                if all(w == str(h) or w in heu for w in woerter):
                     self.search_ids.add(h)
         self._paint_rings()
+        if center and len(woerter) == 1 and woerter[0].isdigit():
+            h = int(woerter[0])
+            if h in self._items:
+                self.centerOn(self._items[h].sceneBoundingRect().center())
 
     def _paint(self) -> None:
         tree, farben = self._tree, _FARBEN[getattr(self, "_dark", True)]
@@ -445,20 +481,109 @@ class TreeGraph(QGraphicsView):
         self.fitInView(rechteck.adjusted(-rand, -rand, rand, rand),
                        Qt.AspectRatioMode.KeepAspectRatio)
 
+    def _click_info(self, h: int) -> tuple[str | None, bool]:
+        """(Zusatzzeile, klickbar) — einmal je Knoten unter der Maus
+        gerechnet, nicht bei jeder Bewegung (die Wegsuche kostet)."""
+        if self.click_hint is None:
+            return None, False
+        if self._hover_info is not None and self._hover_info[0] == h:
+            return self._hover_info[1]
+        roh = self.click_hint(h)
+        info = roh if isinstance(roh, tuple) else (roh, roh is not None)
+        self._hover_info = (h, info)
+        return info
+
     def tooltip_at(self, punkt: QPoint) -> str | None:
         """Der Text zum Knoten unter ``punkt`` (Viewport-Koordinaten)."""
-        if self._tree is None:
+        h = self.node_at(punkt)
+        if h is None:
             return None
+        text = self._tooltip(self._tree.nodes[h])
+        zusatz = self._click_info(h)[0]
+        unten = [zusatz] if zusatz else []
+        unten.append("Ctrl+C: copy name and ID · Ctrl+Shift+C: with stats")
+        return f"{text}\n\n" + "\n".join(unten)
+
+    def hover(self, h: int | None) -> None:
+        """Knoten unter der Maus: Ring drumherum und Zeiger "Hand", wenn ein
+        Klick etwas tut, "verboten", wenn nicht (Peter, 2026-10-05: "den
+        Cursor ändern wenn der Mauscursor über der Node ist und evtl auch
+        die Node hovern"). Ohne ``click_hint`` (nur ansehen) kein Ring."""
+        if h == self.hovered:
+            return
+        self.hovered = h
+        if self._hover_ring is not None:
+            self.scene().removeItem(self._hover_ring)
+            self._hover_ring = None
+        if h is None or self.click_hint is None or self._tree is None:
+            # Zurück auf den Zeiger fürs Verschieben (nicht den Pfeil).
+            self.viewport().setCursor(Qt.CursorShape.OpenHandCursor)
+            return
+        _text, klickbar = self._click_info(h)
+        self.viewport().setCursor(Qt.CursorShape.PointingHandCursor if klickbar
+                                  else Qt.CursorShape.ForbiddenCursor)
+        n = self._tree.nodes[h]
+        # Außerhalb von Reichweiten- (+14) und Suchring (+30).
+        r = _RADIUS.get(n.kind, _KLEIN) + 44.0
+        self._hover_ring = self.scene().addEllipse(
+            QRectF(n.x - r, n.y - r, 2 * r, 2 * r), _cosmetic(_FARBEN[self._dark]["hover"], 3.0))
+        self._hover_ring.setZValue(5)
+        self._hover_ring.setAcceptHoverEvents(False)
+
+    def leaveEvent(self, event) -> None:  # noqa: N802 (Qt-API)
+        self.hover(None)
+        super().leaveEvent(event)
+
+    def enterEvent(self, event) -> None:  # noqa: N802 (Qt-API)
+        # Fokus, damit Strg+C hier ankommt und nicht im Suchfeld.
+        self.setFocus(Qt.FocusReason.MouseFocusReason)
+        super().enterEvent(event)
+
+    def keyPressEvent(self, event) -> None:  # noqa: N802 (Qt-API)
+        kopieren = (event.key() == Qt.Key.Key_C
+                    and event.modifiers() & Qt.KeyboardModifier.ControlModifier)
+        if kopieren and self.hovered is not None and self._tree is not None:
+            voll = bool(event.modifiers() & Qt.KeyboardModifier.ShiftModifier)
+            text = self.copy_text(self.hovered, full=voll)
+            QGuiApplication.clipboard().setText(text)
+            QToolTip.showText(QCursor.pos(), f"Copied: {text.splitlines()[0]}",
+                              self.viewport())
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
+    def node_at(self, punkt: QPoint) -> int | None:
         for item in self.items(punkt):
             h = item.data(0)
-            if isinstance(h, int) and h in self._tree.nodes:
-                return self._tooltip(self._tree.nodes[h])
+            if isinstance(h, int) and self._tree is not None and h in self._tree.nodes:
+                return h
         return None
+
+    def mousePressEvent(self, event) -> None:  # noqa: N802 (Qt-API)
+        self._press = event.position().toPoint()
+        super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:  # noqa: N802 (Qt-API)
+        super().mouseReleaseEvent(event)
+        start, self._press = self._press, None
+        punkt = event.position().toPoint()
+        # Ein Klick, kein Verschieben: höchstens ein paar Pixel bewegt.
+        if start is None or (punkt - start).manhattanLength() > 4:
+            return
+        h = self.node_at(punkt)
+        if h is not None and event.button() in (Qt.MouseButton.LeftButton,
+                                                Qt.MouseButton.RightButton):
+            self.node_clicked.emit(h, event.button() == Qt.MouseButton.RightButton)
+        # Das Verschieben setzt den Zeiger auf "Hand offen" zurück; der
+        # Knoten unter der Maus bekommt seinen wieder (Kosten neu gerechnet).
+        self.hovered = None
+        self.hover(self.node_at(punkt))
 
     def mouseMoveEvent(self, event) -> None:  # noqa: N802 (Qt-API)
         super().mouseMoveEvent(event)
         if event.buttons():                       # beim Verschieben kein Tooltip
             return
+        self.hover(self.node_at(event.position().toPoint()))
         text = self.tooltip_at(event.position().toPoint())
         if text:
             QToolTip.showText(event.globalPosition().toPoint(), text, self.viewport())

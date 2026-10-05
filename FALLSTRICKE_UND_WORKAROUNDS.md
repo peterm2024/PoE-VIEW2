@@ -2035,3 +2035,23 @@ Polieren fällt er.
 **Lehre:** Bei Farbe aus einem Stylesheet das gemalte Pixel prüfen, nicht
 den gesetzten Wert — derselbe Fall wie der fehlende Rahmen ohne
 `WA_StyledBackground` (§4.59).
+
+## 96. Ein Hover-Test fiel nur im Gesamtlauf — `QTest.mouseMove` an die Stelle, an der die Maus schon stand
+
+**Symptom.** `test_hovering_a_node_rings_it_and_changes_the_cursor`
+(ARCHITEKTUR §4.60.6) war einzeln grün, auch zusammen mit den
+Nachbardateien, im Gesamtlauf aber rot.
+
+**Ursache.** `QTest.mouseMove` erzeugt kein Bewegungsereignis, wenn die
+Maus laut Qt schon an der Zielstelle steht. Diese Stelle merkt sich Qt
+über Tests hinweg; ein früherer Test mit gleicher Fenstergröße und
+gleichem Knoten hinterlässt sie je nach Reihenfolge. Beim Schreiben des
+Tests schon einmal gesehen (zweimal dieselbe Stelle hintereinander),
+aber nur innerhalb des Tests behoben.
+
+**Lösung.** Der Test schickt die Bewegung als `QMouseEvent` direkt an
+`mouseMoveEvent` des Bildes — unabhängig davon, wo Qt die Maus vermutet.
+
+**Lehre:** Für Hover-Tests `QTest.mouseMove` meiden oder vorher sicher
+woandershin bewegen; ein Test, der nur im Gesamtlauf fällt, deutet auf
+Zustand, den ein anderer Test hinterlässt.

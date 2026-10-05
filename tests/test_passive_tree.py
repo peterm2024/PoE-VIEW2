@@ -932,3 +932,365 @@ def test_the_graph_names_classes_at_the_edge_and_marks_your_own(qapp) -> None:
     assert t.pos().y() == pytest.approx(-6300) and unterkante < t.pos().y()
     assert t.transform().dx() == pytest.approx(-t.boundingRect().width() / 2)
     assert isinstance(next(iter(g.labels))[1], ClassInfo)
+
+
+# --- Bearbeiten per Klick (§4.60.6) ---------------------------------------- #
+
+def _mastery_baum() -> pt.Tree:
+    """Der kleine Baum, Iron Heart (12) und zwei Masteries in Gruppe 5;
+    beide Masteries bieten den Effekt 777 an (gleichnamige Masteries teilen
+    sich im echten Baum die Effekt-Kennungen)."""
+    import copy
+    roh = copy.deepcopy(_ROH)
+    roh["nodes"]["12"]["group"] = 5
+    roh["nodes"]["40"]["group"] = 5
+    roh["nodes"]["11"]["group"] = 5          # ein kleiner Knoten reicht nicht
+    # Im echten Baum haben 315 von 353 Masteries Verbindungen — durch sie
+    # führt trotzdem kein Weg (hier wäre 11 → 40 → 15 eine Abkürzung).
+    roh["nodes"]["40"]["out"] = ["11", "15"]
+    roh["nodes"]["41"] = _knoten("Life Mastery", (), isMastery=True, group=5, masteryEffects=[
+        {"effect": 777, "stats": ["+50 to maximum Life"]},
+        {"effect": 779, "stats": ["Regenerate 1 Life per second"]}])
+    return pt.parse_tree(roh, ruthless=True)
+
+
+def test_path_to_takes_the_shortest_way_and_respects_blocked_nodes(baum) -> None:
+    have = {10, 11}
+    assert pt.path_to(baum, have, 15, "Marauder") == [12, 14, 15]
+    assert pt.path_to(baum, have, 13, "Marauder") == [12, 13]
+    assert pt.path_to(baum, set(), 11, "Marauder") == [10, 11]       # vom eigenen Start
+    assert pt.path_to(baum, have, 11, "Marauder") == []              # schon vergeben
+    assert pt.path_to(baum, have, 31, "Marauder") is None            # hinter fremdem Start
+    assert pt.path_to(baum, have, 51, "Marauder") is None            # Aszendenz
+    assert pt.path_to(baum, have, 40, "Marauder") is None            # Mastery: per Menü
+
+
+def test_refund_takes_everything_that_would_be_cut_off(baum) -> None:
+    have = {10, 11, 12, 14, 15, 50, 51}
+    assert pt.cut_off(baum, have, 15, "Marauder") == {15}
+    assert pt.cut_off(baum, have, 11, "Marauder") == {11, 12, 14, 15}
+    # Die Aszendenz hängt nicht am Hauptbaum und bleibt.
+    assert pt.cut_off(baum, have, 10, "Marauder") == {10, 11, 12, 14, 15}
+
+
+def test_edits_return_a_new_tree_and_keep_jewels_and_bandit(baum) -> None:
+    alt = {"hashes": [10, 11], "jewel_data": {"21": {"type": "X"}}, "bandit_choice": "Alira"}
+    neu = pt.edit_allocate(baum, alt, 15, "Marauder")
+    assert neu["hashes"] == [10, 11, 12, 14, 15]
+    assert neu["jewel_data"] == alt["jewel_data"] and neu["bandit_choice"] == "Alira"
+    assert alt["hashes"] == [10, 11]                                 # Vorlage unverändert
+    assert pt.edit_allocate(baum, alt, 31, "Marauder") is None
+    zurueck = pt.edit_refund(baum, neu, 12, "Marauder")
+    assert zurueck["hashes"] == [10, 11]
+    assert pt.main_points(baum, {"hashes": [1, 10, 11, 50, 51]}) == 2   # ohne Start/Aszendenz
+
+
+def test_masteries_need_a_notable_and_each_effect_only_once() -> None:
+    b = _mastery_baum()
+    ohne = {"hashes": [10, 11]}
+    assert pt.path_to(b, {10, 11}, 15, "Marauder") == [12, 14, 15]
+    assert not pt.mastery_allowed(b, pt.allocated(ohne), 40)
+    assert pt.edit_mastery(b, ohne, 40, 777) is None
+    mit = pt.edit_allocate(b, ohne, 12, "Marauder")
+    gewaehlt = pt.edit_mastery(b, mit, 40, 777)
+    assert 40 in gewaehlt["hashes"] and gewaehlt["mastery_effects"] == {"40": 777}
+    assert pt.edit_mastery(b, gewaehlt, 41, 777) is None             # 777 schon vergeben
+    assert pt.edit_mastery(b, gewaehlt, 41, 779)["mastery_effects"] == {"40": 777, "41": 779}
+    assert pt.edit_mastery(b, gewaehlt, 40, 999) is None             # kein Effekt davon
+    # Ohne Notable fällt die Mastery mit weg.
+    weg = pt.edit_refund(b, gewaehlt, 12, "Marauder")
+    assert weg["hashes"] == [10, 11] and weg["mastery_effects"] == {}
+    leer = pt.edit_mastery(b, gewaehlt, 40, None)
+    assert 40 not in leer["hashes"] and leer["mastery_effects"] == {}
+
+
+def test_clicking_in_the_tree_starts_a_draft_and_stays_on_the_tree_tab(qapp, baum) -> None:
+    from poe_view.ui.passive_tree_dialog import DRAFT
+    dialog, zeichen, aufrufe = _fenster(qapp, baum)
+    dialog.tabs.setCurrentIndex(3)
+    assert dialog._click_hint(15) == "Click: allocate (2 points)"
+    assert dialog._click_hint(11) == "Right-click: refund (2 points)"
+    assert dialog._click_hint(31) == "Not reachable from your tree"
+    dialog.graph.node_clicked.emit(15, False)
+    assert dialog._selected() == (DRAFT, None) and _eintraege(dialog)[0] == "✎ Unsaved changes"
+    assert dialog.tabs.currentIndex() == 3                       # nicht zum Respec gesprungen
+    assert dialog.graph.comparing              # Entwurf gegen den aktuellen Baum
+    assert "Unsaved changes: 5 points (current tree 3)" in dialog.hint.text()
+    assert "respec: 0 points to refund" in dialog.hint.text()
+    assert dialog.undo_button.isVisibleTo(dialog) and not dialog.undo_button.isEnabled()
+    dialog.graph.node_clicked.emit(13, False)
+    assert dialog.undo_button.isEnabled()
+    dialog.graph.node_clicked.emit(11, True)                     # 11 samt allem dahinter
+    assert pt.allocated(dialog._draft) == {10}
+    assert "respec: 2 points to refund" in dialog.hint.text()
+    dialog._undo_edit()
+    dialog._undo_edit()
+    assert pt.allocated(dialog._draft) == {10, 11, 12, 14, 15}
+    assert aufrufe == []                                         # nichts gespeichert
+    assert th.configs(zeichen, "WitchOfPeter") == {}
+    dialog._draft = None
+    dialog.close()
+
+
+def test_a_draft_is_saved_as_a_configuration(qapp, baum, monkeypatch) -> None:
+    from poe_view.ui.passive_tree_dialog import CONFIG
+    dialog, zeichen, aufrufe = _fenster(qapp, baum)
+    dialog.graph.node_clicked.emit(15, False)
+    assert dialog.save_button.text() == "Save as…"
+    assert not dialog.overwrite_button.isVisibleTo(dialog)      # Entwurf aus dem aktuellen Baum
+    monkeypatch.setattr(dialog, "_ask_name", lambda *_a: "Far")
+    dialog.save_button.click()
+    konfig = th.configs(zeichen, "WitchOfPeter")["Far"]
+    assert pt.allocated(konfig["passives"]) == {10, 11, 12, 14, 15}
+    assert konfig["source"] == "edited" and aufrufe == [1]
+    assert dialog._draft is None and dialog._selected() == (CONFIG, "Far")
+    assert "✎ Unsaved changes" not in _eintraege(dialog)
+    # Weiterbauen an der Konfiguration: "Save to “Far”" überschreibt sie.
+    dialog.graph.node_clicked.emit(13, False)
+    assert dialog.overwrite_button.isVisibleTo(dialog)
+    assert dialog.overwrite_button.text() == "Save to “Far”"
+    dialog.overwrite_button.click()
+    assert 13 in pt.allocated(th.configs(zeichen, "WitchOfPeter")["Far"]["passives"])
+    assert dialog._draft is None and aufrufe == [1, 1]
+    dialog.close()
+
+
+def test_unreachable_clicks_explain_and_lost_drafts_are_asked_for(qapp, baum,
+                                                                  monkeypatch) -> None:
+    from poe_view.ui.passive_tree_dialog import CURRENT, DRAFT, HISTORY
+    dialog, _z, _ = _fenster(qapp, baum)
+    dialog.graph.node_clicked.emit(31, False)
+    assert dialog._draft is None and "Behind Witch: not reachable" in dialog.hint.text()
+    dialog.graph.node_clicked.emit(15, False)
+    fragen = []
+    monkeypatch.setattr(dialog, "_ask", lambda t, x: fragen.append(x) or False)
+    # Neuer Klick aus einem anderen Eintrag: erst fragen, bei "Nein" bleibt alles.
+    dialog.refresh((HISTORY, 0))
+    dialog.graph.node_clicked.emit(13, False)
+    assert len(fragen) == 1 and pt.allocated(dialog._draft) == {10, 11, 12, 14, 15}
+    # Schließen fragt ebenso; "Nein" lässt das Fenster offen.
+    dialog.show()
+    dialog.reject()
+    assert len(fragen) == 2 and dialog.isVisible()
+    monkeypatch.setattr(dialog, "_ask", lambda t, x: True)
+    dialog.refresh((DRAFT, None))
+    dialog.discard_button.click()
+    assert dialog._draft is None and dialog._selected() == (CURRENT, None)
+    dialog.close()
+
+
+def test_mastery_click_offers_the_effects(qapp, monkeypatch) -> None:
+    from poe_view.ui.passive_tree_dialog import PassiveTreeDialog
+    b = _mastery_baum()
+    zeichen: dict = {}
+    th.record(zeichen, "WitchOfPeter", {"hashes": [10, 11, 12]}, level=30, ruthless=True)
+    dialog = PassiveTreeDialog("WitchOfPeter", "Marauder", zeichen, b, on_change=lambda: None)
+    angeboten = []
+
+    def waehle(node, wahl):
+        angeboten.append((node, dict(wahl)))
+        return 777
+    monkeypatch.setattr(dialog, "_choose_effect", waehle)
+    assert dialog._click_hint(40) == "Click: choose an effect"
+    dialog.graph.node_clicked.emit(40, False)
+    assert angeboten == [(40, {})]
+    assert pt.mastery_choices(dialog._draft) == {40: 777}
+    dialog.graph.node_clicked.emit(40, True)
+    assert pt.mastery_choices(dialog._draft) == {} and 40 not in pt.allocated(dialog._draft)
+    dialog._draft = None
+    dialog.close()
+
+
+def test_a_click_selects_a_node_but_a_drag_does_not(qapp) -> None:
+    from PySide6.QtCore import QPoint, Qt
+    from PySide6.QtTest import QTest
+    from poe_view.ui.tree_graph import TreeGraph
+    g = TreeGraph()
+    g.resize(400, 400)
+    g.set_tree(_bild_baum())
+    g.show_tree({"hashes": [10]}, "Marauder")
+    g.show()
+    g.centerOn(g._items[12].sceneBoundingRect().center())
+    qapp.processEvents()
+    mitte = g.mapFromScene(g._items[12].sceneBoundingRect().center())
+    geklickt = []
+    g.node_clicked.connect(lambda h, rechts: geklickt.append((h, rechts)))
+    QTest.mouseClick(g.viewport(), Qt.MouseButton.LeftButton, pos=mitte)
+    QTest.mouseClick(g.viewport(), Qt.MouseButton.RightButton, pos=mitte)
+    assert geklickt == [(12, False), (12, True)]
+    QTest.mousePress(g.viewport(), Qt.MouseButton.LeftButton, pos=mitte)
+    QTest.mouseMove(g.viewport(), mitte + QPoint(40, 0))
+    QTest.mouseRelease(g.viewport(), Qt.MouseButton.LeftButton, pos=mitte + QPoint(40, 0))
+    assert len(geklickt) == 2
+    g.click_hint = lambda h: "Click: allocate (1 point)"
+    assert "Click: allocate (1 point)" in g.tooltip_at(mitte).splitlines()
+    g.close()
+
+
+def test_hovering_a_node_rings_it_and_changes_the_cursor(qapp) -> None:
+    """Peter: "den Cursor ändern wenn der Mauscursor über der Node ist und
+    evtl auch die Node hovern"."""
+    from PySide6.QtCore import QEvent, QPoint, Qt
+    from PySide6.QtTest import QTest
+    from poe_view.ui.tree_graph import TreeGraph
+    g = TreeGraph()
+    g.resize(400, 400)
+    g.set_tree(_bild_baum())
+    g.show_tree({"hashes": [10]}, "Marauder")
+    g.show()
+    g.centerOn(g._items[12].sceneBoundingRect().center())
+    qapp.processEvents()
+    mitte = g.mapFromScene(g._items[12].sceneBoundingRect().center())
+    form = lambda: g.viewport().cursor().shape()                # noqa: E731
+
+    def bewege(punkt):
+        # Direkt ans Bild: QTest.mouseMove meldet nichts, wenn die Maus aus
+        # einem früheren Test schon dort steht (fiel nur im Gesamtlauf).
+        from PySide6.QtCore import QPointF
+        from PySide6.QtGui import QMouseEvent
+        g.mouseMoveEvent(QMouseEvent(QEvent.Type.MouseMove, QPointF(punkt),
+                                     QPointF(g.viewport().mapToGlobal(punkt)),
+                                     Qt.MouseButton.NoButton, Qt.MouseButton.NoButton,
+                                     Qt.KeyboardModifier.NoModifier))
+    # Nur ansehen (kein click_hint): kein Ring, Zeiger fürs Verschieben.
+    bewege(mitte)
+    assert g.hovered == 12 and g._hover_ring is None and form() == Qt.CursorShape.OpenHandCursor
+    bewege(mitte + QPoint(150, 150))
+    g.click_hint = lambda h: ("Click: allocate (1 point)", True)
+    bewege(mitte)
+    assert g.hovered == 12 and form() == Qt.CursorShape.PointingHandCursor
+    ring = g._hover_ring.rect()
+    assert ring.center() == g._items[12].rect().center()
+    assert ring.width() > g._items[12].rect().width()
+    bewege(mitte + QPoint(150, 150))
+    assert g.hovered is None and g._hover_ring is None
+    assert form() == Qt.CursorShape.OpenHandCursor               # nicht der Pfeil
+    g.click_hint = lambda h: ("Not reachable from your tree", False)
+    g._hover_info = None
+    bewege(mitte)
+    assert form() == Qt.CursorShape.ForbiddenCursor
+    # Maus verlässt das Bild: Ring weg.
+    g.leaveEvent(QEvent(QEvent.Type.Leave))
+    assert g.hovered is None and g._hover_ring is None
+    # Nach einem Klick (das Verschieben setzt den Zeiger zurück) zeigt der
+    # Knoten wieder die Hand.
+    g.click_hint = lambda h: ("Click: allocate (1 point)", True)
+    g._hover_info = None
+    QTest.mouseClick(g.viewport(), Qt.MouseButton.LeftButton, pos=mitte)
+    assert g.hovered == 12 and form() == Qt.CursorShape.PointingHandCursor
+    g.close()
+
+
+def test_the_click_cost_is_recomputed_after_an_edit(qapp, baum) -> None:
+    """Die Info wird je Knoten zwischengespeichert — nach einem Klick muss
+    sie neu gerechnet werden, sonst stünde noch "allocate" am Knoten."""
+    dialog, _z, _ = _fenster(qapp, baum)
+    assert dialog.graph._click_info(31) == ("Not reachable from your tree", False)
+    assert dialog.graph._click_info(15) == ("Click: allocate (2 points)", True)   # gemerkt
+    dialog.graph.node_clicked.emit(15, False)
+    assert dialog.graph._click_info(15) == ("Right-click: refund (1 point)", True)
+    dialog._draft = None
+    dialog.close()
+
+
+def test_long_tooltips_wrap_and_show_the_node_id() -> None:
+    """Peter: "Einige sind zu lang, da müssten wir den Text umbrechen" —
+    Wind Dancer stand in einer Zeile über die halbe Bildschirmbreite."""
+    from poe_view.ui.tree_graph import TOOLTIP_BREITE, TreeGraph
+    lang = ("20% less Attack Damage taken if you haven't been Hit by an Attack Recently / "
+            "10% more chance to Evade Attacks if you have been Hit by an Attack Recently / "
+            "20% more Attack Damage taken if you have been Hit by an Attack Recently")
+    text = TreeGraph._tooltip(pt.Node(23455, "Wind Dancer", pt.KEYSTONE, (lang,)))
+    zeilen = text.splitlines()
+    assert zeilen[:2] == ["Wind Dancer (Keystone)", "ID 23455"]
+    assert len(zeilen) >= 4 and all(len(z) <= TOOLTIP_BREITE for z in zeilen)
+    assert " ".join(z.strip() for z in zeilen[2:]) == lang        # nichts verloren
+
+
+def test_ctrl_c_copies_the_hovered_node(qapp) -> None:
+    """Strg+C: Name und ID; Strg+Umschalt+C: dazu die Werte. Ohne Knoten
+    unter der Maus bleibt die Zwischenablage, wie sie ist."""
+    from PySide6.QtCore import Qt
+    from PySide6.QtGui import QGuiApplication
+    from PySide6.QtTest import QTest
+    from poe_view.ui.tree_graph import TreeGraph
+    g = TreeGraph()
+    g.set_tree(_bild_baum())
+    g.show_tree({"hashes": [10]}, "Marauder")
+    ablage = QGuiApplication.clipboard()
+    ablage.setText("vorher")
+    QTest.keyClick(g, Qt.Key.Key_C, Qt.KeyboardModifier.ControlModifier)
+    assert ablage.text() == "vorher"
+    g.hover(12)
+    QTest.keyClick(g, Qt.Key.Key_C, Qt.KeyboardModifier.ControlModifier)
+    assert ablage.text() == "Fire Heart (ID 12)"
+    QTest.keyClick(g, Qt.Key.Key_C,
+                   Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier)
+    assert ablage.text() == "Fire Heart (ID 12)\n+20% to Fire Resistance"
+    QTest.keyClick(g, Qt.Key.Key_C)                               # ohne Strg: nichts
+    assert ablage.text() == "Fire Heart (ID 12)\n+20% to Fire Resistance"
+    g.close()
+
+
+def test_the_tree_takes_focus_when_the_mouse_enters(qapp) -> None:
+    """Sonst landete Strg+C im Suchfeld, das den Fokus noch hatte."""
+    from PySide6.QtCore import QPointF
+    from PySide6.QtGui import QEnterEvent
+    from PySide6.QtWidgets import QLineEdit, QVBoxLayout, QWidget
+    from poe_view.ui.tree_graph import TreeGraph
+    rahmen = QWidget()
+    feld, g = QLineEdit(), TreeGraph()
+    aufbau = QVBoxLayout(rahmen)
+    aufbau.addWidget(feld)
+    aufbau.addWidget(g)
+    rahmen.show()
+    feld.setFocus()
+    assert rahmen.focusWidget() is feld
+    g.enterEvent(QEnterEvent(QPointF(5, 5), QPointF(5, 5), QPointF(5, 5)))
+    assert rahmen.focusWidget() is g
+    rahmen.close()
+
+
+def test_search_finds_a_node_by_its_id_and_jumps_there(qapp) -> None:
+    """Peter: "Wir könnten noch die ID in die Suche integrieren"."""
+    from poe_view.ui.tree_graph import TreeGraph
+    g = TreeGraph()
+    g.resize(400, 400)
+    g.set_tree(_bild_baum())
+    g.show_tree({"hashes": [10]}, "Marauder")
+    g.show()
+    qapp.processEvents()
+    g.highlight("12")
+    assert g.search_ids == {12}                    # "12" steht in keinem Wert
+    g.highlight("fire 12")
+    assert g.search_ids == {12}                    # ID und Wort zusammen
+    g.highlight("1")                               # die ganze ID, kein Teilstück von 12
+    assert g.search_ids == {1, 10, 11}             # Start 1; "+10" im Text von 10 und 11
+    g.centerOn(g._items[11].sceneBoundingRect().center())
+    mitte = g.viewport().rect().center()
+    g.highlight("12")                              # Neuzeichnen: kein Sprung
+    assert (g.mapToScene(mitte) - g._items[11].sceneBoundingRect().center()).manhattanLength() < 5
+    g.highlight("12", center=True)
+    ziel = g._items[12].sceneBoundingRect().center()
+    assert (g.mapToScene(mitte) - ziel).manhattanLength() < 20
+    g.close()
+
+
+def test_typing_an_id_in_the_search_field_jumps_to_the_node(qapp) -> None:
+    from PySide6.QtCore import QPointF
+    from poe_view.ui.passive_tree_dialog import PassiveTreeDialog
+    zeichen: dict = {}
+    th.record(zeichen, "WitchOfPeter", {"hashes": [10]}, level=30, ruthless=True)
+    dialog = PassiveTreeDialog("WitchOfPeter", "Marauder", zeichen, _bild_baum(),
+                               on_change=lambda: None)
+    dialog.show()
+    dialog.tabs.setCurrentIndex(3)
+    qapp.processEvents()
+    g = dialog.graph
+    g.resetTransform()                 # hineingezoomt: der kleine Baum passt sonst ganz hinein
+    g.centerOn(QPointF(0, 0))
+    dialog.graph_search.setText("12")
+    mitte = g.mapToScene(g.viewport().rect().center())
+    assert g.search_ids == {12}
+    assert (mitte - g._items[12].sceneBoundingRect().center()).manhattanLength() < 20
+    dialog.close()

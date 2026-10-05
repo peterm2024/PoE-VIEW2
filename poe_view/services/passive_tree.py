@@ -405,6 +405,128 @@ def within_reach(tree: Tree, have: set[int], max_points: int = REACH_POINTS,
     return sorted(ergebnis, key=lambda r: (r.cost, r.node.kind != KEYSTONE, r.node.name))
 
 
+# --- Bearbeiten per Klick (§4.60.6) ---------------------------------------- #
+#
+# Peter, 2026-10-05, Stufe 3: Konfigurationen im Bild bauen. Klick nimmt
+# einen Knoten samt kürzestem Weg, Rechtsklick nimmt ihn zurück — samt
+# allem, was danach keinen Weg mehr zum Start hätte (wie der offizielle
+# Planer). Alle Funktionen geben ein NEUES ``passives`` zurück; der Rest
+# (Jewels, Bandit, Pantheon) wird unverändert mitgenommen.
+
+
+def _begehbar(n: Node) -> bool:
+    return not n.ascendancy and n.kind != MASTERY and not n.class_start
+
+
+def path_to(tree: Tree, have: set[int], target: int, class_name: str = "") -> list[int] | None:
+    """Die Knoten, die für ``target`` neu dazukommen (Ziel zuletzt), auf dem
+    kürzesten Weg vom vergebenen Baum aus. ``[]``: schon vergeben;
+    ``None``: nicht erreichbar oder nicht auf diesem Weg zu nehmen."""
+    if target in have:
+        return []
+    ziel = tree.nodes.get(target)
+    if ziel is None or not _begehbar(ziel):
+        return None
+    quellen = {h for h in have if h in tree.nodes and not tree.nodes[h].ascendancy}
+    if class_name in tree.class_starts:
+        quellen.add(tree.class_starts[class_name])
+    vorher: dict[int, int | None] = {h: None for h in quellen}
+    schlange = deque(sorted(quellen))
+    while schlange:
+        a = schlange.popleft()
+        if a == target:
+            weg = []
+            while a is not None and a not in quellen:
+                weg.append(a)
+                a = vorher[a]
+            return list(reversed(weg))
+        for b in sorted(tree.nodes[a].neighbours):
+            if b not in vorher and _begehbar(tree.nodes[b]):
+                vorher[b] = a
+                schlange.append(b)
+    return None
+
+
+def cut_off(tree: Tree, have: set[int], node: int, class_name: str = "") -> set[int]:
+    """Was mit ``node`` wegfällt: er selbst und alles im Hauptbaum, was
+    danach keinen Weg mehr zum eigenen Start hat — samt Masteries, deren
+    Gruppe kein Notable mehr hat."""
+    weg = {node}
+    start = tree.class_starts.get(class_name)
+    haupt = {h for h in have if h in tree.nodes and not tree.nodes[h].ascendancy
+             and tree.nodes[h].kind != MASTERY and h != node}
+    if start is not None:
+        gesehen, schlange = {start}, deque([start])
+        while schlange:
+            a = schlange.popleft()
+            for b in tree.nodes[a].neighbours:
+                if b in haupt and b not in gesehen:
+                    gesehen.add(b)
+                    schlange.append(b)
+        weg |= haupt - gesehen
+    bleibt = have - weg
+    for h in have:
+        if h in tree.nodes and tree.nodes[h].kind == MASTERY and not mastery_allowed(
+                tree, bleibt, h):
+            weg.add(h)
+    return weg
+
+
+def mastery_allowed(tree: Tree, have: set[int], mastery: int) -> bool:
+    """Eine Mastery braucht ein vergebenes Notable in ihrer Gruppe (so in
+    allen sechs Masteries von Peters Baum, 2026-10-05)."""
+    m = tree.nodes.get(mastery)
+    if m is None or m.kind != MASTERY or m.group < 0:
+        return False
+    return any(h in tree.nodes and tree.nodes[h].group == m.group
+               and tree.nodes[h].kind == NOTABLE for h in have)
+
+
+def main_points(tree: Tree, passives: dict) -> int:
+    """Belegte Punkte im Hauptbaum (ohne Aszendenz und Start)."""
+    return sum(1 for h in allocated(passives)
+               if h in tree.nodes and not tree.nodes[h].ascendancy
+               and tree.nodes[h].kind != START)
+
+
+def _mit(passives: dict, have: set[int], wahl: dict[int, int]) -> dict:
+    neu = dict(passives or {})
+    neu["hashes"] = sorted(have)
+    neu["mastery_effects"] = {str(k): v for k, v in sorted(wahl.items()) if k in have}
+    return neu
+
+
+def edit_allocate(tree: Tree, passives: dict, node: int, class_name: str = "") -> dict | None:
+    weg = path_to(tree, allocated(passives), node, class_name)
+    if weg is None:
+        return None
+    return _mit(passives, allocated(passives) | set(weg), mastery_choices(passives))
+
+
+def edit_refund(tree: Tree, passives: dict, node: int, class_name: str = "") -> dict:
+    have = allocated(passives)
+    if node not in have:
+        return dict(passives or {})
+    return _mit(passives, have - cut_off(tree, have, node, class_name),
+                mastery_choices(passives))
+
+
+def edit_mastery(tree: Tree, passives: dict, mastery: int, effect: int | None) -> dict | None:
+    """Effekt wählen (``None``: Mastery zurücknehmen). ``None`` als
+    Ergebnis: nicht erlaubt — kein Notable in der Gruppe, oder der Effekt
+    steckt schon in einer anderen Mastery (jeder nur einmal je Baum)."""
+    have, wahl = allocated(passives), mastery_choices(passives)
+    if effect is None:
+        wahl.pop(mastery, None)
+        return _mit(passives, have - {mastery}, wahl)
+    m = tree.nodes.get(mastery)
+    if (m is None or effect not in m.effects or not mastery_allowed(tree, have, mastery)
+            or any(e == effect and k != mastery for k, e in wahl.items())):
+        return None
+    wahl[mastery] = effect
+    return _mit(passives, have | {mastery}, wahl)
+
+
 _ZAHL = re.compile(r"\d+(?:\.\d+)?")
 
 
