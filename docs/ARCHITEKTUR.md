@@ -8571,7 +8571,8 @@ Pfaden statt tausender Einzelstücke, Linien und Ränder sind kosmetisch
 (gleich dick bei jedem Zoom).
 
 **Zustände:** nicht vergeben hohl und gedämpft (#7a7a7a dunkel 3,2:1,
-#8a8a8a hell 3,5:1 — Grafik braucht 3:1), vergeben gefüllt in der
+hell #7e7e7e 4,1:1 — Grafik braucht 3:1; hell zuerst #8a8a8a, auf den
+Klassenbereichen §4.60.5 zu schwach), vergeben gefüllt in der
 Themenfarbe, gewählte Masteries in der Farbe ihres Effekts, Start und
 Keystones gold. Beim Vergleich (Konfiguration gegen den aktuellen Baum,
 Verlaufseintrag gegen den davor) grün nehmen, rot zurücknehmen und
@@ -8594,6 +8595,54 @@ Ringe beim Vergleich, der Reiter folgt der Auswahl samt Legende).
 Gegenprobe mit 9 Sabotagen; zwei hielten zuerst (Reichweite und Suche
 mit harmlosen Testfällen), beide Tests verschärft. Nativ am echten Baum
 angesehen.
+
+#### 4.60.5 Klassenbereiche und Namen am Rand
+
+Peter, 2026-10-05: "den Hintergrund der jeweiligen Bereiche in
+Abhängigkeit der Klasse einem Dunklen Rot (Strength), Blau
+(Intelligence) und Grün (Dexterity), die Zwischenbereiche der
+Hybridklassen jeweils schraffiert, markieren. Bitte auch außen am Rand
+die entsprechenden Bezeichnungen der (Ascendancy) Klasse hinzufügen."
+
+**Welche Farbe:** aus GGGs `classes[].base_str/dex/int` — die höchsten
+Grundwerte (`ClassInfo.attributes`): Marauder 32 Str → rot, Duelist
+23/23 Str/Dex → gestreift rot/grün, Scion 20/20/20 → keiner. Nicht
+fest verdrahtet, damit ein geänderter Baum mitzieht.
+
+**Wo:** Die sechs Startknoten liegen im echten Baum genau auf
+60°-Strahlen um die Mitte (Witch 0°, Shadow 60°, Ranger 120°, Duelist
+180°, Marauder 240°, Templar 300°). Jeder Bereich reicht von der Mitte
+zum vorigen bis zur Mitte zum nächsten Start (`class_areas`), also
+±30°; innen frei bis zum halben Abstand der Starts (dort sitzt der
+Scion), außen bis zum entferntesten Knoten plus Rand.
+
+**Gemalt** in `drawBackground`, nicht als Szenen-Item — sonst fände
+`items()` für Tooltip und Klick die Fläche. Die Streifen (8 Pixel je
+Farbe, diagonal) liegen in Bildschirmpixeln: Mit dem Zoom skaliert
+wären sie herausgezoomt zu einem Brei verschwommen und hineingezoomt
+riesig. Der Ursprung des Musters ist die Baummitte, damit die Streifen
+beim Verschieben mitwandern statt stillzustehen.
+
+**Farben gerechnet** (Knoten liegen jetzt auf der Tönung, nicht mehr auf
+dem Grund): dunkel Str #401f1f, Int #1d2945, Dex #1c3622 — gedämpfte
+Knoten darauf ab 3,06:1, Farbiges ab 5,3:1, ΔE2000 zum Grund 14–16.
+Hell #fce6e6/#e4ebfc/#e1f5e5; dafür mussten das Grau der gedämpften
+Knoten (#8a8a8a → #7e7e7e) und das Gelb des Suchrings (#b8860b →
+#9a7000) dunkler werden, sonst unter 3:1. Danach hell ab 3,40:1.
+
+**Namen am Rand:** je Bereich Klasse (groß) und darunter ihre
+Aszendenzen, die eigene Klasse und Aszendenz gold
+(`own_class` aus `class_ids`). Die Schrift zoomt nicht mit
+(`ItemIgnoresTransformations`); deshalb wird der Kasten in Pixeln nach
+außen geschoben, bis seine Kante den Randpunkt berührt. Voll zu sehen
+ist die Beschriftung erst herausgezoomt — beim Einpassen auf den
+eigenen Teil liegt sie außerhalb, das ist so gewollt.
+
+Getestet: Attribute je Klasse, Bereichsgrenzen samt freier Mitte, das
+gemalte Pixel (rein blau, rein grün, gestreift beide, Mitte ungetönt),
+Beschriftung mit Gold nur bei der eigenen Aszendenz, nicht mitzoomend,
+außen am Rand. Gegenprobe mit 9 Sabotagen, alle gefangen. Nativ dunkel
+angesehen; hell nur gerechnet.
 
 ---
 

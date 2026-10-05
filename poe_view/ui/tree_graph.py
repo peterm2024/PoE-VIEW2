@@ -13,6 +13,9 @@ allein. Beim Vergleich zweier Bäume (Konfiguration gegen den aktuellen,
 Verlaufseintrag gegen den davor): neu zu nehmen grün, zurückzunehmen rot.
 Ringe: in Reichweite (§within_reach) und Suchtreffer.
 
+Im Hintergrund die Bereiche der Klassen nach Attribut, Hybride gestreift,
+außen am Rand Klasse und Aszendenzen (§4.60.5).
+
 Gezeichnet werden weder die Aszendenz (eigener Baum, liegt in den Daten
 weit außerhalb) noch Platzhalter für Cluster-Jewels. Linien und Ränder
 sind "kosmetisch": gleich dick, egal wie weit hineingezoomt ist.
@@ -20,16 +23,19 @@ sind "kosmetisch": gleich dick, egal wie weit hineingezoomt ist.
 
 from __future__ import annotations
 
+import functools
+import html
 import math
 
-from PySide6.QtCore import QPoint, QRectF, Qt
-from PySide6.QtGui import QBrush, QColor, QPainter, QPainterPath, QPalette, QPen
-from PySide6.QtWidgets import (QGraphicsEllipseItem, QGraphicsScene, QGraphicsView,
-                               QToolTip)
+from PySide6.QtCore import QPoint, QPointF, QRectF, Qt
+from PySide6.QtGui import (QBrush, QColor, QImage, QPainter, QPainterPath, QPalette, QPen,
+                           QPixmap, QTransform)
+from PySide6.QtWidgets import (QGraphicsEllipseItem, QGraphicsItem, QGraphicsScene,
+                               QGraphicsTextItem, QGraphicsView, QToolTip)
 
 from poe_view.services import passive_tree
-from poe_view.services.passive_tree import (JEWEL, KEYSTONE, MASTERY, NOTABLE, START, Node,
-                                            Tree)
+from poe_view.services.passive_tree import (JEWEL, KEYSTONE, MASTERY, NOTABLE, START,
+                                            ClassInfo, Node, Tree)
 from poe_view.ui import tree_report
 
 # Halbmesser in Baum-Einheiten (der Baum ist rund 25.000 breit, eine
@@ -41,14 +47,30 @@ _KLEIN = 26.0
 DIM, ALLOCATED, ALLOCATE, REFUND = "dim", "allocated", "allocate", "refund"
 
 # Gerechnet gegen den Grund (Base #2d2d2d / #ffffff), Ziel 3:1 für
-# Grafik: gedämpft dunkel 3,2:1, hell 3,5:1; Ring "Reichweite" 7,5 / 4,5;
-# Suchtreffer 9,8 / 3,3.
+# Grafik: gedämpft dunkel 3,2:1, hell 4,1:1; Ring "Reichweite" 7,5 / 4,5;
+# Suchtreffer 9,8 / 4,5. Hell waren Grau und Gelb zuerst #8a8a8a und
+# #b8860b — auf den getönten Bereichen (§4.60.5) unter 3:1.
 _FARBEN = {
     True: {"dim": "#7a7a7a", "edge": "#4f4f4f", "edge_on": "#d8d8d8",
            "reach": "#4dd0e1", "search": "#ffd54f"},
-    False: {"dim": "#8a8a8a", "edge": "#d0d0d0", "edge_on": "#3a3a3a",
-            "reach": "#00838f", "search": "#b8860b"},
+    False: {"dim": "#7e7e7e", "edge": "#d0d0d0", "edge_on": "#3a3a3a",
+            "reach": "#00838f", "search": "#9a7000"},
 }
+
+# Bereiche der Klassen (§4.60.5, Peters Idee): Stärke dunkelrot,
+# Intelligenz blau, Geschick grün; Hybride gestreift aus beiden.
+# Gerechnet: Jeder Knoten hält darauf seine 3:1 (gedämpft dunkel ab
+# 3,06:1, hell ab 3,40:1, alles Farbige ab 5,3 bzw. 3,75), und die Tönung
+# hebt sich ab (ΔE2000 zum Grund 14–16 dunkel, 9–12 hell).
+_TOENUNG = {
+    True: {"str": "#401f1f", "int": "#1d2945", "dex": "#1c3622"},
+    False: {"str": "#fce6e6", "int": "#e4ebfc", "dex": "#e1f5e5"},
+}
+# Streifen in Bildschirmpixeln (je Farbe), unabhängig vom Zoom.
+STREIFEN_PX = 8
+# Beschriftung am Rand: Klasse, Aszendenzen, die eigene hervorgehoben.
+_SCHRIFT = {True: {"class": "#e0e0e0", "asc": "#b0b0b0"},
+            False: {"class": "#202020", "asc": "#5f5f5f"}}
 
 
 def _drawn(n: Node) -> bool:
@@ -61,6 +83,50 @@ def _cosmetic(farbe: str, breite: float) -> QPen:
     stift = QPen(QColor(farbe), breite)
     stift.setCosmetic(True)
     return stift
+
+
+def _winkel(x: float, y: float) -> float:
+    """Im Uhrzeigersinn von oben, 0..360 — wie die Kreisbahnen."""
+    return math.degrees(math.atan2(x, -y)) % 360.0
+
+
+@functools.lru_cache(maxsize=8)
+def _streifen(farben: tuple[str, ...]) -> QBrush:
+    """Diagonale Streifen; die Kachel wiederholt sich nahtlos."""
+    periode = STREIFEN_PX * len(farben)
+    bild = QImage(periode, periode, QImage.Format.Format_RGB32)
+    werte = [QColor(f).rgb() for f in farben]
+    for y in range(periode):
+        for x in range(periode):
+            bild.setPixel(x, y, werte[((x + y) % periode) // STREIFEN_PX])
+    return QBrush(QPixmap.fromImage(bild))
+
+
+def class_areas(tree: Tree) -> tuple[list[tuple[ClassInfo, float, float, float]], float, float]:
+    """Je Klasse am Rand ihr Bereich: (Klasse, Winkel des Starts, von, bis),
+    dazu innerer und äußerer Halbmesser. Die Grenzen liegen mittig
+    zwischen benachbarten Starts — im echten Baum genau ±30°. Der Scion
+    sitzt in der Mitte und hat keinen Bereich."""
+    starts = []
+    for c in tree.classes:
+        n = tree.nodes.get(c.start) if c.start is not None else None
+        if n is not None and math.hypot(n.x, n.y) > 500:
+            starts.append((_winkel(n.x, n.y), math.hypot(n.x, n.y), c))
+    if not starts:
+        return [], 0.0, 0.0
+    starts.sort(key=lambda s: s[0])
+    bereiche = []
+    for i, (w, _d, c) in enumerate(starts):
+        if len(starts) == 1:
+            von, bis = w - 180.0, w + 180.0
+        else:
+            vor, nach = starts[i - 1][0], starts[(i + 1) % len(starts)][0]
+            von = w - ((w - vor) % 360.0) / 2
+            bis = w + ((nach - w) % 360.0) / 2
+        bereiche.append((c, w, von, bis))
+    innen = 0.5 * sum(d for _w, d, _c in starts) / len(starts)
+    aussen = max(math.hypot(n.x, n.y) for n in tree.nodes.values() if _drawn(n)) + 300.0
+    return bereiche, innen, aussen
 
 
 class TreeGraph(QGraphicsView):
@@ -87,6 +153,12 @@ class TreeGraph(QGraphicsView):
         self.reach_ids: set[int] = set()
         self.search_ids: set[int] = set()
         self._shown: set[int] = set()
+        # Klassenbereiche (§4.60.5): Pfad in Baum-Koordinaten je Bereich,
+        # gemalt im Hintergrund; Beschriftung am Rand.
+        self.areas: list[tuple[QPainterPath, tuple[str, ...]]] = []
+        self.labels: list[tuple[QGraphicsTextItem, ClassInfo, float]] = []
+        self.own_class: tuple[int, int] | None = None
+        self._dark = True
 
     # --- Aufbau --------------------------------------------------------- #
 
@@ -101,6 +173,8 @@ class TreeGraph(QGraphicsView):
         self._edges.clear()
         self._edge_items.clear()
         self._rings.clear()
+        self.areas = []
+        self.labels = []
         if tree is None:
             return
         for n in tree.nodes.values():
@@ -122,7 +196,32 @@ class TreeGraph(QGraphicsView):
                 if b > a and b in self._items and tree.nodes[b].kind != MASTERY:
                     self._edges.append((a, b, self._edge_path(knoten, tree.nodes[b])))
         rand = 600.0
-        szene.setSceneRect(szene.itemsBoundingRect().adjusted(-rand, -rand, rand, rand))
+        rechteck = szene.itemsBoundingRect().adjusted(-rand, -rand, rand, rand)
+        bereiche, innen, aussen = class_areas(tree)
+        ring_o = QRectF(-aussen, -aussen, 2 * aussen, 2 * aussen)
+        ring_i = QRectF(-innen, -innen, 2 * innen, 2 * innen)
+        for klasse, w, von, bis in bereiche:
+            # Qt misst gegen den Uhrzeigersinn ab 3 Uhr.
+            weg = QPainterPath()
+            weg.arcMoveTo(ring_o, 90.0 - von)
+            weg.arcTo(ring_o, 90.0 - von, -(bis - von))
+            weg.arcTo(ring_i, 90.0 - bis, bis - von)
+            weg.closeSubpath()
+            self.areas.append((weg, klasse.attributes))
+            # Die Schrift bleibt bei jedem Zoom gleich groß; ihre Lage am
+            # Rand richtet ``_paint_labels`` aus.
+            text = QGraphicsTextItem()
+            text.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIgnoresTransformations)
+            text.setPos(math.sin(math.radians(w)) * aussen, -math.cos(math.radians(w)) * aussen)
+            text.setZValue(4)
+            text.setAcceptHoverEvents(False)
+            szene.addItem(text)
+            self.labels.append((text, klasse, w))
+        if bereiche:
+            # Platz für die Beschriftung außen herum.
+            weit = aussen + 2500.0
+            rechteck = rechteck.united(QRectF(-weit, -weit, 2 * weit, 2 * weit))
+        szene.setSceneRect(rechteck)
 
     @staticmethod
     def _tooltip(n: Node) -> str:
@@ -191,6 +290,7 @@ class TreeGraph(QGraphicsView):
         self._shown = ziel
         self._dark = dark
         self.comparing = basis is not None
+        self.own_class = tree.class_ids.get(class_name)
         self._paint()
 
     def highlight(self, text: str) -> None:
@@ -256,7 +356,60 @@ class TreeGraph(QGraphicsView):
             item = self.scene().addPath(pfade[art], _cosmetic(farbe, breite))
             item.setZValue(z)
             self._edge_items.append(item)
+        self._paint_labels()
         self._paint_rings()
+        self.resetCachedContent()
+        self.viewport().update()
+
+    def _paint_labels(self) -> None:
+        dunkel = self._dark
+        schrift = _SCHRIFT[dunkel]
+        gold = tree_report.colour("keystone", dunkel)
+        eigen_k, eigen_a = self.own_class if self.own_class else (-1, -1)
+        for text, klasse, w in self.labels:
+            kopf = gold if klasse.index == eigen_k else schrift["class"]
+            namen = []
+            for nummer, name in enumerate(klasse.ascendancies, start=1):
+                if klasse.index == eigen_k and nummer == eigen_a:
+                    namen.append(f'<b style="color:{gold}">{html.escape(name)}</b>')
+                else:
+                    namen.append(html.escape(name))
+            text.setHtml(
+                f'<div align="center"><span style="font-size:13pt; font-weight:600; '
+                f'color:{kopf}">{html.escape(klasse.name)}</span><br>'
+                f'<span style="color:{schrift["asc"]}">{" · ".join(namen)}</span></div>')
+            text.setTextWidth(-1)
+            text.setTextWidth(text.document().idealWidth())
+            # Den Kasten außen an den Randpunkt legen (in Pixeln, weil die
+            # Schrift nicht mitzoomt): Mitte des Kastens um seine halbe
+            # Ausdehnung in Richtung des Bereichs nach außen.
+            b = text.boundingRect()
+            dx, dy = math.sin(math.radians(w)), -math.cos(math.radians(w))
+            hw, hh = b.width() / 2, b.height() / 2
+            weg = min(hw / abs(dx) if abs(dx) > 1e-6 else math.inf,
+                      hh / abs(dy) if abs(dy) > 1e-6 else math.inf) + 8.0
+            text.setTransform(QTransform.fromTranslate(dx * weg - hw, dy * weg - hh))
+
+    def drawBackground(self, painter: QPainter, rect: QRectF) -> None:  # noqa: N802 (Qt-API)
+        super().drawBackground(painter, rect)
+        if not self.areas:
+            return
+        toenung = _TOENUNG[self._dark]
+        welt = painter.worldTransform()
+        painter.save()
+        # In Bildschirmpixeln malen: Streifen gleich breit bei jedem Zoom,
+        # aber mit dem Baum verschoben (Ursprung des Musters = Baummitte).
+        painter.resetTransform()
+        painter.setBrushOrigin(welt.map(QPointF(0.0, 0.0)))
+        painter.setPen(Qt.PenStyle.NoPen)
+        for weg, attribute in self.areas:
+            farben = tuple(toenung[a] for a in attribute if a in toenung)
+            if not farben:
+                continue
+            painter.setBrush(QBrush(QColor(farben[0])) if len(farben) == 1
+                             else _streifen(farben))
+            painter.drawPath(welt.map(weg))
+        painter.restore()
 
     def _paint_rings(self) -> None:
         if self._tree is None:

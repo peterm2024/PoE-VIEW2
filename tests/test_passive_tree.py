@@ -813,3 +813,122 @@ def test_the_tree_window_can_be_maximised(qapp, baum) -> None:
     dialog, _z, _ = _fenster(qapp, baum)
     assert dialog.windowFlags() & Qt.WindowType.WindowMaximizeButtonHint
     dialog.close()
+
+
+def _klassen_baum():
+    """Drei Klassen am Rand (Witch oben, Shadow bei 60°, Ranger bei 120°)
+    und der Scion in der Mitte — wie im echten Baum, nur weniger."""
+    import math
+    lage = {0: (0, 0), 3: (0, -3000), 6: (60, 3000), 2: (120, 3000)}
+    gruppen, knoten = {}, {}
+    for index, (w, d) in lage.items():
+        if index == 3:
+            x, y = 0, -3000
+        elif index == 0:
+            x, y = 0, 0
+        else:
+            x, y = math.sin(math.radians(w)) * d, -math.cos(math.radians(w)) * d
+        gruppen[str(index + 1)] = {"x": x, "y": y}
+        knoten[str(100 + index)] = _knoten("START", (), classStartIndex=index, group=index + 1)
+    knoten["200"] = _knoten("Far", (), group=4, orbit=0)        # irgendein Knoten
+    gruppen["99"] = {"x": 0, "y": 6000}
+    knoten["300"] = _knoten("Outer", (), group=99, orbit=0)     # bestimmt den Rand
+    roh = {"constants": {"skillsPerOrbit": [1], "orbitRadii": [0]},
+           "classes": [{"name": "Scion", "base_str": 20, "base_dex": 20, "base_int": 20,
+                        "ascendancies": [{"name": "Ascendant"}]},
+                       {"name": "Marauder", "base_str": 32, "base_dex": 14, "base_int": 14},
+                       {"name": "Ranger", "base_str": 14, "base_dex": 32, "base_int": 14,
+                        "ascendancies": [{"name": "Warden"}, {"name": "Deadeye"}]},
+                       {"name": "Witch", "base_str": 14, "base_dex": 14, "base_int": 32,
+                        "ascendancies": [{"name": "Occultist"}, {"name": "Elementalist"},
+                                         {"name": "Necromancer"}]},
+                       {"name": "Duelist", "base_str": 23, "base_dex": 23, "base_int": 14},
+                       {"name": "Templar", "base_str": 23, "base_dex": 14, "base_int": 23},
+                       {"name": "Shadow", "base_str": 14, "base_dex": 23, "base_int": 23,
+                        "ascendancies": [{"name": "Assassin"}]}],
+           "groups": gruppen, "nodes": knoten}
+    return pt.parse_tree(roh, False)
+
+
+def test_classes_know_their_main_attributes_and_ascendancies() -> None:
+    """Grundlage der Bereiche (§4.60.5): höchste Grundwerte, Scion keiner."""
+    b = _klassen_baum()
+    attr = {c.name: c.attributes for c in b.classes}
+    assert attr == {"Scion": (), "Marauder": ("str",), "Ranger": ("dex",), "Witch": ("int",),
+                    "Duelist": ("str", "dex"), "Templar": ("str", "int"),
+                    "Shadow": ("dex", "int")}
+    witch = next(c for c in b.classes if c.name == "Witch")
+    assert witch.ascendancies == ("Occultist", "Elementalist", "Necromancer")
+    assert witch.start == 103 and witch.index == 3
+
+
+def test_class_areas_lie_around_their_start_and_leave_the_centre_free() -> None:
+    from poe_view.ui.tree_graph import class_areas
+    bereiche, innen, aussen = class_areas(_klassen_baum())
+    lage = {c.name: (round(w), round(von) % 360, round(bis) % 360)
+            for c, w, von, bis in bereiche}
+    # Grenzen mittig zwischen den Nachbarn; ohne Scion (Mitte).
+    assert lage == {"Witch": (0, 240, 30), "Shadow": (60, 30, 90), "Ranger": (120, 90, 240)}
+    assert innen == pytest.approx(1500) and aussen == pytest.approx(6300)
+
+
+def _bereich_pixel(g, x, y):
+    from PySide6.QtCore import QPointF
+    bild = g.grab().toImage()
+    p = g.mapFromScene(QPointF(x, y))
+    return bild.pixelColor(p.x(), p.y()).name()
+
+
+def test_the_graph_tints_class_areas_and_stripes_hybrids(qapp) -> None:
+    """Witch blau, Ranger grün, Shadow gestreift aus beiden — das gemalte
+    Pixel, nicht der gesetzte Wert; die Mitte bleibt ungetönt."""
+    import math
+    from poe_view.ui.tree_graph import _TOENUNG, TreeGraph
+    g = TreeGraph()
+    g.resize(500, 500)
+    g.set_tree(_klassen_baum())
+    g.show_tree({"hashes": []}, "Necromancer", dark=True)
+    g.resetTransform()
+    g.scale(0.04, 0.04)
+    g.centerOn(0, 0)
+    t = _TOENUNG[True]
+    assert _bereich_pixel(g, -800, -4500) == t["int"]                 # Witch
+    w = math.radians(120)
+    assert _bereich_pixel(g, math.sin(w) * 4500, -math.cos(w) * 4500) == t["dex"]   # Ranger
+    assert _bereich_pixel(g, 0, 700) not in t.values()               # Mitte
+    # Shadow: eine Reihe Pixel quer durch die Streifen enthält beide Farben.
+    from PySide6.QtCore import QPointF
+    bild = g.grab().toImage()
+    w = math.radians(60)
+    p = g.mapFromScene(QPointF(math.sin(w) * 4000, -math.cos(w) * 4000))
+    farben = {bild.pixelColor(p.x() + i, p.y()).name() for i in range(-12, 12)}
+    assert {t["dex"], t["int"]} <= farben
+
+
+def test_the_graph_names_classes_at_the_edge_and_marks_your_own(qapp) -> None:
+    from PySide6.QtWidgets import QGraphicsItem
+    from poe_view.services.passive_tree import ClassInfo
+    from poe_view.ui import tree_report
+    from poe_view.ui.tree_graph import TreeGraph
+    g = TreeGraph()
+    g.set_tree(_klassen_baum())
+    g.show_tree({"hashes": []}, "Necromancer", dark=True)
+    texte = {k.name: t for t, k, _w in g.labels}
+    assert set(texte) == {"Witch", "Shadow", "Ranger"}               # Scion: Mitte
+    gold = tree_report.colour("keystone", True)
+    witch = texte["Witch"].toHtml()
+    assert witch.count(gold) == 2                                    # Klasse + Necromancer
+    import re
+
+    def stil(name):          # Stil des Spans, in dem der Name steht
+        return re.search(r'<span style="([^"]*)">[^<]*' + name, witch).group(1)
+    assert gold in stil("Necromancer") and "font-weight:700" in stil("Necromancer")
+    assert gold not in stil("Occultist") and "#b0b0b0" in stil("Occultist")
+    assert gold not in texte["Ranger"].toHtml() and "Deadeye" in texte["Ranger"].toHtml()
+    t = texte["Witch"]
+    assert t.flags() & QGraphicsItem.GraphicsItemFlag.ItemIgnoresTransformations
+    # Außen am Rand: über dem obersten Punkt des Kreises, mittig.
+    unterkante = t.pos().y() + t.transform().dy() + t.boundingRect().height()
+    assert t.pos().y() == pytest.approx(-6300) and unterkante < t.pos().y()
+    assert t.transform().dx() == pytest.approx(-t.boundingRect().width() / 2)
+    assert isinstance(next(iter(g.labels))[1], ClassInfo)

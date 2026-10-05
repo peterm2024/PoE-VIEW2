@@ -59,6 +59,11 @@ nach [SemVer](https://semver.org/lang/de/).
   Tooltip mit den (Ruthless-)Werten. Bei einer Konfiguration oder
   einem Verlaufseintrag zeigt das Bild den Umbau: grün nehmen, rot
   zurücknehmen, Unverändertes neutral.
+- **Baum-Bild: Klassenbereiche** — der Hintergrund zeigt, wessen Teil
+  des Baums man gerade ansieht: Stärke dunkelrot, Geschick grün,
+  Intelligenz blau, die Hybridklassen (Templar, Duelist, Shadow)
+  gestreift aus beiden. Außen am Rand Klasse und Aszendenzen, die
+  eigene in Gold.
 - **Charakterbogen: Gems nach Link-Gruppen** — welche Gems wirklich
   miteinander verlinkt sind und welche allein stecken, dazu die Sockel
   in der Schreibweise des Spiels („B-B W").

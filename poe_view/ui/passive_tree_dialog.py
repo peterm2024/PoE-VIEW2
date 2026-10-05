@@ -321,7 +321,9 @@ class PassiveTreeDialog(QDialog):
         self.graph_legend.setText(
             ("Green: allocate · red: refund · white: unchanged · " if vergleich is not None
              else "Filled: allocated (colour = theme) · ring: within reach · ")
-            + "hollow: not allocated · yellow ring: search match · wheel: zoom · drag: move")
+            + "hollow: not allocated · yellow ring: search match · wheel: zoom · drag: move\n"
+            + "Background: red Strength · green Dexterity · blue Intelligence · "
+            "striped: hybrid classes")
         if fit:
             self._graph_fit_pending = True
             self._fit_graph_if_pending()

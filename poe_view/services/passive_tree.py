@@ -146,6 +146,18 @@ class Node:
 
 
 @dataclass
+class ClassInfo:
+    """Eine Klasse für die Bereiche im Bild (§4.60.5)."""
+    index: int
+    name: str
+    start: int | None
+    # Die höchsten Grundwerte: Marauder ("str",), Duelist ("str", "dex"),
+    # Scion () — alle gleich, kein Schwerpunkt.
+    attributes: tuple[str, ...]
+    ascendancies: tuple[str, ...]
+
+
+@dataclass
 class Tree:
     nodes: dict[int, Node]
     jewel_slots: list[int]
@@ -156,6 +168,15 @@ class Tree:
     # Name → (Klassen-Index, Aszendenz-Index; 0 = keine), wie die Planer-
     # Links sie kodieren (§encode_url); und umgekehrt.
     class_ids: dict[str, tuple[int, int]] = field(default_factory=dict)
+    classes: list[ClassInfo] = field(default_factory=list)
+
+
+def _attributes(klasse: dict) -> tuple[str, ...]:
+    werte = {a: int(klasse.get(f"base_{a}") or 0) for a in ("str", "dex", "int")}
+    if len(set(werte.values())) < 2:
+        return ()
+    hoch = max(werte.values())
+    return tuple(a for a, w in werte.items() if w == hoch)
 
 
 def _kind(roh: dict) -> str:
@@ -260,16 +281,21 @@ def parse_tree(roh: dict, ruthless: bool) -> Tree:
             nodes[knoten_id].name = str(klassen[index].get("name") or nodes[knoten_id].name)
     starts: dict[str, int] = {}
     ids: dict[str, tuple[int, int]] = {}
+    infos: list[ClassInfo] = []
     for index, klasse in enumerate(roh.get("classes") or ()):
         ids[str(klasse.get("name", ""))] = (index, 0)
+        aszendenzen = []
         for nummer, aszendenz in enumerate(klasse.get("ascendancies") or (), start=1):
-            ids[str(aszendenz.get("name", aszendenz.get("id", "")))] = (index, nummer)
+            aszendenzen.append(str(aszendenz.get("name", aszendenz.get("id", ""))))
+            ids[aszendenzen[-1]] = (index, nummer)
         if index in start_je_index:
             for name, (k, _a) in ids.items():
                 if k == index:
                     starts[name] = start_je_index[index]
+        infos.append(ClassInfo(index, str(klasse.get("name", "")), start_je_index.get(index),
+                               _attributes(klasse), tuple(aszendenzen)))
     return Tree(nodes=nodes, jewel_slots=[int(s) for s in roh.get("jewelSlots") or ()],
-                ruthless=ruthless, class_starts=starts, class_ids=ids)
+                ruthless=ruthless, class_starts=starts, class_ids=ids, classes=infos)
 
 
 # Geparst wird einmal je Datei-Stand: (Pfad, Änderungszeit) → Baum. Ein
