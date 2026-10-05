@@ -6,6 +6,8 @@ nach [SemVer](https://semver.org/lang/de/).
 
 ## [Unveröffentlicht]
 
+## [0.23.0] - 2026-10-05
+
 ### Neu
 
 - **`/kills`-Erinnerung auch beim Programmstart mitten in einer Map:**
