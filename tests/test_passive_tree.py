@@ -240,13 +240,15 @@ def test_the_sheet_section_lists_nodes_masteries_sums_and_reach(baum) -> None:
     assert "Ruthless tree · 3 points allocated · 1 ascendancy points" in text
     assert "Level 30 gives 29 points from levels" in text
     assert "Bandit: Kraityn" in text
-    assert "### Ascendancy (Juggernaut)\n\n- **Unstoppable** — Action Speed cannot be slowed" in text
+    assert "### 👑 Ascendancy (Juggernaut)\n\n- **Unstoppable** — Action Speed cannot be slowed" in text
     assert "- **Iron Heart** — +20 to maximum Life; Regenerate 1% / of Life per second" in text
     assert "- **Life Mastery** — +50 to maximum Life" in text
-    assert "### Notables (1): 1 Defence" in text and "#### Defence (1)" in text
-    assert "### Small passives (2), summed" in text and "- **Utility:** +20 to Strength" in text
-    assert "### Within reach (up to 4 more points): 1 Keystones, 1 Jewel sockets, 1 Defence" in text
-    assert "#### Keystones (1)" in text
+    assert "### Notables (1): 1 Defence" in text and "#### 🛡 Defence (1)" in text
+    assert "### 📊 Totals (all 4 allocated nodes)" in text
+    assert "#### ✦ Utility (1)\n\n- +20 to Strength" in text
+    assert "2 small passives — their values are in the totals." in text
+    assert "### 🧭 Within reach (up to 4 more points): 1 Keystones, 1 Jewel sockets, 1 Defence" in text
+    assert "#### 🔑 Keystones (1)" in text
     assert "- **Iron Will** · 1 point — Strength's bonus applies" in text
     assert "- **Basic Jewel Socket** · 2 points via Life — empty socket" in text
     assert "- **Far Away** · 2 points via Life — +5% to Fire Resistance" in text
@@ -300,7 +302,7 @@ def test_the_whole_sheet_ends_with_the_tree_and_its_jewels(baum) -> None:
                                  "inventoryId": "PassiveJewels", "explicitMods": ["+8% to Fire Resistance"]})
     text = build_character_sheet(char, [jewel], tree_entry=_eintrag([10, 11, 20, 21]), tree=baum)
     assert text.index("## Gems") < text.index("## Passive tree")
-    assert "### Jewels (1 sockets allocated)\n\n- **Crimson Jewel** — +8% to Fire Resistance" in text
+    assert "### 💎 Jewels (1 sockets allocated)\n\n- **Crimson Jewel** — +8% to Fire Resistance" in text
 
 
 def test_a_jewel_swap_updates_the_current_tree_without_history() -> None:
@@ -426,18 +428,18 @@ def test_the_respec_text_is_a_worklist(baum) -> None:
     text = "\n".join(respec_section(baum, {"hashes": [10, 11, 12]},
                                     {"hashes": [10, 11, 14, 15]}, title="Respec: a → b"))
     assert "## Respec: a → b" in text
-    assert "1 points to refund in the main tree" in text
-    assert "### Refund (1)\n\n- **Iron Heart** (notable)" in text
-    assert "### Allocate (2)\n\n- **Far Away** (notable) — +5% to Fire Resistance" in text
-    gewinne = text[text.index("### Gains"):text.index("### Losses")]
-    verluste = text[text.index("### Losses"):]
+    assert "1 point to refund in the main tree" in text
+    assert "### ↩ Refund (1)\n\n- **Iron Heart** (notable)" in text
+    assert "### ＋ Allocate (2)\n\n- **Far Away** (notable) — +5% to Fire Resistance" in text
+    gewinne = text[text.index("### ▲ Gains"):text.index("### ▼ Losses")]
+    verluste = text[text.index("### ▼ Losses"):text.index("### ↩ Refund")]
     assert "- +5% to Fire Resistance" in gewinne and "- +5% increased maximum Life" in gewinne
     assert "- -20 to maximum Life" in verluste
     assert "- Regenerate -1% / of Life per second" in verluste
     umgekehrt = "\n".join(respec_section(baum, {"hashes": [10, 11, 14, 15]},
                                          {"hashes": [10, 11, 12]}, title="b → a"))
-    assert "- Regenerate +1% / of Life per second" in umgekehrt[umgekehrt.index("### Gains"):
-                                                                umgekehrt.index("### Losses")]
+    assert "- Regenerate +1% / of Life per second" in umgekehrt[umgekehrt.index("### ▲ Gains"):
+                                                                umgekehrt.index("### ▼ Losses")]
     gleich = "\n".join(respec_section(baum, {"hashes": [10]}, {"hashes": [10]}, title="x"))
     assert "Same tree" in gleich
 
@@ -482,11 +484,11 @@ def test_a_configuration_shows_the_respec_from_the_current_tree(qapp, baum) -> N
                    level=30, ruthless=True, source="link")
     text = dialog.markdown_for((CONFIG, "Max fire res"))
     assert text.startswith("## Respec: current tree → Max fire res")
-    assert "### Refund (1)\n\n- **Iron Heart**" in text
+    assert "### ↩ Refund (1)\n\n- **Iron Heart**" in text
     assert "## Configuration: Max fire res" in text
     verlauf = dialog.markdown_for((HISTORY, 1))
     assert verlauf.startswith("## Changes from the tree before")
-    assert "### Allocate (1)\n\n- **Iron Heart**" in verlauf
+    assert "### ＋ Allocate (1)\n\n- **Iron Heart**" in verlauf
     dialog.close()
 
 
@@ -622,13 +624,13 @@ def _gruppen(dialog) -> dict[str, list[str]]:
 
 def test_within_reach_is_a_grouped_table_with_a_filter(qapp, baum) -> None:
     dialog, _zeichen, _ = _fenster(qapp, baum)
-    assert _gruppen(dialog) == {"Keystones (1)": ["Iron Will"],
-                                "Jewel sockets (1)": ["Basic Jewel Socket"],
-                                "Defence (1)": ["Far Away"]}
+    assert _gruppen(dialog) == {"🔑 Keystones (1)": ["Iron Will"],
+                                "💎 Jewel sockets (1)": ["Basic Jewel Socket"],
+                                "🛡 Defence (1)": ["Far Away"]}
     zeile = dialog.reach.topLevelItem(2).child(0)
     assert (zeile.text(1), zeile.text(3)) == ("2", "Life")
     dialog.reach_filter.setText("fire res")
-    assert _gruppen(dialog) == {"Defence (1 of 1)": ["Far Away"]}
+    assert _gruppen(dialog) == {"🛡 Defence (1 of 1)": ["Far Away"]}
     # Jedes Wort muss passen: "fire" steht bei Far Away, "strength" bei
     # Iron Will — zusammen bei keinem.
     dialog.reach_filter.setText("fire strength")
@@ -636,3 +638,59 @@ def test_within_reach_is_a_grouped_table_with_a_filter(qapp, baum) -> None:
     dialog.reach_filter.setText("")
     assert len(_gruppen(dialog)) == 3
     dialog.close()
+
+
+
+# --- Bericht: Summen, Farben, Reihenfolge (§4.60.3) ----------------------- #
+
+def test_the_totals_add_up_every_allocated_node_with_the_key_values_first(baum) -> None:
+    """Peter: "eine Summary oben mit den Insgesamtwerten" — kleine Knoten,
+    Notables, Keystones, Aszendenz und gewählte Masteries zusammen."""
+    from poe_view.ui import tree_report
+    bloecke = tree_report.totals_blocks(baum, {"hashes": [10, 11, 12, 14, 13, 51],
+                                               "mastery_effects": {"40": 777}})
+    nach_thema = {b.title: [i.text for i in b.items] for b in bloecke}
+    # Iron Heart +20 und die Mastery +50 ergeben +70 Life; Life vor Regeneration.
+    assert nach_thema == {
+        "Defence (3)": ["5% increased maximum Life", "+70 to maximum Life",
+                        "Regenerate 1% / of Life per second"],
+        "Utility (2)": ["Strength's bonus applies", "+20 to Strength"],
+        "Other (1)": ["Action Speed cannot be slowed"]}
+    assert all(b.columns == 3 for b in bloecke)
+
+
+def test_the_window_html_is_coloured_per_theme_and_mode(baum) -> None:
+    from poe_view.ui import tree_report
+    bloecke = tree_report.tree_blocks(_eintrag([10, 11, 12]), baum,
+                                      character_class="Juggernaut")
+    dunkel = tree_report.to_html(bloecke, dark=True)
+    hell = tree_report.to_html(bloecke, dark=False)
+    assert tree_report.colour(pt.DEFENCE, True) in dunkel
+    assert tree_report.colour(pt.DEFENCE, False) in hell
+    assert tree_report.colour(pt.DEFENCE, True) not in hell
+    assert "🛡 Defence" in dunkel and "<b" in dunkel
+
+
+def test_gains_put_the_key_values_first(baum) -> None:
+    from poe_view.ui import tree_report
+    umbau = tree_report.respec_blocks(baum, {"hashes": [10, 11, 12]},
+                                      {"hashes": [10, 11, 14, 15, 20]}, title="x")
+    gewinne = next(b for b in umbau if b.key == "gain")
+    assert [i.text for i in gewinne.items][0] == "+10% increased maximum Life"
+
+
+def test_gains_are_ranked_not_alphabetical(baum) -> None:
+    """Alphabetisch stünde "gained: Strength's bonus applies" vor "+5% to
+    Fire Resistance" — die Resistenz ist aber das, worauf es ankommt."""
+    from poe_view.ui import tree_report
+    umbau = tree_report.respec_blocks(baum, {"hashes": [10]}, {"hashes": [10, 13, 15]}, title="x")
+    gewinne = next(b for b in umbau if b.key == "gain")
+    assert [i.text for i in gewinne.items] == ["+5% to Fire Resistance",
+                                               "gained: Strength's bonus applies"]
+
+
+def test_the_theme_heading_itself_is_coloured(baum) -> None:
+    from poe_view.ui import tree_report
+    html_text = tree_report.to_html(tree_report.tree_blocks(
+        _eintrag([10, 11, 12]), baum, character_class="Juggernaut"), dark=True)
+    assert f"color:{tree_report.colour(pt.DEFENCE, True)};'>🛡 Defence" in html_text

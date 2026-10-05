@@ -8499,6 +8499,48 @@ Gruppen, flache Liste ohne Sockel-Nummern). Gegenprobe mit 11
 Sabotagen; eine hielt zuerst (Filter mit "irgendein Wort"), der Test
 wurde verschärft. Nativ am echten Baum angesehen.
 
+#### 4.60.3 Gesamtwerte, Farbe und Symbole (`ui/tree_report.py`)
+
+Peter, 2026-10-05: "Kannst du beim Baum noch ein bisschen mehr Farbe und
+Symbole ins Spiel bringen? Und eine Summary oben mit den Insgesamtwerten,
+z.B. 120% increased Damage, +95 max. Life..."
+
+**Einmal gliedern, zweimal ausgeben.** Markdown kann keine Farbe. Der
+Bericht entsteht deshalb als Liste von `Block` (Überschrift, Ebene,
+Farbschlüssel, Absätze, Zeilen, Spaltenzahl) und wird zu Markdown
+(Charakterbogen, "Copy as text": Symbole ja, Farben nein — ein Chat
+zeigt sie ohnehin nicht) oder zu HTML (das Fenster). `character_sheet`
+reicht nur noch durch.
+
+**Totals** zählt `all_stats` zusammen — kleine Knoten, Notables,
+Keystones, Aszendenz und die GEWÄHLTEN Masteries — und gliedert nach
+Thema; sie ersetzen den Abschnitt "Small passives, summed". Jewels
+zählen nicht mit: Ihre Werte stehen im Jewel-Abschnitt, und Radius-
+Jewels ändern die Knoten selbst, das rechnet nur das Spiel. Innerhalb
+eines Themas stehen die Werte vorn, nach denen man einen Baum beurteilt
+(`_ZUERST`: Minion-Schaden und -Life, Life, Energy Shield,
+Resistenzen …), der Rest alphabetisch. Die Minion-Muster stehen in der
+Liste zuerst — sonst zog "Golems have 30% increased Maximum Life" vor
+"Minions deal 198% increased Damage" (nativ gesehen). Im Fenster drei
+Spalten, spaltenweise gefüllt, damit die vorn sortierten Werte links
+oben bleiben; die erste Fassung als eine Zeile je Thema war eine
+Textwand. Gewinne und Verluste im Respec folgen derselben Rangfolge.
+
+**Farben gerechnet**, je eine Reihe für dunklen und hellen Grund gegen
+den echten Grund des Textfelds (`Base`: #2d2d2d / #ffffff): dunkel
+5,6–8,1:1, hell 4,9–6,5:1. Im Respec tragen die Knotennamen KEINE
+Themenfarbe: Grün und Rot heißen dort Gewinn und Verlust, und ein roter
+Angriffsknoten unter "Allocate" las sich wie ein Verlust (nativ
+gesehen). Die Reichweiten-Tabelle färbt Gruppenzeile und Knotennamen.
+
+Getestet: `tests/test_passive_tree.py` (Summen über alle Knotenarten
+samt Mastery und Rangfolge, drei Spalten; HTML je Modus mit der
+richtigen Farbe, auch in der Überschrift; Gewinne nach Rang statt
+Alphabet; Einzahl "1 point"). Gegenprobe mit 7 Sabotagen; zwei hielten
+zuerst (Alphabet und Rang fielen im Testfall zusammen; die Farbe stand
+auch in den Knotennamen), beide Tests verschärft. Nativ am echten Baum
+angesehen; den hellen Modus nur gerechnet, nicht angesehen.
+
 ---
 
 ## 8. Entwicklungsstand

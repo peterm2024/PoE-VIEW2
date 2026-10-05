@@ -209,7 +209,9 @@ delve depth 0, where nobody dies) from the depths below it.
   change mastery, number of points) and what it gains and loses in
   stats. *Open in planner* shows any of them in the official planner.
   Everything is grouped by theme — defence, minions, offence, utility —
-  and *Within reach* is a table you can filter ("fire res").
+  with colours and symbols, a **totals** summary on top (all allocated
+  nodes added up, the key values first), and *Within reach* is a table
+  you can filter ("fire res").
 - **Enlarged item view** (double-click an item): large icon and the full
   property and mod text without the compact detail panel's line
   clipping. Divination cards show their real artwork from GGG's own CDN

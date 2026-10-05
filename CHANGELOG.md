@@ -44,6 +44,14 @@ nach [SemVer](https://semver.org/lang/de/).
   Im Fenster drei Reiter: „Respec" (nur bei Konfiguration und
   Verlauf), „Overview" und „Within reach" als aufklappbare Tabelle mit
   Punkten, Werten, Weg und einem Suchfeld („fire res").
+- **Baum: Gesamtwerte oben, Farbe und Symbole.** „Totals" zählt alle
+  vergebenen Knoten zusammen (kleine, Notables, Keystones, Aszendenz,
+  gewählte Masteries) — je Thema, die wichtigsten Werte vorn (Life,
+  Energy Shield, Resistenzen; bei Minions Damage und Life). Themen mit
+  Symbol und Farbe (🛡 Defence, 💀 Minions, ⚔ Offence, ✦ Utility), dazu
+  👑 Aszendenz, 🔑 Keystones, ✪ Masteries, 💎 Jewels; im Respec Gewinne
+  grün ▲, Verluste rot ▼, die wichtigsten zuerst. Die Summen ersetzen
+  den Abschnitt „Small passives, summed".
 - **Charakterbogen: Gems nach Link-Gruppen** — welche Gems wirklich
   miteinander verlinkt sind und welche allein stecken, dazu die Sockel
   in der Schreibweise des Spiels („B-B W").

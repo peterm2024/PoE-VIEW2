@@ -23,7 +23,7 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from PySide6.QtCore import Qt, QUrl
-from PySide6.QtGui import QDesktopServices, QGuiApplication
+from PySide6.QtGui import QBrush, QColor, QDesktopServices, QGuiApplication, QPalette
 from PySide6.QtWidgets import (QDialog, QHBoxLayout, QHeaderView, QInputDialog, QLabel,
                                QLineEdit, QListWidget, QListWidgetItem, QMessageBox,
                                QPushButton, QSplitter, QTabWidget, QTextBrowser,
@@ -31,8 +31,7 @@ from PySide6.QtWidgets import (QDialog, QHBoxLayout, QHeaderView, QInputDialog, 
 
 from poe_view.services import passive_tree, tree_history
 from poe_view.services.passive_tree import Tree, TreeLinkError
-from poe_view.ui.character_sheet import (reach_groups, respec_section, tree_section,
-                                         _stats_text)
+from poe_view.ui import tree_report
 
 CURRENT, HISTORY, CONFIG = "current", "history", "config"
 
@@ -194,8 +193,35 @@ class PassiveTreeDialog(QDialog):
 
     # --- Anzeige -------------------------------------------------------- #
 
+    def _respec_blocks(self, key) -> list:
+        """Der Umbau zum Gewählten: bei einer Konfiguration vom aktuellen
+        Baum aus, beim Verlauf vom Eintrag davor; sonst nichts."""
+        eintrag = self._entry(key)
+        if eintrag is None or self._tree is None or not key:
+            return []
+        art, schluessel = key
+        aktuell = tree_history.current(self._characters, self._name)
+        if art == CONFIG and aktuell:
+            return tree_report.respec_blocks(
+                self._tree, aktuell.get("passives") or {}, eintrag.get("passives") or {},
+                title=f"Respec: current tree → {schluessel}")
+        if art == HISTORY and schluessel > 0:
+            verlauf = tree_history.history(self._characters, self._name)
+            return tree_report.respec_blocks(
+                self._tree, verlauf[schluessel - 1].get("passives") or {},
+                eintrag.get("passives") or {}, title="Changes from the tree before")
+        return []
+
+    def _tree_blocks(self, key, include_reach: bool) -> list:
+        bloecke = tree_report.tree_blocks(self._entry(key), self._tree,
+                                          character_class=self._class,
+                                          include_reach=include_reach)
+        if key and key[0] == CONFIG:
+            bloecke[0].title = f"Configuration: {key[1]}"
+        return bloecke
+
     def markdown_for(self, key) -> str:
-        """Der Text rechts — auch das, was "Copy as text" kopiert."""
+        """Alles als Markdown — das, was "Copy as text" kopiert."""
         eintrag = self._entry(key)
         if eintrag is None:
             return ("*No tree recorded for this character yet. It arrives with the "
@@ -203,49 +229,11 @@ class PassiveTreeDialog(QDialog):
         if self._tree is None:
             return ("*GGG's tree data has not been downloaded yet — try again in a "
                     "minute.*")
-        art, schluessel = key
-        zeilen: list[str] = []
-        aktuell = tree_history.current(self._characters, self._name)
-        if art == CONFIG and aktuell:
-            zeilen += respec_section(self._tree, aktuell.get("passives") or {},
-                                     eintrag.get("passives") or {},
-                                     title=f"Respec: current tree → {schluessel}")
-        elif art == HISTORY and schluessel > 0:
-            verlauf = tree_history.history(self._characters, self._name)
-            zeilen += respec_section(self._tree, verlauf[schluessel - 1].get("passives") or {},
-                                     eintrag.get("passives") or {},
-                                     title="Changes from the tree before")
-        abschnitt = tree_section(eintrag, self._tree, character_class=self._class)
-        if art == CONFIG:
-            abschnitt[0] = f"## Configuration: {schluessel}"
-        return "\n".join(zeilen + abschnitt)
+        return "\n".join(tree_report.to_markdown(
+            self._respec_blocks(key) + self._tree_blocks(key, include_reach=True)))
 
-    def _respec_markdown(self, key) -> str:
-        eintrag = self._entry(key)
-        if eintrag is None or self._tree is None or not key:
-            return ""
-        art, schluessel = key
-        aktuell = tree_history.current(self._characters, self._name)
-        if art == CONFIG and aktuell:
-            return "\n".join(respec_section(
-                self._tree, aktuell.get("passives") or {}, eintrag.get("passives") or {},
-                title=f"Respec: current tree → {schluessel}"))
-        if art == HISTORY and schluessel > 0:
-            verlauf = tree_history.history(self._characters, self._name)
-            return "\n".join(respec_section(
-                self._tree, verlauf[schluessel - 1].get("passives") or {},
-                eintrag.get("passives") or {}, title="Changes from the tree before"))
-        return ""
-
-    def _overview_markdown(self, key) -> str:
-        eintrag = self._entry(key)
-        if eintrag is None or self._tree is None:
-            return self.markdown_for(key)
-        abschnitt = tree_section(eintrag, self._tree, character_class=self._class,
-                                 include_reach=False)
-        if key and key[0] == CONFIG:
-            abschnitt[0] = f"## Configuration: {key[1]}"
-        return "\n".join(abschnitt)
+    def _dark(self) -> bool:
+        return self.text.palette().color(QPalette.ColorRole.Base).lightnessF() < 0.5
 
     def _fill_reach(self, key) -> None:
         self.reach.clear()
@@ -253,18 +241,23 @@ class PassiveTreeDialog(QDialog):
         if eintrag is None or self._tree is None:
             return
         have = passive_tree.allocated(eintrag.get("passives") or {})
-        for titel, gruppe in reach_groups(self._tree, have, self._class):
-            kopf = QTreeWidgetItem([f"{titel} ({len(gruppe)})"])
-            kopf.setData(0, Qt.ItemDataRole.UserRole, titel)
+        for titel, farbe_key, gruppe in tree_report.reach_groups(self._tree, have, self._class):
+            symbol = tree_report.SYMBOL.get(farbe_key, "")
+            kopf = QTreeWidgetItem([f"{symbol} {titel} ({len(gruppe)})"])
+            kopf.setData(0, Qt.ItemDataRole.UserRole, f"{symbol} {titel}")
             schrift = kopf.font(0)
             schrift.setBold(True)
             kopf.setFont(0, schrift)
-            kopf.setFirstColumnSpanned(False)
+            farbe = tree_report.colour(farbe_key, self._dark())
+            if farbe:
+                kopf.setForeground(0, QBrush(QColor(farbe)))
             for r in gruppe:
-                werte = (_stats_text(r.node.stats) if r.node.stats
+                werte = ("; ".join(r.node.stats) if r.node.stats
                          else "empty socket" if r.node.kind == passive_tree.JEWEL else "—")
                 zeile = QTreeWidgetItem([r.node.name, str(r.cost), werte,
                                          ", ".join(n.name for n in r.via)])
+                if farbe:
+                    zeile.setForeground(0, QBrush(QColor(farbe)))
                 zeile.setToolTip(2, "\n".join(r.node.stats) or werte)
                 zeile.setToolTip(3, " → ".join(n.name for n in r.via))
                 zeile.setTextAlignment(1, Qt.AlignmentFlag.AlignCenter)
@@ -294,8 +287,9 @@ class PassiveTreeDialog(QDialog):
 
     def _show_selected(self) -> None:
         key = self._selected()
-        umbau = self._respec_markdown(key)
-        self.respec_text.setMarkdown(umbau)
+        dunkel = self._dark()
+        umbau = self._respec_blocks(key)
+        self.respec_text.setHtml(tree_report.to_html(umbau, dark=dunkel) if umbau else "")
         # Mit Umbau zeigt der Reiter "Respec" — er ist bei einer
         # Konfiguration das, worum es geht; ohne Umbau verschwindet er.
         self.tabs.setTabVisible(0, bool(umbau))
@@ -303,7 +297,11 @@ class PassiveTreeDialog(QDialog):
             self.tabs.setCurrentIndex(0)
         elif self.tabs.currentIndex() == 0:
             self.tabs.setCurrentIndex(1)
-        self.text.setMarkdown(self._overview_markdown(key))
+        if self._entry(key) is None or self._tree is None:
+            self.text.setMarkdown(self.markdown_for(key))
+        else:
+            self.text.setHtml(tree_report.to_html(self._tree_blocks(key, include_reach=False),
+                                                  dark=dunkel))
         self._fill_reach(key)
         ist_konfig = bool(key) and key[0] == CONFIG
         self.rename_button.setEnabled(ist_konfig)

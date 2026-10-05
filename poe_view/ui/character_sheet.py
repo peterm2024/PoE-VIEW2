@@ -23,14 +23,12 @@ zweites Mal gepflegt werden.
 
 from __future__ import annotations
 
-import re
 from collections.abc import Sequence
 
 from poe_view.api.models import (ENCHANT_MOD_FIELD, FRAME_TYPE_NAMES, Character,
                                  Item, all_extra_mod_lines, extra_mod_lines)
-from poe_view.services import passive_tree
-from poe_view.services.passive_tree import (JEWEL, KEYSTONE, MASTERY, NOTABLE, SMALL,
-                                            START, Tree)
+from poe_view.services.passive_tree import Tree
+from poe_view.ui import tree_report
 from poe_view.ui.gem_progress import gem_progress_of
 from poe_view.ui.paperdoll import DOLL_SLOTS, SWAP_SLOTS, TRINKET_SLOT
 
@@ -126,153 +124,17 @@ def _stats_text(stats) -> str:
 
 def tree_section(entry: dict | None, tree: Tree | None, *, character_class: str,
                  jewels: Sequence[Item] = (), include_reach: bool = True) -> list[str]:
-    """Der Passiv-Baum als Markdown-Abschnitt (§4.60).
-
-    Peter, 2026-10-04: "eine Export-Funktion ... um z.B. eine Einschätzung
-    von dir zur Skillpunktvergabe holen zu können." Geschrieben für einen
-    Leser, der den Baum NICHT vor sich hat: jeder Knoten mit seinen Werten,
-    die kleinen Knoten zusammengezählt, und was mit wenigen Punkten
-    erreichbar wäre."""
-    zeilen = ["## Passive tree", ""]
-    if not entry:
-        zeilen += ["*Not known yet — it arrives with the next refresh of this character.*", ""]
-        return zeilen
-    passives = entry.get("passives") or {}
-    have = passive_tree.allocated(passives)
-    if tree is None:
-        zeilen += [f"*{len(have)} nodes allocated. GGG's tree data has not been downloaded "
-                   "yet, so their names and values are missing — try again in a minute.*", ""]
-        return zeilen
-
-    knoten = [tree.nodes[h] for h in sorted(have) if h in tree.nodes]
-    unbekannt = len(have) - len(knoten)
-    aszendenz = [n for n in knoten if n.ascendancy and n.kind != START]
-    normal = [n for n in knoten if not n.ascendancy and n.kind != START]
-    cluster = len(passives.get("hashes_ex") or ())
-    level = entry.get("level") or 0
-
-    kopf = (f"{'Ruthless' if tree.ruthless else 'Standard'} tree · "
-            f"{len(normal)} points allocated · {len(aszendenz)} ascendancy points")
-    if cluster:
-        kopf += f" · {cluster} cluster jewel nodes"
-    # Jede Kopfzeile ein eigener Absatz — Markdown zieht aufeinanderfolgende
-    # Zeilen sonst zu einer zusammen (nativ gesehen im Baum-Fenster).
-    zeilen += [kopf, ""]
-    if level:
-        zeilen += [f"Level {level} gives {level - 1} points from levels, plus quest "
-                   "rewards (the API does not report those).", ""]
-    extras = []
-    if passives.get("bandit_choice"):
-        extras.append(f"Bandit: {passives['bandit_choice']}")
-    if passives.get("pantheon_major"):
-        extras.append(f"Pantheon: {passives['pantheon_major']}"
-                      + (f" / {passives['pantheon_minor']}" if passives.get("pantheon_minor") else ""))
-    if extras:
-        zeilen += [" · ".join(extras), ""]
-    if unbekannt:
-        zeilen += [f"*{unbekannt} allocated nodes are missing from GGG's tree data "
-                   "(the download may be older than the last patch).*", ""]
-
-    def liste(titel: str, gruppe) -> None:
-        if not gruppe:
-            return
-        zeilen.extend([f"### {titel}", ""])
-        zeilen.extend(f"- **{n.name}** — {_stats_text(n.stats)}"
-                      for n in sorted(gruppe, key=lambda n: n.name))
-        zeilen.append("")
-
-    liste(f"Ascendancy ({character_class})", aszendenz)
-    liste("Keystones", [n for n in normal if n.kind == KEYSTONE])
-    notables = [n for n in normal if n.kind == NOTABLE]
-    if notables:
-        # Nach Thema gegliedert (§4.60.2): Ein Blick zeigt, wohin die
-        # Punkte gegangen sind — "8 Defence, 11 Minions, 2 Offence".
-        zeilen += [f"### Notables ({len(notables)}): " + _theme_counts(notables), ""]
-        for thema, gruppe in _by_theme(notables):
-            zeilen += [f"#### {thema} ({len(gruppe)})", ""]
-            zeilen += [f"- **{n.name}** — {_stats_text(n.stats)}" for n in gruppe]
-            zeilen.append("")
-
-    wahl = passive_tree.mastery_choices(passives)
-    masteries = []
-    for knoten_id, effekt in sorted(wahl.items()):
-        mastery = tree.nodes.get(knoten_id)
-        if mastery is None or mastery.kind != MASTERY:
-            continue
-        masteries.append(f"- **{mastery.name}** — "
-                         f"{_stats_text(mastery.effects.get(effekt, ()))}")
-    if masteries:
-        zeilen += ["### Masteries", ""] + sorted(masteries) + [""]
-
-    sockel = [n for n in normal if n.kind == JEWEL]
-    if sockel or jewels:
-        zeilen += [f"### Jewels ({len(sockel)} sockets allocated)", ""]
-        zeilen += [f"- **{_item_label(j)}** — {_stats_text(_item_mod_lines(j))}"
-                   for j in jewels]
-        if not jewels:
-            zeilen.append("*No jewels socketed.*")
-        zeilen.append("")
-
-    kleine = [n for n in normal if n.kind == SMALL]
-    if kleine:
-        summen = passive_tree.summed_stats([z for n in kleine for z in n.stats])
-        zeilen += [f"### Small passives ({len(kleine)}), summed", ""]
-        for thema in passive_tree.THEMES:
-            teil = [z for z in summen if passive_tree.line_theme(z) == thema]
-            if teil:
-                zeilen += [f"- **{thema}:** " + "; ".join(teil)]
-        zeilen.append("")
-
-    if include_reach:
-        zeilen += reach_section(tree, have, character_class)
-    return zeilen
-
-
-def _by_theme(nodes):
-    """(Thema, Knoten nach Name) in der festen Reihenfolge der Themen."""
-    gruppen: dict[str, list] = {}
-    for n in nodes:
-        gruppen.setdefault(passive_tree.theme(n), []).append(n)
-    return [(t, sorted(gruppen[t], key=lambda n: n.name))
-            for t in passive_tree.THEMES if t in gruppen]
-
-
-def _theme_counts(nodes) -> str:
-    return ", ".join(f"{len(g)} {t}" for t, g in _by_theme(nodes))
-
-
-def reach_groups(tree: Tree, have: set[int], character_class: str):
-    """Die Reichweite gegliedert: (Überschrift, [Reach, …]) — erst
-    Keystones und Jewel-Sockel (sie ändern den Build bzw. brauchen ein
-    Jewel), dann die Notables nach Thema; innen nach Punkten (§4.60.2)."""
-    alle = passive_tree.within_reach(tree, have, class_name=character_class)
-    gruppen = [("Keystones", [r for r in alle if r.node.kind == KEYSTONE]),
-               ("Jewel sockets", [r for r in alle if r.node.kind == JEWEL])]
-    notables = [r for r in alle if r.node.kind == NOTABLE]
-    for thema in passive_tree.THEMES:
-        gruppen.append((thema, [r for r in notables if passive_tree.theme(r.node) == thema]))
-    return [(titel, sorted(liste, key=lambda r: (r.cost, r.node.name)))
-            for titel, liste in gruppen if liste]
-
-
-def reach_line(r) -> str:
-    punkte = "point" if r.cost == 1 else "points"
-    weg = f" via {', '.join(n.name for n in r.via)}" if r.via else ""
-    werte = _stats_text(r.node.stats) if r.node.stats else (
-        "empty socket" if r.node.kind == JEWEL else "—")
-    return f"- **{r.node.name}** · {r.cost} {punkte}{weg} — {werte}"
+    """Der Passiv-Baum als Markdown-Abschnitt (§4.60). Gegliedert wird in
+    ``tree_report`` (§4.60.3), das auch das farbige Fenster speist; hier
+    nur die Jewels als Text und die Markdown-Ausgabe."""
+    return tree_report.to_markdown(tree_report.tree_blocks(
+        entry, tree, character_class=character_class,
+        jewels=[(_item_label(j), _item_mod_lines(j)) for j in jewels],
+        include_reach=include_reach))
 
 
 def reach_section(tree: Tree, have: set[int], character_class: str) -> list[str]:
-    gruppen = reach_groups(tree, have, character_class)
-    gesamt = sum(len(g) for _t, g in gruppen)
-    zeilen = [f"### Within reach (up to {passive_tree.REACH_POINTS} more points): "
-              + (", ".join(f"{len(g)} {t}" for t, g in gruppen) or "nothing"), ""]
-    if not gesamt:
-        return zeilen + ["*Nothing notable within reach.*", ""]
-    for titel, gruppe in gruppen:
-        zeilen += [f"#### {titel} ({len(gruppe)})", ""] + [reach_line(r) for r in gruppe] + [""]
-    return zeilen
+    return tree_report.to_markdown(tree_report.reach_blocks(tree, have, character_class))
 
 
 def build_character_sheet(character: Character, items: Sequence[Item], *,
@@ -350,39 +212,5 @@ def build_character_sheet(character: Character, items: Sequence[Item], *,
 
 
 def respec_section(tree: Tree, current: dict, target: dict, *, title: str) -> list[str]:
-    """Der Umbau als Markdown: was zurücknehmen, was nehmen, welche Mastery
-    anders, was sich an Werten ändert (§4.60.1). Geschrieben als
-    Arbeitsliste für den Baum im Spiel."""
-    umbau = passive_tree.compare(tree, current, target)
-    zeilen = [f"## {title}", ""]
-    if not (umbau.refund or umbau.allocate or umbau.masteries):
-        return zeilen + ["*Same tree — nothing to change.*", ""]
-    zeilen.append(f"{umbau.points} points to refund in the main tree"
-                  + (" (plus ascendancy changes)" if any(n.ascendancy for n in
-                                                          umbau.refund + umbau.allocate) else ""))
-    zeilen.append("")
-    # Gewinn oder Verlust nach dem Vorzeichen der ersten Zahl — es steht
-    # vorn ("+5% to X") oder an der Stelle der Zahl ("Regenerate +1% ...").
-    gewinne = [z for z in umbau.stats if z.startswith("gained: ")
-               or (m := re.search(r"(?<!\w)([+-])\d", z)) is not None and m.group(1) == "+"]
-    verluste = [z for z in umbau.stats if z not in gewinne]
-
-    def knoten_zeile(n) -> str:
-        art = {KEYSTONE: "keystone", NOTABLE: "notable", JEWEL: "jewel socket"}.get(n.kind, "")
-        zusatz = f" ({'ascendancy ' if n.ascendancy else ''}{art})" if art or n.ascendancy else ""
-        return f"- **{n.name}**{zusatz} — {_stats_text(n.stats)}"
-
-    if umbau.refund:
-        zeilen += [f"### Refund ({len(umbau.refund)})", ""] + [knoten_zeile(n) for n in umbau.refund] + [""]
-    if umbau.allocate:
-        zeilen += [f"### Allocate ({len(umbau.allocate)})", ""] + [knoten_zeile(n) for n in umbau.allocate] + [""]
-    if umbau.masteries:
-        zeilen += ["### Change mastery", ""]
-        zeilen += [f"- **{m.name}**: {_stats_text(alt)} → {_stats_text(neu)}"
-                   for m, alt, neu in umbau.masteries]
-        zeilen.append("")
-    if gewinne:
-        zeilen += ["### Gains", ""] + [f"- {z}" for z in gewinne] + [""]
-    if verluste:
-        zeilen += ["### Losses", ""] + [f"- {z}" for z in verluste] + [""]
-    return zeilen
+    """Der Umbau als Markdown (§4.60.1, gegliedert in ``tree_report``)."""
+    return tree_report.to_markdown(tree_report.respec_blocks(tree, current, target, title=title))
