@@ -24,7 +24,7 @@ from collections.abc import Callable
 
 from PySide6.QtCore import Qt, QUrl
 from PySide6.QtGui import QBrush, QColor, QDesktopServices, QGuiApplication, QPalette
-from PySide6.QtWidgets import (QDialog, QHBoxLayout, QHeaderView, QInputDialog, QLabel,
+from PySide6.QtWidgets import (QCheckBox, QDialog, QHBoxLayout, QHeaderView, QInputDialog, QLabel,
                                QLineEdit, QListWidget, QListWidgetItem, QMessageBox,
                                QPushButton, QSplitter, QTabWidget, QTextBrowser,
                                QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
@@ -32,6 +32,7 @@ from PySide6.QtWidgets import (QDialog, QHBoxLayout, QHeaderView, QInputDialog, 
 from poe_view.services import passive_tree, tree_history
 from poe_view.services.passive_tree import Tree, TreeLinkError
 from poe_view.ui import tree_report
+from poe_view.ui.tree_graph import TreeGraph
 
 CURRENT, HISTORY, CONFIG = "current", "history", "config"
 
@@ -79,6 +80,32 @@ class PassiveTreeDialog(QDialog):
         self.tabs.addTab(self.respec_text, "Respec")
         self.tabs.addTab(self.text, "Overview")
         self.tabs.addTab(reichweite, "Within reach")
+        # Der Baum als Bild (§4.60.4).
+        self.graph = TreeGraph()
+        self.graph_reach = QCheckBox("Within reach")
+        self.graph_reach.setChecked(True)
+        self.graph_reach.toggled.connect(lambda *_: self._fill_graph(self._selected(), fit=False))
+        self.graph_search = QLineEdit()
+        self.graph_search.setPlaceholderText("Find nodes, e.g. fire res…")
+        self.graph_search.setClearButtonEnabled(True)
+        self.graph_search.textChanged.connect(self.graph.highlight)
+        self.graph_legend = QLabel()
+        self.graph_legend.setWordWrap(True)
+        leiste = QHBoxLayout()
+        leiste.addWidget(self.graph_search, 1)
+        leiste.addWidget(self.graph_reach)
+        bild = QWidget()
+        b_aufbau = QVBoxLayout(bild)
+        b_aufbau.setContentsMargins(0, 0, 0, 0)
+        b_aufbau.addLayout(leiste)
+        b_aufbau.addWidget(self.graph, 1)
+        b_aufbau.addWidget(self.graph_legend)
+        self.tabs.addTab(bild, "Tree")
+        self._graph_key = None
+        # Einpassen erst, wenn das Bild sichtbar ist — ein verdeckter Reiter
+        # hat keine Größe, und fitInView zoomte dann ins Leere (nativ gesehen).
+        self._graph_fit_pending = False
+        self.tabs.currentChanged.connect(self._fit_graph_if_pending)
 
         teiler = QSplitter()
         teiler.addWidget(self.list)
@@ -266,6 +293,39 @@ class PassiveTreeDialog(QDialog):
         self.reach.expandAll()
         self._apply_reach_filter(self.reach_filter.text())
 
+    def _fill_graph(self, key, *, fit: bool) -> None:
+        """Bild zum Gewählten: bei Konfiguration und Verlauf als Umbau
+        (grün nehmen, rot zurücknehmen), sonst mit Reichweite."""
+        self.graph.set_tree(self._tree)
+        eintrag = self._entry(key)
+        if eintrag is None or self._tree is None:
+            self.graph_legend.setText("")
+            return
+        vergleich = None
+        if key[0] == CONFIG:
+            aktuell = tree_history.current(self._characters, self._name)
+            vergleich = (aktuell or {}).get("passives")
+        elif key[0] == HISTORY and key[1] > 0:
+            vergleich = tree_history.history(self._characters, self._name)[key[1] - 1].get(
+                "passives")
+        self.graph.show_tree(eintrag.get("passives") or {}, self._class,
+                             compare_to=vergleich, show_reach=self.graph_reach.isChecked(),
+                             dark=self._dark())
+        self.graph.highlight(self.graph_search.text())
+        self.graph_reach.setEnabled(vergleich is None)
+        self.graph_legend.setText(
+            ("Green: allocate · red: refund · white: unchanged · " if vergleich is not None
+             else "Filled: allocated (colour = theme) · ring: within reach · ")
+            + "hollow: not allocated · yellow ring: search match · wheel: zoom · drag: move")
+        if fit:
+            self._graph_fit_pending = True
+            self._fit_graph_if_pending()
+
+    def _fit_graph_if_pending(self, *_args) -> None:
+        if self._graph_fit_pending and self.graph.isVisible():
+            self._graph_fit_pending = False
+            self.graph.fit_allocated()
+
     def _apply_reach_filter(self, text: str) -> None:
         """Jedes Wort muss in Name oder Werten vorkommen ("fire res" findet
         "+8% to Fire Resistance"); leere Gruppen verschwinden."""
@@ -303,6 +363,8 @@ class PassiveTreeDialog(QDialog):
             self.text.setHtml(tree_report.to_html(self._tree_blocks(key, include_reach=False),
                                                   dark=dunkel))
         self._fill_reach(key)
+        self._fill_graph(key, fit=key != self._graph_key)
+        self._graph_key = key
         ist_konfig = bool(key) and key[0] == CONFIG
         self.rename_button.setEnabled(ist_konfig)
         self.delete_button.setEnabled(ist_konfig)

@@ -211,7 +211,9 @@ delve depth 0, where nobody dies) from the depths below it.
   Everything is grouped by theme — defence, minions, offence, utility —
   with colours and symbols, a **totals** summary on top (all allocated
   nodes added up, the key values first), and *Within reach* is a table
-  you can filter ("fire res").
+  you can filter ("fire res"). The *Tree* tab draws the tree itself —
+  zoom, drag, search — and shows a configuration's respec in green and
+  red right on the tree.
 - **Enlarged item view** (double-click an item): large icon and the full
   property and mod text without the compact detail panel's line
   clipping. Divination cards show their real artwork from GGG's own CDN

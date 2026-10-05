@@ -52,6 +52,13 @@ nach [SemVer](https://semver.org/lang/de/).
   👑 Aszendenz, 🔑 Keystones, ✪ Masteries, 💎 Jewels; im Respec Gewinne
   grün ▲, Verluste rot ▼, die wichtigsten zuerst. Die Summen ersetzen
   den Abschnitt „Small passives, summed".
+- **Reiter „Tree": der Baum als Bild** — schematisch (Kreise und
+  Linien in der echten Lage, Bögen auf den Kreisbahnen), vergebene
+  Knoten gefüllt in der Farbe ihres Themas, Ringe für „in Reichweite"
+  und Suchtreffer, Zoom mit dem Mausrad, Verschieben mit der Maus,
+  Tooltip mit den (Ruthless-)Werten. Bei einer Konfiguration oder
+  einem Verlaufseintrag zeigt das Bild den Umbau: grün nehmen, rot
+  zurücknehmen, Unverändertes neutral.
 - **Charakterbogen: Gems nach Link-Gruppen** — welche Gems wirklich
   miteinander verlinkt sind und welche allein stecken, dazu die Sockel
   in der Schreibweise des Spiels („B-B W").

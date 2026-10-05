@@ -129,6 +129,20 @@ class Node:
     effects: dict[int, tuple[str, ...]] = field(default_factory=dict)
     # Startknoten einer Klasse: Durch fremde Starts führt kein Weg.
     class_start: bool = False
+    # Lage im Baum (§4.60.4): Gruppe, Kreisbahn, Platz darauf und die
+    # daraus gerechneten Koordinaten. ``proxy``: Platzhalter für Knoten
+    # eines Cluster-Jewels — im Bild nicht gezeichnet.
+    group: int = -1
+    orbit: int = 0
+    orbit_index: int = 0
+    x: float = 0.0
+    y: float = 0.0
+    proxy: bool = False
+    # Mittelpunkt der Gruppe und Halbmesser der Bahn — für die Bögen
+    # zwischen Nachbarn auf derselben Bahn (§tree_graph).
+    gx: float = 0.0
+    gy: float = 0.0
+    radius: float = 0.0
 
 
 @dataclass
@@ -168,6 +182,45 @@ def _lines(stats) -> tuple[str, ...]:
                  for zeile in stats or () if str(zeile).strip())
 
 
+# Winkel der Plätze auf einer Kreisbahn, in Grad. Bahnen mit 16 Plätzen
+# nach GGGs README (3.17.0), Bahnen mit 40 Plätzen wie in Path of
+# Building: alle 10° plus die 45°-Lagen. Gegen den echten Baum geprüft
+# (2026-10-05): Verbundene Knoten derselben Gruppe auf Bahn 2/3 und 4
+# liegen damit in 106 von 198 Fällen exakt auf einem Strahl, mit
+# gleichmäßigen 9°-Schritten nur in 40 — dort häufen sich 3°-Versätze.
+_WINKEL_16 = (0, 30, 45, 60, 90, 120, 135, 150, 180, 210, 225, 240, 270, 300, 315, 330)
+_WINKEL_40 = (0, 10, 20, 30, 40, 45, 50, 60, 70, 80, 90, 100, 110, 120, 130, 135, 140, 150,
+              160, 170, 180, 190, 200, 210, 220, 225, 230, 240, 250, 260, 270, 280, 290, 300,
+              310, 315, 320, 330, 340, 350)
+
+
+def orbit_angle(plaetze: int, index: int) -> float:
+    """Winkel in Grad, im Uhrzeigersinn von oben."""
+    if plaetze == 16 and 0 <= index < 16:
+        return float(_WINKEL_16[index])
+    if plaetze == 40 and 0 <= index < 40:
+        return float(_WINKEL_40[index])
+    return 360.0 * index / plaetze if plaetze else 0.0
+
+
+def _place(nodes: dict, roh: dict) -> None:
+    import math
+    konst = roh.get("constants") or {}
+    plaetze = konst.get("skillsPerOrbit") or []
+    radien = konst.get("orbitRadii") or []
+    gruppen = roh.get("groups") or {}
+    for knoten in nodes.values():
+        gruppe = gruppen.get(str(knoten.group))
+        if gruppe is None or knoten.orbit >= len(radien):
+            continue
+        winkel = math.radians(orbit_angle(plaetze[knoten.orbit] if knoten.orbit < len(plaetze)
+                                          else 0, knoten.orbit_index))
+        knoten.gx, knoten.gy = float(gruppe.get("x", 0)), float(gruppe.get("y", 0))
+        knoten.radius = float(radien[knoten.orbit])
+        knoten.x = knoten.gx + math.sin(winkel) * knoten.radius
+        knoten.y = knoten.gy - math.cos(winkel) * knoten.radius
+
+
 def parse_tree(roh: dict, ruthless: bool) -> Tree:
     nodes: dict[int, Node] = {}
     for schluessel, eintrag in (roh.get("nodes") or {}).items():
@@ -179,7 +232,10 @@ def parse_tree(roh: dict, ruthless: bool) -> Tree:
             ascendancy=str(eintrag.get("ascendancyName") or ""),
             effects={int(e["effect"]): _lines(e.get("stats"))
                      for e in eintrag.get("masteryEffects") or () if "effect" in e},
-            class_start="classStartIndex" in eintrag)
+            class_start="classStartIndex" in eintrag,
+            group=int(eintrag.get("group", -1)), orbit=int(eintrag.get("orbit", 0)),
+            orbit_index=int(eintrag.get("orbitIndex", 0)),
+            proxy=bool(eintrag.get("isProxy")))
     # Verbindungen in beide Richtungen: "out" und "in" nennen jede Kante nur
     # einmal, gegangen werden darf sie in beide.
     for schluessel, eintrag in (roh.get("nodes") or {}).items():
@@ -191,6 +247,7 @@ def parse_tree(roh: dict, ruthless: bool) -> Tree:
             if b in nodes:
                 nodes[a].neighbours.add(b)
                 nodes[b].neighbours.add(a)
+    _place(nodes, roh)
     start_je_index = {int(e["classStartIndex"]): int(k)
                       for k, e in (roh.get("nodes") or {}).items()
                       if str(k).isdigit() and "classStartIndex" in e}

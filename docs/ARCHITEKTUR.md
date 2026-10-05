@@ -8541,6 +8541,58 @@ zuerst (Alphabet und Rang fielen im Testfall zusammen; die Farbe stand
 auch in den Knotennamen), beide Tests verschärft. Nativ am echten Baum
 angesehen; den hellen Modus nur gerechnet, nicht angesehen.
 
+#### 4.60.4 Der Baum als Bild (`ui/tree_graph.py`)
+
+Peter, 2026-10-05: "Wieviel Aufwand ist es, den Skilltree analog zum
+Original in einem weiteren Tab graphisch darzustellen?" Drei Stufen
+vorgeschlagen (schematisch; Original-Grafiken; Konfigurationen per
+Klick). Entschieden: Stufe 1 jetzt, Stufe 3 danach, "Stufe 2 benötigen
+wir vorerst nicht" — den Original-Look liefert "Open in planner".
+
+**Lage der Knoten** (`passive_tree._place`): Gruppe (x, y) plus
+Kreisbahn (Halbmesser aus `constants.orbitRadii`) und Platz darauf;
+Winkel im Uhrzeigersinn von oben, `x = gx + sin·r`, `y = gy − cos·r`.
+**Die Winkel sind nicht gleichmäßig verteilt:** Bahnen mit 16 Plätzen
+nach GGGs README (3.17.0: 0, 30, 45, 60, …), Bahnen mit 40 Plätzen wie
+in Path of Building (alle 10° plus die 45°-Lagen). Für die 40er-Bahn
+nennt GGG nichts; geprüft am echten Baum: Verbundene Knoten derselben
+Gruppe auf Bahn 2/3 und 4 liegen mit der PoB-Tabelle in 106 von 198
+Fällen exakt auf einem Strahl, mit gleichmäßigen 9°-Schritten nur in
+40 — dort häufen sich 3°-Versätze. Verbindungen auf derselben Bahn
+derselben Gruppe sind Bögen (kürzerer Weg; Qt misst gegen den
+Uhrzeigersinn ab 3 Uhr), alle anderen Geraden.
+
+**Gezeichnet** wird, was einer Gruppe angehört, außer Aszendenz (liegt
+in den Daten weit außerhalb, steht im Overview) und Cluster-
+Platzhaltern. Zuerst hieß die Regel "nicht bei 0/0" — ein Knoten genau
+im Ursprung wäre weggefallen (im Test gesehen). Echter Baum: 2387
+Knoten, 2347 Verbindungen, Aufbau 0,02 s; die Linien liegen in vier
+Pfaden statt tausender Einzelstücke, Linien und Ränder sind kosmetisch
+(gleich dick bei jedem Zoom).
+
+**Zustände:** nicht vergeben hohl und gedämpft (#7a7a7a dunkel 3,2:1,
+#8a8a8a hell 3,5:1 — Grafik braucht 3:1), vergeben gefüllt in der
+Themenfarbe, gewählte Masteries in der Farbe ihres Effekts, Start und
+Keystones gold. Beim Vergleich (Konfiguration gegen den aktuellen Baum,
+Verlaufseintrag gegen den davor) grün nehmen, rot zurücknehmen und
+**Unverändertes neutral hell** — mit Themenfarben las sich ein grüner
+Schutz-Knoten wie ein neuer (nativ gesehen, dieselbe Lehre wie im
+Respec-Text §4.60.3). Ringe: Reichweite (nicht beim Vergleich) und
+Suchtreffer (jedes Wort muss passen).
+
+**Einpassen erst, wenn das Bild sichtbar ist:** Beim Wechsel der Auswahl
+ist der Reiter oft verdeckt und hat keine Größe; `fitInView` zoomte dann
+ins Leere (nativ gesehen). Der Dialog merkt sich "einpassen fällig" und
+holt es beim Wechsel auf den Reiter nach.
+
+Getestet: `tests/test_passive_tree.py` (Winkeltabellen, Lage aus
+Gruppe/Bahn/Platz, Bogen gegen Gerade, keine Aszendenz, eigener Start
+vergeben, Reichweite und Suche, Vergleich mit allen Zuständen, keine
+Ringe beim Vergleich, der Reiter folgt der Auswahl samt Legende).
+Gegenprobe mit 9 Sabotagen; zwei hielten zuerst (Reichweite und Suche
+mit harmlosen Testfällen), beide Tests verschärft. Nativ am echten Baum
+angesehen.
+
 ---
 
 ## 8. Entwicklungsstand

@@ -694,3 +694,94 @@ def test_the_theme_heading_itself_is_coloured(baum) -> None:
     html_text = tree_report.to_html(tree_report.tree_blocks(
         _eintrag([10, 11, 12]), baum, character_class="Juggernaut"), dark=True)
     assert f"color:{tree_report.colour(pt.DEFENCE, True)};'>🛡 Defence" in html_text
+
+
+# --- Der Baum als Bild (§4.60.4) ----------------------------------------- #
+
+def test_orbit_angles_follow_ggg_and_pob() -> None:
+    assert pt.orbit_angle(16, 2) == 45 and pt.orbit_angle(16, 4) == 90
+    assert pt.orbit_angle(40, 5) == 45 and pt.orbit_angle(40, 6) == 50
+    assert pt.orbit_angle(6, 1) == 60 and pt.orbit_angle(72, 36) == 180
+
+
+def test_nodes_get_their_place_from_group_orbit_and_index() -> None:
+    roh = {"constants": {"skillsPerOrbit": [1, 6, 16], "orbitRadii": [0, 82, 162]},
+           "groups": {"7": {"x": 1000, "y": 500}},
+           "nodes": {"1": _knoten("A", group=7, orbit=2, orbitIndex=4),      # 90°: rechts
+                     "2": _knoten("B", group=7, orbit=1, orbitIndex=0),      # 0°: oben
+                     "3": _knoten("C", group=7, orbit=0, orbitIndex=0)}}
+    b = pt.parse_tree(roh, False)
+    assert (round(b.nodes[1].x), round(b.nodes[1].y)) == (1162, 500)
+    assert (round(b.nodes[2].x), round(b.nodes[2].y)) == (1000, 418)
+    assert (b.nodes[3].x, b.nodes[3].y) == (1000, 500)
+
+
+def _bild_baum():
+    roh = {"constants": {"skillsPerOrbit": [1, 6, 16], "orbitRadii": [0, 82, 162]},
+           "classes": [{"name": "Scion", "ascendancies": []},
+                       {"name": "Marauder", "ascendancies": []}],
+           "groups": {"1": {"x": 0, "y": 0}, "2": {"x": 2000, "y": 0}},
+           "nodes": {"1": _knoten("MARAUDER", (10,), classStartIndex=1, group=1),
+                     "10": _knoten("Life", (11, 12), group=2, orbit=2, orbitIndex=0,
+                                   stats=["+10 to maximum Life"]),
+                     "11": _knoten("Life", (), group=2, orbit=2, orbitIndex=4,
+                                   stats=["+10 to maximum Life"]),
+                     "12": _knoten("Fire Heart", (), isNotable=True, group=2, orbit=1,
+                                   orbitIndex=3, stats=["+20% to Fire Resistance"]),
+                     "50": _knoten("Asc", (), ascendancyName="Juggernaut", group=1,
+                                   orbit=1)}}
+    return pt.parse_tree(roh, True)
+
+
+def test_the_graph_draws_nodes_arcs_and_states(qapp) -> None:
+    from PySide6.QtGui import QPainterPath
+    from poe_view.ui.tree_graph import ALLOCATED, DIM, TreeGraph
+    g = TreeGraph()
+    b = _bild_baum()
+    g.set_tree(b)
+    assert set(g._items) == {1, 10, 11, 12}                # keine Aszendenz
+    bogen = next(w for a, c, w in g._edges if {a, c} == {10, 11})
+    gerade = next(w for a, c, w in g._edges if {a, c} == {10, 12})
+    assert bogen.elementCount() > 2                        # Bogen: mehrere Kurvenstücke
+    assert gerade.elementCount() == 2 and isinstance(gerade, QPainterPath)
+    g.show_tree({"hashes": [10]}, "Marauder")
+    assert g.states[10] == ALLOCATED and g.states[1] == ALLOCATED   # eigener Start
+    assert g.states[11] == DIM and not g.comparing
+    assert g.reach_ids == {12}
+    g.highlight("fire res")
+    assert g.search_ids == {12}
+
+
+def test_the_graph_compares_two_trees(qapp) -> None:
+    from poe_view.ui.tree_graph import ALLOCATE, ALLOCATED, REFUND, TreeGraph
+    g = TreeGraph()
+    g.set_tree(_bild_baum())
+    g.show_tree({"hashes": [10, 12]}, "Marauder", compare_to={"hashes": [10, 11]})
+    assert (g.states[10], g.states[12], g.states[11]) == (ALLOCATED, ALLOCATE, REFUND)
+    assert g.comparing and g.reach_ids == set()
+
+
+def test_the_window_has_a_tree_tab_that_follows_the_selection(qapp, baum) -> None:
+    from poe_view.ui.passive_tree_dialog import CONFIG, CURRENT
+    dialog, zeichen, _ = _fenster(qapp, baum)
+    assert dialog.tabs.tabText(3) == "Tree"
+    th.save_config(zeichen, "WitchOfPeter", "Fire", {"hashes": [10, 11, 14, 15]}, level=30,
+                   ruthless=True, source="link")
+    dialog.refresh((CONFIG, "Fire"))
+    assert dialog.graph.comparing and not dialog.graph_reach.isEnabled()
+    assert "green: allocate" in dialog.graph_legend.text().lower()
+    dialog.refresh((CURRENT, None))
+    assert not dialog.graph.comparing and dialog.graph_reach.isEnabled()
+    dialog.close()
+
+
+def test_no_reach_rings_while_comparing_and_search_needs_every_word(qapp) -> None:
+    """Beim Vergleich lenkten Reichweiten-Ringe von Grün/Rot ab; die Suche
+    verlangt jedes Wort ("fire life" passt auf keinen Knoten)."""
+    from poe_view.ui.tree_graph import TreeGraph
+    g = TreeGraph()
+    g.set_tree(_bild_baum())
+    g.show_tree({"hashes": [10]}, "Marauder", compare_to={"hashes": [10, 11]})
+    assert g.reach_ids == set()             # ohne Vergleich wäre Fire Heart drin
+    g.highlight("fire life")
+    assert g.search_ids == set()
