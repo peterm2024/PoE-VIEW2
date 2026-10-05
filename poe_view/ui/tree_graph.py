@@ -22,9 +22,10 @@ from __future__ import annotations
 
 import math
 
-from PySide6.QtCore import QRectF, Qt
+from PySide6.QtCore import QPoint, QRectF, Qt
 from PySide6.QtGui import QBrush, QColor, QPainter, QPainterPath, QPalette, QPen
-from PySide6.QtWidgets import QGraphicsEllipseItem, QGraphicsScene, QGraphicsView
+from PySide6.QtWidgets import (QGraphicsEllipseItem, QGraphicsScene, QGraphicsView,
+                               QToolTip)
 
 from poe_view.services import passive_tree
 from poe_view.services.passive_tree import (JEWEL, KEYSTONE, MASTERY, NOTABLE, START, Node,
@@ -73,6 +74,8 @@ class TreeGraph(QGraphicsView):
         # Verschoben wird mit der Maus — Rollbalken nähmen nur Platz.
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setMouseTracking(True)
+        self.viewport().setMouseTracking(True)
         self._mastery_theme: dict[int, str] = {}
         self.comparing = False
         self._tree: Tree | None = None
@@ -106,7 +109,9 @@ class TreeGraph(QGraphicsView):
             r = _RADIUS.get(n.kind, _KLEIN)
             item = QGraphicsEllipseItem(QRectF(n.x - r, n.y - r, 2 * r, 2 * r))
             item.setZValue(2)
-            item.setToolTip(self._tooltip(n))
+            # Kein Qt-Tooltip: der käme erst nach rund 0,7 s (Peter: "Der
+            # Tooltip erscheint im Skilltree zu langsam") — ``mouseMoveEvent``
+            # zeigt ihn sofort.
             item.setData(0, n.id)
             szene.addItem(item)
             self._items[n.id] = item
@@ -271,7 +276,6 @@ class TreeGraph(QGraphicsView):
                                                _cosmetic(farben[art], breite))
                 ring.setZValue(3)
                 ring.setAcceptHoverEvents(False)
-                ring.setToolTip(self._items[h].toolTip())
                 self._rings.append(ring)
 
     # --- Ansicht -------------------------------------------------------- #
@@ -287,6 +291,26 @@ class TreeGraph(QGraphicsView):
         rand = max(rechteck.width(), rechteck.height()) * 0.15 + 400
         self.fitInView(rechteck.adjusted(-rand, -rand, rand, rand),
                        Qt.AspectRatioMode.KeepAspectRatio)
+
+    def tooltip_at(self, punkt: QPoint) -> str | None:
+        """Der Text zum Knoten unter ``punkt`` (Viewport-Koordinaten)."""
+        if self._tree is None:
+            return None
+        for item in self.items(punkt):
+            h = item.data(0)
+            if isinstance(h, int) and h in self._tree.nodes:
+                return self._tooltip(self._tree.nodes[h])
+        return None
+
+    def mouseMoveEvent(self, event) -> None:  # noqa: N802 (Qt-API)
+        super().mouseMoveEvent(event)
+        if event.buttons():                       # beim Verschieben kein Tooltip
+            return
+        text = self.tooltip_at(event.position().toPoint())
+        if text:
+            QToolTip.showText(event.globalPosition().toPoint(), text, self.viewport())
+        else:
+            QToolTip.hideText()
 
     def wheelEvent(self, event) -> None:  # noqa: N802 (Qt-API)
         faktor = 1.2 ** (event.angleDelta().y() / 120)

@@ -251,6 +251,13 @@ def parse_tree(roh: dict, ruthless: bool) -> Tree:
     start_je_index = {int(e["classStartIndex"]): int(k)
                       for k, e in (roh.get("nodes") or {}).items()
                       if str(k).isdigit() and "classStartIndex" in e}
+    # Die Startknoten heißen in GGGs Daten MARAUDER, WITCH … — und der
+    # Scion "SEVEN" (Peter, 2026-10-05: "Wie kommst du auf Seven?"). Für
+    # die Anzeige der Klassenname aus "classes".
+    klassen = roh.get("classes") or ()
+    for index, knoten_id in start_je_index.items():
+        if 0 <= index < len(klassen) and knoten_id in nodes:
+            nodes[knoten_id].name = str(klassen[index].get("name") or nodes[knoten_id].name)
     starts: dict[str, int] = {}
     ids: dict[str, tuple[int, int]] = {}
     for index, klasse in enumerate(roh.get("classes") or ()):

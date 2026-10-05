@@ -785,3 +785,24 @@ def test_no_reach_rings_while_comparing_and_search_needs_every_word(qapp) -> Non
     assert g.reach_ids == set()             # ohne Vergleich wäre Fire Heart drin
     g.highlight("fire life")
     assert g.search_ids == set()
+
+
+def test_class_starts_show_the_class_name_not_ggg_internal_names() -> None:
+    """GGG nennt den Scion-Start "SEVEN" (Peter: "Wie kommst du auf Seven?")."""
+    roh = {"classes": [{"name": "Scion", "ascendancies": []}],
+           "nodes": {"58833": _knoten("SEVEN", (), classStartIndex=0)}}
+    assert pt.parse_tree(roh, False).nodes[58833].name == "Scion"
+
+
+def test_the_tooltip_comes_from_the_node_under_the_mouse(qapp) -> None:
+    """Sofort statt nach Qts Verzögerung — der Text kommt aus ``tooltip_at``."""
+    from poe_view.ui.tree_graph import TreeGraph
+    g = TreeGraph()
+    g.resize(400, 400)
+    g.set_tree(_bild_baum())
+    g.show_tree({"hashes": [10]}, "Marauder")
+    g.centerOn(g._items[12].sceneBoundingRect().center())
+    mitte = g.mapFromScene(g._items[12].sceneBoundingRect().center())
+    assert g.tooltip_at(mitte).startswith("Fire Heart (Notable)")
+    assert g.items(mitte) and all(not i.toolTip() for i in g.items(mitte))
+    assert g.tooltip_at(mitte + type(mitte)(150, 150)) is None

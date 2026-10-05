@@ -8580,6 +8580,8 @@ Schutz-Knoten wie ein neuer (nativ gesehen, dieselbe Lehre wie im
 Respec-Text §4.60.3). Ringe: Reichweite (nicht beim Vergleich) und
 Suchtreffer (jedes Wort muss passen).
 
+**Tooltip sofort, Klassennamen statt GGG-Namen** (Peter, 2026-10-05: "Der Tooltip erscheint im Skilltree zu langsam" und "Wie kommst du auf Seven?"): Qts Tooltip kommt erst nach rund 0,7 s; das Bild setzt keine Item-Tooltips, sondern zeigt den Text in `mouseMoveEvent` sofort (`tooltip_at`), beim Verschieben nicht. Die Startknoten heißen in GGGs Daten MARAUDER, WITCH … und der Scion "SEVEN"; `parse_tree` setzt den Klassennamen aus `classes` ein.
+
 **Einpassen erst, wenn das Bild sichtbar ist:** Beim Wechsel der Auswahl
 ist der Reiter oft verdeckt und hat keine Größe; `fitInView` zoomte dann
 ins Leere (nativ gesehen). Der Dialog merkt sich "einpassen fällig" und
