@@ -4106,6 +4106,75 @@ eine Zeitüberschreitung statt Erfolg, ein Fehler tötet den Schreiber
 nicht und steht im Log), `tests/test_main_window_helpers.py` (Anforderung
 statt Schreibvorgang beobachtet, Konto-Trennung, Überschreibschutz).
 
+#### 4.37.1 Der Hänger blieb — GIL am Stück und die Speicherbereinigung
+
+Peter, 2026-10-06: "Am meisten stört mich, dass das Programm beim Abruf
+der Daten kurz freezed und man mitten in der Bewegung verharren muss."
+Der Hintergrund-Thread von §4.37 hatte das Problem nur halb gelöst. Im
+Hauptfenster ohne Login auf einer Kopie von Peters Daten (59.220 Items,
+77 MB) gemessen, längste Pausen der Ereignisschleife bei eintreffenden
+Fächern: **600–730 ms**. Drei Ursachen, alle gemessen:
+
+1. **`json.dumps` über 77 MB** läuft in C und gibt die GIL in der
+   ganzen Zeit nicht ab — 380 ms, in denen der GUI-Thread nichts tun
+   konnte, obwohl er "nur" auf einen anderen Thread wartete. Dasselbe
+   gilt für das Zusammenkleben eines 77-MB-Texts und sein Umwandeln in
+   Bytes. Die Annahme in §4.37 ("gibt die GIL alle paar Millisekunden
+   ab") stimmt nur für Python-Code, nicht für einen langen C-Aufruf.
+2. **Die Speicherbereinigung.** Nach dem Laden bewacht Python 1,9 Mio.
+   Objekte; eine volle Bereinigung dauert 470 ms und hält JEDEN Thread
+   an. Sie springt von selbst an, sobald genug neue Objekte entstanden
+   sind — beim Speichern und beim Verarbeiten eines Abrufs entstehen
+   viele.
+3. Jedes Speichern verwandelte **alle 59.220 Items** neu in Text (1,6 s
+   Rechenarbeit im Hintergrund), obwohl sich je Abruf ein Fach ändert.
+
+**Lösung:**
+
+- `Snapshot.write` arbeitet **Fach für Fach mit Gedächtnis**
+  (`data_cache._FRAGMENTE`): Je Datei und Fach merkt es sich die
+  Item-Liste und ihren JSON-Text. Ist die Liste beim nächsten Speichern
+  dasselbe Objekt (Listen werden nur als Ganzes ersetzt, §4.37), kommt
+  der Text aus dem Gedächtnis. Gelöschte Fächer fallen beim nächsten
+  Speichern heraus. Preis: Arbeitsspeicher in Höhe der Datei (bei Peter
+  rund 75 MB).
+- `atomic_json.write_chunks` schreibt die Stücke nacheinander in die
+  Nebendatei, statt 77 MB erst zusammenzukleben. Die Datei ist
+  zeichengenau dieselbe wie vorher (Test).
+- `MainWindow._freeze_heap` nach dem Laden und bei jedem Speichern:
+  `gc.collect(0)` für die jüngste Generation, dann `gc.freeze()` — alles
+  Lebende wandert in eine Generation, die die Bereinigung nicht mehr
+  durchsucht. Freigegeben wird trotzdem per Referenzzählung; nur Kreise
+  unter Eingefrorenen räumt niemand mehr auf (vertretbar: Items bilden
+  keine Kreise).
+
+**Zwei Fallen beim Einfrieren**, beide nur im laufenden Programm
+sichtbar, in der Einzelprobe nicht: Ein volles `gc.collect()` davor und
+`gc.get_freeze_count()` danach kosteten **je rund 90 ms** — die Zählung
+geht jedes eingefrorene Objekt einzeln durch. Beides hätte bei jedem
+Abruf genau die Pause eingebaut, die das Einfrieren vermeiden soll. Der
+Profiler half dabei wenig: Er schrieb die 90 ms erst dem falschen
+Schritt zu und mischte unter Python 3.14 auch den Schreib-Thread ins
+Profil; erst Einzelmessungen der Schritte im Slot fanden die Zählung.
+
+**Ergebnis**, gleiche Probe vorher/nachher (sechs Fächer im Abstand von
+1,5 s): längste Pausen 729, 658, 648, 615 … ms → 194, 107, 51, 37, 35
+… ms. Der erste Abruf nach dem Start bleibt länger, weil dann das
+Gedächtnis aufgebaut wird. Ein Speichervorgang dauert im Hintergrund
+0,06 s statt 1,5 s.
+
+Nebenbei: `data_cache.load` räumt liegengebliebene Nebendateien auf
+(`atomic_json.remove_stale_temp`; nur mit Prozess-ID im Namen und älter
+als eine Stunde, weil eine zweite Instanz gerade schreiben könnte). Bei
+Peter lagen vier davon, zusammen 310 MB.
+
+Getestet: zeichengleicher Text, unveränderte Fächer werden nicht neu
+umgewandelt, ein neues schon, das Gedächtnis vergisst gelöschte Fächer,
+Schreiben in Stücken samt Fehler mittendrin, Aufräumen der Reste
+(Alter, Muster, beim Laden), Einfrieren nach dem Laden und beim
+Speichern, kein volles `collect`, keine Zählung. Gegenprobe mit 11
+Sabotagen, alle gefangen.
+
 ---
 
 ### 4.38 Item-Textexport für Path of Building

@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -35,6 +36,13 @@ from poe_view.services.csv_export import sanitize_filename
 log = logging.getLogger(__name__)
 
 _CACHE_FILE = config.APP_DATA_DIR / "data-cache.json"
+
+# Gedächtnis von ``Snapshot.write`` (siehe dort): je Datei und Fach die
+# zuletzt geschriebene Item-Liste und ihr JSON-Text. Kostet so viel
+# Arbeitsspeicher wie die Datei groß ist (bei Peter rund 75 MB) — der
+# Preis dafür, sie nicht bei jedem Abruf neu zu erzeugen.
+_FRAGMENTE: dict[Path, dict[tuple[str, str], tuple[list, str]]] = {}
+_FRAGMENTE_LOCK = threading.Lock()
 
 
 def path_for(account_name: str) -> Path:
@@ -118,21 +126,58 @@ class Snapshot:
     def write(self) -> None:
         """Der teure Teil. Fehler werden nur geloggt (kein Crash) — ein
         fehlgeschlagenes Speichern darf die Anwendung nicht abbrechen,
-        die bisherige Datei bleibt dabei unangetastet (``atomic_json``)."""
-        payload = dict(self.payload)
-        payload["items_by_league"] = {
-            league: {sid: [i.model_dump(mode="json") for i in items]
-                     for sid, items in stashes.items()}
-            for league, stashes in self.items_by_league.items()
-        }
+        die bisherige Datei bleibt dabei unangetastet (``atomic_json``).
+
+        **Fach für Fach, mit Gedächtnis** (Peter, 2026-10-06: "Am meisten
+        stört mich, dass das Programm beim Abruf der Daten kurz freezed").
+        Auch im Hintergrund-Thread hielt das Schreiben die Oberfläche an:
+        ``json.dumps`` über 77 MB läuft in C, ohne die GIL abzugeben —
+        gemessen 380 ms am Stück, in denen der GUI-Thread nichts tun
+        konnte. Jetzt wird jedes Fach einzeln in Text verwandelt, und ein
+        Fach, dessen Item-Liste seit dem letzten Speichern dieselbe ist
+        (dasselbe Objekt, siehe Klassen-Docstring: Listen werden nur als
+        Ganzes ersetzt), bringt seinen Text aus ``_FRAGMENTE`` mit. Im
+        Betrieb ändert sich je Abruf ein Fach — umgewandelt wird nur das."""
         try:
+            stuecke = self._chunks()
             config.ensure_dirs()
             # Nicht direkt in die Zieldatei: siehe atomic_json — bei 76 MB
             # dauert das lange genug, dass ein Absturz oder eine zweite
-            # Instanz eine abgeschnittene Datei hinterlassen könnte.
-            atomic_json.write_json(self.path, payload)
+            # Instanz eine abgeschnittene Datei hinterlassen könnte. In
+            # Stücken: 77 MB zu EINEM Text zusammenzukleben hielte die GIL
+            # wieder am Stück (siehe atomic_json.write_chunks).
+            atomic_json.write_chunks(self.path, stuecke)
         except OSError:
             log.exception("Daten-Cache: Schreiben fehlgeschlagen")
+
+    def _text(self) -> str:
+        """Der ganze Text am Stück (für Tests und Vergleiche)."""
+        return "".join(self._chunks())
+
+    def _chunks(self) -> list[str]:
+        """Dasselbe JSON wie ``json.dumps`` über alles — in Stücken."""
+        kopf = json.dumps(self.payload)
+        stuecke = [kopf[:-1], ", " if self.payload else "", '"items_by_league": {']
+        with _FRAGMENTE_LOCK:
+            alt = _FRAGMENTE.get(self.path, {})
+            neu: dict[tuple[str, str], tuple[list, str]] = {}
+            for n, (league, stashes) in enumerate(self.items_by_league.items()):
+                stuecke.append(f"{', ' if n else ''}{json.dumps(league)}: {{")
+                for m, (sid, items) in enumerate(stashes.items()):
+                    gemerkt = alt.get((league, sid))
+                    if gemerkt is not None and gemerkt[0] is items:
+                        text = gemerkt[1]
+                    else:
+                        text = json.dumps([i.model_dump(mode="json") for i in items])
+                    neu[(league, sid)] = (items, text)
+                    stuecke.append(f"{', ' if m else ''}{json.dumps(sid)}: ")
+                    stuecke.append(text)
+                stuecke.append("}")
+            # Nur behalten, was in diesem Stand vorkommt — sonst hielte das
+            # Gedächtnis gelöschte Fächer samt ihrer Items am Leben.
+            _FRAGMENTE[self.path] = neu
+        stuecke.append("}}")
+        return stuecke
 
 
 def save(data: CachedData, path: Path | None = None) -> None:
@@ -153,6 +198,7 @@ def load(path: Path | None = None) -> CachedData | None:
 
     ``path`` fehlt → ``_CACHE_FILE`` (siehe Modul-Docstring, Konto-Trennung)."""
     path = path if path is not None else _CACHE_FILE
+    atomic_json.remove_stale_temp(path)
     if not path.is_file():
         return None
     try:

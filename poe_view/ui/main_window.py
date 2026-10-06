@@ -7,6 +7,7 @@ Die UI löst API-Arbeit ausschließlich über ``worker.submit(Job)`` aus.
 
 from __future__ import annotations
 
+import gc
 import html
 import json
 import logging
@@ -936,6 +937,33 @@ class MainWindow(QMainWindow):
         log.info("Daten-Cache geladen: %d Charaktere, %d Liga(en), Umfang %d",
                  len(cached.characters), len(cached.stash_trees),
                  self._persisted_scale)
+        self._freeze_heap()
+
+    @staticmethod
+    def _freeze_heap() -> None:
+        """Die geladenen Daten aus Pythons Speicherbereinigung herausnehmen.
+
+        Peter, 2026-10-06: "Am meisten stört mich, dass das Programm beim
+        Abruf der Daten kurz freezed und man mitten in der Bewegung
+        verharren muss." Gemessen an seinem Cache (59.220 Items): Python
+        bewacht danach 1,9 Mio. Objekte, eine volle Bereinigung dauert
+        470 ms und hält dabei JEDEN Thread an — sie springt von selbst an,
+        sobald genug neue Objekte entstanden sind, also gern beim
+        Verarbeiten eines Abrufs. ``gc.freeze()`` schiebt alles Lebende in
+        eine Generation, die die Bereinigung nicht mehr durchsucht: danach
+        0 ms. Freigegeben wird trotzdem, sobald niemand mehr ein Objekt
+        hält (Referenzzählung); nur Kreise unter eingefrorenen Objekten
+        räumt niemand mehr auf — darum vorher die jüngste Generation.
+
+        Zwei Fallen, beide im laufenden Programm gemessen, nicht in der
+        Einzelprobe: Ein VOLLES ``gc.collect()`` davor und
+        ``gc.get_freeze_count()`` danach kosteten je rund 90 ms — die
+        Zählung geht jedes eingefrorene Objekt einzeln durch. Beides hätte
+        die Pause, die das Einfrieren vermeiden soll, bei jedem Abruf
+        wieder eingeführt. ``gc.collect(0)`` und ``gc.freeze()`` selbst
+        kosten 0,0 ms."""
+        gc.collect(0)
+        gc.freeze()
 
     # Wie viele Items je Scheibe in die Sammlung wandern. 4000 kosten
     # gemessen rund 0,09 s — kurz genug, dass zwischen zwei Scheiben
@@ -1224,6 +1252,7 @@ class MainWindow(QMainWindow):
         # Freezes beim Updaten der Fächer zu umgehen?"
         self._cache_writer.request(
             data_cache.Snapshot(data, data_cache.path_for(self._account_name)))
+        self._freeze_heap()
         # Bewusst SOFORT gesetzt, nicht erst nach dem tatsächlichen
         # Schreiben: Der Überschreibschutz oben soll den Umfang des
         # zuletzt BEABSICHTIGTEN Stands kennen, sonst hielte er nach einem

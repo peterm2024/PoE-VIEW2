@@ -2055,3 +2055,32 @@ aber nur innerhalb des Tests behoben.
 **Lehre:** Für Hover-Tests `QTest.mouseMove` meiden oder vorher sicher
 woandershin bewegen; ein Test, der nur im Gesamtlauf fällt, deutet auf
 Zustand, den ein anderer Test hinterlässt.
+
+## 97. Der Hänger beim Abruf blieb trotz Hintergrund-Thread — C-Aufrufe halten die GIL, die Speicherbereinigung hält alle an
+
+**Symptom.** Peter, 2026-10-06: "Am meisten stört mich, dass das
+Programm beim Abruf der Daten kurz freezed". Seit 2026-08-12 schrieb ein
+eigener Thread den Daten-Cache (ARCHITEKTUR §4.37) — trotzdem standen
+bei jedem eintreffenden Fach 600–730 ms Stillstand im Hauptfenster.
+
+**Ursache.** Ein Hintergrund-Thread hilft in Python nur bei Python-Code,
+der die GIL regelmäßig abgibt. `json.dumps` über 77 MB läuft in C und
+hält sie 380 ms am Stück. Dazu kam die automatische Speicherbereinigung:
+Mit 1,9 Mio. bewachten Objekten dauert ein voller Lauf 470 ms und hält
+jeden Thread an.
+
+**Lösung.** ARCHITEKTUR §4.37.1: Fach für Fach mit Gedächtnis
+speichern, in Stücken schreiben, nach dem Laden und bei jedem Speichern
+`gc.collect(0)` + `gc.freeze()`.
+
+**Zwei Folgefallen.** `gc.get_freeze_count()` zählt die eingefrorenen
+Objekte einzeln (87 ms bei 1,9 Mio.), ein volles `gc.collect()` vor dem
+Einfrieren kostete im laufenden Programm ebenfalls rund 90 ms — beides
+hätte die Pause bei jedem Abruf wieder eingebaut. Gefunden erst durch
+Einzelmessung im Slot; die Einzelprobe ohne Programm zeigte 0 ms, und
+der Profiler ordnete die Zeit dem falschen Schritt zu.
+
+**Lehre:** "Läuft im Hintergrund" heißt in Python nicht "hält die
+Oberfläche nicht an". Gemessen wird die Pause der Ereignisschleife im
+echten Programm, nicht die Dauer im Thread — und jede Maßnahme
+gegen Pausen wird selbst im Slot nachgemessen.

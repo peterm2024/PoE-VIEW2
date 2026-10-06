@@ -11862,3 +11862,48 @@ def test_the_tree_window_opens_with_the_right_tree_and_saves_changes(qapp) -> No
         dialog.close()
     finally:
         _schliessen(win)
+
+
+
+def test_loaded_data_is_frozen_out_of_the_garbage_collector(
+        qapp, monkeypatch, tmp_path) -> None:
+    """Peter, 2026-10-06: "Am meisten stört mich, dass das Programm beim
+    Abruf der Daten kurz freezed". Mit seinem Cache bewacht Python 1,9 Mio.
+    Objekte, eine volle Bereinigung hält alles 470 ms an. Eingefroren wird
+    nach dem Laden und bei jedem Speichern (dann sind neue Daten da)."""
+    import gc
+    from poe_view.services import cache_writer, data_cache
+    cache_path = tmp_path / "cache.json"
+    monkeypatch.setattr(data_cache, "_CACHE_FILE", cache_path)
+    data = data_cache.CachedData()
+    data.account_name = "Someone#1234"
+    data.characters = [make_char("A", "Standard")]
+    data_cache.save(data)
+    monkeypatch.setattr(cache_writer.CacheWriter, "request", lambda self, snapshot: None)
+    eingefroren = []
+    echt = gc.freeze
+    monkeypatch.setattr(gc, "freeze", lambda: (eingefroren.append(1), echt())[1])
+
+    win = MainWindow()
+    assert win._account_name == "Someone#1234" and len(eingefroren) == 1   # nach dem Laden
+    win._persist_cache()
+    assert len(eingefroren) == 2                                           # beim Speichern
+    gc.unfreeze()                     # dem Testprozess nichts dauerhaft einfrieren
+    win.worker.stop()
+    win.worker.wait(5000)
+
+
+def test_freezing_is_cheap() -> None:
+    """Nur die jüngste Generation wird vorher aufgeräumt, und gezählt wird
+    nichts: Ein volles ``gc.collect()`` und ``gc.get_freeze_count()``
+    kosteten im laufenden Programm je rund 90 ms — die Pause, die das
+    Einfrieren vermeiden soll."""
+    import gc
+    from unittest import mock
+    zaehlen = AssertionError("zählt 1,9 Mio. Objekte")
+    with mock.patch.object(gc, "collect") as aufraeumen, \
+            mock.patch.object(gc, "freeze") as einfrieren, \
+            mock.patch.object(gc, "get_freeze_count", side_effect=zaehlen):
+        MainWindow._freeze_heap()
+    aufraeumen.assert_called_once_with(0)
+    einfrieren.assert_called_once_with()

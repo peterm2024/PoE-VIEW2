@@ -178,3 +178,69 @@ def test_save_and_load_with_explicit_path_ignore_the_legacy_cache_file(
 
     assert account_path.exists()
     assert not (tmp_path / "legacy.json").exists()  # nicht angelegt/veraendert
+
+
+# --- Fach für Fach mit Gedächtnis (Peter, 2026-10-06: Hänger beim Abruf) ---
+
+def _bestand():
+    data = data_cache.CachedData()
+    data.account_name = "PeterM"
+    data.characters = [Character.model_validate(
+        {"name": "A", "class": "Witch", "level": 90, "league": "Standard"})]
+    data.items_by_league = {
+        "Standard": {"t1": [Item.model_validate({"typeLine": "Chaos Orb", "stackSize": 3})],
+                     "t2": [Item.model_validate({"typeLine": "Exalted Orb"})]},
+        "Allflame": {"t9": []}}
+    return data
+
+
+def _alt_ganz(data, path):
+    """So entstand der Text bis 2026-10-06: json.dumps über alles."""
+    import json
+    payload = dict(data_cache.Snapshot(data, path).payload)
+    payload["items_by_league"] = {
+        league: {sid: [i.model_dump(mode="json") for i in items]
+                 for sid, items in stashes.items()}
+        for league, stashes in data.items_by_league.items()}
+    return json.dumps(payload)
+
+
+def test_the_piecewise_text_equals_one_big_dumps(tmp_path) -> None:
+    """Zeichengenau dasselbe wie vorher — nicht nur gleich geladen."""
+    data, path = _bestand(), tmp_path / "c.json"
+    assert data_cache.Snapshot(data, path)._text() == _alt_ganz(data, path)
+    leer = data_cache.CachedData()
+    leer.items_by_league = {}
+    assert data_cache.Snapshot(leer, path)._text() == _alt_ganz(leer, path)
+
+
+def test_unchanged_tabs_are_not_converted_again(tmp_path, monkeypatch) -> None:
+    """Der Kern: Je Abruf ändert sich EIN Fach — nur das wird neu in Text
+    verwandelt. Gemessen an Peters Cache: 1,5 s → 0,06 s je Speichern."""
+    data, path = _bestand(), tmp_path / "c.json"
+    data_cache.Snapshot(data, path).write()
+    umgewandelt = []
+    echt = Item.model_dump
+
+    def zaehlen(self, *args, **kwargs):
+        umgewandelt.append(self.typeLine)
+        return echt(self, *args, **kwargs)
+    monkeypatch.setattr(Item, "model_dump", zaehlen)
+    data_cache.Snapshot(data, path).write()
+    assert umgewandelt == []                                    # nichts geändert
+    # Ein Fach neu abgerufen: die Liste wird als Ganzes ersetzt.
+    data.items_by_league["Standard"]["t2"] = [Item.model_validate({"typeLine": "Divine Orb"})]
+    data_cache.Snapshot(data, path).write()
+    assert len(umgewandelt) == 1
+    geladen = data_cache.load(path)
+    assert [i.typeLine for i in geladen.items_by_league["Standard"]["t2"]] == ["Divine Orb"]
+    assert [i.typeLine for i in geladen.items_by_league["Standard"]["t1"]] == ["Chaos Orb"]
+
+
+def test_the_memory_forgets_removed_tabs(tmp_path) -> None:
+    """Sonst hielte das Gedächtnis gelöschte Fächer samt Items am Leben."""
+    data, path = _bestand(), tmp_path / "c.json"
+    data_cache.Snapshot(data, path).write()
+    del data.items_by_league["Standard"]["t2"]
+    data_cache.Snapshot(data, path).write()
+    assert set(data_cache._FRAGMENTE[path]) == {("Standard", "t1"), ("Allflame", "t9")}

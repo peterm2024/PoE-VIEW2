@@ -15,6 +15,41 @@ from poe_view.services import atomic_json, data_cache, price_cache
 from poe_view.api.ninja import PriceIndex
 
 
+def _kaputt_beim_schreiben(monkeypatch) -> None:
+    """Die Nebendatei entsteht, das Schreiben bricht nach ein paar Zeichen
+    ab — wie bei voller Platte."""
+    echt = atomic_json.Path.open
+
+    class Kaputt:
+        def __init__(self, datei):
+            self.datei = datei
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            self.datei.close()
+
+        def write(self, text):
+            self.datei.write(text[:3])
+            raise OSError("Platte voll")
+
+    def oeffnen(self, mode="r", *args, **kwargs):
+        datei = echt(self, mode, *args, **kwargs)
+        return Kaputt(datei) if "w" in mode else datei     # Lesen bleibt heil
+    monkeypatch.setattr("pathlib.Path.open", oeffnen)
+
+
+def _spion(monkeypatch, gesehen: list) -> None:
+    """Merkt sich jede geöffnete Datei."""
+    echt = atomic_json.Path.open
+
+    def spy(self, *args, **kwargs):
+        gesehen.append(self.name)
+        return echt(self, *args, **kwargs)
+    monkeypatch.setattr("pathlib.Path.open", spy)
+
+
 def test_write_json_replaces_the_file_completely(tmp_path) -> None:
     path = tmp_path / "cache.json"
     atomic_json.write_json(path, {"a": 1})
@@ -31,10 +66,7 @@ def test_a_failed_write_leaves_the_previous_file_intact(tmp_path, monkeypatch) -
     path = tmp_path / "cache.json"
     atomic_json.write_json(path, {"wertvoll": "bleibt"})
 
-    def boom(self, *args, **kwargs):
-        raise OSError("Platte voll")
-
-    monkeypatch.setattr("pathlib.Path.write_text", boom)
+    _kaputt_beim_schreiben(monkeypatch)
     with pytest.raises(OSError):
         atomic_json.write_json(path, {"neu": "geht schief"})
 
@@ -46,10 +78,7 @@ def test_a_failed_write_leaves_no_leftover_temp_file(tmp_path, monkeypatch) -> N
     52-MB-Leichen an."""
     path = tmp_path / "cache.json"
 
-    def boom(self, *args, **kwargs):
-        raise OSError("Platte voll")
-
-    monkeypatch.setattr("pathlib.Path.write_text", boom)
+    _kaputt_beim_schreiben(monkeypatch)
     with pytest.raises(OSError):
         atomic_json.write_json(path, {"neu": "geht schief"})
 
@@ -61,13 +90,7 @@ def test_two_writers_do_not_share_a_temp_file(tmp_path, monkeypatch) -> None:
     Instanzen schreiben nicht in dieselbe Zwischendatei, sonst wäre das
     Problem nur verschoben."""
     seen = []
-    real = atomic_json.Path.write_text
-
-    def spy(self, *args, **kwargs):
-        seen.append(self.name)
-        return real(self, *args, **kwargs)
-
-    monkeypatch.setattr("pathlib.Path.write_text", spy)
+    _spion(monkeypatch, seen)
     monkeypatch.setattr(atomic_json.os, "getpid", lambda: 4711)
     atomic_json.write_json(tmp_path / "cache.json", {"a": 1})
 
@@ -138,13 +161,7 @@ def test_only_the_replace_is_retried_not_the_serialising(tmp_path, monkeypatch) 
     verlaengern."""
     path = tmp_path / "cache.json"
     schreibvorgaenge = []
-    real_write = atomic_json.Path.write_text
     real_replace = atomic_json.os.replace
-
-    def spy(self, *args, **kwargs):
-        schreibvorgaenge.append(self.name)
-        return real_write(self, *args, **kwargs)
-
     versuche = []
 
     def stoerrisch(src, dst):
@@ -153,7 +170,7 @@ def test_only_the_replace_is_retried_not_the_serialising(tmp_path, monkeypatch) 
             raise PermissionError("blockiert")
         return real_replace(src, dst)
 
-    monkeypatch.setattr("pathlib.Path.write_text", spy)
+    _spion(monkeypatch, schreibvorgaenge)
     monkeypatch.setattr(atomic_json.os, "replace", stoerrisch)
     monkeypatch.setattr(atomic_json.time, "sleep", lambda _s: None)
 
@@ -167,8 +184,9 @@ def test_the_data_cache_writes_through_the_atomic_path(tmp_path, monkeypatch) ->
     """Verdrahtung statt nur Baustein: Die Funktion nützt nichts, wenn
     der Daten-Cache weiter direkt schreibt."""
     calls = []
-    monkeypatch.setattr(atomic_json, "write_json",
-                        lambda path, payload: calls.append(path))
+    # write_chunks: der Cache schreibt seinen JSON-Text Fach für Fach.
+    monkeypatch.setattr(atomic_json, "write_chunks",
+                        lambda path, chunks: calls.append(path))
 
     data_cache.save(data_cache.CachedData(), tmp_path / "data.json")
 
@@ -184,3 +202,57 @@ def test_the_price_cache_writes_through_the_atomic_path(tmp_path, monkeypatch) -
     price_cache.save("Standard", PriceIndex())
 
     assert calls == [tmp_path / "prices.json"]
+
+
+def test_chunks_are_written_one_after_another(tmp_path) -> None:
+    path = tmp_path / "cache.json"
+    atomic_json.write_chunks(path, iter(['{"a": ', "[1, 2]", ', "b": "\u00e4"}']))
+    assert json.loads(path.read_text(encoding="utf-8")) == {"a": [1, 2], "b": "\u00e4"}
+
+
+def test_a_chunk_that_fails_midway_leaves_the_previous_file(tmp_path) -> None:
+    """Der Daten-Cache erzeugt seine Stücke erst beim Schreiben — ein
+    Fehler mittendrin darf nichts Halbes hinterlassen."""
+    path = tmp_path / "cache.json"
+    atomic_json.write_json(path, {"wertvoll": "bleibt"})
+
+    def stuecke():
+        yield '{"neu": '
+        raise OSError("Platte voll")
+    with pytest.raises(OSError):
+        atomic_json.write_chunks(path, stuecke())
+    assert json.loads(path.read_text(encoding="utf-8")) == {"wertvoll": "bleibt"}
+    assert list(tmp_path.iterdir()) == [path]
+
+
+def test_stale_temp_files_are_removed_but_fresh_ones_stay(tmp_path) -> None:
+    """Am 2026-10-06 lagen bei Peter vier Reste von je 77 MB neben dem
+    Cache. Eine frische Nebendatei kann einer zweiten Instanz gehören, die
+    gerade schreibt — die bleibt."""
+    import os
+    import time
+    path = tmp_path / "data-cache-X.json"
+    path.write_text("{}", encoding="utf-8")
+    alt = tmp_path / "data-cache-X.json.2572.tmp"
+    frisch = tmp_path / "data-cache-X.json.9999.tmp"
+    fremd = tmp_path / "data-cache-X.json.backup.tmp"     # kein Prozess-Muster
+    for f in (alt, frisch, fremd):
+        f.write_text("x", encoding="utf-8")
+    vor_zwei_stunden = time.time() - 7200
+    os.utime(alt, (vor_zwei_stunden, vor_zwei_stunden))
+    os.utime(fremd, (vor_zwei_stunden, vor_zwei_stunden))
+    assert atomic_json.remove_stale_temp(path) == 1
+    assert sorted(f.name for f in tmp_path.iterdir()) == sorted(
+        [path.name, frisch.name, fremd.name])
+
+
+def test_loading_the_data_cache_cleans_up_stale_temp_files(tmp_path) -> None:
+    import os
+    import time
+    path = tmp_path / "data.json"
+    data_cache.save(data_cache.CachedData(), path)
+    rest = tmp_path / "data.json.123.tmp"
+    rest.write_text("x", encoding="utf-8")
+    os.utime(rest, (time.time() - 7200, time.time() - 7200))
+    assert data_cache.load(path) is not None
+    assert not rest.exists()

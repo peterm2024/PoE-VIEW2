@@ -50,6 +50,7 @@ import json
 import logging
 import os
 import time
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
@@ -74,9 +75,25 @@ def write_json(path: Path, payload: Any) -> None:
     daran nichts ändern: Ein fehlgeschlagenes Speichern darf die
     Anwendung nicht abbrechen, aber es darf auch nicht so aussehen, als
     wäre es gelungen."""
+    write_text(path, json.dumps(payload))
+
+
+def write_text(path: Path, text: str) -> None:
+    """Wie ``write_json``, für schon fertigen JSON-Text."""
+    write_chunks(path, (text,))
+
+
+def write_chunks(path: Path, chunks: Iterable[str]) -> None:
+    """Wie ``write_text``, der Text kommt aber in Stücken. Der Daten-Cache
+    (``data_cache.Snapshot.write``) schreibt so Fach für Fach, statt 77 MB
+    erst zu einem Text zusammenzukleben: Zusammenkleben und Umwandeln in
+    Bytes laufen in C und halten dabei die GIL — die Oberfläche stand
+    solange (gemessen 2026-10-06)."""
     tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
     try:
-        tmp.write_text(json.dumps(payload), encoding="utf-8")
+        with tmp.open("w", encoding="utf-8") as datei:
+            for stueck in chunks:
+                datei.write(stueck)
         _replace_with_retries(tmp, path)
     except OSError:
         # Nur die Nebendatei aufräumen — an der eigentlichen Datei wurde
@@ -85,6 +102,28 @@ def write_json(path: Path, payload: Any) -> None:
         # verdecken, deshalb missing_ok und kein zweiter try/except.
         tmp.unlink(missing_ok=True)
         raise
+
+
+def remove_stale_temp(path: Path, min_age_s: float = 3600.0) -> int:
+    """Liegengebliebene Nebendateien von ``path`` löschen — Reste eines
+    Schreibvorgangs, den ein Absturz oder ein hart beendeter Prozess
+    abgebrochen hat. Bei Peter lagen am 2026-10-06 vier davon neben dem
+    Daten-Cache, zusammen 310 MB (aus September und Oktober). Nur Dateien,
+    die älter sind als ``min_age_s``: Eine zweite Instanz könnte gerade
+    schreiben. Gibt die Zahl der gelöschten Dateien zurück."""
+    weg = 0
+    grenze = time.time() - min_age_s
+    for rest in path.parent.glob(f"{path.name}.*.tmp"):
+        mitte = rest.name[len(path.name) + 1:-len(".tmp")]
+        try:
+            if mitte.isdigit() and rest.stat().st_mtime < grenze:
+                rest.unlink()
+                weg += 1
+        except OSError:
+            log.debug("Nebendatei %s ließ sich nicht löschen", rest.name)
+    if weg:
+        log.info("%d liegengebliebene Nebendatei(en) von %s gelöscht", weg, path.name)
+    return weg
 
 
 def _replace_with_retries(tmp: Path, path: Path) -> None:

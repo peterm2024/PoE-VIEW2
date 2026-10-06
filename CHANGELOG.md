@@ -6,6 +6,16 @@ nach [SemVer](https://semver.org/lang/de/).
 
 ## [Unveröffentlicht]
 
+### Behoben
+
+- **Kurzer Hänger bei jedem Abruf:** Das Fenster stand bei jedem
+  eintreffenden Fach rund 0,6–0,7 s still (gemessen an einem Bestand
+  von 59.000 Items). Jetzt sind es meist um 35 ms. Gespeichert wird nur
+  noch das geänderte Fach neu, in Stücken, und die geladenen Daten sind
+  von Pythons Speicherbereinigung ausgenommen. Nebenbei räumt das
+  Programm liegengebliebene Zwischendateien des Caches auf (bei einem
+  Tester 310 MB).
+
 ## [0.23.0] - 2026-10-05
 
 ### Neu
