@@ -260,8 +260,18 @@ def is_gain(line: str) -> bool:
     return treffer is not None and treffer.group(1) == "+"
 
 
-def respec_blocks(tree: Tree, current: dict, target: dict, *, title: str) -> list[Block]:
-    """Der Umbau als Arbeitsliste für den Baum im Spiel (§4.60.1)."""
+def gold_text(umbau, level: int | None) -> str:
+    """" · about 11,256 gold at level 81" — leer ohne Level (§4.60.7)."""
+    gold = umbau.gold(level) if level else None
+    if gold is None or not (umbau.points or umbau.ascendancy_points):
+        return ""
+    return f" · about {gold:,} gold at level {level}"
+
+
+def respec_blocks(tree: Tree, current: dict, target: dict, *, title: str,
+                  level: int | None = None) -> list[Block]:
+    """Der Umbau als Arbeitsliste für den Baum im Spiel (§4.60.1); mit
+    ``level`` samt Goldpreis (§4.60.7)."""
     umbau = passive_tree.compare(tree, current, target)
     kopf = Block(title, level=2)
     if not (umbau.refund or umbau.allocate or umbau.masteries):
@@ -270,7 +280,11 @@ def respec_blocks(tree: Tree, current: dict, target: dict, *, title: str) -> lis
     kopf.paragraphs.append(
         f"{umbau.points} {'point' if umbau.points == 1 else 'points'} to refund in the main tree"
         + (" (plus ascendancy changes)" if any(n.ascendancy for n in
-                                               umbau.refund + umbau.allocate) else ""))
+                                               umbau.refund + umbau.allocate) else "")
+        + gold_text(umbau, level)
+        # Was ein Mastery-Wechsel kostet, steht in keiner belegten Quelle.
+        + (" (mastery changes not priced)" if umbau.masteries and gold_text(umbau, level)
+           else ""))
     bloecke = [kopf]
 
     def knoten(n) -> Line:

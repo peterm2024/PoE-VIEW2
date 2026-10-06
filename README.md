@@ -214,7 +214,8 @@ the tree you are in.
   the current tree as one, or import a link from the official tree
   planner or Path of Building. For each configuration you get the
   respec as a to-do list against your current tree (refund, allocate,
-  change mastery, number of points) and what it gains and loses in
+  change mastery, number of points and the gold it costs at your level)
+  and what it gains and loses in
   stats. *Open in planner* shows any of them in the official planner.
   Everything is grouped by theme — defence, minions, offence, utility —
   with colours and symbols, a **totals** summary on top (all allocated

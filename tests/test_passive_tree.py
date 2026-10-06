@@ -1294,3 +1294,68 @@ def test_typing_an_id_in_the_search_field_jumps_to_the_node(qapp) -> None:
     assert g.search_ids == {12}
     assert (mitte - g._items[12].sceneBoundingRect().center()).manhattanLength() < 20
     dialog.close()
+
+
+# --- Goldpreis eines Respecs (§4.60.7) -------------------------------------- #
+
+def test_the_gold_table_is_gggs_per_level_table() -> None:
+    """Aus GGGs Spieldaten über Path of Building; Level 90 = 8.450, wie in
+    Spielerberichten. Steigt nie, ein Wert je Level 1–100."""
+    assert len(pt.GOLD_RESPEC) == 100
+    assert pt.respec_gold_per_point(1) == 4
+    assert pt.respec_gold_per_point(81) == 3752
+    assert pt.respec_gold_per_point(90) == 8450
+    assert pt.respec_gold_per_point(100) == 29119
+    assert all(a <= b for a, b in zip(pt.GOLD_RESPEC, pt.GOLD_RESPEC[1:]))
+    assert pt.respec_gold_per_point(0) is None and pt.respec_gold_per_point(101) is None
+
+
+def test_respec_gold_counts_ascendancy_five_times(baum) -> None:
+    """So rechnet PoB: Hauptbaum zum Tabellenpreis, Aszendenz fünffach,
+    der Aszendenz-Start zählt nicht."""
+    vorher = {"hashes": [10, 11, 12, 14, 15, 50, 51]}
+    nachher = {"hashes": [10, 11, 12]}           # 50 ist der Aszendenz-Start
+    umbau = pt.compare(baum, vorher, nachher)
+    assert (umbau.points, umbau.ascendancy_points) == (2, 1)
+    assert umbau.gold(90) == 2 * 8450 + 5 * 8450
+    assert umbau.gold(0) is None
+
+
+def test_the_respec_list_names_the_gold_at_the_current_level(baum) -> None:
+    from poe_view.ui import tree_report
+    vorher, nachher = {"hashes": [10, 11, 12, 14, 15]}, {"hashes": [10, 11, 12]}
+    kopf = tree_report.respec_blocks(baum, vorher, nachher, title="R", level=90)[0]
+    assert kopf.paragraphs == ["2 points to refund in the main tree · about 16,900 gold "
+                               "at level 90"]
+    ohne = tree_report.respec_blocks(baum, vorher, nachher, title="R")[0]
+    assert ohne.paragraphs == ["2 points to refund in the main tree"]
+    # Nur nehmen kostet nichts — dann kein Goldpreis.
+    nur_nehmen = tree_report.respec_blocks(baum, nachher, vorher, title="R", level=90)[0]
+    assert "gold" not in nur_nehmen.paragraphs[0]
+    # Ein Mastery-Wechsel ist nicht belegt bepreist — das steht dabei.
+    mit = tree_report.respec_blocks(
+        baum, {"hashes": [10, 11, 12, 14, 15, 40], "mastery_effects": {"40": 777}},
+        {"hashes": [10, 11, 12, 40], "mastery_effects": {"40": 778}}, title="R", level=90)[0]
+    assert mit.paragraphs[0].endswith("(mastery changes not priced)")
+
+
+def test_the_window_shows_the_gold_for_configurations_and_drafts(qapp, baum) -> None:
+    """Level 30 im Fenster: 54 Gold je Punkt. Der Verlauf bekommt keinen
+    Preis — der Umbau liegt in der Vergangenheit."""
+    from poe_view.ui.passive_tree_dialog import CONFIG, HISTORY
+    dialog, zeichen, _ = _fenster(qapp, baum)
+    th.save_config(zeichen, "WitchOfPeter", "Kurz", {"hashes": [10]}, level=30,
+                   ruthless=True, source="edited")
+    dialog.refresh((CONFIG, "Kurz"))
+    assert "about 108 gold at level 30" in dialog.respec_text.toPlainText()
+    # Ein Verlaufsschritt MIT Rücknahme — sonst gäbe es ohnehin keinen Preis.
+    th.record(zeichen, "WitchOfPeter", {"hashes": [10]}, level=30, ruthless=True,
+              now=datetime(2026, 10, 4, 20, 0))
+    dialog.refresh((HISTORY, 2))
+    assert "2 points to refund" in dialog.respec_text.toPlainText()
+    assert "gold" not in dialog.respec_text.toPlainText()
+    dialog.refresh((CONFIG, "Kurz"))
+    dialog.graph.node_clicked.emit(10, True)          # Entwurf: alles zurück (aktuell ist jetzt [10])
+    assert "respec: 1 point to refund · about 54 gold at level 30" in dialog.hint.text()
+    dialog._draft = None
+    dialog.close()

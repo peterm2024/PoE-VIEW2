@@ -665,6 +665,29 @@ def stat_delta(tree: Tree, current: dict, target: dict) -> list[str]:
     return _by_wording(ergebnis)
 
 
+# Gold je zurückgenommenem Punkt, nach Charakterlevel (Index = Level − 1).
+# Aus GGGs Spieldaten (VillageBalancePerLevelShared.dat, Spalte
+# GoldRespec), übernommen aus Path of Building (src/Data/Misc.lua,
+# data.goldRespecPrices), 2026-10-06. Gegengeprüft: Level 90 = 8.450, wie
+# in mehreren Spielerberichten. Aszendenz-Knoten kosten das Fünffache
+# (so rechnet PoB, TreeTab.lua). Peter, 2026-10-06: "Goldpreis eines
+# Respecs bekommen wir bestimmt über die Patchnotes oder aus dem Netz".
+# Ob Ruthless dieselbe Tabelle nutzt, ist nicht belegt.
+GOLD_RESPEC = (
+    4, 4, 4, 5, 5, 6, 6, 7, 8, 8, 9, 11, 12, 14, 15, 17, 18, 20, 22, 24,
+    26, 28, 31, 34, 36, 39, 43, 46, 50, 54, 58, 62, 67, 72, 83, 90, 97, 105, 113, 121,
+    130, 151, 161, 171, 182, 209, 222, 237, 252, 267, 295, 313, 333, 354, 376, 427, 452, 482,
+    513, 546, 618, 656, 694, 733, 773, 816, 860, 892, 921, 1055, 1203, 1365, 1541, 1748, 1974,
+    2221, 2490, 2770, 3073, 3400, 3752, 4131, 4538, 4976, 5444, 5967, 6526, 7126, 7766, 8450,
+    9851, 11380, 13042, 14847, 16801, 18914, 21192, 23647, 26286, 29119)
+ASCENDANCY_GOLD_FACTOR = 5
+
+
+def respec_gold_per_point(level: int) -> int | None:
+    """Gold je Punkt im Hauptbaum auf ``level``; ``None`` außerhalb 1–100."""
+    return GOLD_RESPEC[level - 1] if 1 <= level <= len(GOLD_RESPEC) else None
+
+
 @dataclass
 class Respec:
     refund: list[Node]          # zurücknehmen
@@ -677,6 +700,18 @@ class Respec:
         """Rückzunehmende Punkte im normalen Baum — das, was Gold kostet.
         Aszendenz-Wechsel laufen über das Labyrinth, nicht über Gold."""
         return sum(1 for n in self.refund if not n.ascendancy)
+
+    @property
+    def ascendancy_points(self) -> int:
+        return sum(1 for n in self.refund if n.ascendancy)   # Starts nimmt compare() nie auf
+
+    def gold(self, level: int) -> int | None:
+        """Was das Zurücknehmen auf ``level`` kostet (§4.60.7) — Hauptbaum
+        zum Tabellenpreis, Aszendenz fünffach. ``None`` ohne gültiges Level."""
+        preis = respec_gold_per_point(level)
+        if preis is None:
+            return None
+        return self.points * preis + self.ascendancy_points * preis * ASCENDANCY_GOLD_FACTOR
 
 
 def compare(tree: Tree, current: dict, target: dict) -> Respec:

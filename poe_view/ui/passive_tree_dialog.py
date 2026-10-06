@@ -264,7 +264,8 @@ class PassiveTreeDialog(QDialog):
         if art in (CONFIG, DRAFT) and aktuell:
             return tree_report.respec_blocks(
                 self._tree, aktuell.get("passives") or {}, eintrag.get("passives") or {},
-                title=f"Respec: current tree → {schluessel if art == CONFIG else 'unsaved changes'}")
+                title=f"Respec: current tree → {schluessel if art == CONFIG else 'unsaved changes'}",
+                level=aktuell.get("level"))     # umgebaut wird jetzt, auf dem heutigen Level
         if art == HISTORY and schluessel > 0:
             verlauf = tree_history.history(self._characters, self._name)
             return tree_report.respec_blocks(
@@ -430,12 +431,13 @@ class PassiveTreeDialog(QDialog):
         if ist_entwurf and self._tree is not None:
             aktuell = tree_history.current(self._characters, self._name) or {}
             vorher = aktuell.get("passives") or {}
-            umbau_punkte = passive_tree.compare(self._tree, vorher, self._draft).points
+            umbau = passive_tree.compare(self._tree, vorher, self._draft)
+            umbau_punkte = umbau.points
             teile.append(
                 f"Unsaved changes: {passive_tree.main_points(self._tree, self._draft)} points "
                 f"(current tree {passive_tree.main_points(self._tree, vorher)}) · "
                 f"respec: {umbau_punkte} {'point' if umbau_punkte == 1 else 'points'} "
-                "to refund")
+                "to refund" + tree_report.gold_text(umbau, aktuell.get("level")))
         if self._status:
             teile.append(self._status)
         self.hint.setText(" · ".join(teile))

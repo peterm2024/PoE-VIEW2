@@ -6,6 +6,15 @@ nach [SemVer](https://semver.org/lang/de/).
 
 ## [Unveröffentlicht]
 
+### Neu
+
+- **Goldpreis eines Respecs:** Die Respec-Liste einer Konfiguration und
+  die Zeile unter einem Entwurf nennen, was das Zurücknehmen auf dem
+  aktuellen Level kostet („3 points to refund · about 11,256 gold at
+  level 81"). Tabelle aus GGGs Spieldaten (über Path of Building),
+  Aszendenz-Punkte kosten das Fünffache. Was ein Mastery-Wechsel kostet,
+  ist nicht belegt und steht dann dabei.
+
 ### Behoben
 
 - **Kurzer Hänger bei jedem Abruf:** Das Fenster stand bei jedem

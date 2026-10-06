@@ -8807,6 +8807,35 @@ und Überschreiben, Undo, Fragen vor Verlust, Klick gegen Ziehen.
 Gegenprobe mit 14 Sabotagen; eine hielt zuerst (Masteries begehbar —
 die Test-Mastery hatte keine Verbindung), Test verschärft.
 
+
+#### 4.60.7 Was ein Respec an Gold kostet
+
+Peter, 2026-10-06: "Goldpreis eines Respecs bekommen wir bestimmt über
+die Patchnotes oder aus dem Netz". Die Patchnotes nennen keine Zahlen,
+Artikel nur einen Richtwert (Level 90: 8.450 Gold je Punkt). Die Tabelle
+stammt aus GGGs Spieldaten (`VillageBalancePerLevelShared.dat`, Spalte
+`GoldRespec`), übernommen aus Path of Building (`src/Data/Misc.lua`,
+`data.goldRespecPrices`) — ein Wert je Charakterlevel 1–100, maschinell
+gegen PoB abgeglichen, der Richtwert stimmt. Das PoE-Wiki blockt
+automatische Abrufe.
+
+**Regel** (wie PoB, `TreeTab.lua`): Gold = Punkte im Hauptbaum ×
+Tabellenpreis + Aszendenz-Punkte × Tabellenpreis × 5, nach dem Level
+zum Zeitpunkt des Zurücknehmens. Das Fenster rechnet deshalb bei
+Konfigurationen und Entwürfen mit dem **heutigen** Level und zeigt beim
+Verlauf keinen Preis (der Umbau liegt zurück). Nur Nehmen kostet nichts.
+
+**Nicht belegt** und deshalb so gekennzeichnet: was der Wechsel eines
+Mastery-Effekts kostet ("mastery changes not priced"), und ob Ruthless
+dieselbe Tabelle nutzt. Beides ließe sich mit einem einzigen Respec im
+Spiel nachprüfen.
+
+Getestet: Tabelle (Länge, Stichproben, steigt nie), Aszendenz fünffach,
+Text mit und ohne Level, kein Preis ohne Rücknahme, Hinweis bei
+Mastery-Wechsel, Fenster: Konfiguration und Entwurf mit Preis, Verlauf
+ohne. Gegenprobe mit 7 Sabotagen; zwei hielten zuerst — eine prüfte
+eine überflüssige Bedingung (entfernt), eine einen Verlaufsschritt ohne
+Rücknahme (Test verschärft).
 ---
 
 ## 8. Entwicklungsstand
