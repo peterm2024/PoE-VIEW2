@@ -14,8 +14,9 @@ Versionsstand in `CHANGELOG.md` und in `poe_view/__init__.py`
    umbenennen, neuen leeren `[Unveröffentlicht]`-Abschnitt darüber anlegen.
 3. Tests ausführen (`pytest`). Nur bei vollständig grüner Suite weitermachen.
 4. Hat sich die Oberfläche seit dem letzten Release sichtbar geändert:
-   `python tools/make_screenshots.py`. Das Skript erzeugt die drei
-   README-Bilder neu, aus erfundenen Daten und ohne Zugriff auf den
+   `python tools/make_screenshots.py`. Das Skript erzeugt die sechs
+   README-Bilder neu (das Baum-Bild lädt dafür GGGs Baumdaten, braucht
+   also Netz), aus erfundenen Daten und ohne Zugriff auf den
    echten Cache — von Hand aufgenommene Bilder sind dagegen genau der
    Weg, auf dem versehentlich echte Konto- oder Charakternamen in die
    README geraten. Es läuft NICHT headless, das Fenster erscheint kurz.

@@ -740,6 +740,81 @@ def _zone_table(win: MainWindow) -> None:
     dlg.close()
 
 
+def _demo_tree(tree, klasse: str, punkte: int, bevorzugt: tuple[str, ...]) -> dict:
+    """Ein erfundener Baum: von Start aus immer das nächste Notable, dessen
+    Thema in ``bevorzugt`` steht, samt Weg — bis ``punkte`` vergeben sind.
+    Deterministisch (die Wegsuche geht sortiert vor), also bei jedem Lauf
+    dasselbe Bild."""
+    from poe_view.services import passive_tree as pt
+    passives: dict = {"hashes": []}
+    while pt.main_points(tree, passives) < punkte:
+        have = pt.allocated(passives)
+        kandidaten = [r for r in pt.within_reach(tree, have, max_points=6, class_name=klasse)
+                      if r.node.kind == pt.NOTABLE and pt.theme(r.node) in bevorzugt]
+        if not kandidaten:
+            break
+        neu = pt.edit_allocate(tree, passives, kandidaten[0].node.id, klasse)
+        if neu is None:
+            break
+        passives = neu
+    return passives
+
+
+def _passive_tree(win: MainWindow) -> None:
+    """Das Fenster "Passive tree", Reiter "Tree" (§4.60.4–6): eine erfundene
+    Occultist-Skillung und eine Konfiguration "Max fire res", deren Umbau
+    grün/rot im Bild steht — das zeigt, was der offizielle Planer nicht
+    kann.
+
+    Die Baumdaten sind GGGs öffentlicher Export; sie werden frisch in den
+    Wegwerf-Ordner geladen (§_TMP), nicht aus Peters Datenordner gelesen."""
+    from poe_view.services import passive_tree as pt
+    from poe_view.services import tree_history as th
+    from poe_view.ui.passive_tree_dialog import CONFIG, PassiveTreeDialog
+    app = QApplication.instance()
+    if not pt.fetch():
+        print("  passive-tree.png übersprungen: GGGs Baumdaten ließen sich nicht laden")
+        return
+    tree = pt.load(False)
+    klasse = "Occultist"
+    aktuell = _demo_tree(tree, klasse, 78, (pt.MINIONS, pt.DEFENCE))
+    # Umbau: einen kleinen Ast zurück (3–5 Punkte), dafür die nächsten
+    # Notables mit Feuerresistenz — so viel, wie die Punkte hergeben.
+    have = pt.allocated(aktuell)
+    ast = max((n for n in sorted(have) if tree.nodes[n].kind in (pt.NOTABLE, pt.SMALL)
+               and 3 <= len(pt.cut_off(tree, have, n, klasse)) <= 5),
+              key=lambda n: len(pt.cut_off(tree, have, n, klasse)))
+    umbau = pt.edit_refund(tree, aktuell, ast, klasse)
+    while True:
+        frei = pt.main_points(tree, aktuell) - pt.main_points(tree, umbau)
+        wege = [(len(w), n.id) for n in tree.nodes.values()
+                if n.kind == pt.NOTABLE and any("Fire Resistance" in z for z in n.stats)
+                for w in [pt.path_to(tree, pt.allocated(umbau), n.id, klasse)]
+                if w and len(w) <= frei]
+        if not wege:
+            break
+        umbau = pt.edit_allocate(tree, umbau, min(wege)[1], klasse)
+    zeichen: dict = {}
+    th.record(zeichen, "Demo Witch", aktuell, level=88, ruthless=False)
+    th.save_config(zeichen, "Demo Witch", "Max fire res", umbau, level=88, ruthless=False,
+                   source="edited")
+    dlg = PassiveTreeDialog("Demo Witch", klasse, zeichen, tree, on_change=lambda: None,
+                            parent=win)
+    dlg.resize(1100, 760)
+    dlg.show()
+    dlg.refresh((CONFIG, "Max fire res"))
+    dlg.tabs.setCurrentIndex(3)
+    for _ in range(5):
+        app.processEvents()
+    dlg.graph.fit_allocated()
+    for _ in range(3):
+        app.processEvents()
+    path = OUT / "passive-tree.png"
+    assert dlg.grab().save(str(path)), "passive-tree.png ließ sich nicht schreiben"
+    print(f"  {path.relative_to(OUT.parent.parent)}  ({path.stat().st_size // 1024} KB)")
+    dlg.close()
+
+
 def main() -> None:
     app = QApplication.instance() or QApplication([])
     win = _build_window()
@@ -750,6 +825,7 @@ def main() -> None:
     _mod_album(win)
     _character_history(win)
     _zone_table(win)
+    _passive_tree(win)
     win.worker.stop()
     win.worker.wait(5000)
     app.processEvents()

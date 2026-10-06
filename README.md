@@ -74,6 +74,14 @@ delve depth 0, where nobody dies) from the depths below it.
 
 ![The zone table, with Bazaar and the Azurite Mine expanded into one row per monster level](docs/screenshots/zonen.png)
 
+Your passive tree, with named configurations for the fights that need
+them. Selected here: "Max fire res" — red is what you would refund,
+green what you would take instead, white stays. Click nodes to build a
+configuration right in the picture; the background shows whose part of
+the tree you are in.
+
+![The passive tree window with a configuration's respec drawn in green and red](docs/screenshots/passive-tree.png)
+
 ## Features
 
 ### Browsing and searching
