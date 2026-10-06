@@ -179,6 +179,8 @@ class TreeGraph(QGraphicsView):
         self._press: QPoint | None = None
         # Knoten unter der Maus (Ring, Zeiger) und seine Klick-Info.
         self.hovered: int | None = None
+        # Gewählte Mastery-Effekte des gezeigten Baums (für den Tooltip).
+        self.choices: dict[int, int] = {}
         self._hover_ring = None
         self._hover_info: tuple | None = None
 
@@ -247,7 +249,7 @@ class TreeGraph(QGraphicsView):
         szene.setSceneRect(rechteck)
 
     @staticmethod
-    def _tooltip(n: Node) -> str:
+    def _tooltip(n: Node, choices: dict[int, int] | None = None) -> str:
         art = {KEYSTONE: "Keystone", NOTABLE: "Notable", JEWEL: "Jewel socket",
                MASTERY: "Mastery", START: "Class start"}.get(n.kind, "")
         kopf = f"{n.name} ({art})" if art else n.name
@@ -255,7 +257,29 @@ class TreeGraph(QGraphicsView):
         # Qt-Tooltip in reinem Text bricht nicht selbst um; Wind Dancer
         # stand in einer Zeile über die halbe Bildschirmbreite.
         zeilen = [textwrap.fill(z, TOOLTIP_BREITE) for z in n.stats]
-        return "\n".join([kopf, f"ID {n.id}"] + zeilen)
+        return "\n".join([kopf, f"ID {n.id}"] + zeilen + TreeGraph._effect_lines(n, choices))
+
+    @staticmethod
+    def _effect_lines(n: Node, choices: dict[int, int] | None,
+                      wrap: bool = True) -> list[str]:
+        """Die Effekte einer Mastery, zum Planen (Peter, 2026-10-07: "Bei
+        den Masterys sollten wir zumindest hinschreiben was möglich ist
+        zum Planen"). ✓ der gewählte; ein Effekt, der schon in einer
+        anderen Mastery steckt, ist vergeben — jeder nur einmal je Baum
+        (gleichnamige Masteries teilen sich die Kennungen)."""
+        if n.kind != MASTERY or not n.effects:
+            return []
+        choices = choices or {}
+        anderswo = {e for k, e in choices.items() if k != n.id}
+        zeilen = ["Choose one:" if n.id not in choices else "Effects:"]
+        for effekt, werte in n.effects.items():
+            zeichen = "✓" if choices.get(n.id) == effekt else "•"
+            text = " / ".join(werte) or str(effekt)
+            if effekt in anderswo:
+                text += " (taken in another mastery)"
+            zeile = f"{zeichen} {text}"
+            zeilen.append(textwrap.fill(zeile, TOOLTIP_BREITE) if wrap else zeile)
+        return zeilen
 
     def copy_text(self, h: int, full: bool = False) -> str:
         """Was Strg+C kopiert: Name und ID; mit Umschalt alles mit Werten
@@ -263,7 +287,8 @@ class TreeGraph(QGraphicsView):
         n = self._tree.nodes[h]
         if not full:
             return f"{n.name} (ID {n.id})"
-        return "\n".join([f"{n.name} (ID {n.id})"] + list(n.stats))
+        return "\n".join([f"{n.name} (ID {n.id})"] + list(n.stats)
+                         + self._effect_lines(n, self.choices, wrap=False))
 
     @staticmethod
     def _edge_path(a: Node, b: Node) -> QPainterPath:
@@ -313,6 +338,7 @@ class TreeGraph(QGraphicsView):
         # Gewählte Masteries leuchten wie vergebene Knoten — in der Farbe
         # des gewählten Effekts (die Mastery selbst hat keine Werte).
         self._mastery_theme = {}
+        self.choices = passive_tree.mastery_choices(passives)
         for knoten_id, effekt in passive_tree.mastery_choices(passives).items():
             if knoten_id in self.states and self.states[knoten_id] == DIM:
                 self.states[knoten_id] = ALLOCATED
@@ -505,7 +531,7 @@ class TreeGraph(QGraphicsView):
         h = self.node_at(punkt)
         if h is None:
             return None
-        text = self._tooltip(self._tree.nodes[h])
+        text = self._tooltip(self._tree.nodes[h], self.choices)
         zusatz = self._click_info(h)[0]
         unten = [zusatz] if zusatz else []
         unten.append("Ctrl+C: copy name and ID · Ctrl+Shift+C: with stats")

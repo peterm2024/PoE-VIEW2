@@ -8806,6 +8806,17 @@ Qt schickt nur im aktiven Fenster nach ~0,7 s Ruhe ein eigenes
 blendete mit leerem Text unseren aus (Qt wartet dabei noch 0,3 s).
 `TreeGraph.viewportEvent` schluckt das Ereignis jetzt. FALLSTRICKE #98.
 
+**Mastery-Effekte im Tooltip** (Peter, 2026-10-07: "Bei den Masterys
+sollten wir zumindest hinschreiben was möglich ist zum Planen"): Der
+Tooltip einer Mastery listet ihre Effekte aus GGGs Daten — "Choose one:"
+solange keiner gewählt ist, sonst "Effects:" mit ✓ am gewählten. Ein
+Effekt, der schon in einer anderen Mastery des gezeigten Baums steckt,
+trägt "(taken in another mastery)" (jeder nur einmal je Baum;
+gleichnamige Masteries teilen sich die Kennungen, §4.60.6). Grundlage
+ist die Wahl im gezeigten Baum (`TreeGraph.choices`, aus `show_tree`) —
+beim Entwurf also die Wahl des Entwurfs. Strg+Umschalt+C kopiert die
+Liste ungebrochen mit. Gegenprobe mit 5 Sabotagen, alle gefangen.
+
 **ID in der Suche** (Peter: "Wir könnten noch die ID in die Suche
 integrieren"): Ein Suchwort passt, wenn es im Namen oder in den Werten
 vorkommt **oder genau die Knoten-ID ist** — nicht ein Teilstück davon

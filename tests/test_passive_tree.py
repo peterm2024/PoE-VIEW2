@@ -1428,3 +1428,28 @@ def test_qts_own_tooltip_event_does_not_erase_the_node_tooltip(qapp) -> None:
     assert QToolTip.isVisible()
     QToolTip.hideText()
     g.close()
+
+
+def test_a_mastery_tooltip_lists_its_effects_for_planning(qapp) -> None:
+    """Peter: "Bei den Masterys sollten wir zumindest hinschreiben was
+    möglich ist zum Planen." ✓ der gewählte Effekt; einer, der schon in
+    einer anderen Mastery steckt, ist als vergeben markiert."""
+    from poe_view.ui.tree_graph import TreeGraph
+    b = _mastery_baum()
+    m = b.nodes[40]
+    frei = TreeGraph._tooltip(m).splitlines()
+    assert frei[2:] == ["Choose one:", "• +50 to maximum Life", "• 10% reduced Mana Cost"]
+    gewaehlt = TreeGraph._tooltip(m, {40: 778}).splitlines()
+    assert gewaehlt[2:] == ["Effects:", "• +50 to maximum Life", "✓ 10% reduced Mana Cost"]
+    vergeben = TreeGraph._tooltip(m, {41: 777}).splitlines()
+    assert vergeben[3] == "• +50 to maximum Life (taken in another mastery)"
+    assert TreeGraph._tooltip(b.nodes[12], {40: 778}).count("Effects") == 0   # kein Mastery
+    # Das Bild kennt die Wahl des gezeigten Baums, und Strg+Umschalt+C nimmt
+    # die Effekte mit.
+    g = TreeGraph()
+    g.set_tree(b)
+    g.show_tree({"hashes": [10, 11, 12, 40], "mastery_effects": {"40": 778}}, "Marauder")
+    assert g.choices == {40: 778}
+    assert g.copy_text(40, full=True).splitlines() == [
+        "Life Mastery (ID 40)", "Effects:", "• +50 to maximum Life", "✓ 10% reduced Mana Cost"]
+    g.close()

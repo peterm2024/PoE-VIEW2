@@ -15,6 +15,8 @@ nach [SemVer](https://semver.org/lang/de/).
   Aszendenz-Punkte kosten das Fünffache. Was ein Mastery-Wechsel kostet,
   ist nicht belegt und steht dann dabei.
 
+- **Masteries zeigen ihre Effekte im Tooltip**, mit ✓ am gewählten und
+  „taken in another mastery", wenn ein Effekt schon anderswo steckt.
 - **Tooltips im Baum-Bild bleiben stehen**, solange die Maus auf dem
   Knoten ruht. Im aktiven Fenster verschwanden sie nach einer Sekunde
   (Qts eigener Tooltip-Weg räumte sie weg), sonst nach rund zehn.
