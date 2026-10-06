@@ -28,7 +28,7 @@ import html
 import math
 import textwrap
 
-from PySide6.QtCore import QPoint, QPointF, QRectF, Qt, Signal
+from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QRectF, Qt, Signal
 from PySide6.QtGui import (QBrush, QColor, QCursor, QGuiApplication, QImage, QPainter,
                            QPainterPath, QPalette, QPen, QPixmap, QTransform)
 from PySide6.QtWidgets import (QGraphicsEllipseItem, QGraphicsItem, QGraphicsScene,
@@ -71,6 +71,13 @@ _TOENUNG = {
 STREIFEN_PX = 8
 # Zeichen je Tooltip-Zeile, danach Umbruch.
 TOOLTIP_BREITE = 70
+# Wie lange ein Knoten-Tooltip stehen bleibt: so lange, wie die Maus auf
+# dem Knoten ruht (Peter, 2026-10-07: "Können wir die Anzeigedauer des
+# Tooltips bei den Nodes auf unendlich stellen?"). Qt blendet sonst nach
+# rund 10 s plus einem Aufschlag je Zeichen aus. Der größte Wert, den Qt
+# annimmt (int, ~24 Tage); weg ist der Tooltip, sobald die Maus den Knoten
+# verlässt (mouseMoveEvent → hideText).
+TOOLTIP_MS = 2**31 - 1
 # Beschriftung am Rand: Klasse, Aszendenzen, die eigene hervorgehoben.
 _SCHRIFT = {True: {"class": "#e0e0e0", "asc": "#b0b0b0"},
             False: {"class": "#202020", "asc": "#5f5f5f"}}
@@ -530,6 +537,17 @@ class TreeGraph(QGraphicsView):
         self._hover_ring.setZValue(5)
         self._hover_ring.setAcceptHoverEvents(False)
 
+    def viewportEvent(self, event) -> bool:  # noqa: N802 (Qt-API)
+        # Qts eigenes Tooltip-Ereignis schlucken. Es kommt nur im AKTIVEN
+        # Fenster, nach ~0,7 s Ruhe; die Szene sucht dann einen Item-
+        # Tooltip, findet keinen (wir zeigen ihn selbst, mouseMoveEvent)
+        # und blendet mit leerem Text "den" Tooltip aus — unseren, 0,3 s
+        # später. Peter, 2026-10-07: "Wenn es aktiv ist und ich geh drüber
+        # verschwindet der Tooltip nach 1s", im inaktiven Fenster nicht.
+        if event.type() == QEvent.Type.ToolTip:
+            return True
+        return super().viewportEvent(event)
+
     def leaveEvent(self, event) -> None:  # noqa: N802 (Qt-API)
         self.hover(None)
         super().leaveEvent(event)
@@ -586,7 +604,8 @@ class TreeGraph(QGraphicsView):
         self.hover(self.node_at(event.position().toPoint()))
         text = self.tooltip_at(event.position().toPoint())
         if text:
-            QToolTip.showText(event.globalPosition().toPoint(), text, self.viewport())
+            QToolTip.showText(event.globalPosition().toPoint(), text, self.viewport(),
+                              QRect(), TOOLTIP_MS)
         else:
             QToolTip.hideText()
 

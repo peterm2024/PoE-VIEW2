@@ -15,6 +15,10 @@ nach [SemVer](https://semver.org/lang/de/).
   Aszendenz-Punkte kosten das Fünffache. Was ein Mastery-Wechsel kostet,
   ist nicht belegt und steht dann dabei.
 
+- **Tooltips im Baum-Bild bleiben stehen**, solange die Maus auf dem
+  Knoten ruht. Im aktiven Fenster verschwanden sie nach einer Sekunde
+  (Qts eigener Tooltip-Weg räumte sie weg), sonst nach rund zehn.
+
 ### Behoben
 
 - **Kurzer Hänger bei jedem Abruf:** Das Fenster stand bei jedem

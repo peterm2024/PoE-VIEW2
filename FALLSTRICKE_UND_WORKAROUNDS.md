@@ -2084,3 +2084,31 @@ der Profiler ordnete die Zeit dem falschen Schritt zu.
 Oberfläche nicht an". Gemessen wird die Pause der Ereignisschleife im
 echten Programm, nicht die Dauer im Thread — und jede Maßnahme
 gegen Pausen wird selbst im Slot nachgemessen.
+
+## 98. Der eigene Tooltip verschwand nach einer Sekunde — aber nur im aktiven Fenster
+
+**Symptom.** Peter, 2026-10-07: "Mir ist auch vorhin aufgefallen, dass
+der Tooltip lange angezeigt bleibt, wenn das Tree-Fenster nicht aktiv
+ist und ich mit der Maus über einen Node geh. Wenn es aktiv ist und ich
+geh drüber verschwindet der Tooltip nach 1s." Gefragt hatte er nach
+einer längeren Anzeigedauer — die war aber nicht schuld.
+
+**Ursache.** Das Baum-Bild zeigt seine Tooltips selbst (`mouseMoveEvent`
+→ `QToolTip.showText`, ARCHITEKTUR §4.60.6), damit sie sofort kommen.
+Qt schickt zusätzlich, nur im aktiven Fenster und nach ~0,7 s Ruhe, sein
+eigenes `QEvent.ToolTip`. `QGraphicsScene` sucht dafür einen Item-
+Tooltip, findet keinen und ruft `QToolTip.showText` mit leerem Text —
+das blendet jeden sichtbaren Tooltip aus, also unseren, nach weiteren
+0,3 s.
+
+**Lösung.** `TreeGraph.viewportEvent` gibt bei `QEvent.ToolTip` sofort
+`True` zurück; die Szene bekommt das Ereignis nicht mehr.
+
+**Test.** `test_qts_own_tooltip_event_does_not_erase_the_node_tooltip`
+schickt das Ereignis und prüft den echten QToolTip eine Sekunde später.
+Ohne den Fix fällt er.
+
+**Lehre:** Wer Qt-Tooltips selbst zeigt, muss Qts eigenen Weg abschalten
+— sonst räumt der hinter einem auf. Und: Peters Unterscheidung "aktiv
+gegen inaktiv" war der Schlüssel; die Messung der Anzeigedauer auf dem
+Desktop streute nur.

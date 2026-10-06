@@ -1359,3 +1359,72 @@ def test_the_window_shows_the_gold_for_configurations_and_drafts(qapp, baum) -> 
     assert "respec: 1 point to refund · about 54 gold at level 30" in dialog.hint.text()
     dialog._draft = None
     dialog.close()
+
+
+def test_the_node_tooltip_stays_while_the_mouse_rests(qapp, monkeypatch) -> None:
+    """Peter: "Können wir die Anzeigedauer des Tooltips bei den Nodes auf
+    unendlich stellen?" Qt blendet sonst nach 10 s aus (ohne echte Maus
+    gemessen: Standard 10,0 s, mit TOOLTIP_MS nach 40 s noch da)."""
+    from PySide6.QtCore import QEvent, QPointF, Qt
+    from PySide6.QtGui import QMouseEvent
+    from poe_view.ui import tree_graph
+    from poe_view.ui.tree_graph import TOOLTIP_MS, TreeGraph
+    gezeigt = []
+    monkeypatch.setattr(tree_graph.QToolTip, "showText",
+                        lambda *args: gezeigt.append(args))
+    monkeypatch.setattr(tree_graph.QToolTip, "hideText", lambda: gezeigt.append("weg"))
+    g = TreeGraph()
+    g.resize(400, 400)
+    g.set_tree(_bild_baum())
+    g.show_tree({"hashes": [10]}, "Marauder")
+    g.show()
+    g.centerOn(g._items[12].sceneBoundingRect().center())
+    qapp.processEvents()
+
+    def bewege(punkt):
+        g.mouseMoveEvent(QMouseEvent(QEvent.Type.MouseMove, QPointF(punkt),
+                                     QPointF(g.viewport().mapToGlobal(punkt)),
+                                     Qt.MouseButton.NoButton, Qt.MouseButton.NoButton,
+                                     Qt.KeyboardModifier.NoModifier))
+    mitte = g.mapFromScene(g._items[12].sceneBoundingRect().center())
+    bewege(mitte)
+    assert gezeigt[-1][1].startswith("Fire Heart") and gezeigt[-1][-1] == TOOLTIP_MS
+    # Länger als jede Sitzung, aber im Wertebereich von Qt (int).
+    assert 24 * 3600 * 1000 < TOOLTIP_MS < 2**31
+    bewege(mitte + type(mitte)(150, 150))
+    assert gezeigt[-1] == "weg"                     # Maus weg: Tooltip weg
+    g.close()
+
+
+def test_qts_own_tooltip_event_does_not_erase_the_node_tooltip(qapp) -> None:
+    """Peter: "Wenn es aktiv ist und ich geh drüber verschwindet der
+    Tooltip nach 1s." Qt schickt im aktiven Fenster nach ~0,7 s ein
+    eigenes Tooltip-Ereignis; die Szene fand keinen Item-Tooltip und
+    blendete unseren 0,3 s später aus. Echter QToolTip, eine Sekunde."""
+    import time
+    from PySide6.QtCore import QEvent, QPointF, Qt
+    from PySide6.QtGui import QHelpEvent, QMouseEvent
+    from PySide6.QtWidgets import QApplication, QToolTip
+    from poe_view.ui.tree_graph import TreeGraph
+    g = TreeGraph()
+    g.resize(400, 400)
+    g.set_tree(_bild_baum())
+    g.show_tree({"hashes": [10]}, "Marauder")
+    g.show()
+    g.centerOn(g._items[12].sceneBoundingRect().center())
+    qapp.processEvents()
+    p = g.mapFromScene(g._items[12].sceneBoundingRect().center())
+    glob = g.viewport().mapToGlobal(p)
+    g.mouseMoveEvent(QMouseEvent(QEvent.Type.MouseMove, QPointF(p), QPointF(glob),
+                                 Qt.MouseButton.NoButton, Qt.MouseButton.NoButton,
+                                 Qt.KeyboardModifier.NoModifier))
+    qapp.processEvents()
+    assert QToolTip.isVisible() and QToolTip.text().startswith("Fire Heart")
+    QApplication.sendEvent(g.viewport(), QHelpEvent(QEvent.Type.ToolTip, p, glob))
+    ende = time.time() + 1.0
+    while time.time() < ende:
+        qapp.processEvents()
+        time.sleep(0.01)
+    assert QToolTip.isVisible()
+    QToolTip.hideText()
+    g.close()

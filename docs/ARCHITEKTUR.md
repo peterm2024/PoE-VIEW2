@@ -8788,6 +8788,24 @@ holt sich das Bild den Fokus, sobald die Maus hineinfährt. Ohne Knoten
 unter der Maus bleibt die Zwischenablage unberührt. Gegenprobe mit 6
 Sabotagen, alle gefangen.
 
+**Tooltip bleibt stehen** (Peter, 2026-10-07: "Können wir die
+Anzeigedauer des Tooltips bei den Nodes auf unendlich stellen?"): Qt
+blendet nach 10 s aus (plus 40 ms je Zeichen über 100). `showText`
+bekommt `TOOLTIP_MS` = 2³¹−1 ms mit, den größten Wert, den Qt annimmt;
+weg ist der Tooltip, wenn die Maus den Knoten verlässt. **Gemessen ohne
+echte Maus** (offscreen): Standard 10,0 s, 5.000 ms → 5,0 s,
+`TOOLTIP_MS` nach 40 s noch sichtbar. Nativ auf Peters Desktop streuten
+die Zeiten zwischen 0,4 und 40 s, unabhängig vom Wert — jede echte
+Mausbewegung oder ein Fensterwechsel blendet Qt-Tooltips aus. Das ist
+gewollt, macht die Dauer dort aber unmessbar.
+
+Die eigentliche Ursache fand Peter: "Wenn es aktiv ist und ich geh
+drüber verschwindet der Tooltip nach 1s", im inaktiven Fenster nicht.
+Qt schickt nur im aktiven Fenster nach ~0,7 s Ruhe ein eigenes
+`QEvent.ToolTip`; die Szene suchte einen Item-Tooltip, fand keinen und
+blendete mit leerem Text unseren aus (Qt wartet dabei noch 0,3 s).
+`TreeGraph.viewportEvent` schluckt das Ereignis jetzt. FALLSTRICKE #98.
+
 **ID in der Suche** (Peter: "Wir könnten noch die ID in die Suche
 integrieren"): Ein Suchwort passt, wenn es im Namen oder in den Werten
 vorkommt **oder genau die Knoten-ID ist** — nicht ein Teilstück davon
