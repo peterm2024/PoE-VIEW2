@@ -227,8 +227,8 @@ the tree you are in.
   with class and ascendancy names around the edge. **Build
   configurations right in the picture:** click a node to allocate it
   with the shortest path, right-click to refund it (and whatever would
-  be cut off), click a mastery to pick its effect. The tooltip tells you
-  the cost first; changes stay a draft until you save them. Ctrl+C
+  be cut off), click a mastery to pick its effect (its tooltip lists them
+  all). The tooltip tells you the cost first; changes stay a draft until you save them. Ctrl+C
   copies the name and ID of the node under the mouse (Ctrl+Shift+C with
   its stats); type an ID into the search to jump to that node.
 - **Enlarged item view** (double-click an item): large icon and the full

@@ -6,6 +6,8 @@ nach [SemVer](https://semver.org/lang/de/).
 
 ## [Unveröffentlicht]
 
+## [0.24.0] - 2026-10-07
+
 ### Neu
 
 - **Goldpreis eines Respecs:** Die Respec-Liste einer Konfiguration und
@@ -14,7 +16,6 @@ nach [SemVer](https://semver.org/lang/de/).
   level 81"). Tabelle aus GGGs Spieldaten (über Path of Building),
   Aszendenz-Punkte kosten das Fünffache. Was ein Mastery-Wechsel kostet,
   ist nicht belegt und steht dann dabei.
-
 - **Masteries zeigen ihre Effekte im Tooltip**, mit ✓ am gewählten und
   „taken in another mastery", wenn ein Effekt schon anderswo steckt.
 - **Tooltips im Baum-Bild bleiben stehen**, solange die Maus auf dem
