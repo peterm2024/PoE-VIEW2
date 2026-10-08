@@ -41,6 +41,8 @@ CURRENT, HISTORY, CONFIG = "current", "history", "config"
 DRAFT = "draft"
 _GESPERRT_WEG = "Not reachable from your tree"
 _GESPERRT_MASTERY = "Needs a notable of this group first"
+# Die Aszendenzen werden gezeigt, aber (noch) nicht geplant (§4.60.8).
+_GESPERRT_ASZENDENZ = "Ascendancy: shown only, plan it in the official planner"
 
 
 class PassiveTreeDialog(QDialog):
@@ -486,6 +488,8 @@ class PassiveTreeDialog(QDialog):
         if basis is None or self._tree is None or node not in self._tree.nodes:
             return None
         n = self._tree.nodes[node]
+        if n.ascendancy:
+            return None if n.kind == passive_tree.START else _GESPERRT_ASZENDENZ
         have = passive_tree.allocated(basis)
         if n.kind == passive_tree.MASTERY:
             if node in have:
@@ -506,7 +510,8 @@ class PassiveTreeDialog(QDialog):
         """Für das Bild: Zusatzzeile und ob ein Klick etwas tut (Zeiger
         "Hand" oder "verboten")."""
         text = self._click_hint(node)
-        return None if text is None else (text, text not in (_GESPERRT_WEG, _GESPERRT_MASTERY))
+        return None if text is None else (
+            text, text not in (_GESPERRT_WEG, _GESPERRT_MASTERY, _GESPERRT_ASZENDENZ))
 
     def _choose_effect(self, node: int, have_choice: dict[int, int]) -> int | None:
         """Menü mit den Effekten der Mastery; schon anderswo gewählte sind
@@ -525,8 +530,8 @@ class PassiveTreeDialog(QDialog):
         return aktionen.get(gewaehlt)
 
     def _on_node_clicked(self, node: int, right: bool) -> None:
-        if self._tree is None or node not in self._tree.nodes:
-            return
+        if self._tree is None or node not in self._tree.nodes or self._tree.nodes[node].ascendancy:
+            return                                  # Aszendenz: nur gezeigt (§4.60.8)
         key = self._selected()
         basis = self._editing_base()
         if basis is None:

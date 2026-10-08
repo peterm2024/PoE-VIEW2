@@ -6,6 +6,14 @@ nach [SemVer](https://semver.org/lang/de/).
 
 ## [Unveröffentlicht]
 
+### Neu
+
+- **Die Aszendenzen im Baum-Bild:** alle 21 der Klassen als Inseln
+  außen vor dem Bereich ihrer Klasse, mit Tooltips und Suche. Die
+  eigene ist golden umrandet und zeigt die vergebenen Knoten und beim
+  Umbau grün und rot wie der Hauptbaum. Planen lassen sie sich (noch)
+  nicht.
+
 ## [0.25.0] - 2026-10-08
 
 ### Neu

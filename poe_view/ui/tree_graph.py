@@ -16,13 +16,17 @@ Ringe: in Reichweite (§within_reach) und Suchtreffer.
 Im Hintergrund die Bereiche der Klassen nach Attribut, Hybride gestreift,
 außen am Rand Klasse und Aszendenzen (§4.60.5).
 
-Gezeichnet werden weder die Aszendenz (eigener Baum, liegt in den Daten
-weit außerhalb) noch Platzhalter für Cluster-Jewels. Linien und Ränder
+Die Aszendenzen der Klassen (§4.60.8): In GGGs Daten liegen sie als
+kleine Inseln mitten über dem Hauptbaum; jede wird nach außen vor den
+Bereich ihrer Klasse verschoben, die eigene golden umrandet. Nicht
+gezeichnet: Bloodline-Aszendenzen ohne Klasse und Platzhalter für
+Cluster-Jewels. Linien und Ränder
 sind "kosmetisch": gleich dick, egal wie weit hineingezoomt ist.
 """
 
 from __future__ import annotations
 
+import dataclasses
 import functools
 import html
 import math
@@ -78,6 +82,26 @@ TOOLTIP_BREITE = 70
 # annimmt (int, ~24 Tage); weg ist der Tooltip, sobald die Maus den Knoten
 # verlässt (mouseMoveEvent → hideText).
 TOOLTIP_MS = 2**31 - 1
+# Die Aszendenzen (§4.60.8): Abstand der Inseln vom äußeren Rand der
+# Klassenbereiche, Winkel zwischen den Inseln einer Klasse, und die
+# Richtung für den Scion (er sitzt in der Mitte und hat keinen Bereich —
+# zwischen Witch und Shadow ist Platz).
+ASC_ABSTAND = 250.0
+ASC_SPREIZUNG = 10.0
+ASC_WINKEL_OHNE_BEREICH = 30.0
+# Dort steht die Beschriftung schräg, ihr Kasten ragte in der
+# Gesamtansicht über die Nachbarinsel (nativ gesehen) — weiter hinaus.
+ASC_ABSTAND_SCHRAEG = 900.0
+
+
+@dataclasses.dataclass
+class AscIsland:
+    """Eine Aszendenz im Bild: Richtung ihrer Mitte, äußerster Halbmesser,
+    Scheibe dahinter und die Attribute der Klasse (Tönung)."""
+    angle: float
+    outer: float
+    disc: QPainterPath
+    attributes: tuple[str, ...]
 # Beschriftung am Rand: Klasse, Aszendenzen, die eigene hervorgehoben.
 _SCHRIFT = {True: {"class": "#e0e0e0", "asc": "#b0b0b0"},
             False: {"class": "#202020", "asc": "#5f5f5f"}}
@@ -183,6 +207,13 @@ class TreeGraph(QGraphicsView):
         self.choices: dict[int, int] = {}
         self._hover_ring = None
         self._hover_info: tuple | None = None
+        # Die Aszendenzen (§4.60.8): verschobene Knoten (Lage im Bild), ihre
+        # Linien, die Inseln je Name; ``ascendancy`` ist die eigene.
+        self.ascendancy = ""
+        self._moved: dict[int, Node] = {}
+        self._asc_edges: list[tuple[int, int, QPainterPath]] = []
+        self._aussen = 0.0
+        self.islands: dict[str, AscIsland] = {}
 
     # --- Aufbau --------------------------------------------------------- #
 
@@ -200,6 +231,7 @@ class TreeGraph(QGraphicsView):
         self._hover_ring, self.hovered, self._hover_info = None, None, None
         self.areas = []
         self.labels = []
+        self.ascendancy, self._moved, self._asc_edges, self.islands = "", {}, [], {}
         if tree is None:
             return
         for n in tree.nodes.values():
@@ -223,6 +255,7 @@ class TreeGraph(QGraphicsView):
         rand = 600.0
         rechteck = szene.itemsBoundingRect().adjusted(-rand, -rand, rand, rand)
         bereiche, innen, aussen = class_areas(tree)
+        self._aussen = aussen
         ring_o = QRectF(-aussen, -aussen, 2 * aussen, 2 * aussen)
         ring_i = QRectF(-innen, -innen, 2 * innen, 2 * innen)
         for klasse, w, von, bis in bereiche:
@@ -233,25 +266,22 @@ class TreeGraph(QGraphicsView):
             weg.arcTo(ring_i, 90.0 - bis, bis - von)
             weg.closeSubpath()
             self.areas.append((weg, klasse.attributes))
-            # Die Schrift bleibt bei jedem Zoom gleich groß; ihre Lage am
-            # Rand richtet ``_paint_labels`` aus.
-            text = QGraphicsTextItem()
-            text.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIgnoresTransformations)
-            text.setPos(math.sin(math.radians(w)) * aussen, -math.cos(math.radians(w)) * aussen)
-            text.setZValue(4)
-            text.setAcceptHoverEvents(False)
-            szene.addItem(text)
-            self.labels.append((text, klasse, w))
+            self._add_label(klasse, w)
         if bereiche:
-            # Platz für die Beschriftung außen herum.
-            weit = aussen + 2500.0
+            # Platz für die Insel der Aszendenz (§4.60.8, höchstens rund
+            # 1300 breit) und die Beschriftung außen herum.
+            weit = aussen + 4000.0
             rechteck = rechteck.united(QRectF(-weit, -weit, 2 * weit, 2 * weit))
         szene.setSceneRect(rechteck)
+        self._build_ascendancies()
 
     @staticmethod
     def _tooltip(n: Node, choices: dict[int, int] | None = None) -> str:
         art = {KEYSTONE: "Keystone", NOTABLE: "Notable", JEWEL: "Jewel socket",
-               MASTERY: "Mastery", START: "Class start"}.get(n.kind, "")
+               MASTERY: "Mastery",
+               START: "Ascendancy start" if n.ascendancy else "Class start"}.get(n.kind, "")
+        if n.ascendancy and n.kind != START:
+            art = ", ".join(filter(None, (n.ascendancy, art)))     # "Necromancer, Notable"
         kopf = f"{n.name} ({art})" if art else n.name
         # Umbrechen (Peter, 2026-10-05: "Einige sind zu lang") — ein
         # Qt-Tooltip in reinem Text bricht nicht selbst um; Wind Dancer
@@ -308,6 +338,101 @@ class TreeGraph(QGraphicsView):
         weg.lineTo(b.x, b.y)
         return weg
 
+    def _lage(self, h: int) -> Node:
+        """Der Knoten, wie er im Bild liegt — bei der Aszendenz verschoben."""
+        return self._moved.get(h) or self._tree.nodes[h]
+
+    def _own_ascendancy(self, class_name: str) -> str:
+        k, a = self._tree.class_ids.get(class_name, (-1, 0))
+        klasse = next((c for c in self._tree.classes if c.index == k), None)
+        if klasse is None or not 0 < a <= len(klasse.ascendancies):
+            return ""
+        return klasse.ascendancies[a - 1]
+
+    def _build_ascendancies(self) -> None:
+        """Die Inseln aller Aszendenzen der Klassen (§4.60.8; Peter,
+        2026-10-08: "die anderen Ascendancys auch der anderen Klassen
+        analog dazu einbauen? lediglich als Information"). Jede liegt in
+        den Daten über dem Hauptbaum und wandert als Ganzes nach außen vor
+        den Bereich ihrer Klasse, die drei einer Klasse nebeneinander — in
+        der Lesereihenfolge der Beschriftung, die dahinter rückt."""
+        tree = self._tree
+        je_name: dict[str, list[Node]] = {}
+        for n in tree.nodes.values():
+            if n.ascendancy and not n.proxy and n.group >= 0:
+                je_name.setdefault(n.ascendancy, []).append(n)
+        szene = self.scene()
+        weit_je_klasse: dict[int, float] = {}
+        ohne_bereich: set[int] = set()
+        for klasse in tree.classes:
+            w = next((w for _t, c, w in self.labels if c is klasse), None)
+            namen = [a for a in klasse.ascendancies if a in je_name]
+            if w is None:
+                # Ohne Bereich (Scion): eigene Richtung, und eine
+                # Beschriftung, damit die Inseln einen Namen haben.
+                if not namen or not self.labels:
+                    continue
+                w = ASC_WINKEL_OHNE_BEREICH
+                self._add_label(klasse, w)
+                ohne_bereich.add(klasse.index)
+            # Unten im Bild läuft der Winkel von rechts nach links — dann
+            # andersherum, damit die Inseln wie die Namen von links lesen.
+            if math.cos(math.radians(w)) < 0:
+                namen.reverse()
+            for i, name in enumerate(namen):
+                winkel = w + (i - (len(namen) - 1) / 2) * ASC_SPREIZUNG
+                insel = self._place_island(je_name[name], winkel, klasse.attributes)
+                self.islands[name] = insel
+                weit_je_klasse[klasse.index] = max(weit_je_klasse.get(klasse.index, 0.0),
+                                                   insel.outer)
+        for a, lage in self._moved.items():
+            for b in lage.neighbours:
+                if b > a and b in self._moved:
+                    self._asc_edges.append((a, b, self._edge_path(lage, self._moved[b])))
+        for h, lage in self._moved.items():
+            r = _RADIUS.get(lage.kind, _KLEIN)
+            item = QGraphicsEllipseItem(QRectF(lage.x - r, lage.y - r, 2 * r, 2 * r))
+            item.setZValue(2)
+            item.setData(0, h)
+            szene.addItem(item)
+            self._items[h] = item
+        # Beschriftung hinter die Inseln ihrer Klasse.
+        for text, klasse, w in self.labels:
+            weit = weit_je_klasse.get(klasse.index, self._aussen - ASC_ABSTAND) + (
+                ASC_ABSTAND_SCHRAEG if klasse.index in ohne_bereich else ASC_ABSTAND)
+            text.setPos(math.sin(math.radians(w)) * weit, -math.cos(math.radians(w)) * weit)
+
+    def _add_label(self, klasse: ClassInfo, w: float) -> None:
+        """Beschriftung am Rand. Die Schrift bleibt bei jedem Zoom gleich
+        groß; ihre Lage richten ``_build_ascendancies`` (Abstand) und
+        ``_paint_labels`` (Kasten nach außen) aus."""
+        text = QGraphicsTextItem()
+        text.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIgnoresTransformations)
+        text.setPos(math.sin(math.radians(w)) * self._aussen,
+                    -math.cos(math.radians(w)) * self._aussen)
+        text.setZValue(4)
+        text.setAcceptHoverEvents(False)
+        self.scene().addItem(text)
+        self.labels.append((text, klasse, w))
+
+    def _place_island(self, knoten: list[Node], winkel: float,
+                      attribute: tuple[str, ...]) -> AscIsland:
+        """Eine Insel als Ganzes (Form unverändert) nach außen schieben."""
+        xs, ys = [n.x for n in knoten], [n.y for n in knoten]
+        cx, cy = (min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2
+        halb = max(math.hypot(n.x - cx, n.y - cy) + _RADIUS.get(n.kind, _KLEIN)
+                   for n in knoten)
+        mitte = self._aussen + ASC_ABSTAND + halb
+        zx = math.sin(math.radians(winkel)) * mitte
+        zy = -math.cos(math.radians(winkel)) * mitte
+        dx, dy = zx - cx, zy - cy
+        for n in knoten:
+            self._moved[n.id] = dataclasses.replace(n, x=n.x + dx, y=n.y + dy,
+                                                    gx=n.gx + dx, gy=n.gy + dy)
+        scheibe = QPainterPath()
+        scheibe.addEllipse(QPointF(zx, zy), halb + 120.0, halb + 120.0)
+        return AscIsland(winkel, mitte + halb, scheibe, attribute)
+
     # --- Zustand -------------------------------------------------------- #
 
     def show_tree(self, passives: dict, class_name: str, *, compare_to: dict | None = None,
@@ -316,13 +441,18 @@ class TreeGraph(QGraphicsView):
         if self._tree is None:
             return
         tree = self._tree
-        ziel = passive_tree.allocated(passives)
+        self.ascendancy = self._own_ascendancy(class_name)
+        # Startknoten sind nie in "hashes" — die der Klasse und der eigenen
+        # Aszendenz gelten als vergeben, sonst hinge der Baum in der Luft.
+        starts = {h for h, n in self._moved.items()
+                  if n.kind == START and n.ascendancy == self.ascendancy}
         start = tree.class_starts.get(class_name)
         if start is not None:
-            ziel = ziel | {start}
+            starts.add(start)
+        ziel = passive_tree.allocated(passives) | starts
         basis = None
         if compare_to is not None:
-            basis = passive_tree.allocated(compare_to) | ({start} if start is not None else set())
+            basis = passive_tree.allocated(compare_to) | starts
         self.states = {}
         for h in self._items:
             if basis is None:
@@ -406,7 +536,7 @@ class TreeGraph(QGraphicsView):
             self.scene().removeItem(alt)
         self._edge_items = []
         pfade = {k: QPainterPath() for k in ("edge", "edge_on", "gain", "loss")}
-        for a, b, weg in self._edges:
+        for a, b, weg in self._edges + self._asc_edges:
             za, zb = self.states.get(a, DIM), self.states.get(b, DIM)
             an = {ALLOCATED, ALLOCATE}
             if za in an and zb in an:
@@ -461,7 +591,7 @@ class TreeGraph(QGraphicsView):
 
     def drawBackground(self, painter: QPainter, rect: QRectF) -> None:  # noqa: N802 (Qt-API)
         super().drawBackground(painter, rect)
-        if not self.areas:
+        if not self.areas and not self.islands:
             return
         toenung = _TOENUNG[self._dark]
         welt = painter.worldTransform()
@@ -471,13 +601,20 @@ class TreeGraph(QGraphicsView):
         painter.resetTransform()
         painter.setBrushOrigin(welt.map(QPointF(0.0, 0.0)))
         painter.setPen(Qt.PenStyle.NoPen)
-        for weg, attribute in self.areas:
+        scheiben = [(i.disc, i.attributes) for i in self.islands.values()]
+        for weg, attribute in self.areas + scheiben:
             farben = tuple(toenung[a] for a in attribute if a in toenung)
             if not farben:
                 continue
             painter.setBrush(QBrush(QColor(farben[0])) if len(farben) == 1
                              else _streifen(farben))
             painter.drawPath(welt.map(weg))
+        # Die eigene Aszendenz golden umrandet — wie ihr Name am Rand.
+        eigene = self.islands.get(self.ascendancy)
+        if eigene is not None:
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.setPen(QPen(QColor(tree_report.colour("keystone", self._dark)), 2.0))
+            painter.drawPath(welt.map(eigene.disc))
         painter.restore()
 
     def _paint_rings(self) -> None:
@@ -492,7 +629,7 @@ class TreeGraph(QGraphicsView):
             for h in ids:
                 if h not in self._items:          # nicht gezeichnet (Aszendenz, ohne Lage)
                     continue
-                n = self._tree.nodes[h]
+                n = self._lage(h)
                 r = _RADIUS.get(n.kind, _KLEIN) + abstand
                 ring = self.scene().addEllipse(QRectF(n.x - r, n.y - r, 2 * r, 2 * r),
                                                _cosmetic(farben[art], breite))
@@ -555,7 +692,7 @@ class TreeGraph(QGraphicsView):
         _text, klickbar = self._click_info(h)
         self.viewport().setCursor(Qt.CursorShape.PointingHandCursor if klickbar
                                   else Qt.CursorShape.ForbiddenCursor)
-        n = self._tree.nodes[h]
+        n = self._lage(h)
         # Außerhalb von Reichweiten- (+14) und Suchring (+30).
         r = _RADIUS.get(n.kind, _KLEIN) + 44.0
         self._hover_ring = self.scene().addEllipse(

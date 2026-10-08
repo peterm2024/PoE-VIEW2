@@ -226,7 +226,9 @@ the tree you are in.
   allows (all 24 quest points, 23 if you helped a bandit). The
   background marks each class's area (red
   Strength, green Dexterity, blue Intelligence, striped for hybrids),
-  with class and ascendancy names around the edge. **Build
+  with class and ascendancy names around the edge. Every class's
+  ascendancies sit just outside its area (yours outlined in gold, with
+  your allocated nodes). **Build
   configurations right in the picture:** click a node to allocate it
   with the shortest path, right-click to refund it (and whatever would
   be cut off), click a mastery to pick its effect (its tooltip lists them

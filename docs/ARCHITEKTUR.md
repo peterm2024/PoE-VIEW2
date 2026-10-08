@@ -8924,6 +8924,80 @@ Mastery-Wechsel, Fenster: Konfiguration und Entwurf mit Preis, Verlauf
 ohne. Gegenprobe mit 7 Sabotagen; zwei hielten zuerst — eine prüfte
 eine überflüssige Bedingung (entfernt), eine einen Verlaufsschritt ohne
 Rücknahme (Test verschärft).
+
+
+#### 4.60.8 Die Aszendenzen im Bild
+
+Peter, 2026-10-07: "Und die Ascendancy Skills fehlen, oder?" Zur Wahl
+standen (1) nur die eigene Aszendenz zeigen und (2) sie zusätzlich per
+Klick planen (eigener Zähler, 8 Punkte). Peter, 2026-10-08: "wir machen
+vorerst nur 1." Nachdem die eigene stand: "kannst du die anderen
+Ascendancys auch der anderen Klassen analog dazu einbauen? lediglich
+als Information?" — also alle 21 Aszendenzen der Klassen (7 × 3).
+Nicht gezeichnet werden die 16 Bloodline-/Liga-Aszendenzen ohne Klasse
+(in GGGs Daten "Abyssal", "Farrul", "Warlock" …): Sie gehören zu
+keinem Bereich, und gefragt war nach denen der Klassen.
+
+**Wo sie liegen.** In GGGs Daten sind die Aszendenzen kleine Inseln
+(halber Durchmesser höchstens 632 Einheiten, Ascendant; im Mittel rund
+490) — und zwar bei Radius ~10.600, also mitten über dem Hauptbaum
+(Necromancer um (1655, −10501)). In ihrer echten Lage gezeichnet,
+lägen sie auf fremden Knoten; deshalb fehlten sie bisher ganz.
+`TreeGraph._build_ascendancies` (einmal je Baum, in `set_tree`)
+verschiebt jede Insel als Ganzes (Form unverändert) nach außen vor den
+Bereich ihrer Klasse: Mitte bei Radius `aussen + ASC_ABSTAND + halber
+Durchmesser`, die drei einer Klasse `ASC_SPREIZUNG` = 10° auseinander
+(bei Radius ~11.800 rund 2.000 Einheiten — die größte Scheibe misst
+gut 1.400). Reihenfolge wie die Namen in der Beschriftung, von links
+gelesen; unten im Bild (cos w < 0) läuft der Winkel von rechts nach
+links, dort andersherum. Der Scion hat keinen Bereich (er sitzt in der
+Mitte); seine Inseln stehen um 30°, zwischen Witch und Shadow
+(`ASC_WINKEL_OHNE_BEREICH`), und er bekommt dafür eine eigene
+Beschriftung. Die Beschriftungen rücken hinter die Inseln ihrer Klasse
+— sie wachsen in Bildschirmpixeln nach außen (§4.60.5), überdecken sie
+also bei keinem Zoom. Ausnahme: Die schräge Scion-Beschriftung ragte in
+der Gesamtansicht seitlich über die Ascendant-Insel (nativ gesehen) und
+steht deshalb weiter draußen (`ASC_ABSTAND_SCHRAEG`).
+
+Hinter jeder Insel eine Scheibe in der Tönung ihrer Klasse
+(`AscIsland.disc`, gemalt in `drawBackground` wie die Bereiche; Scion
+ohne Tönung). Die eigene ist golden umrandet, wie ihr Name in der
+Beschriftung. Gerechnet: Gold gegen Tönung dunkel ≥ 7,7:1, hell
+≥ 4,1:1 (Grafik braucht 3:1).
+
+**Lage im Bild ≠ Lage in den Daten.** Die verschobenen Knoten stehen in
+`_moved` (Kopien mit neuen x/y/gx/gy, damit auch die Bögen auf den
+Kreisbahnen stimmen); `_lage(h)` gibt sie für Hover- und Suchringe
+zurück. Wer künftig an einem Knoten etwas zeichnet, muss `_lage`
+benutzen, nicht `tree.nodes[h]` — beide Ringe lagen sonst an der alten
+Stelle über dem Hauptbaum (Gegenprobe).
+
+**Zustand.** Fremde Aszendenzen sind nie vergeben, also hohl — reine
+Information, mit Tooltip und Suche. Bei der eigenen gilt der
+Aszendenz-Start als vergeben (er steht nie in `hashes`, in Peters
+Bäumen nur kleine und Notables), wie der Klassenstart, sonst hinge die
+Insel in der Luft. Vergeben, Vergleich (grün/rot beim Umbau), Suche und
+Tooltip ("Mistress of Sacrifice (Necromancer, Notable)", "Necromancer
+(Ascendancy start)") laufen über dieselben Wege wie im Hauptbaum.
+`fit_allocated` schließt die eigene Insel ein, sie ist vergeben.
+
+**Nicht planbar** (Variante 1): Ein Klick auf einen Aszendenz-Knoten
+ändert nichts; der Tooltip sagt "Ascendancy: shown only, plan it in the
+official planner", der Zeiger zeigt "verboten". Die Wegsuche
+(`path_to`) sperrt die Aszendenz ohnehin; die Sperre im Dialog
+(`_on_node_clicked`) verhindert vor allem, dass ein Rechtsklick eine
+vergebene Aszendenz über `cut_off` zurücknimmt. Variante 2 bräuchte
+eigene Wegsuche ab dem Aszendenz-Start und einen Zähler bis 8.
+
+Nativ angesehen an GGGs echtem Baum (Necromancer, Ascendant): alle 21
+Inseln, 404 Knoten mehr in der Szene. Getestet: Lage außen in
+Klassenrichtung, Form, Lesereihenfolge oben und unten, Bloodlines
+nicht, nur der eigene Start vergeben, Linien, Scheiben und Goldrand
+gemalt (Pixel), Beschriftungen dahinter, Scion-Richtung und
+-Beschriftung, Tooltip, Ringe an der neuen Lage, Klicks ohne Wirkung.
+Gegenprobe zuerst (nur eigene) mit 14 Sabotagen — drei hielten
+(Linien, Scheibe, Klick-Sperre), Tests verschärft —, für alle Inseln
+mit 17, alle gefangen.
 ---
 
 ## 8. Entwicklungsstand

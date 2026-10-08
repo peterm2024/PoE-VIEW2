@@ -1571,3 +1571,211 @@ def test_max_points_count_levels_quests_and_the_bandits() -> None:
     assert pt.max_points(81, "Alira") == 103
     assert pt.max_points(91, "Kraityn") == 113
     assert pt.max_points(100, "Eramir") == 123
+
+
+def _aszendenz_baum():
+    """Der Klassen-Baum mit Inseln wie in GGGs Daten: mitten über dem
+    Hauptbaum. Necromancer (Witch): Start 500 - Notable 501 - 502;
+    Occultist 700 (Witch), Ascendant 600 (Scion), Warden 800 und
+    Deadeye 900 (Ranger), Farrul 950 (Bloodline, keine Klasse)."""
+    quelle = _klassen_roh()
+    quelle["constants"] = {"skillsPerOrbit": [1, 4], "orbitRadii": [0, 100]}
+    quelle["groups"]["50"] = {"x": 500, "y": -1500}
+    quelle["groups"]["60"] = {"x": -800, "y": 900}
+    quelle["groups"]["70"] = {"x": -500, "y": -1500}
+    quelle["nodes"]["500"] = _knoten("Necromancer", (501,), isAscendancyStart=True,
+                                     ascendancyName="Necromancer", group=50, orbit=0)
+    quelle["nodes"]["501"] = _knoten("Mistress of Sacrifice", (502,), isNotable=True,
+                                     ascendancyName="Necromancer", group=50, orbit=1,
+                                     orbitIndex=1, stats=["Offering skills affect you"])
+    quelle["nodes"]["502"] = _knoten("Minion Damage", (), ascendancyName="Necromancer",
+                                     group=50, orbit=1, orbitIndex=2)
+    quelle["nodes"]["600"] = _knoten("Ascendant", (), isAscendancyStart=True,
+                                     ascendancyName="Ascendant", group=60, orbit=0)
+    quelle["nodes"]["700"] = _knoten("Occultist", (), isAscendancyStart=True,
+                                     ascendancyName="Occultist", group=70, orbit=0)
+    # Ranger (unten rechts, 120°): Warden, Deadeye; dazu eine Bloodline
+    # ohne Klasse (in GGGs Daten etwa "Farrul"), die nicht gezeichnet wird.
+    for knoten_id, name, x in ((800, "Warden", 1500), (900, "Deadeye", 2500),
+                               (950, "Farrul", 3500)):
+        quelle["groups"][str(knoten_id)] = {"x": x, "y": 0}
+        quelle["nodes"][str(knoten_id)] = _knoten(name, (), isAscendancyStart=True,
+                                                  ascendancyName=name, group=knoten_id,
+                                                  orbit=0)
+    return pt.parse_tree(quelle, False)
+
+
+def _klassen_roh() -> dict:
+    """Die Rohdaten von ``_klassen_baum``, ohne den Knoten 200."""
+    import math
+    lage = {0: (0, 0), 3: (0, 3000), 6: (60, 3000), 2: (120, 3000)}
+    gruppen, knoten = {}, {}
+    for index, (w, d) in lage.items():
+        x, y = math.sin(math.radians(w)) * d, -math.cos(math.radians(w)) * d
+        gruppen[str(index + 1)] = {"x": x, "y": y}
+        knoten[str(100 + index)] = _knoten("START", (), classStartIndex=index, group=index + 1)
+    gruppen["99"] = {"x": 0, "y": 6000}
+    knoten["300"] = _knoten("Outer", (), group=99, orbit=0)
+    return {"constants": {"skillsPerOrbit": [1], "orbitRadii": [0]},
+            "classes": [{"name": "Scion", "base_str": 20, "base_dex": 20, "base_int": 20,
+                         "ascendancies": [{"name": "Ascendant"}]},
+                        {"name": "Marauder", "base_str": 32, "base_dex": 14, "base_int": 14},
+                        {"name": "Ranger", "base_str": 14, "base_dex": 32, "base_int": 14,
+                         "ascendancies": [{"name": "Warden"}, {"name": "Deadeye"}]},
+                        {"name": "Witch", "base_str": 14, "base_dex": 14, "base_int": 32,
+                         "ascendancies": [{"name": "Occultist"}, {"name": "Elementalist"},
+                                          {"name": "Necromancer"}]},
+                        {"name": "Duelist", "base_str": 23, "base_dex": 23, "base_int": 14},
+                        {"name": "Templar", "base_str": 23, "base_dex": 14, "base_int": 23},
+                        {"name": "Shadow", "base_str": 14, "base_dex": 23, "base_int": 23,
+                         "ascendancies": [{"name": "Assassin"}]}],
+            "groups": gruppen, "nodes": knoten}
+
+
+def test_ascendancies_are_drawn_outside_in_their_class_direction(qapp) -> None:
+    """Peter, 2026-10-08: "Und die Ascendancy Skills fehlen, oder?" — zuerst
+    nur die eigene ("wir machen vorerst nur 1"), dann "die anderen
+    Ascendancys auch der anderen Klassen analog dazu einbauen? lediglich
+    als Information". Jede Insel als Ganzes nach außen vor den Bereich
+    ihrer Klasse; die Beschriftung rückt dahinter."""
+    import math
+    from poe_view.ui.tree_graph import ALLOCATED, ASC_ABSTAND, DIM, TreeGraph, _winkel
+    b = _aszendenz_baum()
+    g = TreeGraph()
+    g.set_tree(b)
+    g.show_tree({"hashes": [103, 501]}, "Necromancer")
+    assert g.ascendancy == "Necromancer"
+    assert set(g.islands) == {"Necromancer", "Occultist", "Ascendant", "Warden", "Deadeye"}
+    assert set(g._moved) == {500, 501, 502, 600, 700, 800, 900}
+    assert 950 not in g._items                                   # Bloodline ohne Klasse nicht
+    # Außerhalb des Rands, nahe der Richtung der Klasse, Form unverändert.
+    richtung = {500: 0, 501: 0, 502: 0, 700: 0, 600: 30, 800: 120, 900: 120}
+    for h, lage in g._moved.items():
+        assert math.hypot(lage.x, lage.y) > g._aussen
+        abweichung = (_winkel(lage.x, lage.y) - richtung[h] + 180) % 360 - 180
+        assert abs(abweichung) < 8, (h, abweichung)
+        mitte = g._items[h].sceneBoundingRect().center()
+        assert (round(mitte.x(), 3), round(mitte.y(), 3)) == (round(lage.x, 3), round(lage.y, 3))
+    a, c = b.nodes[500], b.nodes[502]
+    assert (round(g._moved[502].x - g._moved[500].x, 6), round(g._moved[502].y - g._moved[500].y, 6)
+            ) == (round(c.x - a.x, 6), round(c.y - a.y, 6))
+    # In Lesereihenfolge wie die Namen der Beschriftung, von links nach
+    # rechts — oben (Witch) wie unten (Ranger, dort läuft der Winkel andersherum).
+    assert g._moved[700].x < g._moved[500].x                     # Occultist · Necromancer
+    assert g._moved[800].x < g._moved[900].x                     # Warden · Deadeye
+    # Der eigene Aszendenz-Start gilt als vergeben (nie in "hashes"), fremde nicht.
+    assert g.states[500] == ALLOCATED and g.states[501] == ALLOCATED and g.states[502] == DIM
+    assert g.states[700] == DIM and g.states[600] == DIM
+    assert len(g._asc_edges) == 2
+    # Die Linien der Insel werden mitgemalt (500–501 vergeben: kräftig).
+    insel = g._items[501].sceneBoundingRect().united(g._items[500].sceneBoundingRect())
+    assert any(not item.path().isEmpty() and insel.intersects(item.path().boundingRect())
+               for item in g._edge_items)
+    # Beschriftung hinter den Inseln ihrer Klasse; Shadow hat keine Insel.
+    for text, klasse, _w in g.labels:
+        weit = math.hypot(text.pos().x(), text.pos().y())
+        inseln = [g.islands[a].outer for a in klasse.ascendancies if a in g.islands]
+        if klasse.name == "Scion":
+            continue                                             # eigener Test
+        soll = max(inseln) + ASC_ABSTAND if inseln else g._aussen
+        assert abs(weit - soll) < 1e-6, klasse.name
+    assert g.islands["Necromancer"].attributes == ("int",)
+    # Die eigene Insel bleibt beim Wechsel des Gezeigten, nur ihr Status nicht.
+    g.show_tree({"hashes": [103]}, "Witch")
+    assert g.ascendancy == "" and 501 in g._items and g.states[500] == DIM
+    g.close()
+
+
+def test_island_discs_are_painted_and_the_own_one_has_a_gold_rim(qapp) -> None:
+    """Das Pixel zählt, nicht der gesetzte Wert."""
+    from PySide6.QtGui import QColor
+    from poe_view.ui import tree_report
+    from poe_view.ui.tree_graph import _TOENUNG, TreeGraph
+    g = TreeGraph()
+    g.set_tree(_aszendenz_baum())
+    g.show_tree({"hashes": [103, 501]}, "Necromancer")
+    g.resize(400, 400)
+    g.show()
+
+    def pixel(name: str, unten: float):
+        rand = g.islands[name].disc.boundingRect()
+        g.fitInView(rand)
+        qapp.processEvents()
+        punkt = g.mapFromScene(rand.center().x(), rand.bottom() - rand.height() * unten)
+        return g.grab().toImage().pixelColor(punkt).name()
+
+    tinte = QColor(_TOENUNG[True]["int"]).name()
+    gold = QColor(tree_report.colour("keystone", True)).name()
+    assert pixel("Occultist", 0.1) == tinte                     # fremde Insel: getönt
+    assert pixel("Necromancer", 0.1) == tinte
+    # Am Rand der eigenen Insel golden, an dem der fremden nicht.
+    def rand_pixel(name: str) -> set[str]:
+        rand = g.islands[name].disc.boundingRect()
+        g.fitInView(rand)
+        qapp.processEvents()
+        bild = g.grab().toImage()
+        unten = g.mapFromScene(rand.center().x(), rand.bottom())
+        return {bild.pixelColor(unten.x(), unten.y() + d).name() for d in range(-3, 4)}
+    assert gold in rand_pixel("Necromancer")
+    assert gold not in rand_pixel("Occultist")
+    g.close()
+
+
+def test_the_scion_ascendancies_sit_between_witch_and_shadow_with_a_label(qapp) -> None:
+    import math
+    from poe_view.ui.tree_graph import (ASC_ABSTAND_SCHRAEG, ASC_WINKEL_OHNE_BEREICH,
+                                        TreeGraph, _winkel)
+    g = TreeGraph()
+    g.set_tree(_aszendenz_baum())
+    g.show_tree({"hashes": []}, "Ascendant")
+    assert g.ascendancy == "Ascendant" and g.islands["Ascendant"].angle == ASC_WINKEL_OHNE_BEREICH
+    assert abs(_winkel(g._moved[600].x, g._moved[600].y) - 30.0) < 1e-6
+    assert g.islands["Ascendant"].attributes == ()              # Scion: keine Tönung
+    # Der Scion hat keinen Bereich und bekäme sonst keine Beschriftung.
+    text, _k, w = next(lab for lab in g.labels if lab[1].name == "Scion")
+    assert w == ASC_WINKEL_OHNE_BEREICH
+    assert abs(math.hypot(text.pos().x(), text.pos().y())
+               - (g.islands["Ascendant"].outer + ASC_ABSTAND_SCHRAEG)) < 1e-6
+    assert "Ascendant" in text.toPlainText()
+    g.close()
+
+
+def test_ascendancy_nodes_say_what_they_are_and_hover_where_they_are_drawn(qapp) -> None:
+    from poe_view.ui.tree_graph import TreeGraph
+    b = _aszendenz_baum()
+    assert TreeGraph._tooltip(b.nodes[501]).splitlines()[0] == (
+        "Mistress of Sacrifice (Necromancer, Notable)")
+    assert TreeGraph._tooltip(b.nodes[502]).splitlines()[0] == "Minion Damage (Necromancer)"
+    assert TreeGraph._tooltip(b.nodes[500]).splitlines()[0] == "Necromancer (Ascendancy start)"
+    assert TreeGraph._tooltip(b.nodes[103]).splitlines()[0].endswith("(Class start)")
+    g = TreeGraph()
+    g.set_tree(b)
+    g.show_tree({"hashes": [501]}, "Necromancer")
+    g.click_hint = lambda h: ("x", False)
+    g.hover(501)
+    mitte = g._hover_ring.rect().center()
+    assert (round(mitte.x(), 3), round(mitte.y(), 3)) == (
+        round(g._moved[501].x, 3), round(g._moved[501].y, 3))
+    g.highlight("sacrifice")
+    assert g.search_ids == {501}
+    ring = next(r for r in g._rings)
+    assert round(ring.rect().center().x(), 3) == round(g._moved[501].x, 3)
+    g.close()
+
+
+def test_ascendancy_nodes_are_shown_but_not_planned(qapp, baum) -> None:
+    """Variante 1: ansehen ja, Klicks ändern nichts und sagen das."""
+    from poe_view.ui.passive_tree_dialog import _GESPERRT_ASZENDENZ, CURRENT
+    dialog, _zeichen, _ = _fenster(qapp, baum)
+    assert dialog._click_hint(51) == _GESPERRT_ASZENDENZ
+    assert dialog._click_info(51) == (_GESPERRT_ASZENDENZ, False)
+    assert dialog._click_hint(50) is None                        # Aszendenz-Start
+    dialog.graph.node_clicked.emit(51, False)
+    assert dialog._status == ""                                  # keine Fehlmeldung
+    # Auch eine vergebene Aszendenz nimmt der Rechtsklick nicht zurück.
+    th.record(_zeichen, "WitchOfPeter", {"hashes": [10, 11, 12, 50, 51]}, level=31,
+              ruthless=True, now=datetime(2026, 10, 4, 20, 0))
+    dialog.refresh((CURRENT, None))
+    dialog.graph.node_clicked.emit(51, True)
+    assert dialog._draft is None and dialog._selected() == (CURRENT, None)
+    dialog.close()
