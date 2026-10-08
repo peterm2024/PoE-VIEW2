@@ -8542,8 +8542,8 @@ Ruthless-Baums bleiben 10 ohne Thema (Valour, Stances, Marks). Grob mit
 Absicht — ein falsch einsortierter Knoten steht in der Nachbargruppe,
 er verschwindet nicht.
 
-**Im Fenster drei Reiter:** "Respec" (nur, wo es einen Umbau gibt —
-bei einer Konfiguration springt das Fenster dorthin), "Overview" (der
+**Im Fenster drei Reiter:** "Respec" (nur, wo es einen Umbau gibt;
+der gewählte Reiter bleibt beim Wechsel der Auswahl, §4.60.6), "Overview" (der
 Baum nach Themen, ohne Reichweite) und "Within reach" als
 `QTreeWidget`: Gruppen Keystones, Jewel-Sockel, dann die Themen, innen
 nach Punkten; Spalten Knoten, Punkte, Werte, Weg; ein Suchfeld, in dem
@@ -8741,6 +8741,46 @@ samt kürzestem Weg, Rechtsklick nimmt ihn zurück".
 - `main_points`: Punkte im Hauptbaum (ohne Start und Aszendenz; Cluster-
   Knoten aus `hashes_ex` zählen nicht mit).
 
+**Verbrauchte Punkte im Tree-Reiter** (Peter, 2026-10-08: "eine Anzeige
+der aktuell verbrauchten Skillpoints"): eine eigene Zeile über dem
+Bild, `tree_report.points_text` — "Points used: 101 (3 in cluster
+jewels) · max 113 at level 90 · ascendancy 8". Anders als `main_points` zählen hier die Cluster-Knoten
+mit, denn im Spiel kostet jeder einen Punkt; Starts (auch der
+Aszendenz-Start) kosten keinen. Bei Konfiguration und Entwurf steht der
+aktuelle Baum dahinter, wo er abweicht ("…, current tree 98"); beim
+Verlauf nicht — dort ist der Vergleich der Eintrag davor.
+
+Der **Höchstwert** (`passive_tree.max_points`, Peter: "ja, zeig das an")
+ist Level − 1 plus alle Quest-Punkte: **24, wenn alle drei Banditen
+getötet wurden, sonst 23** (poewiki.net "Passive skill": "23 points
+from quests, and 1 optional point from the quest Deal with the Bandits
+if all three Bandit Lords were killed"; Level 100 ergibt die bekannten
+123). Ob jede Quest
+erledigt ist, meldet die API nicht — daher "max". Den Banditen aber
+schon: `bandit_choice` ist "Eramir" (alle getötet) oder der Name dessen,
+dem man geholfen hat. Peter: In Ruthless holt man den Banditen-Punkt
+meist nicht — die Wahl deckt das ab.
+
+Zuerst stand hier 22 + 2 (Fandom-Wiki und Leitfäden: "22 Punkte, plus
+2 von Eramir" — veraltet: Seit 3.23 ist einer der beiden Banditen-Punkte
+zu "Through Sacred Ground" gewandert, so die Versionsgeschichte auf
+poewiki.net). Maßgeblich ist poewiki.net (Peter: "der Goldstandard"),
+nicht das Fandom-Wiki; poewiki.net blockt Abrufe per Bot-Schutz, der
+Rohtext kommt über `index.php?title=…&action=raw`. Peters Bild zeigte dann "Points used: 103 ·
+max 102 at level 81" (Peter: "Überprüfe das mit den Banditen nochmal").
+Seine drei echten Bäume nutzen genau Level − 1 + 23 bzw. + 24: Level 81
+Ruthless mit Alira 103, Level 91 Standard mit Kraityn 113, Level 100
+mit Eramir 107 + 16 Cluster-Knoten = 123. Helfen kostet also einen
+Punkt, nicht zwei — in Standard wie Ruthless. Lehre: Eine Zahl aus
+Leitfäden gegen die echten Daten prüfen, bevor sie angezeigt wird; hier
+lagen sie im Cache bereit. Level und Bandit stammen beim Verlauf aus dem
+Eintrag, sonst vom Charakter heute (gebaut wird auf dem heutigen Level,
+wie beim Goldpreis).
+
+Die Zeile stand zuerst rechts neben dem Suchfeld; mit dem Höchstwert
+wäre das Suchfeld nativ unter 168 px geschrumpft. Jetzt eigene Zeile:
+der längste Text 539 px bei 711 px Platz (1000 px Fenster).
+
 **Der Entwurf ist ein Listeneintrag** ("✎ Unsaved changes", Schlüssel
 `DRAFT`), nicht ein Sonderzustand des Bildes: Dadurch zeigen Respec,
 Overview, Within reach, "Open in planner" und "Copy link" ihn ohne
@@ -8750,10 +8790,29 @@ wenn er aus der Konfiguration X entstand). Ein Klick aus einem anderen
 Eintrag heraus fragt, bevor er einen bestehenden Entwurf ersetzt;
 Schließen (Esc, ×) fragt ebenso.
 
-**Im Bild bleiben:** Wählt man eine Konfiguration aus der Liste,
-springt das Fenster zum Reiter Respec. Ein Klick im Bild wechselt die
-Auswahl auf den Entwurf — und sprang anfangs ebenso dorthin (vom Test
-gefunden). Der Wechsel zählt jetzt nicht als neue Auswahl.
+**Im Bild bleiben:** Anfangs sprang das Fenster bei der Wahl einer
+Konfiguration zum Reiter Respec. Peter (2026-10-08): "Beim Wechseln
+eines Trees wird auf den Respec-Reiter gewechselt statt auf dem Tree zu
+bleiben." Jetzt bleibt der gewählte Reiter immer; nur wenn der
+Respec-Reiter verschwindet (Current tree), übernimmt "Overview".
+
+**Ausschnitt und Zoom bleiben.** Anfangs passte jede neue Auswahl das
+Bild auf den vergebenen Teil ein (`fit_allocated`). Das störte zweimal
+(Peter, 2026-10-08): Der erste Klick wechselt die Auswahl auf den
+Entwurf und zoomte damit um — beim Rechtsklick sichtbar, weil das
+Zurücknehmen den vergebenen Teil schrumpfen lässt. Und beim Wechsel
+zwischen Konfigurationen soll man "sofort sehen, was hinzukommt und
+weggenommen wird". Jetzt passt das Fenster nur beim ersten Zeigen ein
+(`_graph_fitted`); danach bleibt der Ausschnitt bei Klick, Undo,
+Verwerfen und jeder Auswahl in der Liste. Das Einpassen wartet weiter,
+bis der Reiter sichtbar ist (`_graph_fit_pending`).
+
+**Undo reicht bis zum Ausgangsbaum.** Der erste Klick legte anfangs
+keinen Rückschritt an, Undo war danach gesperrt (Peter, 2026-10-08).
+Jetzt kommt auch der Ausgangsbaum auf den Stapel; nimmt Undo den
+letzten Schritt zurück, verschwindet der Entwurf ohne Rückfrage und
+das vorher Gewählte ist wieder ausgewählt — ein Entwurf ohne Änderung
+würde sonst beim Schließen nachfragen.
 
 **Klick oder Verschieben:** Ziehen verschiebt das Bild; als Klick gilt
 nur, was sich zwischen Drücken und Loslassen höchstens 4 Pixel bewegt.

@@ -260,6 +260,36 @@ def is_gain(line: str) -> bool:
     return treffer is not None and treffer.group(1) == "+"
 
 
+def used_points(tree: Tree, passives: dict) -> tuple[int, int, int]:
+    """(Punkte gesamt, davon in Cluster-Jewels, Aszendenz-Punkte). Knoten
+    in Cluster-Jewels kosten im Spiel einen Punkt wie jeder andere."""
+    cluster = len((passives or {}).get("hashes_ex") or ())
+    aszendenz = sum(1 for h in passive_tree.allocated(passives)
+                    if h in tree.nodes and tree.nodes[h].ascendancy
+                    and tree.nodes[h].kind != START)
+    return passive_tree.main_points(tree, passives) + cluster, cluster, aszendenz
+
+
+def points_text(tree: Tree, passives: dict, compare_to: dict | None = None, *,
+                level: int | None = None, bandit: str | None = None) -> str:
+    """"Points used: 101 (3 in cluster jewels) · max 113 at level 90 ·
+    ascendancy 8", beim Vergleich mit dem aktuellen Baum dahinter, wo er
+    abweicht; ohne Level kein Höchstwert."""
+    gesamt, cluster, aszendenz = used_points(tree, passives)
+    text = f"Points used: {gesamt}"
+    if cluster:
+        text += f" ({cluster} in cluster jewels)"
+    vorher = used_points(tree, compare_to) if compare_to is not None else None
+    if vorher and vorher[0] != gesamt:
+        text += f", current tree {vorher[0]}"
+    if level:
+        text += f" · max {passive_tree.max_points(level, bandit)} at level {level}"
+    text += f" · ascendancy {aszendenz}"
+    if vorher and vorher[2] != aszendenz:
+        text += f", current tree {vorher[2]}"
+    return text
+
+
 def gold_text(umbau, level: int | None) -> str:
     """" · about 11,256 gold at level 81" — leer ohne Level (§4.60.7)."""
     gold = umbau.gold(level) if level else None

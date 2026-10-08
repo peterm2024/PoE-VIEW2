@@ -222,7 +222,9 @@ the tree you are in.
   nodes added up, the key values first), and *Within reach* is a table
   you can filter ("fire res"). The *Tree* tab draws the tree itself —
   zoom, drag, search — and shows a configuration's respec in green and
-  red right on the tree. The background marks each class's area (red
+  red right on the tree, with the points used and the most your level
+  allows (all 24 quest points, 23 if you helped a bandit). The
+  background marks each class's area (red
   Strength, green Dexterity, blue Intelligence, striped for hybrids),
   with class and ascendancy names around the edge. **Build
   configurations right in the picture:** click a node to allocate it

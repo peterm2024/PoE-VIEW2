@@ -482,6 +482,24 @@ def mastery_allowed(tree: Tree, have: set[int], mastery: int) -> bool:
                and tree.nodes[h].kind == NOTABLE for h in have)
 
 
+# Quest-Punkte: 24, wenn alle drei Banditen getötet wurden, sonst 23
+# (poewiki.net "Passive skill": "23 points from quests, and 1 optional
+# point from the quest Deal with the Bandits if all three Bandit Lords
+# were killed" — seit 3.23). Peters echte Bäume bestätigen es genau,
+# Standard wie Ruthless (§4.60.6).
+QUEST_POINTS = 24
+HELPED_BANDITS = ("Kraityn", "Alira", "Oak")
+
+
+def max_points(level: int, bandit: str | None = None) -> int:
+    """Höchstens verfügbare Punkte: einer je Level ab 2, dazu alle
+    Quest-Punkte — einer weniger, wenn einem Banditen geholfen wurde
+    (API ``bandit_choice``; "Eramir" = alle getötet, unbekannt zählt
+    voll). Ob jede Quest erledigt ist, meldet die API nicht, deshalb
+    "höchstens"."""
+    return max(level - 1, 0) + QUEST_POINTS - (bandit in HELPED_BANDITS)
+
+
 def main_points(tree: Tree, passives: dict) -> int:
     """Belegte Punkte im Hauptbaum (ohne Aszendenz und Start)."""
     return sum(1 for h in allocated(passives)

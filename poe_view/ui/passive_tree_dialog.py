@@ -62,7 +62,6 @@ class PassiveTreeDialog(QDialog):
         self._draft_from: tuple | None = None    # woraus er entstand
         self._undo: list[dict] = []
         self._status = ""                        # Meldung zum letzten Klick
-        self._shown_key = None
 
         self.list = QListWidget()
         self.list.currentItemChanged.connect(lambda *_: self._show_selected())
@@ -109,6 +108,7 @@ class PassiveTreeDialog(QDialog):
         self.graph.click_hint = self._click_info
         self.graph_legend = QLabel()
         self.graph_legend.setWordWrap(True)
+        self.graph_points = QLabel()        # verbrauchte Punkte des Gezeigten
         leiste = QHBoxLayout()
         leiste.addWidget(self.graph_search, 1)
         leiste.addWidget(self.graph_reach)
@@ -116,10 +116,15 @@ class PassiveTreeDialog(QDialog):
         b_aufbau = QVBoxLayout(bild)
         b_aufbau.setContentsMargins(0, 0, 0, 0)
         b_aufbau.addLayout(leiste)
+        # Eigene Zeile: neben dem Suchfeld drückte der lange Text es auf
+        # 168 px zusammen (nativ gemessen).
+        b_aufbau.addWidget(self.graph_points)
         b_aufbau.addWidget(self.graph, 1)
         b_aufbau.addWidget(self.graph_legend)
         self.tabs.addTab(bild, "Tree")
-        self._graph_key = None
+        # Eingepasst wird nur beim ersten Zeigen; danach bleibt der
+        # Ausschnitt, auch beim Wechsel in der Liste (§4.60.6).
+        self._graph_fitted = False
         # Einpassen erst, wenn das Bild sichtbar ist — ein verdeckter Reiter
         # hat keine Größe, und fitInView zoomte dann ins Leere (nativ gesehen).
         self._graph_fit_pending = False
@@ -336,6 +341,7 @@ class PassiveTreeDialog(QDialog):
         eintrag = self._entry(key)
         if eintrag is None or self._tree is None:
             self.graph_legend.setText("")
+            self.graph_points.setText("")
             return
         vergleich = None
         if key[0] in (CONFIG, DRAFT):
@@ -348,6 +354,15 @@ class PassiveTreeDialog(QDialog):
                              compare_to=vergleich, show_reach=self.graph_reach.isChecked(),
                              dark=self._dark())
         self.graph.highlight(self.graph_search.text())
+        # Level und Bandit: beim Verlauf die des Eintrags, sonst die des
+        # Charakters heute — gebaut wird auf dem heutigen Level.
+        quelle = (eintrag if key[0] == HISTORY
+                  else tree_history.current(self._characters, self._name) or eintrag)
+        self.graph_points.setText(tree_report.points_text(
+            self._tree, eintrag.get("passives") or {},
+            vergleich if key[0] in (CONFIG, DRAFT) else None,     # Verlauf: kein "current"
+            level=quelle.get("level"),
+            bandit=(quelle.get("passives") or {}).get("bandit_choice")))
         self.graph_reach.setEnabled(vergleich is None)
         self.graph_legend.setText(
             ("Green: allocate · red: refund · white: unchanged · " if vergleich is not None
@@ -357,6 +372,7 @@ class PassiveTreeDialog(QDialog):
             + "Background: red Strength · green Dexterity · blue Intelligence · "
             "striped: hybrid classes")
         if fit:
+            self._graph_fitted = True
             self._graph_fit_pending = True
             self._fit_graph_if_pending()
 
@@ -392,13 +408,10 @@ class PassiveTreeDialog(QDialog):
         # Mit Umbau zeigt der Reiter "Respec" — er ist bei einer
         # Konfiguration das, worum es geht; ohne Umbau verschwindet er.
         self.tabs.setTabVisible(0, bool(umbau))
-        # Nur beim Wechsel der Auswahl springen — wer im Bild klickt, bleibt
-        # im Bild (§4.60.6).
-        neu_gewaehlt = key != self._shown_key
-        self._shown_key = key
-        if umbau and neu_gewaehlt:
-            self.tabs.setCurrentIndex(0)
-        elif not umbau and self.tabs.currentIndex() == 0:
+        # Der gewählte Reiter bleibt, auch beim Wechsel der Auswahl (Peter,
+        # 2026-10-08: "statt auf dem Tree zu bleiben"); nur ein Respec-Reiter,
+        # der verschwindet, gibt an "Overview" ab (§4.60.6).
+        if not umbau and self.tabs.currentIndex() == 0:
             self.tabs.setCurrentIndex(1)
         if self._entry(key) is None or self._tree is None:
             self.text.setMarkdown(self.markdown_for(key))
@@ -406,8 +419,7 @@ class PassiveTreeDialog(QDialog):
             self.text.setHtml(tree_report.to_html(self._tree_blocks(key, include_reach=False),
                                                   dark=dunkel))
         self._fill_reach(key)
-        self._fill_graph(key, fit=key != self._graph_key)
-        self._graph_key = key
+        self._fill_graph(key, fit=not self._graph_fitted)
         ist_konfig = bool(key) and key[0] == CONFIG
         self.rename_button.setEnabled(ist_konfig)
         self.delete_button.setEnabled(ist_konfig)
@@ -550,13 +562,10 @@ class PassiveTreeDialog(QDialog):
                 return
             self._draft_from = key
             self._undo = []
-        else:
-            self._undo.append(basis)
+        # Auch der erste Klick ist rücknehmbar: dann zurück zum Ausgangsbaum.
+        self._undo.append(basis)
         self._draft = neu
         self._status = ""
-        # Der Wechsel auf den Entwurf kommt vom Klick, nicht aus der Liste:
-        # im Bild bleiben.
-        self._shown_key = (DRAFT, None)
         self.refresh((DRAFT, None))
 
     def _set_status(self, text: str) -> None:
@@ -564,10 +573,19 @@ class PassiveTreeDialog(QDialog):
         self._show_selected()
 
     def _undo_edit(self) -> None:
-        if self._undo:
-            self._draft = self._undo.pop()
-            self._status = ""
-            self.refresh((DRAFT, None))
+        if not self._undo:
+            return
+        vorher = self._undo.pop()
+        if not self._undo:
+            # Der erste Schritt ist zurückgenommen: kein Entwurf mehr, wieder
+            # das Gewählte von vorher — ohne Rückfrage, verloren geht nichts.
+            zurueck = self._draft_from or (CURRENT, None)
+            self._draft, self._draft_from, self._status = None, None, ""
+            self.refresh(zurueck)
+            return
+        self._draft = vorher
+        self._status = ""
+        self.refresh((DRAFT, None))
 
     def _discard_draft(self, ask: bool) -> bool:
         if self._draft is None:

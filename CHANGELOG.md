@@ -6,6 +6,27 @@ nach [SemVer](https://semver.org/lang/de/).
 
 ## [Unveröffentlicht]
 
+### Neu
+
+- **Verbrauchte Punkte im Tree-Reiter** über dem Bild: „Points used:
+  101 (3 in cluster jewels) · max 113 at level 90 · ascendancy 8", bei
+  Konfiguration und Entwurf mit dem aktuellen Baum zum Vergleich. Der
+  Höchstwert rechnet alle Quest-Punkte ein: 24, wenn alle Banditen
+  getötet wurden, sonst 23.
+
+### Behoben
+
+- **Baum-Fenster: Undo nach dem ersten Klick.** Undo war nach dem ersten
+  Klick gesperrt; jetzt nimmt es auch den zurück und kehrt zum
+  Ausgangsbaum zurück.
+- **Baum-Fenster: Ausschnitt und Zoom bleiben.** Der erste Klick
+  (sichtbar beim Rechtsklick) passte das Bild neu ein. Eingepasst wird
+  jetzt nur beim ersten Zeigen; beim Wechsel zwischen Konfigurationen
+  bleibt der Ausschnitt, so sieht man sofort, was hinzukommt und
+  wegfällt.
+- **Baum-Fenster: der Reiter bleibt beim Wechsel der Auswahl** — die
+  Wahl einer Konfiguration sprang zum Reiter Respec.
+
 ## [0.24.0] - 2026-10-07
 
 ### Neu

@@ -603,9 +603,13 @@ def test_the_respec_tab_shows_only_for_a_configuration(qapp, baum) -> None:
     dialog, zeichen, _ = _fenster(qapp, baum)
     th.save_config(zeichen, "WitchOfPeter", "Fire", {"hashes": [10, 11, 14, 15]}, level=30,
                    ruthless=True, source="link")
+    # Peter, 2026-10-08: beim Wechsel der Auswahl auf dem gewählten Reiter
+    # bleiben, nicht zum Respec springen.
+    dialog.tabs.setCurrentIndex(3)
     dialog.refresh((CONFIG, "Fire"))
-    assert dialog.tabs.isTabVisible(0) and dialog.tabs.currentIndex() == 0
+    assert dialog.tabs.isTabVisible(0) and dialog.tabs.currentIndex() == 3
     assert "Refund (1)" in dialog.respec_text.toPlainText()
+    dialog.tabs.setCurrentIndex(0)
     dialog.refresh((CURRENT, None))
     assert not dialog.tabs.isTabVisible(0) and dialog.tabs.currentIndex() == 1
     assert "Within reach" not in dialog.text.toPlainText()
@@ -1005,7 +1009,7 @@ def test_masteries_need_a_notable_and_each_effect_only_once() -> None:
 
 
 def test_clicking_in_the_tree_starts_a_draft_and_stays_on_the_tree_tab(qapp, baum) -> None:
-    from poe_view.ui.passive_tree_dialog import DRAFT
+    from poe_view.ui.passive_tree_dialog import CURRENT, DRAFT
     dialog, zeichen, aufrufe = _fenster(qapp, baum)
     dialog.tabs.setCurrentIndex(3)
     assert dialog._click_hint(15) == "Click: allocate (2 points)"
@@ -1017,7 +1021,8 @@ def test_clicking_in_the_tree_starts_a_draft_and_stays_on_the_tree_tab(qapp, bau
     assert dialog.graph.comparing              # Entwurf gegen den aktuellen Baum
     assert "Unsaved changes: 5 points (current tree 3)" in dialog.hint.text()
     assert "respec: 0 points to refund" in dialog.hint.text()
-    assert dialog.undo_button.isVisibleTo(dialog) and not dialog.undo_button.isEnabled()
+    # Schon der erste Klick ist rücknehmbar (Peter, 2026-10-08).
+    assert dialog.undo_button.isVisibleTo(dialog) and dialog.undo_button.isEnabled()
     dialog.graph.node_clicked.emit(13, False)
     assert dialog.undo_button.isEnabled()
     dialog.graph.node_clicked.emit(11, True)                     # 11 samt allem dahinter
@@ -1026,9 +1031,62 @@ def test_clicking_in_the_tree_starts_a_draft_and_stays_on_the_tree_tab(qapp, bau
     dialog._undo_edit()
     dialog._undo_edit()
     assert pt.allocated(dialog._draft) == {10, 11, 12, 14, 15}
+    # Der letzte Schritt zurück führt ohne Entwurf zum Ausgangsbaum.
+    dialog._undo_edit()
+    assert dialog._draft is None and dialog._selected() == (CURRENT, None)
+    assert "✎ Unsaved changes" not in _eintraege(dialog)
+    assert dialog.tabs.currentIndex() == 3
     assert aufrufe == []                                         # nichts gespeichert
     assert th.configs(zeichen, "WitchOfPeter") == {}
-    dialog._draft = None
+    dialog.close()
+
+
+def test_the_first_click_keeps_the_zoom(qapp, baum) -> None:
+    """Peter, 2026-10-08: "die Anzeige/Zoom ändert sich beim ersten
+    Rechtsklick" — der Wechsel auf den Entwurf passte das Bild neu ein.
+    Auch Rücknahme und Verwerfen lassen den Ausschnitt stehen."""
+    from poe_view.ui.passive_tree_dialog import CONFIG, HISTORY
+    dialog, _zeichen, _ = _fenster(qapp, baum)
+    dialog.resize(900, 700)
+    dialog.show()
+    dialog.tabs.setCurrentIndex(3)
+    qapp.processEvents()
+    dialog.graph.scale(3, 3)                                     # von Hand gezoomt
+    gezoomt = dialog.graph.transform()
+    dialog.graph.node_clicked.emit(11, True)
+    qapp.processEvents()
+    assert dialog._draft is not None and dialog.graph.transform() == gezoomt
+    dialog._undo_edit()
+    qapp.processEvents()
+    assert dialog._draft is None and dialog.graph.transform() == gezoomt
+    dialog.graph.node_clicked.emit(15, False)
+    dialog._discard_draft(ask=False)
+    qapp.processEvents()
+    assert dialog._draft is None and dialog.graph.transform() == gezoomt
+    # Auch der Wechsel in der Liste lässt den Ausschnitt stehen — so sieht
+    # man sofort, was hinzukommt und wegfällt (Peter, 2026-10-08).
+    th.save_config(_zeichen, "WitchOfPeter", "Fire", {"hashes": [10, 11, 14, 15]}, level=30,
+                   ruthless=True, source="link")
+    dialog.refresh((CONFIG, "Fire"))
+    qapp.processEvents()
+    assert dialog.graph.comparing and dialog.graph.transform() == gezoomt
+    dialog.refresh((HISTORY, 0))
+    qapp.processEvents()
+    assert dialog.graph.transform() == gezoomt
+    dialog.close()
+
+
+def test_the_tree_is_fitted_once_when_first_shown(qapp, baum) -> None:
+    """Eingepasst wird beim ersten Zeigen — auch wenn der Reiter erst
+    später sichtbar wird (ein verdeckter Reiter hat keine Größe)."""
+    dialog, _zeichen, _ = _fenster(qapp, baum)
+    dialog.resize(900, 700)
+    dialog.show()
+    qapp.processEvents()
+    vorher = dialog.graph.transform()
+    dialog.tabs.setCurrentIndex(3)
+    qapp.processEvents()
+    assert dialog.graph.transform() != vorher
     dialog.close()
 
 
@@ -1453,3 +1511,63 @@ def test_a_mastery_tooltip_lists_its_effects_for_planning(qapp) -> None:
     assert g.copy_text(40, full=True).splitlines() == [
         "Life Mastery (ID 40)", "Effects:", "• +50 to maximum Life", "✓ 10% reduced Mana Cost"]
     g.close()
+
+
+def test_used_points_count_cluster_jewels_and_ascendancy_apart(baum) -> None:
+    """Peter, 2026-10-08: "eine Anzeige der aktuell verbrauchten
+    Skillpoints". Cluster-Knoten kosten wie jeder andere einen Punkt;
+    Starts (auch der Aszendenz-Start) kosten keinen."""
+    from poe_view.ui.tree_report import points_text, used_points
+    passives = {"hashes": [1, 10, 11, 50, 51], "hashes_ex": [65600, 65601, 65602]}
+    assert used_points(baum, passives) == (5, 3, 1)
+    assert points_text(baum, passives) == ("Points used: 5 (3 in cluster jewels) · "
+                                           "ascendancy 1")
+    assert points_text(baum, passives, {"hashes": [1, 10, 11, 50, 51]}) == (
+        "Points used: 5 (3 in cluster jewels), current tree 2 · ascendancy 1")
+    assert points_text(baum, {"hashes": [10, 11]}, {"hashes": [10, 11, 51]}) == (
+        "Points used: 2 · ascendancy 0, current tree 1")
+    assert points_text(baum, {"hashes": [10, 11]}, {"hashes": [11, 10]}) == (
+        "Points used: 2 · ascendancy 0")                                 # gleich: kein Vergleich
+
+
+def test_the_tree_tab_shows_the_points_used(qapp, baum) -> None:
+    from poe_view.ui.passive_tree_dialog import CONFIG, CURRENT, HISTORY
+    dialog, zeichen, _ = _fenster(qapp, baum)
+    # Level 30: 29 Punkte aus Leveln + 24 aus Quests (Bandit unbekannt).
+    assert dialog.graph_points.text() == "Points used: 3 · max 53 at level 30 · ascendancy 0"
+    dialog.graph.node_clicked.emit(15, False)
+    assert dialog.graph_points.text() == ("Points used: 5, current tree 3 · max 53 at level 30"
+                                          " · ascendancy 0")
+    dialog._discard_draft(ask=False)
+    dialog.refresh((HISTORY, 0))                     # Level des Eintrags
+    assert dialog.graph_points.text() == "Points used: 2 · max 52 at level 29 · ascendancy 0"
+    # Der Verlauf vergleicht mit dem Eintrag davor, nicht mit dem aktuellen
+    # Baum — "current tree" wäre dort falsch.
+    dialog.refresh((HISTORY, 1))
+    assert dialog.graph.comparing
+    assert dialog.graph_points.text() == "Points used: 3 · max 53 at level 30 · ascendancy 0"
+    # Eine Konfiguration von Level 20 wird auf dem heutigen Level gebaut.
+    th.save_config(zeichen, "WitchOfPeter", "Old", {"hashes": [10, 11]}, level=20,
+                   ruthless=True, source="link")
+    dialog.refresh((CONFIG, "Old"))
+    assert dialog.graph_points.text() == ("Points used: 2, current tree 3 · max 53 at level 30"
+                                          " · ascendancy 0")
+    # Einem Banditen geholfen: ein Quest-Punkt weniger (30 + 23).
+    th.record(zeichen, "WitchOfPeter", {"hashes": [10, 11, 12], "bandit_choice": "Alira"},
+              level=31, ruthless=True, now=datetime(2026, 10, 4, 20, 0))
+    dialog.refresh((CURRENT, None))
+    assert dialog.graph_points.text() == "Points used: 3 · max 53 at level 31 · ascendancy 0"
+    dialog.close()
+
+
+def test_max_points_count_levels_quests_and_the_bandits() -> None:
+    assert pt.max_points(90) == 89 + 24
+    assert pt.max_points(90, "Eramir") == 113                       # alle getötet
+    assert [pt.max_points(90, b) for b in ("Kraityn", "Alira", "Oak")] == [112] * 3
+    assert pt.max_points(1) == 24 and pt.max_points(100) == 123
+    # Peter, 2026-10-08: "Points used: 103 · max 102 at level 81" — mit 22
+    # Quest-Punkten gerechnet. Seine echten Bäume nutzen genau: Level 81
+    # und 91 mit geholfenem Banditen 103 und 113, Level 100 mit Eramir 123.
+    assert pt.max_points(81, "Alira") == 103
+    assert pt.max_points(91, "Kraityn") == 113
+    assert pt.max_points(100, "Eramir") == 123
