@@ -4314,12 +4314,12 @@ class MainWindow(QMainWindow):
 
     def _change_quest(self, name: str, delta: int) -> None:
         """"+1 quest"/"−1 quest" im Mini-Fenster (§4.60.14)."""
-        baeume = self._trees()
-        jetzt = tree_history.quest_points(baeume, name)
-        neu = min(max(jetzt + delta, 0), passive_tree.QUEST_POINTS)
-        if neu == jetzt:
+        baum, klasse = self._leveling_context(name)
+        if baum is None:
             return
-        tree_history.set_quest_points(baeume, name, neu)
+        stand = leveling_view.progress(baum, self._trees(), name, klasse, self._level_of(name))
+        if stand is None or not leveling_view.change_quest(self._trees(), name, stand, delta):
+            return
         self._save_trees()
         self._update_leveling(name)             # bringt auch ein offenes Baum-Fenster nach
 

@@ -657,11 +657,15 @@ def test_a_reimport_over_the_shown_configuration_keeps_its_new_notes(qapp, baum,
 # --- Leveling-Plan (§4.60.14) ---------------------------------------------- #
 
 def _plan_fenster(qapp, baum):
-    """Aktueller Baum 10, 11, 12 (Level 30); Ziel "Build" = 10, 11, 12, 14,
-    15, 20, 21. Reihenfolge vom Start: 10, 11, 12 (Iron Heart), 14, 15
-    (Far Away), 20, 21 (Sockel) — kein Schadens-Notable, also das
+    """Ein frischer Charakter (aktueller Baum leer — ein voller zählte als
+    Quest-Punkte, ``seen_quest``); Ziel "Build" = 10, 11, 12, 14, 15, 20,
+    21. Reihenfolge vom Start: 10, 11, 12 (Iron Heart), 14, 15 (Far
+    Away), 20, 21 (Sockel) — kein Schadens-Notable, also das
     nächstgelegene; bei Gleichstand die kleinere Kennung."""
+    from datetime import datetime
     dialog, zeichen, gespeichert = _fenster(qapp, baum)
+    th.record(zeichen, "WitchOfPeter", {"hashes": []}, level=1, ruthless=True,
+              now=datetime(2026, 10, 4, 20, 0))
     th.save_config(zeichen, "WitchOfPeter", "Build", {"hashes": [10, 11, 12, 14, 15, 20, 21]},
                    level=30, ruthless=True, source="pob")
     dialog.refresh()
@@ -735,6 +739,34 @@ def test_quest_points_are_added_and_taken_back_by_hand(qapp, baum) -> None:
     dialog.close()
 
 
+def test_quest_points_the_real_tree_shows_count_by_themselves(qapp, baum) -> None:
+    """Peter: "Warum resettet sich der tree auf 80/103 wenn ich 'now'
+    drücke?" — Level 81, 103 Punkte vergeben, keine Quest-Punkte
+    eingetragen. Was der echte Baum über Level − 1 hinaus belegt, sind
+    Quest-Punkte; darunter geht "−1 quest" nicht."""
+    dialog, zeichen, gespeichert = _plan_fenster(qapp, baum)
+    th.set_leveling(zeichen, "WitchOfPeter", "Build")
+    th.record(zeichen, "WitchOfPeter", {"hashes": [10, 11, 12, 14]}, level=3, ruthless=True)
+    dialog.set_level(3)                                           # 2 aus Leveln, 4 vergeben
+    assert "level 3 + 2 quest = 4 points" in dialog.plan_label.text()
+    assert dialog.plan_slider.value() == 4
+    assert not dialog.quest_minus.isEnabled() and dialog.quest_plus.isEnabled()
+    dialog._change_quest(-1)                                      # nicht unter den Baum
+    assert th.quest_points(zeichen, "WitchOfPeter") == 0 and gespeichert == []
+    dialog.quest_plus.click()                                     # vom wirksamen Wert aus
+    assert th.quest_points(zeichen, "WitchOfPeter") == 3 and gespeichert == [1]
+    assert "level 3 + 3 quest = 5 points" in dialog.plan_label.text()
+    assert dialog.quest_minus.isEnabled()
+    dialog.quest_minus.click()
+    assert th.quest_points(zeichen, "WitchOfPeter") == 2
+    assert "level 3 + 2 quest = 4 points" in dialog.plan_label.text()
+    # Ein späteres Level deckt die Punkte selbst: keine Quest-Punkte mehr nötig.
+    th.set_quest_points(zeichen, "WitchOfPeter", 0)
+    dialog.set_level(5)
+    assert "level 5 = 4 points" in dialog.plan_label.text()
+    dialog.close()
+
+
 def test_the_slider_previews_the_tree_point_by_point(qapp, baum) -> None:
     """Peter, 2026-10-08: "ein Progress Bar den ich selbst bedienen kann
     mit den zur Verfügung stehenden Skillpoints, so dass ich sehen kann,
@@ -775,10 +807,10 @@ def test_the_slider_previews_the_tree_point_by_point(qapp, baum) -> None:
     assert dialog.graph._shown - {1} == {10, 11, 12, 14, 15, 20, 21} and dialog.graph.markers == {}
     dialog.plan_now_button.click()                                # zurück: der Eintrag selbst
     assert dialog._preview is None and s.value() == 2
-    assert dialog.graph._shown - {1} == {10, 11, 12} and dialog.graph.marker_now == 11
+    assert dialog.graph._shown - {1} == set() and dialog.graph.marker_now == 11
     s.setValue(3)
     s.setValue(2)                                                 # auf den Stand von jetzt
-    assert dialog._preview is None and dialog.graph._shown - {1} == {10, 11, 12}
+    assert dialog._preview is None and dialog.graph._shown - {1} == set()
     s.setValue(5)
     dialog.refresh((HISTORY, 0))                                  # anderer Eintrag: Regler weg
     assert dialog.plan_slider.isHidden() and dialog.graph._shown - {1} == {10, 11}

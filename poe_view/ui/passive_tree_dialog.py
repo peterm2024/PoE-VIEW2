@@ -630,11 +630,11 @@ class PassiveTreeDialog(QDialog):
         self._update_plan(self._selected())
 
     def _change_quest(self, delta: int) -> None:
-        jetzt = tree_history.quest_points(self._characters, self._name)
-        neu = min(max(jetzt + delta, 0), passive_tree.QUEST_POINTS)
-        if neu == jetzt:
+        stand = leveling_view.progress(self._tree, self._characters, self._name, self._class,
+                                       self._level)
+        if stand is None or not leveling_view.change_quest(self._characters, self._name,
+                                                           stand, delta):
             return
-        tree_history.set_quest_points(self._characters, self._name, neu)
         self._on_change()
         self._update_plan(self._selected())
 
@@ -653,7 +653,7 @@ class PassiveTreeDialog(QDialog):
         ziel = roh.get("target", "")
         stand = leveling_view.progress(self._tree, self._characters, self._name, self._class,
                                        self._level)
-        leveling_view.update_quest_buttons(self.quest_plus, self.quest_minus, stand.quest)
+        leveling_view.update_quest_buttons(self.quest_plus, self.quest_minus, stand)
         im_plan = key in ((CURRENT, None), (CONFIG, ziel))
         for w in (self.plan_slider, self.plan_slider_label, self.plan_now_button):
             w.setVisible(im_plan)

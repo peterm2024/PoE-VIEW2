@@ -9333,8 +9333,20 @@ Level 1 heißt es "First point (level 2)". Quest-Punkte meldet weder Log
 noch API: "+1 quest"/"−1 quest" im Baum- und im Mini-Fenster, 0 bis 24
 (`passive_tree.QUEST_POINTS`), gespeichert unter `"quest_points"` beim
 Charakter — sie bleiben, wenn das Ziel wechselt oder der Plan endet.
-Der echte Baum zählt bewusst nicht: Wer abweicht, sieht es im Bild
-(gefüllte Knoten gegen nummerierte Ringe).
+
+Nur an einer Stelle zählt der echte Baum mit: Hat er mehr Punkte
+vergeben (Hauptbaum + Cluster-Jewels), als Level − 1 hergibt, kamen die
+übrigen aus Quests (`leveling_view.seen_quest`). Peter, mit einem
+fertigen Charakter: "Warum resettet sich der tree auf 80/103 wenn ich
+'now' drücke?" — Level 81, 103 Punkte vergeben, 0 eingetragen. Wirksam
+ist der größere Wert aus eingetragenen und gesehenen Quest-Punkten;
+die Knöpfe rechnen vom wirksamen Wert aus (`change_quest`), "−1 quest"
+geht nicht unter das, was der Baum belegt (Peters Entscheidung zwischen
+"23× +1 drücken" und dieser Automatik; Preis: die Zahl springt nach
+einem Abruf von selbst, wenn im Spiel mehr vergeben wurde, als der Plan
+dachte). Sonst zählt der echte Baum nicht: Wer abweicht, sieht es im
+Bild (gefüllte Knoten gegen nummerierte Ringe). Nativ mit dem echten
+Charakter: "level 81 + 23 quest = 103 points", Regler 103/103.
 
 **Anzeige**, eine Rechnung für alle drei (`ui/leveling_view.progress`):
 
@@ -9408,6 +9420,8 @@ Start-Prüfung in der Breitensuche, die `erlaubt` schon ausschließt;
 eigenes Nachziehen des Baum-Fensters, das `set_level` schon macht),
 beide entfernt; für die dritte (Obergrenze 24) Tests verschärft.
 Regler: 15 Sabotagen, alle gefangen.
+Gesehene Quest-Punkte: 6 Sabotagen, eine hielt — eine doppelte
+Obergrenze, entfernt.
 
 ---
 

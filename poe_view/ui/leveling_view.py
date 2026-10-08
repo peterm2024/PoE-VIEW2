@@ -18,6 +18,7 @@ from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWi
 from poe_view.services import leveling, passive_tree, tree_history
 from poe_view.services.leveling import Plan, Step
 from poe_view.services.passive_tree import Tree
+from poe_view.ui import tree_report
 
 
 def build_plan(characters: dict, name: str) -> Plan | None:
@@ -37,7 +38,8 @@ class Progress:
     title: str                      # Name der Ziel-Konfiguration
     steps: list[Step]               # alle, vom Klassenstart bis zum Ziel
     level: int
-    quest: int                      # von Hand gezählte Quest-Punkte
+    quest: int                      # wirksame Quest-Punkte (``seen_quest`` oder von Hand)
+    quest_seen: int = 0             # die der echte Baum belegt — darunter geht es nicht
 
     @property
     def points(self) -> int:
@@ -82,8 +84,32 @@ def progress(tree: Tree, characters: dict, name: str, class_name: str,
     if not level:
         level = (tree_history.current(characters, name) or {}).get("level") or 1
     roh = tree_history.leveling(characters, name) or {}
+    echt = (tree_history.current(characters, name) or {}).get("passives") or {}
+    gesehen = seen_quest(tree, echt, level)
+    # Beide schon höchstens 24 (``seen_quest``, ``change_quest``).
+    quest = max(tree_history.quest_points(characters, name), gesehen)
     return Progress(roh.get("target", ""), leveling.sequence(tree, plan, class_name), level,
-                    tree_history.quest_points(characters, name))
+                    quest, gesehen)
+
+
+def seen_quest(tree: Tree, passives: dict, level: int) -> int:
+    """Quest-Punkte, die der echte Baum belegt: Hat er mehr Punkte
+    vergeben, als das Level hergibt, kamen die übrigen aus Quests (Peter:
+    "Warum resettet sich der tree auf 80/103 wenn ich 'now' drücke?" —
+    Level 81, 103 Punkte vergeben, 0 Quest-Punkte eingetragen)."""
+    vergeben = tree_report.used_points(tree, passives)[0]
+    return min(max(vergeben - max(level - 1, 0), 0), passive_tree.QUEST_POINTS)
+
+
+def change_quest(characters: dict, name: str, stand: Progress, delta: int) -> bool:
+    """"+1 quest"/"−1 quest": vom wirksamen Wert aus, nie unter das, was
+    der echte Baum belegt, nie über alle Quest-Punkte. True, wenn sich
+    etwas geändert hat."""
+    neu = min(max(stand.quest + delta, stand.quest_seen), passive_tree.QUEST_POINTS)
+    if neu == stand.quest:
+        return False
+    tree_history.set_quest_points(characters, name, neu)
+    return True
 
 
 def step_text(tree: Tree, step: Step, towards: bool = True) -> str:
@@ -115,14 +141,16 @@ def quest_buttons(on_change: Callable[[int], None]) -> tuple[QPushButton, QPushB
     plus.setToolTip("A quest gave you a passive point")
     plus.clicked.connect(lambda: on_change(1))
     minus = QPushButton("−1 quest")
-    minus.setToolTip("Take back a quest point added by mistake")
+    minus.setToolTip("Take back a quest point added by mistake "
+                     "(not below what your tree already shows)")
     minus.clicked.connect(lambda: on_change(-1))
     return plus, minus
 
 
-def update_quest_buttons(plus: QPushButton, minus: QPushButton, quest: int) -> None:
-    plus.setEnabled(quest < passive_tree.QUEST_POINTS)
-    minus.setEnabled(quest > 0)
+def update_quest_buttons(plus: QPushButton, minus: QPushButton,
+                         stand: Progress | None) -> None:
+    plus.setEnabled(stand is not None and stand.quest < passive_tree.QUEST_POINTS)
+    minus.setEnabled(stand is not None and stand.quest > stand.quest_seen)
 
 
 class LevelingWindow(QWidget):
@@ -159,8 +187,7 @@ class LevelingWindow(QWidget):
         if tree is None or stand is None:
             self.head.setText(f"{character}: no leveling plan")
             self.body.setText("")
-            update_quest_buttons(self.quest_plus, self.quest_minus, 0)
-            self.quest_plus.setEnabled(False)
+            update_quest_buttons(self.quest_plus, self.quest_minus, None)
             return
         e = html.escape
         self.head.setText(f"<b>{e(character)}</b> · {e(stand.points_text())}<br>"
@@ -173,4 +200,4 @@ class LevelingWindow(QWidget):
         if not zeilen:
             zeilen.append("Plan complete.")
         self.body.setText("<br>".join(zeilen))
-        update_quest_buttons(self.quest_plus, self.quest_minus, stand.quest)
+        update_quest_buttons(self.quest_plus, self.quest_minus, stand)
