@@ -113,7 +113,8 @@ def current(characters: dict, name: str) -> dict | None:
 # Peter, 2026-10-04: "eine Konfiguration für maximale Feuerresistenz oder
 # maximalen Burst-Damage". Je Charakter unter "configs", ein Eintrag wie
 # "current" plus "source" (woher: "current", "link", "pob", "edited",
-# "copy") und, wenn gesetzt, "group" (§4.60.12: Gruppe nach Build).
+# "copy") und, wenn gesetzt, "group" (§4.60.12: Gruppe nach Build) und
+# "notes" (§4.60.13).
 
 def configs(characters: dict, name: str) -> dict[str, dict]:
     return (characters.get(name) or {}).get("configs") or {}
@@ -121,22 +122,40 @@ def configs(characters: dict, name: str) -> dict[str, dict]:
 
 def save_config(characters: dict, name: str, config_name: str, passives: dict, *,
                 level: int, ruthless: bool, source: str,
-                now: datetime | None = None, group: str | None = None) -> None:
-    """Anlegen oder überschreiben. ``group``: None behält die Gruppe einer
-    überschriebenen Konfiguration ("Save to X" soll sie nicht verlieren),
-    "" nimmt sie heraus."""
+                now: datetime | None = None, group: str | None = None,
+                notes: str | None = None) -> None:
+    """Anlegen oder überschreiben. ``group`` und ``notes``: None behält
+    Gruppe bzw. Notizen einer überschriebenen Konfiguration ("Save to X"
+    soll sie nicht verlieren), "" nimmt sie heraus."""
     config_name = config_name.strip()
     if not config_name:
         raise ValueError("Konfiguration ohne Namen")
     alle = characters.setdefault(name, {}).setdefault("configs", {})
     if group is None:
         group = (alle.get(config_name) or {}).get("group", "")
+    if notes is None:
+        notes = (alle.get(config_name) or {}).get("notes", "")
     eintrag = {"at": (now or datetime.now()).isoformat(timespec="seconds"),
                "level": level, "ruthless": ruthless, "source": source,
                "passives": passives}
     if group.strip():
         eintrag["group"] = group.strip()
+    if notes.strip():
+        eintrag["notes"] = notes
     alle[config_name] = eintrag
+
+
+def set_notes(characters: dict, name: str, config_name: str, notes: str) -> bool:
+    """Notizen einer Konfiguration (§4.60.13); True, wenn sich etwas
+    änderte."""
+    eintrag = configs(characters, name).get(config_name)
+    if eintrag is None or eintrag.get("notes", "") == (notes if notes.strip() else ""):
+        return False
+    if notes.strip():
+        eintrag["notes"] = notes
+    else:
+        eintrag.pop("notes", None)
+    return True
 
 
 def group_of(characters: dict, name: str, config_name: str) -> str:

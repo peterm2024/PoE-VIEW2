@@ -9212,6 +9212,52 @@ Auswahlwechsel, Aufklappen bei Auswahl, Pfeiltasten über die
 Gruppe und Vorschlag. Nativ angesehen mit Pohx' Bäumen. Gegenprobe mit
 12 Sabotagen, alle gefangen.
 
+
+#### 4.60.13 Notizen je Konfiguration
+
+Idee 4: "für Sirus, Feuerres-Ring tragen" — und beim PoB-Import die
+Notizen des Builds (Pohx: rund 20.000 Zeichen mit Regex-Zeilen für die
+Händler, Unique-Tabellen, Levelplan).
+
+**Gespeichert** als optionales Feld `"notes"` der Konfiguration
+(`save_config(..., notes=)`, `set_notes`); `notes=None` behält sie beim
+Überschreiben ("Save to X"), das Duplikat übernimmt sie, leere Notizen
+nehmen das Feld heraus.
+
+**Reiter "Notes"** (Index 4, Strg+5): ein `QPlainTextEdit`, nur bei
+Konfigurationen beschreibbar (aktueller Baum und Verlauf ändern sich von
+selbst). Gespeichert wird 700 ms nach dem letzten Tastendruck
+(`_notes_timer` — jedes Speichern schreibt die Datei), beim Wechsel der
+Auswahl (`_show_selected` → `_commit_notes`) und beim Schließen
+(`done`). Nur Getipptes (`_notes_dirty`): Zuerst schrieb das Feld beim
+Wechsel seinen Inhalt immer zurück — hatte ein Import die gezeigte
+Konfiguration samt neuen Notizen überschrieben, kamen die alten zurück
+(im Test gefunden). Mit Notizen heißt der Reiter "Notes •", und der
+Listeneintrag zeigt ihren Anfang (300 Zeichen) als Tooltip.
+
+**Festbreite ohne Umbruch:** Build-Notizen richten Spalten mit
+Leerzeichen aus; in der Proportionalschrift verrutschte Pohx'
+Unique-Tabelle (nativ gesehen). Ganz exakt stehen die Spalten auch so
+nicht — er mischt Tabs und Leerzeichen für PoBs Schrift —, lesbar sind
+sie.
+
+**Import:** `<Notes>` des Builds, ohne Farbcodes (`clean_notes`: `^0`–`^9`,
+`^xRRGGBB`; ein `^` vor einem Buchstaben — Regex wie `^fire t` — bleibt),
+ohne den Einzug des XML, Zeilen wie sie sind. Bei einem Mehrfach-Import
+bekommt jede Konfiguration des Builds dieselben Notizen; so stehen sie
+bei jedem Levelabschnitt zur Hand (bei Pohx 10 × 20 KB in der
+Baum-Datei).
+
+Getestet: Speichern nach der Pause, beim Wechsel, beim Schließen;
+aktueller Baum nur lesen; leeren; "Save to X" und Duplikat behalten;
+Import samt Farbcodes und Regex; erneuter Import über die gezeigte
+Konfiguration behält die neuen Notizen. Nativ angesehen mit Pohx'
+Notizen. Gegenprobe mit 12 Sabotagen, alle gefangen.
+
+**Werkzeug-Falle beim Bauen:** Ein Patch über einen Bash-Heredoc machte
+aus `"\r\n"` und `"\n"` in `clean_notes` echte Zeilenumbrüche (die
+bekannte Falle; Reparatur über ein Skript aus dem Write-Werkzeug).
+
 **Duplicate** speichert den gewählten Eintrag unter neuem Namen
 (Vorschlag "Fire (copy)" bzw. "Level 29 tree" beim Verlauf, mit dessen
 Level; `source="copy"`). Beim aktuellen Baum ist es "Save current as…".

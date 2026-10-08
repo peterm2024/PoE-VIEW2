@@ -563,3 +563,89 @@ def test_arrow_keys_skip_group_headers(qapp, baum) -> None:
     QTest.keyClick(dialog.list, Qt.Key.Key_Down)
     assert dialog._selected() == (CONFIG, "Lvl 01-30")            # über "▾ Pohx (1)" hinweg
     dialog.close()
+
+
+def test_notes_are_saved_per_configuration(qapp, baum, monkeypatch) -> None:
+    """Idee 4: Notizen je Konfiguration — speichern sich selbst (nach einer
+    Pause beim Tippen, beim Wechsel, beim Schließen)."""
+    from poe_view.ui.passive_tree_dialog import CONFIG, CURRENT
+    dialog, zeichen, gespeichert = _drei(qapp, baum)
+    assert dialog.tabs.tabText(4) == "Notes" and not dialog.notes_edit.isReadOnly()
+    dialog.notes_edit.setPlainText("Sirus: wear the fire res ring")
+    assert dialog.tabs.tabText(4) == "Notes •"
+    assert th.configs(zeichen, "WitchOfPeter")["A"].get("notes") is None   # noch nicht
+    assert dialog._notes_timer.isActive()
+    dialog._notes_timer.timeout.emit()                            # Pause beim Tippen
+    assert th.configs(zeichen, "WitchOfPeter")["A"]["notes"] == "Sirus: wear the fire res ring"
+    assert gespeichert == [1]
+    assert _item(dialog, (CONFIG, "A")).toolTip() == "Sirus: wear the fire res ring"
+    # Wechsel sichert sofort, ohne auf die Pause zu warten.
+    dialog.notes_edit.setPlainText("Sirus: wear the ring, flask!")
+    dialog.refresh((CONFIG, "B"))
+    assert th.configs(zeichen, "WitchOfPeter")["A"]["notes"] == "Sirus: wear the ring, flask!"
+    assert dialog.notes_edit.toPlainText() == "" and dialog.tabs.tabText(4) == "Notes"
+    # Aktueller Baum: keine Notizen, nur lesen.
+    dialog.refresh((CURRENT, None))
+    assert dialog.notes_edit.isReadOnly() and "belong to configurations" in (
+        dialog.notes_edit.placeholderText())
+    dialog.notes_edit.setPlainText("x")                           # nichts gespeichert
+    dialog._commit_notes()
+    assert "notes" not in th.configs(zeichen, "WitchOfPeter")["B"]
+    # Schließen sichert, was noch in der Pause hängt.
+    dialog.refresh((CONFIG, "C"))
+    dialog.notes_edit.setPlainText("for Maven")
+    dialog.close()
+    assert th.configs(zeichen, "WitchOfPeter")["C"]["notes"] == "for Maven"
+    # Leeren nimmt das Feld heraus.
+    assert th.set_notes(zeichen, "WitchOfPeter", "C", "  ") is True
+    assert "notes" not in th.configs(zeichen, "WitchOfPeter")["C"]
+
+
+def test_notes_survive_save_to_and_duplicate(qapp, baum, monkeypatch) -> None:
+    from poe_view.ui.passive_tree_dialog import CONFIG
+    dialog, zeichen, _ = _drei(qapp, baum)
+    th.set_notes(zeichen, "WitchOfPeter", "A", "keep me")
+    dialog.refresh((CONFIG, "A"))
+    dialog.graph.node_clicked.emit(12, False)                     # Entwurf aus "A"
+    dialog.act_save.trigger()                                     # Save to "A"
+    assert th.configs(zeichen, "WitchOfPeter")["A"]["notes"] == "keep me"
+    monkeypatch.setattr(dialog, "_ask_name", lambda titel, v="": v)
+    dialog.act_duplicate.trigger()
+    assert th.configs(zeichen, "WitchOfPeter")["A (copy)"]["notes"] == "keep me"
+    dialog.close()
+
+
+def test_build_notes_come_with_the_import(qapp, baum, monkeypatch) -> None:
+    """Pohx' Notizen (20.000 Zeichen, mit PoB-Farbcodes) kommen mit — ohne
+    die Codes, mit Zeilen und Regex-Zeilen wie sie sind."""
+    from poe_view.services import pob_import as pi
+    from poe_view.ui import passive_tree_dialog as modul
+    dialog, zeichen, _ = _fenster(qapp, baum)
+    specs = "".join(f'<Spec title="{t}"><URL>{pt.encode_url(baum, {"hashes": k}, "Juggernaut")}'
+                    f"</URL></Spec>" for t, k in (("A", [10]), ("B", [10, 11])))
+    notizen = "\n\t\t^2Visit Pohx.net^7\nRegex --> ^fire t|male\n\n^xE05030RED^7 end\n\t"
+    xml = (f"<PathOfBuilding><Notes>{notizen}</Notes><Tree activeSpec='1'>{specs}</Tree>"
+           "</PathOfBuilding>")
+    code = base64.urlsafe_b64encode(zlib.compress(xml.encode())).decode()
+    assert pi.decode_code(code)[0].notes == "Visit Pohx.net\nRegex --> ^fire t|male\n\nRED end"
+    monkeypatch.setattr(modul.QInputDialog, "getText", staticmethod(lambda *a, **k: (code, True)))
+    monkeypatch.setattr(dialog, "_choose_trees", lambda b: b)
+    dialog._import_link()
+    konfigs = th.configs(zeichen, "WitchOfPeter")
+    assert konfigs["A"]["notes"] == konfigs["B"]["notes"] == (
+        "Visit Pohx.net\nRegex --> ^fire t|male\n\nRED end")
+    dialog.close()
+
+
+def test_a_reimport_over_the_shown_configuration_keeps_its_new_notes(qapp, baum,
+                                                                      monkeypatch) -> None:
+    """Das Feld schreibt nur Getipptes zurück — sonst überschriebe es die
+    Notizen, die ein Import gerade in die gezeigte Konfiguration legte."""
+    from poe_view.ui.passive_tree_dialog import CONFIG
+    dialog, zeichen, gespeichert = _drei(qapp, baum)
+    th.save_config(zeichen, "WitchOfPeter", "A", {"hashes": [10]}, level=30, ruthless=True,
+                   source="pob", notes="new notes from the build")
+    dialog.refresh((CONFIG, "B"))
+    assert th.configs(zeichen, "WitchOfPeter")["A"]["notes"] == "new notes from the build"
+    assert gespeichert == []
+    dialog.close()

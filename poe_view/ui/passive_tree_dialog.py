@@ -23,13 +23,14 @@ from __future__ import annotations
 import re
 from collections.abc import Callable
 
-from PySide6.QtCore import Qt, QUrl, Signal
+from PySide6.QtCore import Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import (QAction, QBrush, QColor, QCursor, QDesktopServices,
-                           QGuiApplication, QKeySequence, QPalette)
+                           QFontDatabase, QGuiApplication, QKeySequence, QPalette)
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, QHBoxLayout,
                                QHeaderView,
                                QInputDialog, QLabel,
                                QLineEdit, QListWidget, QListWidgetItem, QMenu, QMessageBox,
+                               QPlainTextEdit,
                                QPushButton, QSplitter, QTabWidget, QTextBrowser,
                                QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
 
@@ -177,6 +178,22 @@ class PassiveTreeDialog(QDialog):
         b_aufbau.addWidget(self.graph, 1)
         b_aufbau.addWidget(self.graph_legend)
         self.tabs.addTab(bild, "Tree")
+        # Notizen je Konfiguration (§4.60.13): speichern sich selbst, kurz
+        # nach dem letzten Tastendruck und beim Wechsel der Auswahl.
+        self.notes_edit = QPlainTextEdit()
+        # Festbreite ohne Umbruch: Build-Notizen richten Spalten mit
+        # Leerzeichen aus (Pohx' Unique-Tabelle verrutschte in der
+        # Proportionalschrift, nativ gesehen).
+        self.notes_edit.setFont(QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont))
+        self.notes_edit.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
+        self.notes_edit.textChanged.connect(self._notes_changed)
+        self._notes_key = None
+        self._notes_dirty = False                # getippt seit dem Zeigen
+        self._notes_timer = QTimer(self)
+        self._notes_timer.setSingleShot(True)
+        self._notes_timer.setInterval(700)
+        self._notes_timer.timeout.connect(self._commit_notes)
+        self.tabs.addTab(self.notes_edit, "Notes")
         # Eingepasst wird nur beim ersten Zeigen; danach bleibt der
         # Ausschnitt, auch beim Wechsel in der Liste (§4.60.6).
         self._graph_fitted = False
@@ -296,7 +313,7 @@ class PassiveTreeDialog(QDialog):
         self.act_ungroup = aktion("Ungroup", "", self._ungroup)
         self.act_delete_group = aktion("Delete group…", "", self._delete_group)
         self.act_find = aktion("Find", "Ctrl+F", self._focus_search)
-        for nummer in range(4):
+        for nummer in range(5):
             aktion(f"Tab {nummer + 1}", f"Ctrl+{nummer + 1}",
                    lambda n=nummer: self._show_tab(n))
 
@@ -449,6 +466,69 @@ class PassiveTreeDialog(QDialog):
         self._on_change()
         self.refresh((CURRENT, None) if gewaehlt in [(CONFIG, n) for n in namen] else gewaehlt)
 
+    # --- Notizen (§4.60.13) ---------------------------------------------- #
+
+    def _show_notes(self, key) -> None:
+        """Die Notizen des Gezeigten ins Feld; nur Konfigurationen haben
+        welche (aktueller Baum und Verlauf ändern sich von selbst)."""
+        ist_konfig = bool(key) and key[0] == CONFIG
+        text = (tree_history.configs(self._characters, self._name).get(key[1]) or {}).get(
+            "notes", "") if ist_konfig else ""
+        self.notes_edit.blockSignals(True)
+        self.notes_edit.setPlainText(text)
+        self.notes_edit.blockSignals(False)
+        self.notes_edit.setReadOnly(not ist_konfig)
+        self.notes_edit.setPlaceholderText(
+            "Notes for this configuration — which boss it is for, what to wear, regexes "
+            "for the vendors… Saved as you type." if ist_konfig
+            else "Notes belong to configurations. Save this tree as one to add notes.")
+        self._notes_key = key if ist_konfig else None
+        self._notes_dirty = False
+        self._label_notes_tab(text)
+
+    def _label_notes_tab(self, text: str) -> None:
+        self.tabs.setTabText(4, "Notes •" if text.strip() else "Notes")
+
+    def _notes_changed(self) -> None:
+        if self._notes_key is not None:
+            self._notes_dirty = True
+            self._label_notes_tab(self.notes_edit.toPlainText())
+            self._notes_timer.start()
+
+    def _commit_notes(self) -> None:
+        """Ins Gespeicherte, wenn getippt wurde — einmal je Pause beim
+        Tippen, nicht je Taste (jedes Speichern schreibt die Datei). Nur
+        Getipptes: Hat ein Import die gezeigte Konfiguration samt Notizen
+        überschrieben, schrieb das Feld sonst die alten zurück (im Test
+        gefunden)."""
+        self._notes_timer.stop()
+        key = self._notes_key
+        if (key is None or not self._notes_dirty
+                or key[1] not in tree_history.configs(self._characters, self._name)):
+            return
+        self._notes_dirty = False
+        if tree_history.set_notes(self._characters, self._name, key[1],
+                                  self.notes_edit.toPlainText()):
+            self._on_change()
+            self._tooltip_notes(key)
+
+    def _tooltip_notes(self, key) -> None:
+        for i in range(self.list.count()):
+            item = self.list.item(i)
+            if item.data(Qt.ItemDataRole.UserRole) == key:
+                item.setToolTip(self._notes_preview(key[1]))
+
+    def _notes_preview(self, name: str) -> str:
+        """Tooltip in der Liste: der Anfang der Notizen."""
+        text = (tree_history.configs(self._characters, self._name).get(name) or {}).get(
+            "notes", "").strip()
+        return text if len(text) <= 300 else text[:300].rstrip() + " …"
+
+    def done(self, result) -> None:  # noqa: D401 (Qt-API)
+        # Schließen (Esc, ×, accept) sichert ungespeicherte Notizen.
+        self._commit_notes()
+        super().done(result)
+
     def _exec_menu(self, menue: QMenu, punkt):
         """Ein Menü öffnen. Eigene Methode, damit Tests sie ersetzen können:
         ``QMenu.exec`` lässt sich bei PySide6 an der Klasse nicht ersetzen
@@ -484,7 +564,8 @@ class PassiveTreeDialog(QDialog):
                                  dict(eintrag.get("passives") or {}),
                                  level=eintrag.get("level") or aktuell.get("level") or 0,
                                  ruthless=bool(eintrag.get("ruthless", aktuell.get("ruthless"))),
-                                 source="copy", group=eintrag.get("group", ""))
+                                 source="copy", group=eintrag.get("group", ""),
+                                 notes=eintrag.get("notes", ""))
         self._on_change()
         self._after(key, (CONFIG, name))
 
@@ -552,13 +633,14 @@ class PassiveTreeDialog(QDialog):
             for name in sorted(konfigs, key=config_order):
                 je_gruppe.setdefault(konfigs[name].get("group", ""), []).append(name)
             for name in je_gruppe.pop("", []):
-                self._add(f"  {name}", (CONFIG, name))
+                self._add(f"  {name}", (CONFIG, name), tooltip=self._notes_preview(name))
             for gruppe in sorted(je_gruppe, key=config_order):
                 zu = gruppe in self._collapsed
                 self._group_header(gruppe, len(je_gruppe[gruppe]), zu)
                 if not zu:
                     for name in je_gruppe[gruppe]:
-                        self._add(f"      {name}", (CONFIG, name))
+                        self._add(f"      {name}", (CONFIG, name),
+                                  tooltip=self._notes_preview(name))
         verlauf = tree_history.history(self._characters, self._name)
         if verlauf:
             self._header("History")
@@ -642,9 +724,11 @@ class PassiveTreeDialog(QDialog):
         if key and self._compare_index(key):
             self.compare_box.setCurrentIndex(self._compare_index(key))
 
-    def _add(self, text: str, key: tuple, bold: bool = False) -> None:
+    def _add(self, text: str, key: tuple, bold: bool = False, tooltip: str = "") -> None:
         item = QListWidgetItem(text)
         item.setData(Qt.ItemDataRole.UserRole, key)
+        if tooltip:
+            item.setToolTip(tooltip)
         if bold:
             schrift = item.font()
             schrift.setBold(True)
@@ -844,7 +928,9 @@ class PassiveTreeDialog(QDialog):
                            else f"{titel} ({anzahl})")
 
     def _show_selected(self) -> None:
+        self._commit_notes()
         key = self._selected()
+        self._show_notes(key)
         dunkel = self._dark()
         umbau = self._respec_blocks(key)
         self.respec_text.setHtml(tree_report.to_html(umbau, dark=dunkel) if umbau else "")
@@ -1144,7 +1230,8 @@ class PassiveTreeDialog(QDialog):
                                      level=aktuell.get("level") or 0,
                                      ruthless=self._tree.ruthless,
                                      source="link" if not baum.title else "pob",
-                                     group=self._import_group if len(baeume) > 1 else "")
+                                     group=self._import_group if len(baeume) > 1 else "",
+                                     notes=baum.notes)
         self._on_change()
         self.refresh((CONFIG, namen[0]))
 

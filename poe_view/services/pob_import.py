@@ -57,6 +57,9 @@ class BuildTree:
     title: str
     link: TreeLink
     active: bool = False
+    # Die Notizen des Builds (für jeden seiner Bäume dieselben), ohne
+    # PoB-Farbcodes (§4.60.13).
+    notes: str = ""
 
 
 def remote_url(text: str) -> str | None:
@@ -99,6 +102,13 @@ def clean_title(title: str) -> str:
     return " ".join(_FARBE.sub("", title).split())
 
 
+def clean_notes(text: str) -> str:
+    """PoB-Notizen ohne Farbcodes, ohne den Einzug, den das XML davor
+    setzt; Zeilen und Leerzeilen bleiben (Pohx' Regex-Zeilen stehen so)."""
+    zeilen = _FARBE.sub("", text).replace("\r\n", "\n").split("\n")
+    return "\n".join(z.rstrip() for z in zeilen).strip("\n").lstrip("\t ")
+
+
 def decode_code(code: str) -> list[BuildTree]:
     """Die Bäume eines PoB-Codes, in der Reihenfolge des Builds."""
     roh = "".join(code.split())
@@ -117,6 +127,7 @@ def decode_code(code: str) -> list[BuildTree]:
     baum = wurzel.find("Tree")
     if wurzel.tag != "PathOfBuilding" or baum is None:
         raise PobImportError("no passive tree in this build")
+    notizen = clean_notes(wurzel.findtext("Notes") or "")
     aktiv_roh = str(baum.get("activeSpec") or "1")
     aktiv = int(aktiv_roh) if aktiv_roh.isdigit() else 1
     ergebnis = []
@@ -127,7 +138,7 @@ def decode_code(code: str) -> list[BuildTree]:
             log.warning("PoB-Import: Baum %s übersprungen (%s)", nummer, exc)
             continue
         titel = clean_title(spec.get("title") or "") or f"Tree {nummer}"
-        ergebnis.append(BuildTree(titel, link, active=nummer == aktiv))
+        ergebnis.append(BuildTree(titel, link, active=nummer == aktiv, notes=notizen))
     if not ergebnis:
         raise PobImportError("no readable passive tree in this build")
     return ergebnis
