@@ -23,7 +23,7 @@ from __future__ import annotations
 import re
 from collections.abc import Callable
 
-from PySide6.QtCore import Qt, QUrl
+from PySide6.QtCore import Qt, QUrl, Signal
 from PySide6.QtGui import (QAction, QBrush, QColor, QCursor, QDesktopServices,
                            QGuiApplication, QKeySequence, QPalette)
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, QHBoxLayout,
@@ -49,15 +49,31 @@ def config_order(name: str) -> list:
             for t in re.split(r"(\d+)", name)]
 
 
+# Überschrift einer Gruppe (§4.60.12): eigene Rolle, damit sie nie als
+# Eintrag gilt (kein Schlüssel in UserRole).
+GROUP_ROLE = Qt.ItemDataRole.UserRole + 1
+
+
 class _EntryList(QListWidget):
     """Die Liste links. Ein Rechtsklick wählt nicht aus (§4.60.10; Peter,
     2026-10-08: "Wenn ich auf eine Config rechtsklicke wird diese
     automatisch ausgewählt" — sonst wechselte das Bild rechts mit); das
     Menü wirkt auf den Eintrag unter der Maus."""
 
+    # Linksklick auf eine Gruppen-Überschrift: auf-/zuklappen, ohne dass
+    # sie zum aktuellen Eintrag wird (sonst sprang die Auswahl weg — im
+    # Test gesehen).
+    group_clicked = Signal(str)
+
     def mousePressEvent(self, event) -> None:  # noqa: N802 (Qt-API)
         if event.button() == Qt.MouseButton.RightButton:
             event.accept()
+            return
+        item = self.itemAt(event.position().toPoint())
+        gruppe = item.data(GROUP_ROLE) if item is not None else None
+        if gruppe:
+            event.accept()
+            self.group_clicked.emit(gruppe)
             return
         super().mousePressEvent(event)
 # Der Entwurf aus Klicks im Bild (§4.60.6) — nur im Fenster, bis er als
@@ -89,6 +105,10 @@ class PassiveTreeDialog(QDialog):
         self._undo: list[dict] = []
         self._status = ""                        # Meldung zum letzten Klick
         self._menu_keys: list | None = None      # Ziel des offenen Menüs (§4.60.10)
+        self._menu_group: str | None = None      # Gruppe unter der Maus (§4.60.12)
+        self._collapsed: set[str] = set()        # zugeklappte Gruppen
+        self._import_group = ""                  # Gruppe des letzten Mehrfach-Imports
+        self._group_suggestion = ""
 
         self.list = _EntryList()
         # Mehrere Konfigurationen auf einmal löschen (Strg-/Umschalt-Klick),
@@ -99,6 +119,7 @@ class PassiveTreeDialog(QDialog):
         self.list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.list.customContextMenuRequested.connect(self._list_menu)
         self.list.itemActivated.connect(lambda *_: self._show_tree_tab())
+        self.list.group_clicked.connect(self._toggle_group)
         # Rechts drei Reiter (§4.60.2, Peter: "Wir müssen unbedingt den Tree
         # übersichtlicher hinbekommen"): der Umbau (nur bei Konfiguration
         # und Verlauf), der Baum nach Themen, und die Reichweite als
@@ -270,6 +291,10 @@ class PassiveTreeDialog(QDialog):
                                knopf=self.copy_button)
         self.act_show = aktion("Show tree", "", self._show_target)
         self.act_compare = aktion("Compare with this", "", self._compare_with_target)
+        self.act_move_group = aktion("Move to group…", "", self._move_to_group)
+        self.act_rename_group = aktion("Rename group…", "", self._rename_group)
+        self.act_ungroup = aktion("Ungroup", "", self._ungroup)
+        self.act_delete_group = aktion("Delete group…", "", self._delete_group)
         self.act_find = aktion("Find", "Ctrl+F", self._focus_search)
         for nummer in range(4):
             aktion(f"Tab {nummer + 1}", f"Ctrl+{nummer + 1}",
@@ -310,7 +335,8 @@ class PassiveTreeDialog(QDialog):
                 haupt.append(self.act_save)
             haupt += [self.act_save_as, self.act_undo, self.act_discard]
         elif art == CONFIG:
-            haupt += [self.act_show, self.act_rename, self.act_duplicate, self.act_delete]
+            haupt += [self.act_show, self.act_rename, self.act_duplicate, self.act_move_group,
+                      self.act_delete]
         elif art in (CURRENT, HISTORY):
             haupt += [self.act_show, self.act_duplicate]
         self.act_duplicate.setText("Duplicate…" if art == CONFIG else "Save as configuration…")
@@ -324,6 +350,10 @@ class PassiveTreeDialog(QDialog):
         """Das Menü zum Eintrag unter der Maus, ohne ihn auszuwählen. Gehört
         er zu einer Mehrfachauswahl, gilt es für alle (Löschen)."""
         item = self.list.itemAt(punkt)
+        gruppe = item.data(GROUP_ROLE) if item is not None else None
+        if gruppe:
+            self._group_menu(gruppe, punkt)
+            return
         key = item.data(Qt.ItemDataRole.UserRole) if item is not None else None
         auswahl = self._selected_keys()
         self._menu_keys = ([key] + [k for k in auswahl if k != key] if key in auswahl
@@ -345,6 +375,79 @@ class PassiveTreeDialog(QDialog):
             for i in range(self.list.count()):
                 if hervor is not None and self.list.item(i).data(Qt.ItemDataRole.UserRole) == key:
                     self.list.item(i).setBackground(QBrush())
+
+    def _group_menu(self, gruppe: str, punkt) -> None:
+        menue = QMenu(self)
+        n = len(self._group_members(gruppe))
+        self.act_delete_group.setText(f"Delete group and its {n} configuration"
+                                      f"{'' if n == 1 else 's'}…")
+        for a in (self.act_rename_group, self.act_ungroup, self.act_delete_group):
+            menue.addAction(a)
+        self._menu_group = gruppe
+        try:
+            self._exec_menu(menue, self.list.viewport().mapToGlobal(punkt))
+        finally:
+            self._menu_group = None
+
+    def _group_members(self, gruppe: str) -> list[str]:
+        return sorted((n for n, e in tree_history.configs(self._characters, self._name).items()
+                       if e.get("group") == gruppe), key=config_order)
+
+    def _move_to_group(self) -> None:
+        """Die gewählten Konfigurationen (oder die unter der Maus) in eine
+        Gruppe — eine vorhandene oder eine neue; leer = keine."""
+        namen = [k[1] for k in self._targets() if k and k[0] == CONFIG]
+        if not namen:
+            return
+        vorhanden = tree_history.groups(self._characters, self._name)
+        jetzt = tree_history.group_of(self._characters, self._name, namen[0])
+        wahl, ok = QInputDialog.getItem(
+            self, "Move to group",
+            f"Group for {len(namen)} configuration{'' if len(namen) == 1 else 's'} "
+            "(type a new name, or leave empty for none):",
+            [""] + vorhanden, (vorhanden.index(jetzt) + 1) if jetzt in vorhanden else 0, True)
+        if not ok:
+            return
+        if tree_history.set_group(self._characters, self._name, namen, wahl):
+            self._collapsed.discard(wahl.strip())
+            self._on_change()
+            self.refresh(self._selected())
+
+    def _rename_group(self) -> None:
+        gruppe = self._menu_group
+        if not gruppe:
+            return
+        neu = self._ask_name("Rename group", gruppe)
+        if not neu or neu == gruppe:
+            return
+        tree_history.set_group(self._characters, self._name, self._group_members(gruppe), neu)
+        if gruppe in self._collapsed:
+            self._collapsed ^= {gruppe, neu}
+        self._on_change()
+        self.refresh(self._selected())
+
+    def _ungroup(self) -> None:
+        gruppe = self._menu_group
+        if gruppe and tree_history.set_group(self._characters, self._name,
+                                             self._group_members(gruppe), ""):
+            self._collapsed.discard(gruppe)
+            self._on_change()
+            self.refresh(self._selected())
+
+    def _delete_group(self) -> None:
+        gruppe = self._menu_group
+        namen = self._group_members(gruppe) if gruppe else []
+        if not namen or QMessageBox.question(
+                self, "Delete group",
+                f"Delete the group “{gruppe}” and its {len(namen)} configuration"
+                f"{'' if len(namen) == 1 else 's'}?") != QMessageBox.StandardButton.Yes:
+            return
+        gewaehlt = self._selected()
+        for name in namen:
+            tree_history.delete_config(self._characters, self._name, name)
+        self._collapsed.discard(gruppe)
+        self._on_change()
+        self.refresh((CURRENT, None) if gewaehlt in [(CONFIG, n) for n in namen] else gewaehlt)
 
     def _exec_menu(self, menue: QMenu, punkt):
         """Ein Menü öffnen. Eigene Methode, damit Tests sie ersetzen können:
@@ -381,7 +484,7 @@ class PassiveTreeDialog(QDialog):
                                  dict(eintrag.get("passives") or {}),
                                  level=eintrag.get("level") or aktuell.get("level") or 0,
                                  ruthless=bool(eintrag.get("ruthless", aktuell.get("ruthless"))),
-                                 source="copy")
+                                 source="copy", group=eintrag.get("group", ""))
         self._on_change()
         self._after(key, (CONFIG, name))
 
@@ -439,8 +542,23 @@ class PassiveTreeDialog(QDialog):
         konfigs = tree_history.configs(self._characters, self._name)
         if konfigs:
             self._header("Configurations")
+            # Erst die ohne Gruppe, dann je Gruppe eine aufklappbare
+            # Überschrift (§4.60.12). Liegt die Auswahl in einer
+            # zugeklappten Gruppe, klappt sie auf.
+            if alt and alt[0] == CONFIG:
+                self._collapsed.discard(tree_history.group_of(self._characters, self._name,
+                                                              alt[1]))
+            je_gruppe: dict[str, list[str]] = {}
             for name in sorted(konfigs, key=config_order):
+                je_gruppe.setdefault(konfigs[name].get("group", ""), []).append(name)
+            for name in je_gruppe.pop("", []):
                 self._add(f"  {name}", (CONFIG, name))
+            for gruppe in sorted(je_gruppe, key=config_order):
+                zu = gruppe in self._collapsed
+                self._group_header(gruppe, len(je_gruppe[gruppe]), zu)
+                if not zu:
+                    for name in je_gruppe[gruppe]:
+                        self._add(f"      {name}", (CONFIG, name))
         verlauf = tree_history.history(self._characters, self._name)
         if verlauf:
             self._header("History")
@@ -532,6 +650,21 @@ class PassiveTreeDialog(QDialog):
             schrift.setBold(True)
             item.setFont(schrift)
         self.list.addItem(item)
+
+    def _group_header(self, gruppe: str, anzahl: int, zu: bool) -> None:
+        item = QListWidgetItem(f"  {'▸' if zu else '▾'} {gruppe} ({anzahl})")
+        # Wie die anderen Überschriften ohne Flags: die Pfeiltasten springen
+        # darüber; Klick und Menü kommen über ``itemAt`` (_EntryList).
+        item.setFlags(Qt.ItemFlag.NoItemFlags)
+        item.setData(GROUP_ROLE, gruppe)
+        schrift = item.font()
+        schrift.setBold(True)
+        item.setFont(schrift)
+        self.list.addItem(item)
+
+    def _toggle_group(self, gruppe: str) -> None:
+        self._collapsed ^= {gruppe}
+        self.refresh(self._selected())
 
     def _header(self, text: str) -> None:
         item = QListWidgetItem(text)
@@ -975,7 +1108,9 @@ class PassiveTreeDialog(QDialog):
         except (TreeLinkError, pob_import.PobImportError) as exc:
             QMessageBox.warning(self, "Import tree", f"Nothing to import ({exc}).")
             return
+        self._import_group = ""
         if len(baeume) > 1:
+            self._group_suggestion = self._suggest_group(baeume, text)
             baeume = self._choose_trees(baeume)
             if not baeume:
                 return
@@ -1008,7 +1143,8 @@ class PassiveTreeDialog(QDialog):
             tree_history.save_config(self._characters, self._name, name, baum.link.passives,
                                      level=aktuell.get("level") or 0,
                                      ruthless=self._tree.ruthless,
-                                     source="link" if not baum.title else "pob")
+                                     source="link" if not baum.title else "pob",
+                                     group=self._import_group if len(baeume) > 1 else "")
         self._on_change()
         self.refresh((CONFIG, namen[0]))
 
@@ -1025,6 +1161,20 @@ class PassiveTreeDialog(QDialog):
             return [pob_import.BuildTree("", passive_tree.decode_url(text))]
         except TreeLinkError:
             return pob_import.decode_code(text)
+
+    def _suggest_group(self, baeume: list[pob_import.BuildTree], text: str) -> str:
+        """Vorschlag für die Gruppe eines Builds: die Aszendenz des
+        aktiven (sonst letzten) Baums, bei pobb.in/pastebin mit der Adresse —
+        "Chieftain (pobb.in/KMJMGblyFcI7)"; umbenennen kann man ihn."""
+        baum = next((b for b in baeume if b.active and passive_tree.main_points(
+            self._tree, b.link.passives)), baeume[-1])
+        klasse = passive_tree.class_name_of(self._tree, baum.link.class_index,
+                                            baum.link.ascendancy_index) or "Build"
+        roh = pob_import.remote_url(text)
+        if roh:
+            adresse = roh.replace("https://", "").replace("/raw", "").replace("raw/", "")
+            return f"{klasse} ({adresse})"
+        return f"{klasse} build"
 
     @staticmethod
     def _unique_titles(baeume: list[pob_import.BuildTree]) -> list[str]:
@@ -1056,16 +1206,24 @@ class PassiveTreeDialog(QDialog):
         knoepfe.button(QDialogButtonBox.StandardButton.Ok).setText("Import")
         knoepfe.accepted.connect(fenster.accept)
         knoepfe.rejected.connect(fenster.reject)
+        gruppe = QLineEdit(self._group_suggestion)
+        gruppe.setObjectName("group")
+        gruppe.setPlaceholderText("no group")
+        gruppe_zeile = QHBoxLayout()
+        gruppe_zeile.addWidget(QLabel("Group:"))
+        gruppe_zeile.addWidget(gruppe, 1)
         aufbau = QVBoxLayout(fenster)
         aufbau.addWidget(QLabel(f"This build has {len(baeume)} trees. Each one you tick "
                                 "becomes a configuration named after it."))
         aufbau.addWidget(liste)
+        aufbau.addLayout(gruppe_zeile)
         aufbau.addWidget(knoepfe)
         # Hoch genug für alle Bäume (Pohx: zehn — mit fester Höhe war der
         # letzte abgeschnitten, nativ gesehen), höchstens 720 px.
-        fenster.resize(600, min(720, liste.sizeHintForRow(0) * len(baeume) + 110))
+        fenster.resize(600, min(760, liste.sizeHintForRow(0) * len(baeume) + 145))
         if fenster.exec() != QDialog.DialogCode.Accepted:
             return []
+        self._import_group = gruppe.text().strip()
         return [b for i, b in enumerate(baeume)
                 if liste.item(i).checkState() == Qt.CheckState.Checked]
 

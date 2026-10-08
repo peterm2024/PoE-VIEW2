@@ -34,6 +34,10 @@ nach [SemVer](https://semver.org/lang/de/).
   „Lvl 81-90“ gegen „Lvl 61-80“ statt gegen den aktuellen Baum, mit
   Respec-Liste, Goldpreis, Grün/Rot im Bild und Punkten. Auch per
   Rechtsklick „Compare with this“.
+- **Gruppen:** Ein importierter Build landet unter einer aufklappbaren
+  Überschrift („▾ Pohx RF (9)“); Konfigurationen lassen sich per
+  Rechtsklick in Gruppen verschieben, Gruppen umbenennen, auflösen
+  oder samt Inhalt löschen.
 
 ### Behoben
 

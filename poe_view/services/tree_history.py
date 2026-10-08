@@ -112,7 +112,8 @@ def current(characters: dict, name: str) -> dict | None:
 #
 # Peter, 2026-10-04: "eine Konfiguration für maximale Feuerresistenz oder
 # maximalen Burst-Damage". Je Charakter unter "configs", ein Eintrag wie
-# "current" plus "source" (woher: "current", "link", "suggestion").
+# "current" plus "source" (woher: "current", "link", "pob", "edited",
+# "copy") und, wenn gesetzt, "group" (§4.60.12: Gruppe nach Build).
 
 def configs(characters: dict, name: str) -> dict[str, dict]:
     return (characters.get(name) or {}).get("configs") or {}
@@ -120,15 +121,46 @@ def configs(characters: dict, name: str) -> dict[str, dict]:
 
 def save_config(characters: dict, name: str, config_name: str, passives: dict, *,
                 level: int, ruthless: bool, source: str,
-                now: datetime | None = None) -> None:
-    """Anlegen oder überschreiben."""
+                now: datetime | None = None, group: str | None = None) -> None:
+    """Anlegen oder überschreiben. ``group``: None behält die Gruppe einer
+    überschriebenen Konfiguration ("Save to X" soll sie nicht verlieren),
+    "" nimmt sie heraus."""
     config_name = config_name.strip()
     if not config_name:
         raise ValueError("Konfiguration ohne Namen")
-    characters.setdefault(name, {}).setdefault("configs", {})[config_name] = {
-        "at": (now or datetime.now()).isoformat(timespec="seconds"),
-        "level": level, "ruthless": ruthless, "source": source,
-        "passives": passives}
+    alle = characters.setdefault(name, {}).setdefault("configs", {})
+    if group is None:
+        group = (alle.get(config_name) or {}).get("group", "")
+    eintrag = {"at": (now or datetime.now()).isoformat(timespec="seconds"),
+               "level": level, "ruthless": ruthless, "source": source,
+               "passives": passives}
+    if group.strip():
+        eintrag["group"] = group.strip()
+    alle[config_name] = eintrag
+
+
+def group_of(characters: dict, name: str, config_name: str) -> str:
+    return (configs(characters, name).get(config_name) or {}).get("group", "")
+
+
+def set_group(characters: dict, name: str, config_names, group: str) -> int:
+    """Konfigurationen in eine Gruppe verschieben ("" = keine); gibt die
+    Zahl der geänderten zurück."""
+    alle, group, zahl = configs(characters, name), group.strip(), 0
+    for config_name in config_names:
+        eintrag = alle.get(config_name)
+        if eintrag is None or eintrag.get("group", "") == group:
+            continue
+        if group:
+            eintrag["group"] = group
+        else:
+            eintrag.pop("group", None)
+        zahl += 1
+    return zahl
+
+
+def groups(characters: dict, name: str) -> list[str]:
+    return sorted({e["group"] for e in configs(characters, name).values() if e.get("group")})
 
 
 def delete_config(characters: dict, name: str, config_name: str) -> bool:

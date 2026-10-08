@@ -78,7 +78,7 @@ def test_the_menu_fits_the_entry(qapp, baum) -> None:
     dialog.refresh((CONFIG, "Fire"))
     teile = ["—", "Open in planner", "Copy link", "Copy as text", "—", "Import…"]
     assert _texte(dialog._context_actions((CONFIG, "Fire"))) == [
-        "Show tree", "Rename…", "Duplicate…", "Delete"] + teile
+        "Show tree", "Rename…", "Duplicate…", "Move to group…", "Delete"] + teile
     # Bei einem anderen als dem gezeigten Eintrag: "Compare with this" (§4.60.11).
     assert _texte(dialog._context_actions((CURRENT, None))) == [
         "Show tree", "Save as configuration…", "Compare with this"] + teile
@@ -284,7 +284,7 @@ def test_the_menu_acts_on_the_entry_under_the_mouse(qapp, baum, monkeypatch) -> 
     monkeypatch.setattr(dialog, "_ask_name", lambda *a: "C2")
     _menue_waehlt(monkeypatch, "act_rename", dialog, gesehen)
     dialog._list_menu(punkt)
-    assert gesehen[0][:4] == ["Show tree", "Rename…", "Duplicate…", "Delete"]
+    assert gesehen[0][:5] == ["Show tree", "Rename…", "Duplicate…", "Move to group…", "Delete"]
     assert set(th.configs(zeichen, "WitchOfPeter")) == {"A", "B", "C2"}
     assert dialog._selected() == (CONFIG, "A")
     punkt = dialog.list.visualItemRect(_item(dialog, (CONFIG, "C2"))).center()
@@ -441,3 +441,125 @@ def test_respec_lines_without_stats_or_kind_read_cleanly() -> None:
     zeilen = {z.name: z.text for blk in bloecke for z in blk.items}
     assert zeilen["Basic Jewel Socket"] == "(jewel socket)"
     assert zeilen["Unrelenting"] == "(ascendancy) — +1 to Armour"
+
+
+def test_groups_keep_their_configurations_together(qapp, baum, monkeypatch) -> None:
+    """Idee 3: importierte Bäume unter einer aufklappbaren Überschrift statt
+    alphabetisch zwischen den eigenen."""
+    from poe_view.ui import passive_tree_dialog as modul
+    from poe_view.ui.passive_tree_dialog import CONFIG
+    dialog, zeichen, gespeichert = _offen(qapp, baum)
+    for name, gruppe in (("Boss", ""), ("Lvl 01-30", "Pohx RF"), ("Lvl 100", "Pohx RF"),
+                         ("Lvl 31-40", "Pohx RF"), ("Arc", "Other")):
+        th.save_config(zeichen, "WitchOfPeter", name, {"hashes": [10]}, level=30, ruthless=True,
+                       source="pob", group=gruppe)
+    dialog.refresh((CONFIG, "Boss"))
+    eintraege = _eintraege(dialog)
+    start = eintraege.index("Configurations")
+    assert eintraege[start:start + 8] == ["Configurations", "Boss", "▾ Other (1)", "Arc",
+                                          "▾ Pohx RF (3)", "Lvl 01-30", "Lvl 31-40", "Lvl 100"]
+    # Ein Klick auf die Überschrift klappt zu — und wählt nichts aus.
+    kopf = next(dialog.list.item(i) for i in range(dialog.list.count())
+                if dialog.list.item(i).data(modul.GROUP_ROLE) == "Pohx RF")
+    QTest.mouseClick(dialog.list.viewport(), Qt.MouseButton.LeftButton,
+                     pos=dialog.list.visualItemRect(kopf).center())
+    assert "▸ Pohx RF (3)" in _eintraege(dialog) and "Lvl 100" not in _eintraege(dialog)
+    assert dialog._selected() == (CONFIG, "Boss")
+    # Wird eine Konfiguration der Gruppe gewählt, klappt sie wieder auf.
+    dialog.refresh((CONFIG, "Lvl 100"))
+    assert "Lvl 100" in _eintraege(dialog) and dialog._selected() == (CONFIG, "Lvl 100")
+    # "Save to X" und Überschreiben behalten die Gruppe.
+    th.save_config(zeichen, "WitchOfPeter", "Lvl 100", {"hashes": [10, 11]}, level=30,
+                   ruthless=True, source="edited")
+    assert th.group_of(zeichen, "WitchOfPeter", "Lvl 100") == "Pohx RF"
+    dialog.close()
+
+
+def test_move_rename_ungroup_and_delete_a_group(qapp, baum, monkeypatch) -> None:
+    from poe_view.ui import passive_tree_dialog as modul
+    from poe_view.ui.passive_tree_dialog import CONFIG, CURRENT
+    dialog, zeichen, gespeichert = _drei(qapp, baum)
+    # Zwei gewählte Konfigurationen in eine neue Gruppe.
+    _item(dialog, (CONFIG, "B")).setSelected(True)
+    angeboten = []
+    monkeypatch.setattr(modul.QInputDialog, "getItem", staticmethod(
+        lambda *a, **k: angeboten.append(a[3]) or ("Pohx", True)))
+    dialog.act_move_group.trigger()
+    assert angeboten == [[""]]                                    # noch keine Gruppen
+    assert th.group_of(zeichen, "WitchOfPeter", "A") == "Pohx"
+    assert th.group_of(zeichen, "WitchOfPeter", "B") == "Pohx"
+    assert th.group_of(zeichen, "WitchOfPeter", "C") == ""
+    assert gespeichert == [1]
+
+    def kopf_punkt(gruppe):
+        kopf = next(dialog.list.item(i) for i in range(dialog.list.count())
+                    if dialog.list.item(i).data(modul.GROUP_ROLE) == gruppe)
+        return dialog.list.visualItemRect(kopf).center()
+    # Rechtsklick auf die Überschrift: Gruppen-Menü.
+    gesehen = []
+    monkeypatch.setattr(dialog, "_ask_name", lambda *a: "Pohx RF")
+    _menue_waehlt(monkeypatch, "act_rename_group", dialog, gesehen)
+    dialog._list_menu(kopf_punkt("Pohx"))
+    assert gesehen[0] == ["Rename group…", "Ungroup", "Delete group and its 2 configurations…"]
+    assert tree_groups(zeichen) == ["Pohx RF"]
+    _menue_waehlt(monkeypatch, "act_ungroup", dialog)
+    dialog._list_menu(kopf_punkt("Pohx RF"))
+    assert tree_groups(zeichen) == [] and set(th.configs(zeichen, "WitchOfPeter")) == {"A", "B", "C"}
+    # Gruppe samt Konfigurationen löschen — nach einer Frage.
+    th.set_group(zeichen, "WitchOfPeter", ["B", "C"], "Old")
+    dialog.refresh((CONFIG, "B"))
+    fragen = []
+    monkeypatch.setattr(modul.QMessageBox, "question", staticmethod(
+        lambda *a, **k: fragen.append(a[2]) or modul.QMessageBox.StandardButton.Yes))
+    _menue_waehlt(monkeypatch, "act_delete_group", dialog)
+    dialog._list_menu(kopf_punkt("Old"))
+    assert fragen == ["Delete the group “Old” and its 2 configurations?"]
+    assert set(th.configs(zeichen, "WitchOfPeter")) == {"A"}
+    assert dialog._selected() == (CURRENT, None)                  # B war gewählt
+    dialog.close()
+
+
+def tree_groups(zeichen) -> list[str]:
+    return th.groups(zeichen, "WitchOfPeter")
+
+
+def test_a_multi_tree_import_lands_in_a_group(qapp, baum, monkeypatch) -> None:
+    from poe_view.ui import passive_tree_dialog as modul
+    dialog, zeichen, _ = _fenster(qapp, baum)
+    code = _pob(baum, ("Lvl 01-30", [10, 11]), ("Lvl 31-40", [10, 11, 12]))
+    monkeypatch.setattr(modul.QInputDialog, "getText", staticmethod(lambda *a, **k: (code, True)))
+    felder = []
+
+    def zeigen(fenster):
+        feld = fenster.findChild(modul.QLineEdit, "group")
+        felder.append(feld.text())
+        feld.setText("Pohx RF")
+        return modul.QDialog.DialogCode.Accepted
+    monkeypatch.setattr(modul.QDialog, "exec", zeigen)
+    dialog._import_link()
+    assert felder == ["Juggernaut build"]                        # Vorschlag
+    assert {th.group_of(zeichen, "WitchOfPeter", n) for n in ("Lvl 01-30", "Lvl 31-40")} == {
+        "Pohx RF"}
+    # Mit pobb.in-Adresse steht sie im Vorschlag.
+    assert dialog._suggest_group(pob_trees(baum), "https://pobb.in/KMJMGblyFcI7") == (
+        "Juggernaut (pobb.in/KMJMGblyFcI7)")
+    dialog.close()
+
+
+def pob_trees(baum):
+    from poe_view.services import pob_import as pi
+    return pi.decode_code(_pob(baum, ("A", [10]), ("B", [10, 11])))
+
+
+def test_arrow_keys_skip_group_headers(qapp, baum) -> None:
+    from poe_view.ui.passive_tree_dialog import CONFIG
+    dialog, zeichen, _ = _offen(qapp, baum)
+    th.save_config(zeichen, "WitchOfPeter", "Boss", {"hashes": [10]}, level=30, ruthless=True,
+                   source="link")
+    th.save_config(zeichen, "WitchOfPeter", "Lvl 01-30", {"hashes": [10]}, level=30,
+                   ruthless=True, source="pob", group="Pohx")
+    dialog.refresh((CONFIG, "Boss"))
+    dialog.list.setFocus()
+    QTest.keyClick(dialog.list, Qt.Key.Key_Down)
+    assert dialog._selected() == (CONFIG, "Lvl 01-30")            # über "▾ Pohx (1)" hinweg
+    dialog.close()

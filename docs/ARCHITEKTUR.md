@@ -9165,6 +9165,53 @@ aktueller Baum gegen Konfiguration, gelöschte Basis, Verlauf automatisch
 und gewählt, Menü. Nativ angesehen mit Pohx' Bäumen. Gegenprobe mit 11
 Sabotagen für den Vergleich und 3 für die Kleinigkeiten, alle gefangen.
 
+
+#### 4.60.12 Gruppen nach Build
+
+Idee 3: Die zehn Bäume eines importierten Builds stehen unter einer
+aufklappbaren Überschrift, nicht alphabetisch zwischen den eigenen.
+
+**Gespeichert** als optionales Feld `"group"` der Konfiguration
+(`tree_history.save_config(..., group=)`, `set_group`, `groups`,
+`group_of`); kein Versionssprung der Datei. `group=None` behält beim
+Überschreiben die bisherige Gruppe — "Save to X" aus einem Entwurf soll
+sie nicht verlieren —, `""` nimmt heraus. Das Duplikat übernimmt die
+Gruppe des Originals.
+
+**In der Liste** unter "Configurations" erst die ohne Gruppe, dann je
+Gruppe "▾ Pohx RF (9)" mit eingerückten Mitgliedern (`config_order`
+in beiden Ebenen). Ein Linksklick klappt zu ("▸"); zugeklappt fehlen die
+Mitglieder in der Liste (nicht nur versteckt). Wird eine Konfiguration
+einer zugeklappten Gruppe gewählt, klappt sie auf. Zugeklappt wird nur
+für die Sitzung.
+
+Die Überschrift hat **keine Item-Flags** wie "Configurations" und
+"History", trägt die Gruppe in `GROUP_ROLE` (nicht in `UserRole`, sonst
+hielte sie jede Handlung für einen Eintrag) und fängt ihren Klick in
+`_EntryList.mousePressEvent` selbst ab (Signal `group_clicked`). Zuerst
+war sie anklickbar ("enabled") und über `itemClicked` verdrahtet: Der
+Klick machte sie zum aktuellen Eintrag, die Auswahl sprang auf "Current
+tree" (im Test gefunden), und die Pfeiltasten landeten auf ihr, rechts
+leer.
+
+**Menü:** bei Konfigurationen "Move to group…" (auch für eine
+Mehrfachauswahl; vorhandene Gruppe wählen oder neuen Namen tippen, leer
+= keine); Rechtsklick auf die Überschrift: "Rename group…", "Ungroup"
+(Konfigurationen bleiben), "Delete group and its N configurations…"
+(nach einer Frage).
+
+**Import:** Das Auswahlfenster eines Builds hat ein Feld "Group:",
+vorbelegt mit der Aszendenz des aktiven Baums und der Adresse —
+"Chieftain (pobb.in/KMJMGblyFcI7)" —, sonst "Chieftain build"; leer =
+keine Gruppe. Ein einzelner Baum kommt ohne Gruppe.
+
+Getestet: Reihenfolge mit Gruppen, Zuklappen per echtem Klick ohne
+Auswahlwechsel, Aufklappen bei Auswahl, Pfeiltasten über die
+Überschrift hinweg, Gruppe bleibt beim Überschreiben, Verschieben
+(Mehrfachauswahl), Umbenennen, Auflösen, Löschen samt Frage, Import mit
+Gruppe und Vorschlag. Nativ angesehen mit Pohx' Bäumen. Gegenprobe mit
+12 Sabotagen, alle gefangen.
+
 **Duplicate** speichert den gewählten Eintrag unter neuem Namen
 (Vorschlag "Fire (copy)" bzw. "Level 29 tree" beim Verlauf, mit dessen
 Level; `source="copy"`). Beim aktuellen Baum ist es "Save current as…".
