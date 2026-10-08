@@ -78,7 +78,8 @@ def test_the_menu_fits_the_entry(qapp, baum) -> None:
     dialog.refresh((CONFIG, "Fire"))
     teile = ["—", "Open in planner", "Copy link", "Copy as text", "—", "Import…"]
     assert _texte(dialog._context_actions((CONFIG, "Fire"))) == [
-        "Show tree", "Rename…", "Duplicate…", "Move to group…", "Delete"] + teile
+        "Show tree", "Rename…", "Duplicate…", "Move to group…", "Use as leveling plan",
+        "Delete"] + teile
     # Bei einem anderen als dem gezeigten Eintrag: "Compare with this" (§4.60.11).
     assert _texte(dialog._context_actions((CURRENT, None))) == [
         "Show tree", "Save as configuration…", "Compare with this"] + teile
@@ -284,7 +285,8 @@ def test_the_menu_acts_on_the_entry_under_the_mouse(qapp, baum, monkeypatch) -> 
     monkeypatch.setattr(dialog, "_ask_name", lambda *a: "C2")
     _menue_waehlt(monkeypatch, "act_rename", dialog, gesehen)
     dialog._list_menu(punkt)
-    assert gesehen[0][:5] == ["Show tree", "Rename…", "Duplicate…", "Move to group…", "Delete"]
+    assert gesehen[0][:6] == ["Show tree", "Rename…", "Duplicate…", "Move to group…",
+                              "Use as leveling plan", "Delete"]
     assert set(th.configs(zeichen, "WitchOfPeter")) == {"A", "B", "C2"}
     assert dialog._selected() == (CONFIG, "A")
     punkt = dialog.list.visualItemRect(_item(dialog, (CONFIG, "C2"))).center()
@@ -500,7 +502,8 @@ def test_move_rename_ungroup_and_delete_a_group(qapp, baum, monkeypatch) -> None
     monkeypatch.setattr(dialog, "_ask_name", lambda *a: "Pohx RF")
     _menue_waehlt(monkeypatch, "act_rename_group", dialog, gesehen)
     dialog._list_menu(kopf_punkt("Pohx"))
-    assert gesehen[0] == ["Rename group…", "Ungroup", "Delete group and its 2 configurations…"]
+    assert gesehen[0] == ["Rename group…", "Ungroup", "Use as leveling plan",
+                          "Delete group and its 2 configurations…"]
     assert tree_groups(zeichen) == ["Pohx RF"]
     _menue_waehlt(monkeypatch, "act_ungroup", dialog)
     dialog._list_menu(kopf_punkt("Pohx RF"))
@@ -649,3 +652,131 @@ def test_a_reimport_over_the_shown_configuration_keeps_its_new_notes(qapp, baum,
     assert th.configs(zeichen, "WitchOfPeter")["A"]["notes"] == "new notes from the build"
     assert gespeichert == []
     dialog.close()
+
+
+# --- Leveling-Plan (§4.60.14) ---------------------------------------------- #
+
+def _plan_fenster(qapp, baum):
+    """Aktueller Baum 10, 11, 12 (Level 30); Gruppe "Build" mit zwei
+    Abschnitten: "S1" = 10, 11, 12, 20, 21 und "S2" = … 13, 14, 15."""
+    dialog, zeichen, gespeichert = _fenster(qapp, baum)
+    th.save_config(zeichen, "WitchOfPeter", "S2", {"hashes": [10, 11, 12, 13, 14, 15]},
+                   level=30, ruthless=True, source="pob", group="Build")
+    th.save_config(zeichen, "WitchOfPeter", "S1", {"hashes": [10, 11, 12, 20, 21]},
+                   level=30, ruthless=True, source="pob", group="Build")
+    dialog.refresh()
+    return dialog, zeichen, gespeichert
+
+
+def test_a_group_becomes_the_leveling_plan(qapp, baum, monkeypatch) -> None:
+    """Peter, 2026-10-08: "Leveling-Mode … zeigt dann den zu vergebenden
+    Skill-Punkt im Tree an." Rechtsklick auf die Gruppe → Plan."""
+    from poe_view.ui import passive_tree_dialog as modul
+    from poe_view.ui.passive_tree_dialog import CONFIG, CURRENT
+    dialog, zeichen, gespeichert = _plan_fenster(qapp, baum)
+    dialog.refresh((CONFIG, "S2"))
+    dialog._menu_group = "Build"
+    dialog.act_plan.trigger()
+    dialog._menu_group = None
+    assert th.leveling(zeichen, "WitchOfPeter") == {"stages": ["S1", "S2"], "priority": [],
+                                                    "title": "Build"}
+    assert dialog._selected() == (CURRENT, None) and dialog.tabs.currentIndex() == 3
+    assert dialog.plan_bar.isVisibleTo(dialog) and gespeichert == [1]
+    text = dialog.plan_label.text()
+    assert text.startswith("Leveling “Build” · stage 1/2 “S1” · next: Life (towards Basic Jewel")
+    assert "then Basic Jewel Socket, Iron Will" in text
+    assert dialog.graph.markers == {20: "1", 21: "2", 13: "3", 14: "4", 15: "5"}
+    assert dialog.graph.marker_now == 20 and dialog.graph.marker_refund == set()
+    # Andere Einträge: kein Plan im Bild, nur der Hinweis.
+    dialog.refresh((CONFIG, "S1"))
+    assert dialog.graph.markers == {} and "select “Current tree”" in dialog.plan_label.text()
+    # Stoppen.
+    dialog.refresh((CURRENT, None))
+    dialog.plan_stop_button.click()
+    assert th.leveling(zeichen, "WitchOfPeter") is None
+    assert not dialog.plan_bar.isVisibleTo(dialog) and dialog.graph.markers == {}
+    dialog.close()
+
+
+def test_points_spent_since_the_last_update_are_ticked(qapp, baum) -> None:
+    """Zwischen zwei Abrufen zählt der Plan live weiter: zwei Aufstiege seit
+    dem letzten Abruf → der erste Punkt ist vermutlich vergeben (✓)."""
+    dialog, zeichen, _ = _plan_fenster(qapp, baum)
+    th.set_leveling(zeichen, "WitchOfPeter", ["S1", "S2"], title="Build")
+    dialog.refresh()
+    dialog.set_levels(30, 32)
+    assert dialog.graph.markers == {20: "✓", 21: "1", 13: "2", 14: "3", 15: "4"}
+    assert dialog.graph.marker_now == 21
+    assert "next: Basic Jewel Socket" in dialog.plan_label.text()
+    assert "1 point assumed spent since the last update" in dialog.plan_label.text()
+    dialog.close()
+
+
+def test_the_order_is_set_by_clicking(qapp, baum, monkeypatch) -> None:
+    """"Set order": Klicks stellen die Reihenfolge um und bauen keinen
+    Entwurf; Knoten außerhalb des Plans sagen das."""
+    from poe_view.ui.passive_tree_dialog import _GESPERRT_PLAN
+    dialog, zeichen, gespeichert = _plan_fenster(qapp, baum)
+    th.set_leveling(zeichen, "WitchOfPeter", ["S1", "S2"], title="Build")
+    dialog.refresh()
+    dialog.order_button.setChecked(True)
+    assert dialog._click_hint(21) == "Click: take this as #1 in the leveling order"
+    assert dialog._click_info(31) == (_GESPERRT_PLAN, False)
+    dialog.graph.node_clicked.emit(15, False)                    # erst Far Away
+    assert th.leveling(zeichen, "WitchOfPeter")["priority"] == [15]
+    assert dialog._draft is None
+    assert dialog._click_hint(15) == "Click: remove from the leveling order (#1)"
+    # S1 ist noch offen (20, 21) — der Vorrang gilt im Abschnitt, in dem 15 liegt.
+    assert dialog.graph.markers == {20: "1", 21: "2", 14: "3", 15: "4", 13: "5"}
+    assert "click notables in the order you want them" in dialog.plan_label.text()
+    dialog.graph.node_clicked.emit(15, False)                    # wieder heraus
+    assert th.leveling(zeichen, "WitchOfPeter")["priority"] == []
+    dialog.graph.node_clicked.emit(31, False)                    # nicht im Plan: nichts
+    assert th.leveling(zeichen, "WitchOfPeter")["priority"] == []
+    dialog.order_button.setChecked(False)
+    dialog.graph.node_clicked.emit(13, False)                    # wieder normal: Entwurf
+    assert dialog._draft is not None
+    dialog._draft = None
+    dialog.close()
+
+
+def test_selected_configurations_and_a_renamed_stage_stay_in_the_plan(qapp, baum,
+                                                                      monkeypatch) -> None:
+    from poe_view.ui.passive_tree_dialog import CONFIG
+    dialog, zeichen, _ = _plan_fenster(qapp, baum)
+    dialog.refresh((CONFIG, "S2"))
+    _item(dialog, (CONFIG, "S1")).setSelected(True)
+    dialog.act_plan.trigger()
+    assert th.leveling(zeichen, "WitchOfPeter")["stages"] == ["S1", "S2"]
+    assert th.rename_config(zeichen, "WitchOfPeter", "S1", "Act 1-5")
+    assert th.leveling(zeichen, "WitchOfPeter")["stages"] == ["Act 1-5", "S2"]
+    # Eine gelöschte Konfiguration fällt aus dem Plan; fehlen alle, gibt es keinen.
+    th.delete_config(zeichen, "WitchOfPeter", "Act 1-5")
+    assert [s.name for s in dialog._plan().stages] == ["S2"]
+    th.delete_config(zeichen, "WitchOfPeter", "S2")
+    assert dialog._plan() is None
+    dialog.close()
+
+
+def test_plan_markers_are_drawn_and_the_current_step_stands_out(qapp) -> None:
+    """Gemalt am Baum mit Lage: violetter Ring je Schritt, der jetzt dran
+    ist doppelt so kräftig; was zurückzunehmen ist, gestrichelt."""
+    from PySide6.QtWidgets import QGraphicsEllipseItem, QGraphicsSimpleTextItem
+    from poe_view.ui.tree_graph import _FARBEN, TreeGraph
+    from tests.test_passive_tree import _aszendenz_baum
+    g = TreeGraph()
+    g.set_tree(_aszendenz_baum())
+    g.show_tree({"hashes": [103]}, "Witch")
+    g.set_markers({300: "1", 106: "2"}, now=300, refund=[102])
+    ringe = [i for i in g._marker_items if isinstance(i, QGraphicsEllipseItem)]
+    texte = sorted(i.text() for i in g._marker_items if isinstance(i, QGraphicsSimpleTextItem))
+    assert texte == ["1", "2"]
+    breiten = {round(r.rect().center().y()): (r.pen().widthF(), r.pen().style(), r.pen().color().name())
+               for r in ringe}
+    lage300 = round(g._lage(300).y)
+    assert breiten[lage300] == (4.0, Qt.PenStyle.SolidLine, _FARBEN[True]["plan"])
+    assert sorted(b[0] for b in breiten.values()) == [2.0, 2.0, 4.0]
+    assert sum(1 for b in breiten.values() if b[1] == Qt.PenStyle.DashLine) == 1
+    g.set_markers({})
+    assert g._marker_items == []
+    g.close()

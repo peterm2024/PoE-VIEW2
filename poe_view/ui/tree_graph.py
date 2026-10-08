@@ -33,10 +33,11 @@ import math
 import textwrap
 
 from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QRectF, Qt, Signal
-from PySide6.QtGui import (QBrush, QColor, QCursor, QGuiApplication, QImage, QPainter,
-                           QPainterPath, QPalette, QPen, QPixmap, QTransform)
+from PySide6.QtGui import (QBrush, QColor, QCursor, QFont, QGuiApplication, QImage,
+                           QPainter, QPainterPath, QPalette, QPen, QPixmap, QTransform)
 from PySide6.QtWidgets import (QGraphicsEllipseItem, QGraphicsItem, QGraphicsScene,
-                               QGraphicsTextItem, QGraphicsView, QToolTip)
+                               QGraphicsSimpleTextItem, QGraphicsTextItem, QGraphicsView,
+                               QToolTip)
 
 from poe_view.services import passive_tree
 from poe_view.services.passive_tree import (JEWEL, KEYSTONE, MASTERY, NOTABLE, START,
@@ -57,10 +58,13 @@ DIM, ALLOCATED, ALLOCATE, REFUND = "dim", "allocated", "allocate", "refund"
 # #b8860b — auf den getönten Bereichen (§4.60.5) unter 3:1.
 _FARBEN = {
     True: {"dim": "#7a7a7a", "edge": "#4f4f4f", "edge_on": "#d8d8d8",
-           "reach": "#4dd0e1", "search": "#ffd54f", "hover": "#ffffff"},
+           "reach": "#4dd0e1", "search": "#ffd54f", "hover": "#ffffff", "plan": "#ce93d8"},
     False: {"dim": "#7e7e7e", "edge": "#d0d0d0", "edge_on": "#3a3a3a",
-            "reach": "#00838f", "search": "#9a7000", "hover": "#000000"},
+            "reach": "#00838f", "search": "#9a7000", "hover": "#000000", "plan": "#7b1fa2"},
 }
+# "plan" (Leveling-Plan, §4.60.14): Violett, weg von Grün/Rot (Umbau),
+# Türkis (Reichweite) und Gelb (Suche); gerechnet gegen Grund und
+# Tönung dunkel ≥ 5,5:1, hell ≥ 6,9:1.
 
 # Bereiche der Klassen (§4.60.5, Peters Idee): Stärke dunkelrot,
 # Intelligenz blau, Geschick grün; Hybride gestreift aus beiden.
@@ -207,6 +211,12 @@ class TreeGraph(QGraphicsView):
         self.choices: dict[int, int] = {}
         self._hover_ring = None
         self._hover_info: tuple | None = None
+        # Leveling-Plan (§4.60.14): Knoten → Beschriftung ("1", "2", "✓"),
+        # der jetzt dran ist, und was zurückzunehmen ist.
+        self.markers: dict[int, str] = {}
+        self.marker_now: int | None = None
+        self.marker_refund: set[int] = set()
+        self._marker_items: list = []
         # Die Aszendenzen (§4.60.8): verschobene Knoten (Lage im Bild), ihre
         # Linien, die Inseln je Name; ``ascendancy`` ist die eigene.
         self.ascendancy = ""
@@ -228,6 +238,7 @@ class TreeGraph(QGraphicsView):
         self._edges.clear()
         self._edge_items.clear()
         self._rings.clear()
+        self._marker_items = []
         self._hover_ring, self.hovered, self._hover_info = None, None, None
         self.areas = []
         self.labels = []
@@ -557,6 +568,7 @@ class TreeGraph(QGraphicsView):
             self._edge_items.append(item)
         self._paint_labels()
         self._paint_rings()
+        self._paint_markers()
         self.resetCachedContent()
         self.viewport().update()
 
@@ -616,6 +628,57 @@ class TreeGraph(QGraphicsView):
             painter.setPen(QPen(QColor(tree_report.colour("keystone", self._dark)), 2.0))
             painter.drawPath(welt.map(eigene.disc))
         painter.restore()
+
+    def set_markers(self, labels: dict[int, str], now: int | None = None,
+                    refund=()) -> None:
+        """Die Schritte des Leveling-Plans im Bild (§4.60.14): je Knoten ein
+        violetter Ring mit Nummer, der jetzt dran ist kräftiger, was
+        zurückzunehmen ist gestrichelt rot."""
+        self.markers, self.marker_now, self.marker_refund = dict(labels), now, set(refund)
+        self._paint_markers()
+
+    def _paint_markers(self) -> None:
+        if self._tree is None:
+            return
+        for item in self._marker_items:
+            self.scene().removeItem(item)
+        self._marker_items = []
+        farben = _FARBEN[getattr(self, "_dark", True)]
+        schrift = QFont(self.font())
+        schrift.setBold(True)
+        for h, text in self.markers.items():
+            if h not in self._items:
+                continue
+            n = self._lage(h)
+            jetzt = h == self.marker_now
+            r = _RADIUS.get(n.kind, _KLEIN) + (22.0 if jetzt else 18.0)
+            ring = self.scene().addEllipse(QRectF(n.x - r, n.y - r, 2 * r, 2 * r),
+                                           _cosmetic(farben["plan"], 4.0 if jetzt else 2.0))
+            ring.setZValue(3)
+            ring.setAcceptHoverEvents(False)
+            nummer = QGraphicsSimpleTextItem(text)
+            nummer.setFont(schrift)
+            nummer.setBrush(QBrush(QColor(farben["plan"])))
+            nummer.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIgnoresTransformations)
+            nummer.setPos(n.x, n.y)
+            # In Pixeln rechts oben neben den Knoten — die Schrift zoomt nicht.
+            nummer.setTransform(QTransform.fromTranslate(7.0, -18.0))
+            nummer.setZValue(6)
+            nummer.setAcceptHoverEvents(False)
+            self.scene().addItem(nummer)
+            self._marker_items += [ring, nummer]
+        rot = QPen(QColor(tree_report.colour("loss", getattr(self, "_dark", True))), 2.0)
+        rot.setCosmetic(True)
+        rot.setStyle(Qt.PenStyle.DashLine)
+        for h in self.marker_refund:
+            if h not in self._items:
+                continue
+            n = self._lage(h)
+            r = _RADIUS.get(n.kind, _KLEIN) + 18.0
+            ring = self.scene().addEllipse(QRectF(n.x - r, n.y - r, 2 * r, 2 * r), rot)
+            ring.setZValue(3)
+            ring.setAcceptHoverEvents(False)
+            self._marker_items.append(ring)
 
     def _paint_rings(self) -> None:
         if self._tree is None:

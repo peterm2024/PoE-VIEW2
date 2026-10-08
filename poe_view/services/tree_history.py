@@ -193,7 +193,39 @@ def rename_config(characters: dict, name: str, old: str, new: str) -> bool:
     if old not in alle or not new or new in alle:
         return False
     alle[new] = alle.pop(old)
+    # Ein Leveling-Plan (§4.60.14) nennt seine Abschnitte beim Namen.
+    plan = (characters.get(name) or {}).get("leveling")
+    if isinstance(plan, dict):
+        plan["stages"] = [new if s == old else s for s in plan.get("stages") or ()]
     return True
+
+
+# --- Leveling-Plan (§4.60.14) ------------------------------------------- #
+#
+# Je Charakter unter "leveling": die Abschnitte als Namen von
+# Konfigurationen (so wirken spätere Änderungen an ihnen gleich mit) und
+# die Vorrangliste angeklickter Knoten.
+
+def leveling(characters: dict, name: str) -> dict | None:
+    plan = (characters.get(name) or {}).get("leveling")
+    return plan if isinstance(plan, dict) and plan.get("stages") else None
+
+
+def set_leveling(characters: dict, name: str, stages: list[str],
+                 priority: list[int] | None = None, title: str = "") -> None:
+    characters.setdefault(name, {})["leveling"] = {
+        "stages": list(stages), "priority": list(priority or []),
+        "title": title or (stages[0] if stages else "")}
+
+
+def set_leveling_priority(characters: dict, name: str, priority: list[int]) -> None:
+    plan = leveling(characters, name)
+    if plan is not None:
+        plan["priority"] = list(priority)
+
+
+def clear_leveling(characters: dict, name: str) -> bool:
+    return (characters.get(name) or {}).pop("leveling", None) is not None
 
 
 def history(characters: dict, name: str) -> list[dict]:
