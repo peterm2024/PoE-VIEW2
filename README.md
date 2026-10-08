@@ -231,7 +231,8 @@ the tree you are in.
   per level from level 2 (read live from Client.txt), quest points with
   *+1 quest* / *−1 quest*. The tree numbers the next ten points, and on
   every level-up the status bar and a small always-on-top window name the
-  point to take now.
+  point to take now; a slider lets you watch the tree grow from 0 points
+  to the goal.
   For each configuration you get the
   respec as a to-do list against your current tree (refund, allocate,
   change mastery, number of points and the gold it costs at your level)

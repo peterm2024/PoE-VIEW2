@@ -43,6 +43,8 @@ nach [SemVer](https://semver.org/lang/de/).
   Bild nummeriert die nächsten zehn Punkte, die Statusleiste nennt beim
   Levelaufstieg den jetzigen, und ein kleines, immer obenliegendes
   Fenster („Mini window“) zeigt die nächsten sechs samt Quest-Knöpfen.
+  Ein Regler unter der Plan-Zeile zeigt, wie der Baum Punkt für Punkt
+  von 0 bis zum Ziel wächst.
 - **Notizen je Konfiguration:** Reiter „Notes“ (speichert von selbst),
   Tooltip in der Liste. Beim Import eines Builds kommen seine PoB-Notizen
   mit (ohne Farbcodes).

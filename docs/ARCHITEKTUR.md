@@ -9349,6 +9349,19 @@ Der echte Baum zählt bewusst nicht: Wer abweicht, sieht es im Bild
   nur der Hinweis. "Set order": Klicks setzen/entfernen Knoten der
   Vorrangliste statt einen Entwurf zu bauen; Knoten außerhalb des Ziels
   sagen es. "Stop plan".
+- Regler darunter (Peter, nach dem ersten Test: "ein Progress Bar den
+  ich selbst bedienen kann mit den zur Verfügung stehenden Skillpoints,
+  so dass ich sehen kann, wie sich der Tree von 0 bis 121 oder so
+  aufbaut"): 0 bis alle Schritte, steht auf den schon vergebenen Punkten
+  (Punkt 21 dran → 20). Gezogen zeigt das Bild den Baum nach den ersten
+  N Schritten (`leveling.passives_after`, samt Mastery-Effekten), die
+  Nummern ab N + 1 und "Preview: 60/103 points · level 61 without
+  quests"; "Now" — oder der Regler zurück auf den Stand — zeigt wieder
+  den Eintrag selbst, ein anderer Eintrag beendet die Vorschau. Nativ
+  ~30 ms je Schritt am echten Baum, flüssig beim Ziehen. Der Ausschnitt
+  bleibt, wie er ist (wie beim Wechsel der Einträge): Was wächst, sieht
+  man an Ort und Stelle; spätere Punkte liegen oft außerhalb, dafür
+  zoomt man heraus.
 - Statusleiste: ein eigenes, festes Feld "Leveling: Point 21/103: …"
   (das Meldungsfeld überschreiben die Abrufe laufend), dazu beim
   Aufstieg "WitchOfPeter reached level 21 — Point 20/103: …".
@@ -9383,6 +9396,7 @@ hielten zuerst — zwei zeigten überflüssigen Code (Aszendenz- und
 Start-Prüfung in der Breitensuche, die `erlaubt` schon ausschließt;
 eigenes Nachziehen des Baum-Fensters, das `set_level` schon macht),
 beide entfernt; für die dritte (Obergrenze 24) Tests verschärft.
+Regler: 9 Sabotagen, alle gefangen.
 
 ---
 

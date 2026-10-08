@@ -31,7 +31,7 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, 
                                QInputDialog, QLabel,
                                QLineEdit, QListWidget, QListWidgetItem, QMenu, QMessageBox,
                                QPlainTextEdit,
-                               QPushButton, QSplitter, QTabWidget, QTextBrowser,
+                               QPushButton, QSlider, QSplitter, QTabWidget, QTextBrowser,
                                QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
 
 from poe_view.services import leveling, passive_tree, pob_import, tree_history
@@ -116,6 +116,9 @@ class PassiveTreeDialog(QDialog):
         # Leveling-Plan (§4.60.14): Level aus API-Abruf bzw. live aus der
         # Client.txt — setzt das Hauptfenster (``set_level``).
         self._level: int | None = None
+        # Vorschau am Regler: so viele Punkte des Plans vergeben (None = wie
+        # jetzt, der Eintrag selbst im Bild).
+        self._preview: int | None = None
         self.plan_steps: list = []
         self._group_suggestion = ""
 
@@ -210,8 +213,27 @@ class PassiveTreeDialog(QDialog):
         plan_zeile.addWidget(self.order_button)
         plan_zeile.addWidget(self.mini_button)
         plan_zeile.addWidget(self.plan_stop_button)
+        # Der Regler (Peter, 2026-10-08: "ein Progress Bar den ich selbst
+        # bedienen kann mit den zur Verfügung stehenden Skillpoints, so dass
+        # ich sehen kann, wie sich der Tree von 0 bis 121 oder so aufbaut").
+        self.plan_slider = QSlider(Qt.Orientation.Horizontal)
+        self.plan_slider.setToolTip("Drag to watch the tree grow point by point")
+        self.plan_slider.valueChanged.connect(self._slider_moved)
+        self.plan_slider_label = QLabel()
+        self.plan_now_button = QPushButton("Now")
+        self.plan_now_button.setToolTip("Back to the points you have now")
+        self.plan_now_button.clicked.connect(lambda: self._set_preview(None))
+        regler = QHBoxLayout()
+        regler.setContentsMargins(0, 0, 0, 0)
+        regler.addWidget(self.plan_slider, 1)
+        regler.addWidget(self.plan_slider_label)
+        regler.addWidget(self.plan_now_button)
+        plan_aufbau = QVBoxLayout()
+        plan_aufbau.setContentsMargins(0, 0, 0, 0)
+        plan_aufbau.addLayout(plan_zeile)
+        plan_aufbau.addLayout(regler)
         self.plan_bar = QWidget()
-        self.plan_bar.setLayout(plan_zeile)
+        self.plan_bar.setLayout(plan_aufbau)
         # Erst nach dem Einhängen: Beim Wechsel des Elternwidgets macht Qt
         # ein Widget unsichtbar, auch ein vorher sichtbar geschaltetes (im
         # Test gesehen).
@@ -611,37 +633,81 @@ class PassiveTreeDialog(QDialog):
         self._update_plan(self._selected())
 
     def _update_plan(self, key) -> None:
-        """Plan-Zeile und Markierungen — am aktuellen Baum (dort steht der
-        Spieler) und am Ziel; sonst ein Hinweis darauf. Rechnet wie
-        Statusleiste und Mini-Fenster (``leveling_view.progress``)."""
+        """Plan-Zeile, Regler und Markierungen — am aktuellen Baum (dort
+        steht der Spieler) und am Ziel; sonst ein Hinweis darauf. Rechnet
+        wie Statusleiste und Mini-Fenster (``leveling_view.progress``)."""
         roh = tree_history.leveling(self._characters, self._name) or {}
         plan = self._plan() if self._tree is not None else None
         self.plan_bar.setVisible(plan is not None)
         self.plan_steps = []
         if plan is None:
+            self._preview = None
             self.graph.set_markers({})
             return
         ziel = roh.get("target", "")
         stand = leveling_view.progress(self._tree, self._characters, self._name, self._class,
                                        self._level)
         leveling_view.update_quest_buttons(self.quest_plus, self.quest_minus, stand.quest)
-        if key not in ((CURRENT, None), (CONFIG, ziel)):
+        im_plan = key in ((CURRENT, None), (CONFIG, ziel))
+        for w in (self.plan_slider, self.plan_slider_label, self.plan_now_button):
+            w.setVisible(im_plan)
+        if not im_plan:
+            self._preview = None
             self.graph.set_markers({})
             self.plan_label.setText(f"Leveling towards “{ziel}” · {stand.points_text()} — "
                                     f"select “Current tree” or “{ziel}” to see the next points.")
             return
         self.plan_steps = stand.steps
-        kommend = stand.upcoming[:PLAN_MARKERS]
-        marken = {s.node: str(stand.index + i) for i, s in enumerate(kommend, start=1)}
-        jetzt = stand.now
-        self.graph.set_markers(marken, now=jetzt.node if jetzt else None)
+        gesamt = len(stand.steps)
+        if self._preview is not None:
+            self._preview = min(self._preview, gesamt)
+        vergeben = self._preview if self._preview is not None else min(stand.index, gesamt)
+        self.plan_slider.blockSignals(True)
+        self.plan_slider.setRange(0, gesamt)
+        self.plan_slider.setValue(vergeben)
+        self.plan_slider.blockSignals(False)
+        self.plan_now_button.setEnabled(self._preview is not None)
+        kommend = stand.steps[vergeben:vergeben + PLAN_MARKERS]
+        marken = {s.node: str(vergeben + i) for i, s in enumerate(kommend, start=1)}
+        naechster = kommend[0] if kommend else None
+        if self._preview is not None:
+            # Vorschau: der Baum mit den ersten N Punkten des Plans.
+            vorschau = leveling.passives_after(stand.steps, vergeben)
+            self.graph.show_tree(vorschau, self._class, show_reach=False, dark=self._dark())
+            self.graph.highlight(self.graph_search.text())
+            self.graph_points.setText(tree_report.points_text(self._tree, vorschau))
+            self.plan_slider_label.setText(
+                f"Preview: {vergeben}/{gesamt} points · level {vergeben + 1} without quests")
+        else:
+            self.plan_slider_label.setText(f"{vergeben}/{gesamt} points · drag to preview")
+        self.graph.set_markers(marken, now=naechster.node if naechster else None)
         teile = [f"Leveling towards “{ziel}”", stand.points_text(), stand.now_text(self._tree)]
         danach = [self._tree.nodes[s.node].name for s in stand.upcoming[1:3]]
-        if jetzt is not None and danach:
+        if stand.now is not None and danach:
             teile.append("then " + ", ".join(danach))
         if self.order_button.isChecked():
             teile.append("click notables in the order you want them")
         self.plan_label.setText(" · ".join(teile))
+
+    def _slider_moved(self, wert: int) -> None:
+        self._set_preview(wert)
+
+    def _set_preview(self, wert: int | None) -> None:
+        """Vorschau auf ``wert`` Punkte; None (oder der Stand von jetzt)
+        zeigt wieder den Eintrag selbst."""
+        stand = leveling_view.progress(self._tree, self._characters, self._name, self._class,
+                                       self._level) if self._tree is not None else None
+        if stand is not None and wert == min(stand.index, len(stand.steps)):
+            wert = None
+        if wert == self._preview:
+            return
+        war_vorschau = self._preview is not None
+        self._preview = wert
+        key = self._selected()
+        if wert is None and war_vorschau:
+            self._fill_graph(key, fit=False)        # zeichnet den Eintrag, ruft _update_plan
+        else:
+            self._update_plan(key)
 
     def _order_toggled(self) -> None:
         """"Set order": Klicks im Bild stellen die Reihenfolge um, statt

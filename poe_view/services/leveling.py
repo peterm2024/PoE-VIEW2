@@ -154,6 +154,15 @@ def _masteries(tree: Tree, have: set[int], ziel_baum: set[int], wahl: dict[int, 
     return schritte
 
 
+def passives_after(steps: list[Step], count: int) -> dict:
+    """Der Baum nach den ersten ``count`` Schritten — für die Vorschau am
+    Regler, im Format der API (``hashes``, ``mastery_effects``)."""
+    erste = steps[:max(count, 0)]
+    return {"hashes": [s.node for s in erste],
+            "mastery_effects": {str(s.node): s.effect for s in erste
+                                if s.kind == MASTERY_STEP}}
+
+
 def points_earned(level: int, quest_points: int = 0) -> int:
     """Punkte bisher: einer je Level ab Stufe 2, dazu die von Hand
     gezählten Quest-Punkte (die sieht weder Log noch API)."""

@@ -118,6 +118,15 @@ def test_a_mastery_follows_its_notable() -> None:
         (40, lv.MASTERY_STEP, 778)]
 
 
+def test_the_tree_after_some_steps_for_the_preview() -> None:
+    b = _mastery_baum()
+    schritte = lv.sequence(b, _plan([10, 11, 12, 40], mastery_effects={"40": 778}), "Marauder")
+    assert lv.passives_after(schritte, 2) == {"hashes": [10, 11], "mastery_effects": {}}
+    assert lv.passives_after(schritte, 9) == {"hashes": [10, 11, 12, 40],
+                                              "mastery_effects": {"40": 778}}
+    assert lv.passives_after(schritte, -1) == {"hashes": [], "mastery_effects": {}}
+
+
 def test_unreachable_ascendancy_and_unknown_class_are_left_out(baum) -> None:
     """31 liegt hinter dem fremden Witch-Start — kein Weg; die Aszendenz
     kommt aus dem Labyrinth, nicht aus Leveln."""

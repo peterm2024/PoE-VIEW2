@@ -735,6 +735,41 @@ def test_quest_points_are_added_and_taken_back_by_hand(qapp, baum) -> None:
     dialog.close()
 
 
+def test_the_slider_previews_the_tree_point_by_point(qapp, baum) -> None:
+    """Peter, 2026-10-08: "ein Progress Bar den ich selbst bedienen kann
+    mit den zur Verfügung stehenden Skillpoints, so dass ich sehen kann,
+    wie sich der Tree von 0 bis 121 oder so aufbaut"."""
+    from poe_view.ui.passive_tree_dialog import CURRENT, HISTORY
+    dialog, zeichen, gespeichert = _plan_fenster(qapp, baum)
+    th.set_leveling(zeichen, "WitchOfPeter", "Build")
+    dialog.set_level(3)                                           # Punkt 2 dran, 1 vergeben
+    dialog.refresh((CURRENT, None))
+    s = dialog.plan_slider
+    assert (s.minimum(), s.maximum(), s.value()) == (0, 7, 1)
+    assert dialog.plan_slider_label.text() == "1/7 points · drag to preview"
+    assert not dialog.plan_now_button.isEnabled()
+    s.setValue(4)                                                 # Vorschau: 4 Punkte
+    assert dialog._preview == 4 and dialog.graph._shown - {1} == {10, 11, 12, 14}
+    assert dialog.graph.markers == {15: "5", 20: "6", 21: "7"} and dialog.graph.marker_now == 15
+    assert dialog.plan_slider_label.text() == "Preview: 4/7 points · level 5 without quests"
+    assert dialog.graph_points.text().startswith("Points used: 4 ")
+    assert dialog.plan_now_button.isEnabled() and gespeichert == []
+    s.setValue(0)
+    assert dialog.graph._shown - {1} == set() and dialog.graph.marker_now == 10
+    s.setValue(7)                                                 # fertig
+    assert dialog.graph._shown - {1} == {10, 11, 12, 14, 15, 20, 21} and dialog.graph.markers == {}
+    dialog.plan_now_button.click()                                # zurück: der Eintrag selbst
+    assert dialog._preview is None and s.value() == 1
+    assert dialog.graph._shown - {1} == {10, 11, 12} and dialog.graph.marker_now == 11
+    s.setValue(3)
+    s.setValue(1)                                                 # auf den Stand von jetzt
+    assert dialog._preview is None and dialog.graph._shown - {1} == {10, 11, 12}
+    s.setValue(5)
+    dialog.refresh((HISTORY, 0))                                  # anderer Eintrag: Schluss
+    assert dialog._preview is None and dialog.plan_slider.isHidden()
+    dialog.close()
+
+
 def test_the_order_is_set_by_clicking(qapp, baum) -> None:
     """"Set order": Klicks stellen die Reihenfolge um und bauen keinen
     Entwurf; Knoten außerhalb des Ziels sagen das."""
