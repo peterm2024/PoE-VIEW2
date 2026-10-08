@@ -6,6 +6,8 @@ nach [SemVer](https://semver.org/lang/de/).
 
 ## [Unveröffentlicht]
 
+## [0.25.0] - 2026-10-08
+
 ### Neu
 
 - **Verbrauchte Punkte im Tree-Reiter** über dem Bild: „Points used:
