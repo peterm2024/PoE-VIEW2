@@ -8998,6 +8998,60 @@ gemalt (Pixel), Beschriftungen dahinter, Scion-Richtung und
 Gegenprobe zuerst (nur eigene) mit 14 Sabotagen — drei hielten
 (Linien, Scheibe, Klick-Sperre), Tests verschärft —, für alle Inseln
 mit 17, alle gefangen.
+
+
+#### 4.60.9 Bäume aus Path-of-Building-Builds (Code, pobb.in)
+
+Peter, 2026-10-08, mit Pohx' geschriebenem Build-Guide offen: Der
+verweist auf https://pobb.in/KMJMGblyFcI7, "dort haben wir 9
+verschiedene Trees und einen Info-Tree. Evtl. sollten wir die pobb.in
+Unterstützung hinzufügen." Bis dahin las "Import link…" nur einzelne
+Baum-Links (Planer, PoB-Baum-Link).
+
+**Format.** Ein PoB-Code ist das Build-XML, zlib-gepackt, URL-sicher
+Base64. pobb.in liefert ihn unter `<id>/raw`, pastebin unter
+`raw/<id>` (`pob_import.remote_url`). Im XML steht je Baum ein
+`<Spec title=… classId ascendClassId nodes masteryEffects>` — und PoB
+schreibt die Planer-URL des Baums als `<URL>` mit. Die liest
+`passive_tree.decode_url` schon, samt Masteries und Cluster-Knoten;
+`pob_import` braucht also keinen eigenen Baum-Leser. Fehlt die URL,
+baut `_spec_link` den Baum aus den Attributen (`masteryEffects` als
+`{Knoten,Effekt}`, Cluster-Knoten über 65536). An Pohx' Build geprüft:
+beide Wege gleich, bis auf die Startknoten, die PoB in `nodes`
+mitführt — harmlos, Starts zählt nirgends etwas mit.
+`<Tree activeSpec>` markiert den in PoB aktiven Baum.
+
+**Titel** tragen PoB-Farbcodes ("Lvl 90 ^2Going Block Based ^7{6}"):
+`clean_title` streicht `^0`–`^9` und `^xRRGGBB` und fasst Leerraum
+zusammen. Sie werden die Namen der Konfigurationen.
+
+**Ablauf im Fenster** (Knopf jetzt "Import…"): erst pobb.in/pastebin
+(Abruf mit Sanduhr, im Vordergrund — 47 KB, vom Nutzer ausgelöst), dann
+Baum-Link, zuletzt PoB-Code. Ein Baum: wie bisher nach dem Namen
+fragen, Titel als Vorschlag. Mehrere: Auswahlfenster mit Häkchen, je
+Zeile Titel, Klasse, Punkte (wie "Points used", §4.60.6) und "(active
+in Path of Building)"; vorgewählt sind alle mit Punkten — der Info-Baum
+("CHECK POB NOTES", nur der Start) nicht. Fremde Klasse: eine Frage für
+alle. Schon vorhandene Namen: eine Frage für alle; gleiche Titel im
+Build werden "Titel (2)". Herkunft `source="pob"`.
+
+**Sicherheit.** Entpackt wird höchstens `MAX_XML` = 20 MB (Pohx' Build:
+270 KB) — Schutz vor einer zlib-Bombe. XML liest `xml.etree`; das
+mitgelieferte expat begrenzt Entity-Expansion seit 2.4.1. Netz nur auf
+Wunsch, mit eigenem User-Agent `PoE-VIEW2/<Version> (+Repo)` ohne
+Kontaktadresse (die gehört in den GGG-Kopf, §config.user_agent).
+Die Autouse-Fixture ersetzt `pob_import._http` durch einen Client, der
+jeden Abruf ablehnt; Tests reichen einen MockTransport herein.
+
+Getestet: Code mit Titeln, aktivem Baum, Umbrüchen; Ersatzweg aus den
+Attributen; Müll, fremde Wurzel, kein Baum, Bombe; welche Links geholt
+werden (auch `pobb.in.evil.example` nicht); Abruf, 404, kein Netz;
+Mehrfach-Import, Vorwahl, Namen, Klasse; pobb.in von Ende zu Ende.
+Einmal echt gegen pobb.in geholt (Pohx: 10 Bäume, aktiv "Lvl 01-30").
+Nativ gesehen: Mit fester Höhe war im Auswahlfenster der zehnte Baum
+abgeschnitten, jetzt richtet sich die Höhe nach der Zahl. Gegenprobe
+mit 15 Sabotagen, alle gefangen — eine ließ den Lauf zuerst hängen
+(FALLSTRICKE #99).
 ---
 
 ## 8. Entwicklungsstand

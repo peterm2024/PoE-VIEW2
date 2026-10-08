@@ -2112,3 +2112,25 @@ Ohne den Fix fällt er.
 — sonst räumt der hinter einem auf. Und: Peters Unterscheidung "aktiv
 gegen inaktiv" war der Schlüssel; die Messung der Anzeigedauer auf dem
 Desktop streute nur.
+
+## 99. Eine Gegenprobe hing ewig — eine echte Meldung wartet offscreen auf einen Klick
+
+**Symptom.** Bei der Gegenprobe zum PoB-Import (ARCHITEKTUR §4.60.9)
+lief eine Sabotage (falsche pobb.in-Adresse) nicht durch, sondern in den
+Zeitablauf von 200 s.
+
+**Ursache.** Der End-to-End-Test ersetzte `QMessageBox.warning` erst für
+den zweiten, absichtlich scheiternden Import. Mit der Sabotage scheiterte
+schon der erste — und öffnete eine echte, modale Meldung. Offscreen
+sieht sie niemand, `exec()` kehrt nie zurück.
+
+**Lösung.** `tests/test_pob_import.py` hat eine Autouse-Fixture, die
+`warning`, `question`, `information` und `critical` durch einen
+sofortigen `AssertionError` ersetzt; Tests, die eine Meldung erwarten,
+setzen ihre eigene. Eine unerwartete Meldung scheitert jetzt in
+Millisekunden mit ihrem Text.
+
+**Lehre:** In Dialog-Tests jede modale Meldung von Anfang an abfangen,
+nicht erst dort, wo man sie erwartet — gerade die unerwartete hängt.
+Und: Gegenproben mit Zeitlimit laufen lassen; ohne `timeout` hätte der
+Lauf einfach gestanden.

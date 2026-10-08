@@ -4,6 +4,7 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+import httpx
 import pytest
 from PySide6.QtWidgets import QApplication
 
@@ -53,6 +54,12 @@ def _isolated_local_state(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     # Dasselbe für die Baumdaten von GGG (§passive_tree), die im selben Job
     # mitkommen — rund 13 MB, die kein Test laden soll.
     monkeypatch.setattr("poe_view.services.passive_tree.fetch", lambda http=None: False)
+    # Kein Abruf bei pobb.in/pastebin (§pob_import): Wer einen Build aus
+    # dem Netz braucht, reicht einen eigenen Client mit MockTransport herein.
+    def _kein_netz(request):
+        raise httpx.ConnectError("Testsuite: kein Netz für pob_import", request=request)
+    monkeypatch.setattr("poe_view.services.pob_import._http",
+                        lambda: httpx.Client(transport=httpx.MockTransport(_kein_netz)))
     # Kein Gong aus der Testsuite (§kills_reminder): Ein Test, der die
     # Erinnerung einschaltet, soll prüfen, DASS sie klingt, nicht klingen.
     monkeypatch.setattr("poe_view.ui.kills_reminder.play_gong", lambda: None)

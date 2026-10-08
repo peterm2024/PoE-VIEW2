@@ -10,8 +10,8 @@ Ausrüstung hat."
 Links die Liste (aktuell, Verlauf, Konfigurationen), rechts der Text zum
 Gewählten — bei einer Konfiguration die Respec-Liste gegenüber dem
 aktuellen Baum, beim Verlauf die Änderung gegenüber dem Eintrag davor.
-Eine Konfiguration entsteht aus dem aktuellen Baum oder aus einem
-Planer-/PoB-Link; "Open in planner" zeigt jeden Baum grafisch im
+Eine Konfiguration entsteht aus dem aktuellen Baum, aus einem
+Planer-/PoB-Link oder aus einem PoB-Build (Code, pobb.in, §4.60.9); "Open in planner" zeigt jeden Baum grafisch im
 offiziellen Planer, ohne dass PoE-VIEW2 selbst einen Baum zeichnet.
 
 Das Fenster ändert nur die übergebenen Daten und ruft danach
@@ -25,12 +25,13 @@ from collections.abc import Callable
 from PySide6.QtCore import Qt, QUrl
 from PySide6.QtGui import (QBrush, QColor, QCursor, QDesktopServices, QGuiApplication,
                            QPalette)
-from PySide6.QtWidgets import (QCheckBox, QDialog, QHBoxLayout, QHeaderView, QInputDialog, QLabel,
+from PySide6.QtWidgets import (QCheckBox, QDialog, QDialogButtonBox, QHBoxLayout, QHeaderView,
+                               QInputDialog, QLabel,
                                QLineEdit, QListWidget, QListWidgetItem, QMenu, QMessageBox,
                                QPushButton, QSplitter, QTabWidget, QTextBrowser,
                                QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
 
-from poe_view.services import passive_tree, tree_history
+from poe_view.services import passive_tree, pob_import, tree_history
 from poe_view.services.passive_tree import Tree, TreeLinkError
 from poe_view.ui import tree_report
 from poe_view.ui.tree_graph import TreeGraph
@@ -138,7 +139,7 @@ class PassiveTreeDialog(QDialog):
         teiler.setStretchFactor(1, 3)
 
         self.save_button = QPushButton("Save current as…")
-        self.import_button = QPushButton("Import link…")
+        self.import_button = QPushButton("Import…")
         self.rename_button = QPushButton("Rename…")
         self.delete_button = QPushButton("Delete")
         self.planner_button = QPushButton("Open in planner")
@@ -643,33 +644,113 @@ class PassiveTreeDialog(QDialog):
         self.refresh((CONFIG, name))
 
     def _import_link(self) -> None:
+        """Planer-Link, PoB-Code oder pobb.in-/pastebin-Link (§4.60.9;
+        Peter, 2026-10-08: "Evtl. sollten wir die pobb.in Unterstützung
+        hinzufügen") — ein Build bringt oft mehrere Bäume mit."""
         text, ok = QInputDialog.getText(
-            self, "Import tree link",
-            "Paste a passive tree link (official planner or Path of Building):")
+            self, "Import tree",
+            "Paste a passive tree link (official planner or Path of Building),\n"
+            "a Path of Building code, or a pobb.in / pastebin link:")
         if not ok or not text.strip():
             return
         try:
-            link = passive_tree.decode_url(text)
-        except TreeLinkError as exc:
-            QMessageBox.warning(self, "Import tree link", f"That is not a tree link ({exc}).")
+            baeume = self._read_trees(text)
+        except (TreeLinkError, pob_import.PobImportError) as exc:
+            QMessageBox.warning(self, "Import tree", f"Nothing to import ({exc}).")
             return
-        klasse = passive_tree.class_name_of(self._tree, link.class_index, link.ascendancy_index)
-        eigene = self._tree.class_ids.get(self._class, (None, None))[0]
-        if eigene is not None and link.class_index != eigene:
-            if QMessageBox.question(
-                    self, "Import tree link",
-                    f"This tree is for a {klasse or 'different class'}, not a {self._class}. "
-                    "Import it anyway?") != QMessageBox.StandardButton.Yes:
+        if len(baeume) > 1:
+            baeume = self._choose_trees(baeume)
+            if not baeume:
                 return
-        name = self._ask_name("Name the configuration")
-        if not name or not self._confirm_overwrite(name):
+        eigene = self._tree.class_ids.get(self._class, (None, None))[0]
+        fremd = sorted({passive_tree.class_name_of(self._tree, b.link.class_index,
+                                                   b.link.ascendancy_index) or "different class"
+                        for b in baeume if eigene is not None and b.link.class_index != eigene})
+        if fremd and QMessageBox.question(
+                self, "Import tree",
+                f"{'This tree is' if len(baeume) == 1 else 'These trees are'} for a "
+                f"{' / '.join(fremd)}, not a {self._class}. Import anyway?"
+        ) != QMessageBox.StandardButton.Yes:
             return
+        if len(baeume) == 1:
+            name = self._ask_name("Name the configuration", baeume[0].title)
+            if not name or not self._confirm_overwrite(name):
+                return
+            namen = [name]
+        else:
+            namen = self._unique_titles(baeume)
+            vorhanden = [n for n in namen if n in tree_history.configs(self._characters,
+                                                                       self._name)]
+            if vorhanden and not self._ask(
+                    "Overwrite configurations",
+                    f"{len(vorhanden)} of these names exist already "
+                    f"(“{vorhanden[0]}”{', …' if len(vorhanden) > 1 else ''}). Replace them?"):
+                return
         aktuell = tree_history.current(self._characters, self._name) or {}
-        tree_history.save_config(self._characters, self._name, name, link.passives,
-                                 level=aktuell.get("level") or 0,
-                                 ruthless=self._tree.ruthless, source="link")
+        for name, baum in zip(namen, baeume):
+            tree_history.save_config(self._characters, self._name, name, baum.link.passives,
+                                     level=aktuell.get("level") or 0,
+                                     ruthless=self._tree.ruthless,
+                                     source="link" if not baum.title else "pob")
         self._on_change()
-        self.refresh((CONFIG, name))
+        self.refresh((CONFIG, namen[0]))
+
+    def _read_trees(self, text: str) -> list[pob_import.BuildTree]:
+        """Erst die Links mit eigener Adresse (pobb.in/pastebin, Abruf mit
+        Sanduhr), dann ein Baum-Link, zuletzt ein PoB-Code."""
+        if pob_import.remote_url(text):
+            QGuiApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+            try:
+                return pob_import.read(text)
+            finally:
+                QGuiApplication.restoreOverrideCursor()
+        try:
+            return [pob_import.BuildTree("", passive_tree.decode_url(text))]
+        except TreeLinkError:
+            return pob_import.decode_code(text)
+
+    @staticmethod
+    def _unique_titles(baeume: list[pob_import.BuildTree]) -> list[str]:
+        namen: list[str] = []
+        for baum in baeume:
+            name, n = baum.title, 2
+            while name in namen:
+                name, n = f"{baum.title} ({n})", n + 1
+            namen.append(name)
+        return namen
+
+    def _choose_trees(self, baeume: list[pob_import.BuildTree]) -> list[pob_import.BuildTree]:
+        """Welche Bäume des Builds? Vorgewählt sind alle mit Punkten — ein
+        "Info"-Baum mit nur dem Start (Pohx: "CHECK POB NOTES") nicht."""
+        fenster = QDialog(self)
+        fenster.setWindowTitle("Import trees from build")
+        liste = QListWidget()
+        for baum in baeume:
+            punkte = tree_report.used_points(self._tree, baum.link.passives)[0]   # wie "Points used"
+            klasse = passive_tree.class_name_of(self._tree, baum.link.class_index,
+                                                baum.link.ascendancy_index) or "?"
+            item = QListWidgetItem(f"{baum.title} — {klasse}, {punkte} points"
+                                   + (" (active in Path of Building)" if baum.active else ""))
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            item.setCheckState(Qt.CheckState.Checked if punkte else Qt.CheckState.Unchecked)
+            liste.addItem(item)
+        knoepfe = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok
+                                   | QDialogButtonBox.StandardButton.Cancel)
+        knoepfe.button(QDialogButtonBox.StandardButton.Ok).setText("Import")
+        knoepfe.accepted.connect(fenster.accept)
+        knoepfe.rejected.connect(fenster.reject)
+        aufbau = QVBoxLayout(fenster)
+        aufbau.addWidget(QLabel(f"This build has {len(baeume)} trees. Each one you tick "
+                                "becomes a configuration named after it."))
+        aufbau.addWidget(liste)
+        aufbau.addWidget(knoepfe)
+        # Hoch genug für alle Bäume (Pohx: zehn — mit fester Höhe war der
+        # letzte abgeschnitten, nativ gesehen), höchstens 720 px.
+        fenster.resize(600, min(720, liste.sizeHintForRow(0) * len(baeume) + 110))
+        if fenster.exec() != QDialog.DialogCode.Accepted:
+            return []
+        return [b for i, b in enumerate(baeume)
+                if liste.item(i).checkState() == Qt.CheckState.Checked]
 
     def _rename(self) -> None:
         key = self._selected()

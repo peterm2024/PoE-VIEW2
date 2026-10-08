@@ -6,6 +6,8 @@ nach [SemVer](https://semver.org/lang/de/).
 
 ## [Unveröffentlicht]
 
+## [0.26.0] - 2026-10-08
+
 ### Neu
 
 - **Die Aszendenzen im Baum-Bild:** alle 21 der Klassen als Inseln
@@ -13,6 +15,11 @@ nach [SemVer](https://semver.org/lang/de/).
   eigene ist golden umrandet und zeigt die vergebenen Knoten und beim
   Umbau grün und rot wie der Hauptbaum. Planen lassen sie sich (noch)
   nicht.
+- **Bäume aus Path-of-Building-Builds importieren:** „Import…“ nimmt
+  jetzt auch einen PoB-Code oder einen pobb.in-/pastebin-Link. Hat der
+  Build mehrere Bäume (Pohx' Guide: neun Levelabschnitte und ein
+  Info-Baum), wählt man sie per Häkchen aus; jeder wird eine
+  Konfiguration mit dem Titel aus PoB.
 
 ## [0.25.0] - 2026-10-08
 
