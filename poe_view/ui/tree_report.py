@@ -271,7 +271,8 @@ def used_points(tree: Tree, passives: dict) -> tuple[int, int, int]:
 
 
 def points_text(tree: Tree, passives: dict, compare_to: dict | None = None, *,
-                level: int | None = None, bandit: str | None = None) -> str:
+                level: int | None = None, bandit: str | None = None,
+                base_label: str = "current tree") -> str:
     """"Points used: 101 (3 in cluster jewels) · max 113 at level 90 ·
     ascendancy 8", beim Vergleich mit dem aktuellen Baum dahinter, wo er
     abweicht; ohne Level kein Höchstwert."""
@@ -281,12 +282,12 @@ def points_text(tree: Tree, passives: dict, compare_to: dict | None = None, *,
         text += f" ({cluster} in cluster jewels)"
     vorher = used_points(tree, compare_to) if compare_to is not None else None
     if vorher and vorher[0] != gesamt:
-        text += f", current tree {vorher[0]}"
+        text += f", {base_label} {vorher[0]}"
     if level:
         text += f" · max {passive_tree.max_points(level, bandit)} at level {level}"
     text += f" · ascendancy {aszendenz}"
     if vorher and vorher[2] != aszendenz:
-        text += f", current tree {vorher[2]}"
+        text += f", {base_label} {vorher[2]}"
     return text
 
 
@@ -319,13 +320,19 @@ def respec_blocks(tree: Tree, current: dict, target: dict, *, title: str,
 
     def knoten(n) -> Line:
         art = {KEYSTONE: "keystone", NOTABLE: "notable", JEWEL: "jewel socket"}.get(n.kind, "")
-        zusatz = f" ({'ascendancy ' if n.ascendancy else ''}{art})" if art or n.ascendancy else ""
+        # "(ascendancy notable)", "(ascendancy)" — ohne Leerzeichen vor der
+        # Klammer, wenn die Art fehlt (nativ gesehen: "(ascendancy )").
+        teile = " ".join(t for t in ("ascendancy" if n.ascendancy else "", art) if t)
+        zusatz = f" ({teile})" if teile else ""
         # "(notable) — Werte"; ohne Art nur die Werte — sonst stünde der
         # Gedankenstrich doppelt da ("Life — — 5% ...", im Test gesehen).
         # Ohne Themenfarbe: Grün und Rot stehen hier für Gewinn und
         # Verlust — ein roter Angriffs-Knoten unter "Allocate" las sich
         # wie ein Verlust (nativ gesehen).
-        return Line(n.name, f"{zusatz.strip()} — {_stats(n.stats)}" if zusatz else _stats(n.stats))
+        if not zusatz:
+            return Line(n.name, _stats(n.stats))
+        # Ohne Werte (Jewel-Sockel) kein "— —" (nativ gesehen).
+        return Line(n.name, f"{zusatz.strip()} — {_stats(n.stats)}" if n.stats else zusatz.strip())
 
     gewinne = sorted((z for z in umbau.stats if is_gain(z)), key=_rang)
     verluste = sorted((z for z in umbau.stats if not is_gain(z)), key=_rang)

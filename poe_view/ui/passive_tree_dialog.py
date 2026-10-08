@@ -20,12 +20,14 @@ Das Fenster ändert nur die übergebenen Daten und ruft danach
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 
 from PySide6.QtCore import Qt, QUrl
 from PySide6.QtGui import (QAction, QBrush, QColor, QCursor, QDesktopServices,
                            QGuiApplication, QKeySequence, QPalette)
-from PySide6.QtWidgets import (QCheckBox, QDialog, QDialogButtonBox, QHBoxLayout, QHeaderView,
+from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, QHBoxLayout,
+                               QHeaderView,
                                QInputDialog, QLabel,
                                QLineEdit, QListWidget, QListWidgetItem, QMenu, QMessageBox,
                                QPushButton, QSplitter, QTabWidget, QTextBrowser,
@@ -37,6 +39,14 @@ from poe_view.ui import tree_report
 from poe_view.ui.tree_graph import TreeGraph
 
 CURRENT, HISTORY, CONFIG = "current", "history", "config"
+
+
+def config_order(name: str) -> list:
+    """Sortierung der Konfigurationen nach Zahlen, nicht nach Zeichen:
+    "Lvl 31-40" vor "Lvl 100" (Pohx' Bäume standen alphabetisch
+    durcheinander, nativ gesehen)."""
+    return [(0, int(t), "") if t.isdigit() else (1, 0, t.lower())
+            for t in re.split(r"(\d+)", name)]
 
 
 class _EntryList(QListWidget):
@@ -154,9 +164,23 @@ class PassiveTreeDialog(QDialog):
         self._graph_fit_pending = False
         self.tabs.currentChanged.connect(self._fit_graph_if_pending)
 
+        # Wogegen verglichen wird (§4.60.11): automatisch wie bisher, oder
+        # ein beliebiger anderer Eintrag.
+        self.compare_box = QComboBox()
+        self.compare_box.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
+        self.compare_box.currentIndexChanged.connect(lambda *_: self._show_selected())
+        rechts = QWidget()
+        rechts_aufbau = QVBoxLayout(rechts)
+        rechts_aufbau.setContentsMargins(0, 0, 0, 0)
+        vergleich_zeile = QHBoxLayout()
+        vergleich_zeile.addStretch(1)
+        vergleich_zeile.addWidget(QLabel("Compare with:"))
+        vergleich_zeile.addWidget(self.compare_box)
+        rechts_aufbau.addLayout(vergleich_zeile)
+        rechts_aufbau.addWidget(self.tabs, 1)
         teiler = QSplitter()
         teiler.addWidget(self.list)
-        teiler.addWidget(self.tabs)
+        teiler.addWidget(rechts)
         teiler.setStretchFactor(1, 3)
 
         self.save_button = QPushButton("Save current as…")
@@ -245,6 +269,7 @@ class PassiveTreeDialog(QDialog):
         self.act_text = aktion("Copy as text", "Ctrl+C", self._copy_text, nur_liste=True,
                                knopf=self.copy_button)
         self.act_show = aktion("Show tree", "", self._show_target)
+        self.act_compare = aktion("Compare with this", "", self._compare_with_target)
         self.act_find = aktion("Find", "Ctrl+F", self._focus_search)
         for nummer in range(4):
             aktion(f"Tab {nummer + 1}", f"Ctrl+{nummer + 1}",
@@ -289,6 +314,8 @@ class PassiveTreeDialog(QDialog):
         elif art in (CURRENT, HISTORY):
             haupt += [self.act_show, self.act_duplicate]
         self.act_duplicate.setText("Duplicate…" if art == CONFIG else "Save as configuration…")
+        if key and key != self._selected() and self._entry(key) is not None:
+            haupt.append(self.act_compare)                 # §4.60.11
         if self._entry(key) is not None:
             haupt += [None, self.act_planner, self.act_link, self.act_text]
         return haupt + ([None] if haupt else []) + [self.act_import]
@@ -412,7 +439,7 @@ class PassiveTreeDialog(QDialog):
         konfigs = tree_history.configs(self._characters, self._name)
         if konfigs:
             self._header("Configurations")
-            for name in sorted(konfigs, key=str.lower):
+            for name in sorted(konfigs, key=config_order):
                 self._add(f"  {name}", (CONFIG, name))
         verlauf = tree_history.history(self._characters, self._name)
         if verlauf:
@@ -421,6 +448,7 @@ class PassiveTreeDialog(QDialog):
                 eintrag = verlauf[index]
                 self._add(f"  {self._history_caption(verlauf, index)}", (HISTORY, index))
         self.list.blockSignals(False)
+        self._fill_compare_box(aktuell, konfigs, verlauf)
         # Überschriften tragen keinen Schlüssel — ohne ``alt`` darf die
         # Suche nicht auf ihnen landen.
         ziel = next((self.list.item(i) for i in range(self.list.count())
@@ -431,6 +459,70 @@ class PassiveTreeDialog(QDialog):
         if ziel is not None:
             self.list.setCurrentItem(ziel)
         self._show_selected()
+
+    def _fill_compare_box(self, aktuell, konfigs, verlauf) -> None:
+        """"Automatic", der aktuelle Baum, die Konfigurationen, der Verlauf —
+        die Wahl bleibt, solange es den Eintrag gibt."""
+        alt = self._compare_key()
+        # Die Schlüssel stehen in einer eigenen Liste: ``findData`` vergleicht
+        # Python-Objekte im QVariant über ihre Identität — ein gleiches,
+        # aber neu gebautes Tupel fand es nicht (-1; gemessen).
+        eintraege = [("Automatic (current tree / the tree before)", None)]
+        if aktuell:
+            eintraege.append(("Current tree", (CURRENT, None)))
+        eintraege += [(name, (CONFIG, name)) for name in sorted(konfigs or {}, key=config_order)]
+        eintraege += [(self._history_caption(verlauf, index), (HISTORY, index))
+                      for index in range(len(verlauf or ()) - 1, -1, -1)]
+        self._compare_keys = [k for _t, k in eintraege]
+        self.compare_box.blockSignals(True)
+        self.compare_box.clear()
+        self.compare_box.addItems([t for t, _k in eintraege])
+        self.compare_box.setCurrentIndex(self._compare_index(alt))
+        self.compare_box.blockSignals(False)
+
+    def _compare_key(self):
+        i = self.compare_box.currentIndex()
+        keys = getattr(self, "_compare_keys", [])
+        return keys[i] if 0 <= i < len(keys) else None
+
+    def _compare_index(self, key) -> int:
+        keys = getattr(self, "_compare_keys", [])
+        return keys.index(key) if key in keys else 0
+
+    def _label(self, key) -> str:
+        art, schluessel = key
+        if art == CURRENT:
+            return "current tree"
+        if art == DRAFT:
+            return "unsaved changes"
+        if art == CONFIG:
+            return schluessel
+        eintrag = self._entry(key) or {}
+        return f"tree of {str(eintrag.get('at', '')).replace('T', ' ')[:16]}"
+
+    def _base(self, key) -> tuple[dict, str, bool] | None:
+        """Wogegen ``key`` verglichen wird: (passives, Bezeichnung, ob der
+        Umbau jetzt ansteht — dann mit Goldpreis). Automatisch:
+        Konfiguration und Entwurf gegen den aktuellen Baum, Verlauf gegen
+        den Eintrag davor (§4.60.11)."""
+        gewaehlt = self._compare_key()
+        if gewaehlt and gewaehlt != key and self._entry(gewaehlt) is not None:
+            return (self._entry(gewaehlt).get("passives") or {}, self._label(gewaehlt), True)
+        art = key[0] if key else None
+        if art in (CONFIG, DRAFT):
+            aktuell = tree_history.current(self._characters, self._name)
+            if aktuell:
+                return aktuell.get("passives") or {}, "current tree", True
+        if art == HISTORY and key[1] > 0:
+            davor = tree_history.history(self._characters, self._name)[key[1] - 1]
+            return davor.get("passives") or {}, "the tree before", False
+        return None
+
+    def _compare_with_target(self) -> None:
+        """Menü "Compare with this": den Eintrag unter der Maus als Basis."""
+        key = self._target()
+        if key and self._compare_index(key):
+            self.compare_box.setCurrentIndex(self._compare_index(key))
 
     def _add(self, text: str, key: tuple, bold: bool = False) -> None:
         item = QListWidgetItem(text)
@@ -483,24 +575,21 @@ class PassiveTreeDialog(QDialog):
     # --- Anzeige -------------------------------------------------------- #
 
     def _respec_blocks(self, key) -> list:
-        """Der Umbau zum Gewählten: bei einer Konfiguration vom aktuellen
-        Baum aus, beim Verlauf vom Eintrag davor; sonst nichts."""
+        """Der Umbau zum Gewählten — von dem aus, wogegen verglichen wird
+        (``_base``); ohne Vergleich nichts."""
         eintrag = self._entry(key)
-        if eintrag is None or self._tree is None or not key:
+        basis = self._base(key) if eintrag is not None and self._tree is not None else None
+        if basis is None:
             return []
-        art, schluessel = key
-        aktuell = tree_history.current(self._characters, self._name)
-        if art in (CONFIG, DRAFT) and aktuell:
-            return tree_report.respec_blocks(
-                self._tree, aktuell.get("passives") or {}, eintrag.get("passives") or {},
-                title=f"Respec: current tree → {schluessel if art == CONFIG else 'unsaved changes'}",
-                level=aktuell.get("level"))     # umgebaut wird jetzt, auf dem heutigen Level
-        if art == HISTORY and schluessel > 0:
-            verlauf = tree_history.history(self._characters, self._name)
-            return tree_report.respec_blocks(
-                self._tree, verlauf[schluessel - 1].get("passives") or {},
-                eintrag.get("passives") or {}, title="Changes from the tree before")
-        return []
+        passives, bezeichnung, jetzt = basis
+        aktuell = tree_history.current(self._characters, self._name) or {}
+        if bezeichnung == "the tree before":
+            titel = "Changes from the tree before"
+        else:
+            titel = f"Respec: {bezeichnung} → {self._label(key)}"
+        return tree_report.respec_blocks(
+            self._tree, passives, eintrag.get("passives") or {}, title=titel,
+            level=aktuell.get("level") if jetzt else None)   # umgebaut wird auf dem heutigen Level
 
     def _tree_blocks(self, key, include_reach: bool) -> list:
         bloecke = tree_report.tree_blocks(self._entry(key), self._tree,
@@ -567,13 +656,8 @@ class PassiveTreeDialog(QDialog):
             self.graph_legend.setText("")
             self.graph_points.setText("")
             return
-        vergleich = None
-        if key[0] in (CONFIG, DRAFT):
-            aktuell = tree_history.current(self._characters, self._name)
-            vergleich = (aktuell or {}).get("passives")
-        elif key[0] == HISTORY and key[1] > 0:
-            vergleich = tree_history.history(self._characters, self._name)[key[1] - 1].get(
-                "passives")
+        basis = self._base(key)
+        vergleich = basis[0] if basis else None
         self.graph.show_tree(eintrag.get("passives") or {}, self._class,
                              compare_to=vergleich, show_reach=self.graph_reach.isChecked(),
                              dark=self._dark())
@@ -582,11 +666,13 @@ class PassiveTreeDialog(QDialog):
         # Charakters heute — gebaut wird auf dem heutigen Level.
         quelle = (eintrag if key[0] == HISTORY
                   else tree_history.current(self._characters, self._name) or eintrag)
+        # Der Eintrag davor (Verlauf, automatisch) steht nicht dabei.
+        nennen = basis is not None and basis[1] != "the tree before"
         self.graph_points.setText(tree_report.points_text(
-            self._tree, eintrag.get("passives") or {},
-            vergleich if key[0] in (CONFIG, DRAFT) else None,     # Verlauf: kein "current"
+            self._tree, eintrag.get("passives") or {}, vergleich if nennen else None,
             level=quelle.get("level"),
-            bandit=(quelle.get("passives") or {}).get("bandit_choice")))
+            bandit=(quelle.get("passives") or {}).get("bandit_choice"),
+            base_label=basis[1] if nennen else "current tree"))
         self.graph_reach.setEnabled(vergleich is None)
         self.graph_legend.setText(
             ("Green: allocate · red: refund · white: unchanged · " if vergleich is not None

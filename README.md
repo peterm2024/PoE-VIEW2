@@ -218,7 +218,10 @@ the tree you are in.
   rename, duplicate, delete and the rest (the tree you are looking at
   stays; Ctrl/Shift-click to delete several at once); the usual shortcuts work
   (Ctrl+S, Ctrl+Z, F2, Del, Ctrl+D, and Ctrl+V in the list imports
-  whatever tree or build link is on the clipboard). For each configuration you get the
+  whatever tree or build link is on the clipboard). *Compare with*
+  shows any configuration against any other — what to change going from
+  "Lvl 61-80" to "Lvl 81-90", say — instead of against your current
+  tree. For each configuration you get the
   respec as a to-do list against your current tree (refund, allocate,
   change mastery, number of points and the gold it costs at your level)
   and what it gains and loses in

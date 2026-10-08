@@ -30,6 +30,15 @@ nach [SemVer](https://semver.org/lang/de/).
   unter der Maus, das Bild rechts bleibt.
 - **Mehrere Konfigurationen auf einmal löschen** (Strg-/Umschalt-Klick,
   dann Entf), etwa die Bäume eines importierten Builds.
+- **Zwei Bäume vergleichen:** „Compare with:“ über den Reitern — etwa
+  „Lvl 81-90“ gegen „Lvl 61-80“ statt gegen den aktuellen Baum, mit
+  Respec-Liste, Goldpreis, Grün/Rot im Bild und Punkten. Auch per
+  Rechtsklick „Compare with this“.
+
+### Behoben
+
+- Konfigurationen sortieren nach Zahlen („Lvl 31-40“ vor „Lvl 100“).
+- Respec-Liste: kein „— —“ mehr bei Jewel-Sockeln, kein „(ascendancy )“.
 
 ## [0.25.0] - 2026-10-08
 

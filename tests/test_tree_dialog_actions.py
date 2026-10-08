@@ -79,10 +79,11 @@ def test_the_menu_fits_the_entry(qapp, baum) -> None:
     teile = ["—", "Open in planner", "Copy link", "Copy as text", "—", "Import…"]
     assert _texte(dialog._context_actions((CONFIG, "Fire"))) == [
         "Show tree", "Rename…", "Duplicate…", "Delete"] + teile
+    # Bei einem anderen als dem gezeigten Eintrag: "Compare with this" (§4.60.11).
     assert _texte(dialog._context_actions((CURRENT, None))) == [
-        "Show tree", "Save as configuration…"] + teile
+        "Show tree", "Save as configuration…", "Compare with this"] + teile
     assert _texte(dialog._context_actions((HISTORY, 0))) == [
-        "Show tree", "Save as configuration…"] + teile
+        "Show tree", "Save as configuration…", "Compare with this"] + teile
     assert _texte(dialog._context_actions(None)) == ["Import…"]
     dialog.graph.node_clicked.emit(13, False)                     # Entwurf aus "Fire"
     assert _texte(dialog._context_actions((DRAFT, None))) == [
@@ -335,3 +336,108 @@ def test_several_configurations_are_deleted_at_once(qapp, baum, monkeypatch) -> 
     assert fragen == [("Delete configuration", "Delete “D”?")]
     assert set(th.configs(zeichen, "WitchOfPeter")) == {"C"} and dialog._selected() == (CONFIG, "C")
     dialog.close()
+
+
+def test_compare_two_configurations(qapp, baum, monkeypatch) -> None:
+    """Idee 2 (Peter, 2026-10-08: "so machen wir das"): "Lvl 61-80" gegen
+    "Lvl 41-60" statt gegen den aktuellen Baum — Respec, Gold, Bild, Punkte."""
+    from poe_view.ui.passive_tree_dialog import CONFIG, CURRENT, HISTORY
+    dialog, zeichen, _ = _fenster(qapp, baum)
+    # Wogegen das Bild vergleicht (der Testbaum hat keine Lage, also keine
+    # gezeichneten Knoten — deshalb ein Spion statt der Zustände).
+    verglichen = []
+    original = dialog.graph.show_tree
+    monkeypatch.setattr(dialog.graph, "show_tree", lambda p, k, compare_to=None, **kw: (
+        verglichen.append(pt.allocated(compare_to) if compare_to is not None else None),
+        original(p, k, compare_to=compare_to, **kw)))
+    th.save_config(zeichen, "WitchOfPeter", "Lvl 41-60", {"hashes": [10, 11, 12, 13]},
+                   level=30, ruthless=True, source="pob")
+    th.save_config(zeichen, "WitchOfPeter", "Lvl 61-80", {"hashes": [10, 11, 12, 14, 15]},
+                   level=30, ruthless=True, source="pob")
+    dialog.refresh((CONFIG, "Lvl 61-80"))
+    box = dialog.compare_box
+    assert [box.itemText(i) for i in range(box.count())][:4] == [
+        "Automatic (current tree / the tree before)", "Current tree", "Lvl 41-60", "Lvl 61-80"]
+    assert dialog._compare_keys[4:] == [(HISTORY, 1), (HISTORY, 0)]
+    # Automatisch: gegen den aktuellen Baum (10, 11, 12).
+    assert "Respec: current tree → Lvl 61-80" in dialog.respec_text.toPlainText()
+    # Gegen "Lvl 41-60": 13 fällt weg, 14 und 15 kommen dazu.
+    box.setCurrentIndex(dialog._compare_index((CONFIG, "Lvl 41-60")))
+    respec = dialog.respec_text.toPlainText()
+    assert "Respec: Lvl 41-60 → Lvl 61-80" in respec
+    assert "1 point to refund in the main tree · about" in respec and "at level 30" in respec
+    assert "Refund (1)" in respec and "Allocate (2)" in respec
+    assert verglichen[-1] == {10, 11, 12, 13} and dialog.graph.comparing
+    assert dialog.graph_points.text().startswith("Points used: 5, Lvl 41-60 4 · max")
+    # Der Vergleichs-Eintrag selbst: dann automatisch (gegen den aktuellen Baum).
+    dialog.refresh((CONFIG, "Lvl 41-60"))
+    assert "Respec: current tree → Lvl 41-60" in dialog.respec_text.toPlainText()
+    assert verglichen[-1] == {10, 11, 12}
+    # Auch der aktuelle Baum lässt sich gegen eine Konfiguration zeigen.
+    dialog.refresh((CURRENT, None))
+    assert "Respec: Lvl 41-60 → current tree" in dialog.respec_text.toPlainText()
+    assert dialog.tabs.isTabVisible(0)
+    # Gibt es den Vergleichs-Eintrag nicht mehr, gilt wieder "Automatic".
+    th.delete_config(zeichen, "WitchOfPeter", "Lvl 41-60")
+    dialog.refresh((CONFIG, "Lvl 61-80"))
+    assert dialog._compare_key() is None and box.currentIndex() == 0
+    assert "Respec: current tree → Lvl 61-80" in dialog.respec_text.toPlainText()
+    dialog.close()
+
+
+def test_history_compares_with_the_tree_before_or_the_chosen_one(qapp, baum) -> None:
+    from poe_view.ui.passive_tree_dialog import CONFIG, HISTORY
+    dialog, zeichen, _ = _fenster(qapp, baum)
+    th.save_config(zeichen, "WitchOfPeter", "Far", {"hashes": [10, 11, 12, 14, 15]},
+                   level=30, ruthless=True, source="link")
+    dialog.refresh((HISTORY, 1))
+    assert "Changes from the tree before" in dialog.respec_text.toPlainText()
+    assert "gold" not in dialog.respec_text.toPlainText()          # schon geschehen
+    assert ", " not in dialog.graph_points.text().split(" · ")[0]  # kein "the tree before 2"
+    dialog.compare_box.setCurrentIndex(dialog._compare_index((CONFIG, "Far")))
+    assert "Respec: Far → tree of 2026-10-04 19:00" in dialog.respec_text.toPlainText()
+    assert dialog.graph_points.text().startswith("Points used: 3, Far 5")
+    dialog.close()
+
+
+def test_compare_with_this_from_the_menu(qapp, baum, monkeypatch) -> None:
+    from poe_view.ui.passive_tree_dialog import CONFIG
+    dialog, zeichen, _ = _drei(qapp, baum)
+    punkt = dialog.list.visualItemRect(_item(dialog, (CONFIG, "C"))).center()
+    gesehen = []
+    _menue_waehlt(monkeypatch, "act_compare", dialog, gesehen)
+    dialog._list_menu(punkt)
+    assert "Compare with this" in gesehen[0]
+    assert dialog._compare_key() == (CONFIG, "C") and dialog._selected() == (CONFIG, "A")
+    assert "Respec: C → A" in dialog.respec_text.toPlainText()
+    # Beim gezeigten Eintrag selbst steht es nicht im Menü.
+    assert "Compare with this" not in _texte(dialog._context_actions((CONFIG, "A")))
+    dialog.close()
+
+
+def test_configurations_are_sorted_by_their_numbers() -> None:
+    """Pohx' Bäume standen alphabetisch durcheinander ("Lvl 100" vor
+    "Lvl 31-40"); jetzt nach Zahlen, Groß/klein egal."""
+    from poe_view.ui.passive_tree_dialog import config_order
+    namen = ["Lvl 100 Cogwork Ring {10}", "Lvl 31-40 {2}", "lvl 01-30 {1}", "Boss",
+             "Lvl 95+ Small Cluster {8}", "Lvl 100 25% Effect {9}", "Lvl 90 Block {6}", "boss 2"]
+    assert sorted(namen, key=config_order) == [
+        "Boss", "boss 2", "lvl 01-30 {1}", "Lvl 31-40 {2}", "Lvl 90 Block {6}",
+        "Lvl 95+ Small Cluster {8}", "Lvl 100 25% Effect {9}", "Lvl 100 Cogwork Ring {10}"]
+
+
+def test_respec_lines_without_stats_or_kind_read_cleanly() -> None:
+    """Nativ gesehen: "Basic Jewel Socket (jewel socket) — —" und
+    "(ascendancy )"."""
+    from poe_view.ui import tree_report
+    roh = {"classes": [{"name": "Marauder", "ascendancies": [{"name": "Juggernaut"}]}],
+           "nodes": {
+               "1": {"name": "MARAUDER", "out": ["10"], "in": [], "classStartIndex": 0},
+               "10": {"name": "Basic Jewel Socket", "out": ["11"], "in": [], "isJewelSocket": True},
+               "11": {"name": "Unrelenting", "out": [], "in": [], "ascendancyName": "Juggernaut",
+                      "stats": ["+1 to Armour"]}}}
+    b = pt.parse_tree(roh, False)
+    bloecke = tree_report.respec_blocks(b, {"hashes": []}, {"hashes": [10, 11]}, title="T")
+    zeilen = {z.name: z.text for blk in bloecke for z in blk.items}
+    assert zeilen["Basic Jewel Socket"] == "(jewel socket)"
+    assert zeilen["Unrelenting"] == "(ascendancy) — +1 to Armour"

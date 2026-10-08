@@ -9124,6 +9124,47 @@ und ein echtes Menü wartet offscreen ewig — der Testlauf hing zweimal
 (FALLSTRICKE #99). `test_stash_tree.py` umgeht es aus demselben Grund
 mit einem Ersatz-QMenu.
 
+
+#### 4.60.11 Zwei Bäume miteinander vergleichen
+
+Idee 2 aus der QoL-Runde (Peter, 2026-10-08: "da nehmen wir thematisch
+einfach die Ideen noch dazu"): Nach dem Import von Pohx' Levelabschnitten
+will man sehen, was von "Lvl 61-80" auf "Lvl 81-90" umzubauen ist — nicht
+nur, was vom aktuellen Baum aus.
+
+Über den Reitern steht **"Compare with:"** (`compare_box`): "Automatic"
+(wie bisher — Konfiguration und Entwurf gegen den aktuellen Baum,
+Verlauf gegen den Eintrag davor), "Current tree", alle Konfigurationen,
+der Verlauf. `_base(key)` ist die einzige Stelle, die das entscheidet;
+Respec-Liste (`_respec_blocks`, Titel "Respec: Lvl 61-80 {4} → Lvl
+81-90 {5}"), Bild (grün/rot) und Punkte-Zeile ("…, Lvl 41-60 4")
+fragen sie. Mit einer gewählten Basis gibt es einen Goldpreis auf dem
+heutigen Level (umgebaut wird jetzt); "the tree before" im Verlauf
+bleibt ohne Preis und ohne Nennung in der Punkte-Zeile. Ist die Basis
+der gezeigte Eintrag selbst, gilt "Automatic"; gibt es sie nicht mehr
+(gelöscht), springt die Auswahl auf "Automatic". Auch der aktuelle Baum
+lässt sich gegen eine Konfiguration zeigen (dann mit Respec-Reiter).
+Rechtsklick auf einen anderen Eintrag: "Compare with this".
+
+Die Schlüssel der Auswahl stehen in einer eigenen Liste
+(`_compare_keys`), nicht als Daten im QComboBox: `findData` vergleicht
+Python-Objekte im QVariant über ihre **Identität** — ein gleiches, aber
+neu gebautes Tupel ergab -1 (gemessen; eine erste Probe mit zweimal
+demselben Tupel-Literal täuschte, Python legt Konstanten nur einmal an).
+
+**Nebenbei, nativ gesehen:** Konfigurationen sortieren jetzt nach Zahlen
+(`config_order`): "Lvl 31-40" vor "Lvl 100", vorher alphabetisch
+durcheinander. In der Respec-Liste stand bei Knoten ohne Werte "(jewel
+socket) — —" und bei kleinen Aszendenz-Knoten "(ascendancy )"; beides
+behoben.
+
+Getestet: Einträge der Auswahl, Vergleich zweier Konfigurationen
+(Respec, Gold, Basis des Bildes per Spion — der Testbaum hat keine
+Lage, also keine gezeichneten Knoten —, Punkte), Selbstvergleich,
+aktueller Baum gegen Konfiguration, gelöschte Basis, Verlauf automatisch
+und gewählt, Menü. Nativ angesehen mit Pohx' Bäumen. Gegenprobe mit 11
+Sabotagen für den Vergleich und 3 für die Kleinigkeiten, alle gefangen.
+
 **Duplicate** speichert den gewählten Eintrag unter neuem Namen
 (Vorschlag "Fire (copy)" bzw. "Level 29 tree" beim Verlauf, mit dessen
 Level; `source="copy"`). Beim aktuellen Baum ist es "Save current as…".
