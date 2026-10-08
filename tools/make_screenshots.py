@@ -778,6 +778,17 @@ def _passive_tree(win: MainWindow) -> None:
     tree = pt.load(False)
     klasse = "Occultist"
     aktuell = _demo_tree(tree, klasse, 78, (pt.MINIONS, pt.DEFENCE))
+    # Sechs Aszendenz-Punkte vom Aszendenz-Start aus (§4.60.8) — sonst
+    # stünde im Bild eine leere eigene Insel und "ascendancy 0".
+    start = next(n.id for n in tree.nodes.values()
+                 if n.ascendancy == klasse and n.kind == pt.START)
+    asz, rand = [], [start]
+    while rand and len(asz) < 6:
+        for b in sorted(tree.nodes[rand.pop(0)].neighbours):
+            if tree.nodes[b].ascendancy == klasse and b != start and b not in asz:
+                asz.append(b)
+                rand.append(b)
+    aktuell["hashes"] = sorted(set(aktuell["hashes"]) | set(asz[:6]))
     # Umbau: einen kleinen Ast zurück (3–5 Punkte), dafür die nächsten
     # Notables mit Feuerresistenz — so viel, wie die Punkte hergeben.
     have = pt.allocated(aktuell)
