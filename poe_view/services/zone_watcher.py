@@ -199,6 +199,12 @@ _INVENTORY_LINES = (
 # +1,9 Mio. XP). Die Client.txt ist die einzige verlässliche Quelle.
 _DEATH_LINE = re.compile(r": (.+) has been slain\.\s*$")
 
+# Levelaufstieg (§4.60.14, Leveling-Plan): "… ] : WitchOfPeter
+# (Chieftain) is now level 83" — dasselbe Format, das ``league_log``
+# rückblickend liest. Auch Mitspieler stehen so im Log; der Plan gilt nur
+# für den eigenen Charakter mit Plan, fremde Namen stören nicht.
+_LEVEL_LINE = re.compile(r": (\S+) \(([^)]+)\) is now level (\d+)\s*$")
+
 # Zeitstempel am Zeilenanfang, lokale Zeit des Spiel-Clients.
 _LINE_STAMP = "%Y/%m/%d %H:%M:%S"
 
@@ -419,6 +425,8 @@ class ZoneWatcher(QObject):
     death_seen = Signal(str, object)
     # Ablesung von "/kills": (Zähler, Zeitpunkt aus der Zeile) — §kills_log.
     kills_reported = Signal(int, object)
+    # Levelaufstieg: (Name, neuer Level) — §_LEVEL_LINE.
+    level_up = Signal(str, int)
 
     def __init__(self, log_path: Path, parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -508,6 +516,11 @@ class ZoneWatcher(QObject):
             if match:
                 log.info("Zonenwechsel erkannt: %s", match.group(1))
                 self.zone_changed.emit(match.group(1))
+                continue
+            match = _LEVEL_LINE.search(line)
+            if match:
+                log.info("Levelaufstieg erkannt: %s → %s", match.group(1), match.group(3))
+                self.level_up.emit(match.group(1), int(match.group(3)))
                 continue
             match = _DEATH_LINE.search(line)
             if match:

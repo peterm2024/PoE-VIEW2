@@ -646,3 +646,26 @@ def test_kill_readings_come_with_the_login_they_belong_to(tmp_path) -> None:
 def test_kill_readings_of_a_missing_file_are_empty(tmp_path) -> None:
     from poe_view.services.zone_watcher import kill_readings
     assert kill_readings(tmp_path / "fehlt.txt") == []
+
+
+_LEVEL_LINE = ('2026/10/08 18:31:07 33736781 cffb065b [INFO Client 19976] '
+               ': WitchOfPeter (Chieftain) is now level 32\n')
+
+
+def test_a_level_up_is_emitted_for_the_leveling_plan(tmp_path, qapp) -> None:
+    """§4.60.14: Der Plan zählt live weiter — der Aufstieg kommt aus der
+    Client.txt, die API kennt ihn erst beim nächsten Abruf."""
+    log = tmp_path / "Client.txt"
+    _write(log, _OTHER_LINE)
+    watcher = ZoneWatcher(log)
+    stufen, tode, zonen = [], [], []
+    watcher.level_up.connect(lambda name, level: stufen.append((name, level)))
+    watcher.death_seen.connect(lambda *a: tode.append(a))
+    watcher.zone_changed.connect(zonen.append)
+    with log.open("a", encoding="utf-8") as f:
+        f.write(_LEVEL_LINE)
+        f.write(_LEVEL_LINE.replace("WitchOfPeter (Chieftain)", "PeterM (Necromancer)")
+                .replace("level 32", "level 100"))
+    watcher.check_now()
+    assert stufen == [("WitchOfPeter", 32), ("PeterM", 100)]
+    assert tode == [] and zonen == []

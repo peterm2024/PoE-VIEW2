@@ -85,6 +85,8 @@ from poe_view.ui.item_history import (BASE_COL as HISTORY_BASE_COL,
 from poe_view.ui.item_zoom import ItemZoomDialog
 from poe_view.ui.character_sheet import build_character_sheet
 from poe_view.ui.paperdoll import EQUIPPED_SLOTS, PaperdollDialog
+from poe_view.ui import leveling_view
+from poe_view.ui.leveling_view import LevelingWindow
 from poe_view.ui.passive_tree_dialog import PassiveTreeDialog
 from poe_view.ui.settings_dialog import SettingsDialog
 from poe_view.ui.rate_limit_dashboard import RateLimitDashboard
@@ -761,6 +763,13 @@ class MainWindow(QMainWindow):
         # dieselbe Datei, die der Watcher live liest. ``None``, solange
         # die Zonen-Beobachtung aus ist (dann gibt es keinen Rückblick).
         self._client_log_path: Path | None = None
+        # Leveling-Plan (§4.60.14): Level je Charakter beim letzten Abruf und
+        # live aus der Client.txt; der Charakter, dem Statusleiste und
+        # Mini-Fenster folgen; das Mini-Fenster selbst.
+        self._api_levels: dict[str, int] = {}
+        self._live_levels: dict[str, int] = {}
+        self._leveling_char = ""
+        self._leveling_window: LevelingWindow | None = None
         # Charakter-Item-Verlauf (Peter, 2026-08-02): letzte 120 Items, die
         # neu im Inventar aufgetaucht oder daraus verschwunden sind — über
         # ALLE Charaktere hinweg, unabhängig davon, welcher gerade angezeigt
@@ -1684,6 +1693,11 @@ class MainWindow(QMainWindow):
 
         self._status_msg = QLabel("Starting…")
         self.statusBar().addWidget(self._status_msg, stretch=1)
+        # Leveling-Plan (§4.60.14): der nächste Passivpunkt, fest stehend —
+        # das Meldungsfeld daneben überschreiben die Abrufe laufend.
+        self._plan_status = QLabel()
+        self._plan_status.hide()
+        self.statusBar().addWidget(self._plan_status)
         # Range (0, 0) macht aus der QProgressBar einen "busy"-Indikator mit
         # eingebauter Lauf-Animation (kein eigener QTimer/keine Assets nötig).
         self._busy_indicator = QProgressBar()
@@ -4242,6 +4256,7 @@ class MainWindow(QMainWindow):
         dialog = getattr(self, "_tree_dialog", None)
         if dialog is not None and dialog.isVisible() and dialog._name == name:
             dialog.refresh()
+        self._update_leveling(name)
 
     def _save_trees(self) -> None:
         try:
@@ -4256,12 +4271,94 @@ class MainWindow(QMainWindow):
         eintrag = tree_history.current(self._trees(), char.name)
         ruthless = (bool(eintrag.get("ruthless")) if eintrag
                     else passive_tree.is_ruthless({}, char.league or ""))
+        name = char.name
+
+        def geaendert() -> None:
+            self._save_trees()
+            self._update_leveling(name)
         self._tree_dialog = PassiveTreeDialog(
             char.name, char.class_, self._trees(), passive_tree.load(ruthless),
-            on_change=self._save_trees, parent=self)
+            on_change=geaendert, parent=self,
+            on_mini_window=lambda: self._show_leveling_window(name))
+        api, live = self._levels_of(name)
+        if api:
+            self._tree_dialog.set_levels(api, live)
         self._tree_dialog.show()
 
+    # --- Leveling-Plan (§4.60.14) ---------------------------------------- #
+
+    def _levels_of(self, name: str) -> tuple[int, int]:
+        """(Level beim letzten Abruf, Level live aus der Client.txt)."""
+        char = next((c for c in self._all_characters if c.name == name), None)
+        api = self._api_levels.get(name) or (char.level if char else 0) or 0
+        return api, max(self._live_levels.get(name, 0), api)
+
+    def _note_api_level(self, name: str, level: int) -> None:
+        if level and self._api_levels.get(name) != level:
+            self._api_levels[name] = level
+            self._update_leveling(name)
+
+    def _on_level_up(self, name: str, level: int) -> None:
+        """"… is now level N" in der Client.txt. Hat der Charakter einen
+        Plan, folgen Statusleiste und Mini-Fenster ihm, und die Meldung
+        sagt, welcher Punkt jetzt dran ist."""
+        self._live_levels[name] = level
+        if tree_history.leveling(self._trees(), name) is None:
+            return
+        self._leveling_char = name
+        stand = self._update_leveling(name)
+        if stand is not None and stand[1] is not None and stand[1].now is not None:
+            self._on_status(f"{name} reached level {level} — next passive: "
+                            f"{leveling_view.step_text(stand[0], stand[1].now)}")
+
+    def _leveling_context(self, name: str):
+        """Baum und Klasse eines Charakters für den Plan."""
+        char = next((c for c in self._all_characters if c.name == name), None)
+        eintrag = tree_history.current(self._trees(), name)
+        if char is None or eintrag is None:
+            return None, ""
+        return passive_tree.load(bool(eintrag.get("ruthless"))), char.class_
+
+    def _update_leveling(self, name: str):
+        """Statusleiste, Mini-Fenster und ein offenes Baum-Fenster auf den
+        Stand des Plans von ``name`` bringen. Gibt (Baum, Stand) zurück."""
+        api, live = self._levels_of(name)
+        dialog = getattr(self, "_tree_dialog", None)
+        if dialog is not None and dialog.isVisible() and dialog._name == name and api:
+            dialog.set_levels(api, live)
+        if tree_history.leveling(self._trees(), name) is None:
+            if name == self._leveling_char:
+                self._plan_status.hide()
+                if self._leveling_window is not None:
+                    self._leveling_window.show_progress(None, name, live, None)
+            return None
+        if not self._leveling_char:
+            self._leveling_char = name
+        if name != self._leveling_char:
+            return None
+        baum, klasse = self._leveling_context(name)
+        stand = (leveling_view.progress(baum, self._trees(), name, klasse, api, live)
+                 if baum is not None else None)
+        text = leveling_view.status_text(baum, stand) if stand is not None else ""
+        self._plan_status.setText(text)
+        self._plan_status.setVisible(bool(text))
+        if self._leveling_window is not None and self._leveling_window.isVisible():
+            self._leveling_window.show_progress(baum, name, live, stand)
+        return baum, stand
+
+    def _show_leveling_window(self, name: str) -> None:
+        if self._leveling_window is None:
+            self._leveling_window = LevelingWindow(self)
+        self._leveling_char = name
+        self._leveling_window.show()
+        self._leveling_window.raise_()
+        self._update_leveling(name)
+
     def _on_character_snapshot(self, name: str, level: int, experience: int) -> None:
+        self._note_api_level(name, level)
+        self._on_character_snapshot_xp(name, level, experience)
+
+    def _on_character_snapshot_xp(self, name: str, level: int, experience: int) -> None:
         """Läuft bei JEDEM Abruf von ``/character/{name}`` mit, egal ob
         gerade angezeigt oder ein stiller Hintergrund-Refresh — anders als
         die Türkis-Hervorhebung, die nur die offene Ansicht betrifft
@@ -5887,6 +5984,7 @@ class MainWindow(QMainWindow):
         self._zone_watcher.inventory_event.connect(self._on_inventory_event)
         self._zone_watcher.death_seen.connect(self._on_death_seen)
         self._zone_watcher.kills_reported.connect(self._on_kills_reported)
+        self._zone_watcher.level_up.connect(self._on_level_up)
         self._seed_running_stay(resolved)
         self._remind_kills_at_start(resolved)
         # Die letzten 24 h aus der Datei nachladen, damit der Zaehler einen

@@ -9258,6 +9258,96 @@ Notizen. Gegenprobe mit 12 Sabotagen, alle gefangen.
 aus `"\r\n"` und `"\n"` in `clean_notes` echte Zeilenumbrüche (die
 bekannte Falle; Reparatur über ein Skript aus dem Write-Werkzeug).
 
+
+#### 4.60.14 Leveling-Plan
+
+Peter, 2026-10-08: "Was nice wäre, wäre ein 'Leveling-Mode'. Das
+Programm überwacht ja eh schon den Char-Level und zeigt dann den zu
+vergebenden Skill-Punkt im Tree an. D.h. wir brauchen eine
+Node-ID-Liste die abgearbeitet wird." Entschieden (Auswahl im Dialog):
+Reihenfolge **automatisch + per Klick umstellbar**; Anzeige **im
+Baum-Bild, als Hinweis beim Levelaufstieg und in einem kleinen Fenster**.
+
+**Der Plan** ist eine Folge von Abschnitten — Konfigurationen, beim
+Namen genannt (`tree_history.set_leveling`, unter `"leveling"` je
+Charakter; Umbenennen zieht mit, Gelöschtes fällt heraus) — und eine
+Vorrangliste angeklickter Knoten. Entsteht per Rechtsklick "Use as
+leveling plan" auf eine Gruppe (ihre Konfigurationen in
+Zahlenreihenfolge, `config_order`) oder auf gewählte Konfigurationen.
+
+**Die Schritte werden nicht gespeichert, sondern immer frisch gerechnet**
+(`services/leveling.next_steps`, ~3 ms für Pohx' 160 Schritte am echten
+Baum), vom echten Baum aus: Wer abweicht, bekommt den nächsten
+sinnvollen Punkt von dort. Im Abschnitt geht es nur über dessen Knoten
+(nicht über eine kürzere Abkürzung durch fremde): zuerst zum
+vorrangigen Ziel, sonst zum nächstgelegenen Notable, Keystone oder
+Jewel-Sockel (Gleichstand: kleinere Kennung), samt Weg; kleine Reste
+zuletzt; eine Mastery, sobald ihr Notable steht — auch ein
+Effekt-Wechsel in einem sonst fertigen Abschnitt. Danach geht die Liste
+im nächsten Abschnitt weiter. Was der aktuelle Abschnitt nicht mehr hat
+(Pohx' "RF Start" baut den Anfang um), ist "zurückzunehmen"
+(`to_refund`, gestrichelt rot) — wann, entscheidet der Spieler. Die
+Aszendenz bleibt draußen (Labyrinth-Punkte, §4.60.8).
+
+**In welchem Abschnitt der Spieler steht** (`stage_index`): dem, zu dem
+sein Baum am besten passt (übereinstimmende minus fehlende Knoten,
+Gleichstand → der spätere); ist der fertig, der nächste. Zuerst stand
+hier "der erste, dem etwas fehlt" — nach einem Umbau fehlt dem früheren
+Abschnitt aber immer etwas, man landete wieder vorn (im Test gefunden).
+
+**Live zählen** (`assumed_done`): Die API kennt den neuen Baum erst nach
+dem nächsten Abruf (meist beim Zonenwechsel). Der Zonen-Beobachter
+meldet jetzt auch "… (Chieftain) is now level N" (`level_up`). Auf dem
+Level des letzten Abrufs ist Schritt 1 dran; der erste Aufstieg bringt
+den Punkt dafür, erst jeder weitere heißt "der vorige ist vergeben" —
+also Level live − Level beim Abruf − 1 Schritte vermutet (✓ im Bild).
+Der Abruf-Level ist der des letzten Abrufs (`_note_api_level` aus jedem
+Snapshot), nicht der des gespeicherten Baums: Der wird nur bei einer
+Änderung neu geschrieben und wäre oft alt. Quest-Punkte sieht niemand,
+sie zählen nicht.
+
+**Anzeige**, eine Rechnung für alle drei (`ui/leveling_view.progress`):
+
+- Baum-Fenster, am aktuellen Baum: Zeile "Leveling “Pohx RF” · stage
+  1/9 “Lvl 01-30 {1}” · next: … · then …" und die nächsten zehn Schritte
+  nummeriert im Bild (`TreeGraph.set_markers`: violetter Ring, der
+  jetzige doppelt so kräftig, Nummer in Pixeln daneben; Farbe gerechnet
+  dunkel ≥ 5,5:1, hell ≥ 6,9:1 gegen Grund und Tönung). An anderen
+  Einträgen nur der Hinweis, den aktuellen Baum zu wählen. "Set order":
+  Klicks setzen/entfernen Knoten der Vorrangliste statt einen Entwurf zu
+  bauen; Knoten außerhalb des Plans sagen es. "Stop plan".
+- Statusleiste: ein eigenes, festes Feld "Next passive: …" (das
+  Meldungsfeld überschreiben die Abrufe laufend), dazu beim Aufstieg die
+  Meldung "WitchOfPeter reached level 32 — next passive: …".
+- "Mini window" (`LevelingWindow`): klein, immer oben, ohne
+  Taskleisten-Eintrag; jetziger Punkt fett, fünf weitere, Zahl der
+  Rücknahmen. Gehört dem Hauptfenster, lebt also weiter, wenn das
+  Baum-Fenster zu ist.
+
+Statusleiste und Mini-Fenster folgen dem Charakter, der zuletzt mit Plan
+aufgestiegen ist oder dessen Mini-Fenster geöffnet wurde
+(`_leveling_char`); ein Aufstieg ohne Plan (Mitspieler im Log, ein
+anderer Charakter) ändert nichts.
+
+**Zwei Qt-Fallen beim Bauen** (FALLSTRICKE #100): Ein vor dem Einhängen
+sichtbar geschalteter Knopf ("Mini window") war danach unsichtbar —
+Qt versteckt ein Widget beim Wechsel des Elternwidgets. Und ein
+übrig gebliebenes Hauptfenster aus einem Test blieb offscreen "aktiv"
+und schluckte die Tastenkürzel eines späteren Tests.
+
+Getestet: Logik (Ziele, Vorrang, echter Baum als Start, Abschnitte und
+Rücknahmen, Masteries samt Wechsel, Unerreichbares, Limit, Aszendenz,
+Abschnitts-Wahl inkl. Gleichstand, Weg nur über Abschnitts-Knoten,
+Zählung); Fenster (Plan aus Gruppe und Auswahl, Markierungen und ✓,
+Reihenfolge per Klick, Stoppen, Umbenennen/Löschen, gemalte Ringe);
+Hauptfenster (Aufstieg → Statusfeld und Meldung, Abruf setzt zurück,
+neuer Baum rückt weiter, fremder Charakter, Mini-Fenster, offenes
+Baum-Fenster bekommt die Level); Watcher (Aufstiegszeile). Nativ
+angesehen mit Pohx' Plan: Baum-Bild, Mini-Fenster. Gegenproben: Logik
+12 (zwei hielten zuerst, Tests verschärft), Fenster 12 (eine), live 10
+(vier; eine davon gleichwertig zum Original — das überflüssige `max`
+in `progress` ist weg).
+
 **Duplicate** speichert den gewählten Eintrag unter neuem Namen
 (Vorschlag "Fire (copy)" bzw. "Level 29 tree" beim Verlauf, mit dessen
 Level; `source="copy"`). Beim aktuellen Baum ist es "Save current as…".

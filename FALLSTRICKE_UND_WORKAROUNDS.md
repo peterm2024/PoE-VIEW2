@@ -2146,3 +2146,32 @@ ersetzen; die Autouse-Fixture in `test_tree_dialog_actions.py` lässt
 jedes unerwartete Menü sofort scheitern. Und offscreen erzeugt
 `QTest.mouseClick` mit der rechten Taste kein Kontextmenü-Ereignis —
 der Test schickt `QContextMenuEvent` selbst.
+
+## 100. Ein sichtbar geschalteter Knopf blieb unsichtbar — und ein altes Fenster schluckte Tastenkürzel
+
+**Symptom 1.** Der Knopf "Mini window" im Leveling-Plan (ARCHITEKTUR
+§4.60.14) war nie zu sehen, obwohl `setVisible(True)` lief.
+
+**Ursache.** Er wurde sichtbar geschaltet, bevor er in sein Layout kam.
+Beim Einhängen wechselt das Elternwidget, und Qt macht ein Widget dabei
+unsichtbar — "even if it was previously visible" (Qt-Doku zu
+`setParent`).
+
+**Lösung.** Sichtbarkeit erst nach dem Einhängen setzen. (Und im Test
+nicht `isVisibleTo` fragen, wenn der Reiter nicht vorne liegt — Qt
+versteckt die Seiten der übrigen Reiter; `isHidden()` sagt, ob das
+Widget selbst ausgeblendet ist.)
+
+**Symptom 2.** Ein Test mit echten Tastendrücken (F2 in der Liste) fiel
+nur, wenn die neuen Hauptfenster-Tests vorher liefen.
+
+**Ursache.** Offscreen lösen Kürzel nur im aktiven Fenster aus; das
+geschlossene, aber nicht gelöschte Hauptfenster der vorigen Tests blieb
+das aktive.
+
+**Lösung.** Die Fixture in `test_leveling_main_window.py` schließt
+Baum-Fenster, Mini-Fenster und Hauptfenster, ruft `deleteLater()` und
+lässt die Ereignisschleife einmal laufen.
+
+**Lehre:** Bei Tests mit Tastendrücken ist "aktiv" globaler Zustand —
+wer Fenster baut, räumt sie wirklich ab, nicht nur `close()`.

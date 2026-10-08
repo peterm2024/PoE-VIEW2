@@ -36,7 +36,7 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, 
 
 from poe_view.services import leveling, passive_tree, pob_import, tree_history
 from poe_view.services.passive_tree import Tree, TreeLinkError
-from poe_view.ui import tree_report
+from poe_view.ui import leveling_view, tree_report
 from poe_view.ui.tree_graph import TreeGraph
 
 CURRENT, HISTORY, CONFIG = "current", "history", "config"
@@ -91,7 +91,8 @@ PLAN_MARKERS = 10
 
 class PassiveTreeDialog(QDialog):
     def __init__(self, name: str, class_name: str, characters: dict, tree: Tree | None,
-                 on_change: Callable[[], None], parent: QWidget | None = None) -> None:
+                 on_change: Callable[[], None], parent: QWidget | None = None,
+                 on_mini_window: Callable[[], None] | None = None) -> None:
         super().__init__(parent)
         self.setWindowTitle(f"Passive tree — {name}")
         # Ein QDialog hat unter Windows nur "Schließen"; für den Baum will
@@ -191,12 +192,24 @@ class PassiveTreeDialog(QDialog):
         self.order_button.toggled.connect(lambda *_: self._order_toggled())
         self.plan_stop_button = QPushButton("Stop plan")
         self.plan_stop_button.clicked.connect(self._stop_plan)
+        # Das kleine Fenster neben dem Spiel (§4.60.14) gehört dem
+        # Hauptfenster — es lebt weiter, wenn dieses Fenster zu ist.
+        self.mini_button = QPushButton("Mini window")
+        self.mini_button.setToolTip("A small always-on-top window with the next points, "
+                                    "to put next to the game")
+        self.mini_button.clicked.connect(lambda: self._on_mini_window and self._on_mini_window())
+        self._on_mini_window = on_mini_window
         plan_zeile = QHBoxLayout()
         plan_zeile.addWidget(self.plan_label, 1)
         plan_zeile.addWidget(self.order_button)
+        plan_zeile.addWidget(self.mini_button)
         plan_zeile.addWidget(self.plan_stop_button)
         self.plan_bar = QWidget()
         self.plan_bar.setLayout(plan_zeile)
+        # Erst nach dem Einhängen: Beim Wechsel des Elternwidgets macht Qt
+        # ein Widget unsichtbar, auch ein vorher sichtbar geschaltetes (im
+        # Test gesehen).
+        self.mini_button.setVisible(on_mini_window is not None)
         plan_zeile.setContentsMargins(0, 0, 0, 0)
         self.plan_bar.setVisible(False)
         b_aufbau.addWidget(self.plan_bar)
@@ -581,14 +594,7 @@ class PassiveTreeDialog(QDialog):
             self._show_selected()
 
     def _plan(self) -> leveling.Plan | None:
-        roh = tree_history.leveling(self._characters, self._name)
-        if roh is None:
-            return None
-        konfigs = tree_history.configs(self._characters, self._name)
-        stufen = [leveling.Stage(n, konfigs[n].get("passives") or {})
-                  for n in roh["stages"] if n in konfigs]
-        return leveling.Plan(stufen, [int(h) for h in roh.get("priority") or ()]) if stufen \
-            else None
+        return leveling_view.build_plan(self._characters, self._name)
 
     def set_levels(self, api_level: int, live_level: int) -> None:
         """Vom Hauptfenster: Level beim letzten Abruf und live aus dem Log."""
@@ -598,61 +604,47 @@ class PassiveTreeDialog(QDialog):
 
     def _update_plan(self, key) -> None:
         """Plan-Zeile und Markierungen — nur am aktuellen Baum (dort steht
-        der Spieler); sonst ein Hinweis darauf."""
-        plan = self._plan() if self._tree is not None else None
+        der Spieler); sonst ein Hinweis darauf. Rechnet wie Statusleiste und
+        Mini-Fenster (``leveling_view.progress``)."""
         roh = tree_history.leveling(self._characters, self._name) or {}
+        plan = self._plan() if self._tree is not None else None
         self.plan_bar.setVisible(plan is not None)
         self.plan_steps = []
         if plan is None:
             self.graph.set_markers({})
             return
-        titel = roh.get("title") or plan.stages[0].name
         if key != (CURRENT, None):
             self.graph.set_markers({})
-            self.plan_label.setText(f"Leveling plan “{titel}” — select “Current tree” to see "
-                                    "the next points.")
+            self.plan_label.setText(f"Leveling plan “{roh.get('title') or plan.stages[0].name}” "
+                                    "— select “Current tree” to see the next points.")
             return
-        aktuell = tree_history.current(self._characters, self._name) or {}
-        passives = aktuell.get("passives") or {}
-        api, live = self._levels or (aktuell.get("level") or 0, aktuell.get("level") or 0)
-        erledigt = leveling.assumed_done(live, api)
-        schritte = leveling.next_steps(self._tree, plan, passives, self._class,
-                                       limit=erledigt + PLAN_MARKERS)
-        self.plan_steps = schritte
-        have = leveling._haupt(self._tree, passive_tree.allocated(passives))
-        index = leveling.stage_index(self._tree, plan, have)
-        zurueck = leveling.to_refund(self._tree, plan, passives)
-        marken = {s.node: "✓" for s in schritte[:erledigt]}
-        marken.update({s.node: str(i) for i, s in enumerate(schritte[erledigt:], start=1)})
-        jetzt = schritte[erledigt] if len(schritte) > erledigt else None
+        api, live = self._levels or (None, None)
+        stand = leveling_view.progress(self._tree, self._characters, self._name, self._class,
+                                       api, live, limit=PLAN_MARKERS)
+        self.plan_steps = stand.steps
+        erledigt = stand.done
+        marken = {s.node: "✓" for s in stand.steps[:erledigt]}
+        marken.update({s.node: str(i) for i, s in enumerate(stand.upcoming, start=1)})
+        jetzt = stand.now
         self.graph.set_markers(marken, now=jetzt.node if jetzt else None,
-                               refund=[n.id for n in zurueck])
-        teile = [f"Leveling “{titel}” · stage {index + 1}/{len(plan.stages)} "
-                 f"“{plan.stages[index].name}”"]
+                               refund=[n.id for n in stand.refund])
+        teile = [f"Leveling “{stand.title}” · stage {stand.stage_index + 1}/{stand.stage_count} "
+                 f"“{stand.stage_name}”"]
         if jetzt is None:
             teile.append("plan complete")
         else:
-            teile.append(f"next: {self._step_text(jetzt)}")
-            danach = [self._tree.nodes[s.node].name for s in schritte[erledigt + 1:erledigt + 3]]
+            teile.append(f"next: {leveling_view.step_text(self._tree, jetzt)}")
+            danach = [self._tree.nodes[s.node].name for s in stand.upcoming[1:3]]
             if danach:
                 teile.append("then " + ", ".join(danach))
         if erledigt:
             teile.append(f"{erledigt} {'point' if erledigt == 1 else 'points'} assumed spent "
                          "since the last update")
-        if zurueck:
-            teile.append(f"{len(zurueck)} to refund (dashed red)")
+        if stand.refund:
+            teile.append(f"{len(stand.refund)} to refund (dashed red)")
         if self.order_button.isChecked():
             teile.append("click notables in the order you want them")
         self.plan_label.setText(" · ".join(teile))
-
-    def _step_text(self, schritt) -> str:
-        n = self._tree.nodes[schritt.node]
-        if schritt.kind == leveling.MASTERY_STEP:
-            werte = " / ".join(n.effects.get(schritt.effect, ())) or str(schritt.effect)
-            return f"{n.name}: {werte}"
-        ziel = self._tree.nodes.get(schritt.target)
-        weg = f" (towards {ziel.name})" if ziel is not None and ziel.id != n.id else ""
-        return f"{n.name}{weg}"
 
     def _order_toggled(self) -> None:
         """"Set order": Klicks im Bild stellen die Reihenfolge um, statt

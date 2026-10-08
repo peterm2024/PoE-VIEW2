@@ -223,7 +223,13 @@ the tree you are in.
   "Lvl 61-80" to "Lvl 81-90", say — instead of against your current
   tree. A build's trees stay together under a collapsible group, and
   each configuration has its own notes (a build's Path of Building notes
-  come with the import).
+  come with the import). **Leveling plan:** right-click a group (an
+  imported build with a tree per levelling stage) and *Use as leveling
+  plan* — the current tree numbers the next ten points (the way to the
+  next notable first, masteries as soon as they open up, refunds of a
+  rebuilt stage in dashed red), *Set order* lets you click your own
+  order, and on every level-up (read from Client.txt) the status bar and
+  a small always-on-top window name the next point.
   For each configuration you get the
   respec as a to-do list against your current tree (refund, allocate,
   change mastery, number of points and the gold it costs at your level)
