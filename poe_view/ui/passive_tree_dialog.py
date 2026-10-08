@@ -37,6 +37,19 @@ from poe_view.ui import tree_report
 from poe_view.ui.tree_graph import TreeGraph
 
 CURRENT, HISTORY, CONFIG = "current", "history", "config"
+
+
+class _EntryList(QListWidget):
+    """Die Liste links. Ein Rechtsklick wählt nicht aus (§4.60.10; Peter,
+    2026-10-08: "Wenn ich auf eine Config rechtsklicke wird diese
+    automatisch ausgewählt" — sonst wechselte das Bild rechts mit); das
+    Menü wirkt auf den Eintrag unter der Maus."""
+
+    def mousePressEvent(self, event) -> None:  # noqa: N802 (Qt-API)
+        if event.button() == Qt.MouseButton.RightButton:
+            event.accept()
+            return
+        super().mousePressEvent(event)
 # Der Entwurf aus Klicks im Bild (§4.60.6) — nur im Fenster, bis er als
 # Konfiguration gespeichert wird.
 DRAFT = "draft"
@@ -65,8 +78,12 @@ class PassiveTreeDialog(QDialog):
         self._draft_from: tuple | None = None    # woraus er entstand
         self._undo: list[dict] = []
         self._status = ""                        # Meldung zum letzten Klick
+        self._menu_keys: list | None = None      # Ziel des offenen Menüs (§4.60.10)
 
-        self.list = QListWidget()
+        self.list = _EntryList()
+        # Mehrere Konfigurationen auf einmal löschen (Strg-/Umschalt-Klick),
+        # etwa die zehn eines importierten Builds; gezeigt wird die aktuelle.
+        self.list.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
         self.list.currentItemChanged.connect(lambda *_: self._show_selected())
         # Rechtsklick-Menü und Doppelklick/Enter → Bild (§4.60.10).
         self.list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -227,11 +244,35 @@ class PassiveTreeDialog(QDialog):
         self.act_link = aktion("Copy link", "Ctrl+L", self._copy_link, knopf=self.link_button)
         self.act_text = aktion("Copy as text", "Ctrl+C", self._copy_text, nur_liste=True,
                                knopf=self.copy_button)
-        self.act_show = aktion("Show tree", "", self._show_tree_tab)
+        self.act_show = aktion("Show tree", "", self._show_target)
         self.act_find = aktion("Find", "Ctrl+F", self._focus_search)
         for nummer in range(4):
             aktion(f"Tab {nummer + 1}", f"Ctrl+{nummer + 1}",
                    lambda n=nummer: self._show_tab(n))
+
+    def _targets(self) -> list:
+        """Worauf eine Handlung wirkt: im Menü der Eintrag unter der Maus
+        (oder die Auswahl, wenn er dazugehört), sonst die Auswahl — die
+        aktuelle zuerst."""
+        if self._menu_keys is not None:
+            return list(self._menu_keys)
+        aktuell = self._selected()
+        weitere = [k for k in self._selected_keys() if k != aktuell]
+        return ([aktuell] if aktuell else []) + weitere
+
+    def _target(self):
+        ziele = self._targets()
+        return ziele[0] if ziele else None
+
+    def _selected_keys(self) -> list:
+        return [i.data(Qt.ItemDataRole.UserRole) for i in self.list.selectedItems()
+                if i.data(Qt.ItemDataRole.UserRole)]
+
+    def _after(self, key, ziel=None) -> None:
+        """Nach einer Handlung neu aufbauen — die Auswahl bleibt, außer die
+        Handlung galt ihr selbst (dann ``ziel``, etwa der neue Name)."""
+        gewaehlt = self._selected()
+        self.refresh(ziel if key == gewaehlt or gewaehlt is None else gewaehlt)
 
     def _context_actions(self, key) -> list[QAction | None]:
         """Was das Menü zu ``key`` zeigt (``None`` = Trennstrich)."""
@@ -253,13 +294,37 @@ class PassiveTreeDialog(QDialog):
         return haupt + ([None] if haupt else []) + [self.act_import]
 
     def _list_menu(self, punkt) -> None:
+        """Das Menü zum Eintrag unter der Maus, ohne ihn auszuwählen. Gehört
+        er zu einer Mehrfachauswahl, gilt es für alle (Löschen)."""
         item = self.list.itemAt(punkt)
-        if item is not None and item.data(Qt.ItemDataRole.UserRole):
-            self.list.setCurrentItem(item)
+        key = item.data(Qt.ItemDataRole.UserRole) if item is not None else None
+        auswahl = self._selected_keys()
+        self._menu_keys = ([key] + [k for k in auswahl if k != key] if key in auswahl
+                           else [key] if key else [])
+        hervor = None
+        if item is not None and key and not item.isSelected():
+            # Solange das Menü offen ist, zeigt eine Tönung, worauf es wirkt.
+            hervor = item
+            item.setBackground(QBrush(self.palette().color(QPalette.ColorRole.Mid)))
         menue = QMenu(self)
-        for a in self._context_actions(self._selected()):
+        for a in self._context_actions(key):
             menue.addSeparator() if a is None else menue.addAction(a)
-        menue.exec(self.list.viewport().mapToGlobal(punkt))
+        try:
+            self._exec_menu(menue, self.list.viewport().mapToGlobal(punkt))
+        finally:
+            self._menu_keys = None
+            # Über den Schlüssel, nicht das Item: Löschen, Umbenennen usw.
+            # bauen die Liste neu, das alte Item gibt es dann nicht mehr.
+            for i in range(self.list.count()):
+                if hervor is not None and self.list.item(i).data(Qt.ItemDataRole.UserRole) == key:
+                    self.list.item(i).setBackground(QBrush())
+
+    def _exec_menu(self, menue: QMenu, punkt):
+        """Ein Menü öffnen. Eigene Methode, damit Tests sie ersetzen können:
+        ``QMenu.exec`` lässt sich bei PySide6 an der Klasse nicht ersetzen
+        (die statische Überladung gleichen Namens geht vor), ein echtes
+        Menü wartet offscreen ewig (FALLSTRICKE #99)."""
+        return menue.exec(punkt)
 
     def _save_quick(self) -> None:
         """Strg+S: einen Entwurf aus einer Konfiguration dorthin zurück,
@@ -272,7 +337,7 @@ class PassiveTreeDialog(QDialog):
     def _duplicate(self) -> None:
         """Den gewählten Eintrag als (neue) Konfiguration — Kopie einer
         Konfiguration oder ein Stand aus dem Verlauf."""
-        key = self._selected()
+        key = self._target()
         eintrag = self._entry(key)
         if eintrag is None or key[0] == DRAFT:
             return
@@ -291,7 +356,14 @@ class PassiveTreeDialog(QDialog):
                                  ruthless=bool(eintrag.get("ruthless", aktuell.get("ruthless"))),
                                  source="copy")
         self._on_change()
-        self.refresh((CONFIG, name))
+        self._after(key, (CONFIG, name))
+
+    def _show_target(self) -> None:
+        """"Show tree": den Eintrag auswählen und das Bild zeigen."""
+        key = self._target()
+        if key:
+            self.refresh(key)
+        self._show_tree_tab()
 
     def _show_tab(self, nummer: int) -> None:
         if self.tabs.isTabVisible(nummer):
@@ -680,7 +752,7 @@ class PassiveTreeDialog(QDialog):
             a.setChecked(have_choice.get(node) == effekt)
             a.setEnabled(effekt not in anderswo)
             aktionen[a] = effekt
-        gewaehlt = menue.exec(QCursor.pos())
+        gewaehlt = self._exec_menu(menue, QCursor.pos())
         return aktionen.get(gewaehlt)
 
     def _on_node_clicked(self, node: int, right: bool) -> None:
@@ -778,7 +850,7 @@ class PassiveTreeDialog(QDialog):
         super().reject()
 
     def _save_current(self) -> None:
-        key = self._selected()
+        key = self._target()
         if key and key[0] == DRAFT and self._draft is not None:
             herkunft = self._draft_from or (None, None)
             name = self._ask_name("Save changes as", herkunft[1] if herkunft[0] == CONFIG else "")
@@ -912,7 +984,7 @@ class PassiveTreeDialog(QDialog):
                 if liste.item(i).checkState() == Qt.CheckState.Checked]
 
     def _rename(self) -> None:
-        key = self._selected()
+        key = self._target()
         if not key or key[0] != CONFIG:
             return
         neu = self._ask_name("Rename configuration", key[1])
@@ -923,18 +995,24 @@ class PassiveTreeDialog(QDialog):
                                 f"A configuration named “{neu}” exists already.")
             return
         self._on_change()
-        self.refresh((CONFIG, neu))
+        self._after(key, (CONFIG, neu))
 
     def _delete(self) -> None:
-        key = self._selected()
-        if not key or key[0] != CONFIG:
+        """Löschen — bei einer Mehrfachauswahl alle gewählten
+        Konfigurationen auf einmal (Verlauf und aktueller Baum bleiben)."""
+        namen = [k[1] for k in self._targets() if k and k[0] == CONFIG]
+        if not namen:
             return
-        if QMessageBox.question(self, "Delete configuration",
-                                f"Delete “{key[1]}”?") != QMessageBox.StandardButton.Yes:
+        frage = (f"Delete “{namen[0]}”?" if len(namen) == 1
+                 else f"Delete these {len(namen)} configurations?\n\n" + "\n".join(namen))
+        title = "Delete configuration" if len(namen) == 1 else "Delete configurations"
+        if QMessageBox.question(self, title, frage) != QMessageBox.StandardButton.Yes:
             return
-        tree_history.delete_config(self._characters, self._name, key[1])
+        gewaehlt = self._selected()
+        for name in namen:
+            tree_history.delete_config(self._characters, self._name, name)
         self._on_change()
-        self.refresh((CURRENT, None))
+        self.refresh((CURRENT, None) if gewaehlt in [(CONFIG, n) for n in namen] else gewaehlt)
 
     def link_for(self, key) -> str | None:
         eintrag = self._entry(key)
@@ -943,14 +1021,14 @@ class PassiveTreeDialog(QDialog):
         return passive_tree.encode_url(self._tree, eintrag.get("passives") or {}, self._class)
 
     def _open_planner(self) -> None:
-        link = self.link_for(self._selected())
+        link = self.link_for(self._target())
         if link:
             QDesktopServices.openUrl(QUrl(link))
 
     def _copy_link(self) -> None:
-        link = self.link_for(self._selected())
+        link = self.link_for(self._target())
         if link:
             QGuiApplication.clipboard().setText(link)
 
     def _copy_text(self) -> None:
-        QGuiApplication.clipboard().setText(self.markdown_for(self._selected()))
+        QGuiApplication.clipboard().setText(self.markdown_for(self._target()))

@@ -215,7 +215,8 @@ the tree you are in.
   planner, a Path of Building code or a **pobb.in** / pastebin link —
   a build with several trees (one per levelling stage, say) becomes
   one configuration per tree you tick. Right-click a configuration for
-  rename, duplicate, delete and the rest; the usual shortcuts work
+  rename, duplicate, delete and the rest (the tree you are looking at
+  stays; Ctrl/Shift-click to delete several at once); the usual shortcuts work
   (Ctrl+S, Ctrl+Z, F2, Del, Ctrl+D, and Ctrl+V in the list imports
   whatever tree or build link is on the clipboard). For each configuration you get the
   respec as a to-do list against your current tree (refund, allocate,

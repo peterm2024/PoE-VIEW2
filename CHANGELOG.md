@@ -26,6 +26,10 @@ nach [SemVer](https://semver.org/lang/de/).
   Ctrl+V in der Liste importiert aus der Zwischenablage, Ctrl+L/Ctrl+O
   Link/Planer, Ctrl+F Suche, Ctrl+1–4 Reiter, Doppelklick zum Bild.
   Steht im Import-Feld schon, was in der Zwischenablage liegt.
+  Ein Rechtsklick wählt nicht aus: Das Menü wirkt auf den Eintrag
+  unter der Maus, das Bild rechts bleibt.
+- **Mehrere Konfigurationen auf einmal löschen** (Strg-/Umschalt-Klick,
+  dann Entf), etwa die Bäume eines importierten Builds.
 
 ## [0.25.0] - 2026-10-08
 

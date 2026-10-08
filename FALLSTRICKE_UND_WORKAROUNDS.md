@@ -2134,3 +2134,15 @@ Millisekunden mit ihrem Text.
 nicht erst dort, wo man sie erwartet — gerade die unerwartete hängt.
 Und: Gegenproben mit Zeitlimit laufen lassen; ohne `timeout` hätte der
 Lauf einfach gestanden.
+
+**Nachtrag, dasselbe mit einem Menü** (Rechtsklick-Menü, ARCHITEKTUR
+§4.60.10): Der Testlauf hing zweimal, obwohl `QMenu.exec` per
+`monkeypatch.setattr(QMenu, "exec", …)` ersetzt war. Bei PySide6 greift
+das nicht — die statische Überladung `QMenu.exec(actions, pos)` geht
+vor, der Ersatz wird still übergangen, das echte Menü wartet. (Bei
+`QDialog.exec` greift der Ersatz.) Lösung: Menüs über eine eigene
+Methode öffnen (`PassiveTreeDialog._exec_menu`), die Tests am Objekt
+ersetzen; die Autouse-Fixture in `test_tree_dialog_actions.py` lässt
+jedes unerwartete Menü sofort scheitern. Und offscreen erzeugt
+`QTest.mouseClick` mit der rechten Taste kein Kontextmenü-Ereignis —
+der Test schickt `QContextMenuEvent` selbst.

@@ -9,6 +9,7 @@ import pytest
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QApplication
 
 from poe_view.services import passive_tree as pt
 from poe_view.services import tree_history as th
@@ -30,6 +31,10 @@ def keine_offenen_meldungen(monkeypatch) -> None:
     for art in ("warning", "question", "information", "critical"):
         monkeypatch.setattr(modul.QMessageBox, art, staticmethod(unerwartet))
     monkeypatch.setattr(modul.QInputDialog, "getText", staticmethod(unerwartet))
+    # Ein echtes Menü wartet offscreen genauso (ein echter Rechtsklick
+    # öffnet es — so hing der Lauf beim ersten Versuch).
+    monkeypatch.setattr(modul.PassiveTreeDialog, "_exec_menu",
+                        lambda self, m, *a: unerwartet(None, "QMenu", m))
 
 
 def _offen(qapp, baum):
@@ -216,4 +221,117 @@ def test_the_clipboard_fills_the_import(qapp, baum, monkeypatch) -> None:
     assert vorschlaege[-1] == "Endgame"                           # nur die Namensfrage
     assert "Endgame" in th.configs(zeichen, "WitchOfPeter")
     assert "Endgame" in _eintraege(dialog)
+    dialog.close()
+
+
+def _drei(qapp, baum):
+    from poe_view.ui.passive_tree_dialog import CONFIG
+    dialog, zeichen, gespeichert = _offen(qapp, baum)
+    for name, knoten in (("A", [10]), ("B", [10, 11]), ("C", [10, 11, 12])):
+        th.save_config(zeichen, "WitchOfPeter", name, {"hashes": knoten}, level=30,
+                       ruthless=True, source="link")
+    dialog.refresh((CONFIG, "A"))
+    return dialog, zeichen, gespeichert
+
+
+def _item(dialog, key):
+    from PySide6.QtCore import Qt as _Qt
+    return next(dialog.list.item(i) for i in range(dialog.list.count())
+                if dialog.list.item(i).data(_Qt.ItemDataRole.UserRole) == key)
+
+
+def _menue_waehlt(monkeypatch, aktion_name, dialog, gesehen=None):
+    """Das Menü "öffnen": die genannte Aktion auslösen, als hätte man sie
+    im offenen Menü angeklickt."""
+    def ausfuehren(menue, *a):
+        if gesehen is not None:
+            gesehen.append([x.text() for x in menue.actions() if not x.isSeparator()])
+        getattr(dialog, aktion_name).trigger()
+    monkeypatch.setattr(dialog, "_exec_menu", ausfuehren)
+
+
+def test_a_right_click_does_not_change_the_selection(qapp, baum, monkeypatch) -> None:
+    """Peter, 2026-10-08: "Wenn ich auf eine Config rechtsklicke wird diese
+    automatisch ausgewählt - Bug?" — jetzt nicht mehr: das Bild bleibt."""
+    from poe_view.ui.passive_tree_dialog import CONFIG
+    from poe_view.ui import passive_tree_dialog as modul
+    dialog, _z, _g = _drei(qapp, baum)
+    punkt = dialog.list.visualItemRect(_item(dialog, (CONFIG, "C"))).center()
+    geoeffnet = []
+    monkeypatch.setattr(dialog, "_exec_menu", lambda m, *a: geoeffnet.append(
+        [x.text() for x in m.actions() if not x.isSeparator()][:2]))
+    QTest.mouseClick(dialog.list.viewport(), Qt.MouseButton.RightButton, pos=punkt)
+    # Das Kontextmenü-Ereignis kommt offscreen nicht von selbst mit.
+    from PySide6.QtGui import QContextMenuEvent
+    QApplication.sendEvent(dialog.list.viewport(),
+                           QContextMenuEvent(QContextMenuEvent.Reason.Mouse, punkt,
+                                             dialog.list.viewport().mapToGlobal(punkt)))
+    assert geoeffnet == [["Show tree", "Rename…"]]               # das Menü kam
+    assert dialog._selected() == (CONFIG, "A") and dialog._selected_keys() == [(CONFIG, "A")]
+    QTest.mouseClick(dialog.list.viewport(), Qt.MouseButton.LeftButton, pos=punkt)
+    assert dialog._selected() == (CONFIG, "C")                   # links wählt weiter aus
+    dialog.close()
+
+
+def test_the_menu_acts_on_the_entry_under_the_mouse(qapp, baum, monkeypatch) -> None:
+    """Umbenennen, Link kopieren, löschen von "C", während "A" gezeigt wird —
+    die Auswahl bleibt bei "A"."""
+    from poe_view.ui.passive_tree_dialog import CONFIG
+    dialog, zeichen, _ = _drei(qapp, baum)
+    punkt = dialog.list.visualItemRect(_item(dialog, (CONFIG, "C"))).center()
+    gesehen = []
+    monkeypatch.setattr(dialog, "_ask_name", lambda *a: "C2")
+    _menue_waehlt(monkeypatch, "act_rename", dialog, gesehen)
+    dialog._list_menu(punkt)
+    assert gesehen[0][:4] == ["Show tree", "Rename…", "Duplicate…", "Delete"]
+    assert set(th.configs(zeichen, "WitchOfPeter")) == {"A", "B", "C2"}
+    assert dialog._selected() == (CONFIG, "A")
+    punkt = dialog.list.visualItemRect(_item(dialog, (CONFIG, "C2"))).center()
+    _menue_waehlt(monkeypatch, "act_link", dialog)
+    dialog._list_menu(punkt)
+    assert QGuiApplication.clipboard().text() == dialog.link_for((CONFIG, "C2"))
+    assert dialog.link_for((CONFIG, "C2")) != dialog.link_for((CONFIG, "A"))
+    # Während das Menü offen ist, ist "C2" getönt, danach nicht mehr.
+    toene = []
+    monkeypatch.setattr(dialog, "_exec_menu", lambda m, *a: toene.append(
+        _item(dialog, (CONFIG, "C2")).background().style()))
+    dialog._list_menu(punkt)
+    assert toene == [Qt.BrushStyle.SolidPattern]
+    assert _item(dialog, (CONFIG, "C2")).background().style() == Qt.BrushStyle.NoBrush
+    # "Show tree" wählt aus und zeigt das Bild.
+    dialog.tabs.setCurrentIndex(1)
+    _menue_waehlt(monkeypatch, "act_show", dialog)
+    dialog._list_menu(punkt)
+    assert dialog._selected() == (CONFIG, "C2") and dialog.tabs.currentIndex() == 3
+    # Ohne Menü wirken die Kürzel wieder auf die Auswahl.
+    assert dialog._menu_keys is None and dialog._target() == (CONFIG, "C2")
+    dialog.close()
+
+
+def test_several_configurations_are_deleted_at_once(qapp, baum, monkeypatch) -> None:
+    from poe_view.ui import passive_tree_dialog as modul
+    from poe_view.ui.passive_tree_dialog import CONFIG, CURRENT
+    dialog, zeichen, gespeichert = _drei(qapp, baum)
+    _item(dialog, (CONFIG, "B")).setSelected(True)
+    _item(dialog, (CURRENT, None)).setSelected(True)             # bleibt, wird nicht gelöscht
+    assert set(dialog._selected_keys()) == {(CONFIG, "A"), (CONFIG, "B"), (CURRENT, None)}
+    fragen = []
+    monkeypatch.setattr(modul.QMessageBox, "question", staticmethod(
+        lambda *a, **k: fragen.append((a[1], a[2])) or modul.QMessageBox.StandardButton.Yes))
+    # Rechtsklick auf einen Eintrag der Auswahl: gilt für alle gewählten.
+    punkt = dialog.list.visualItemRect(_item(dialog, (CONFIG, "B"))).center()
+    _menue_waehlt(monkeypatch, "act_delete", dialog)
+    dialog._list_menu(punkt)
+    assert fragen == [("Delete configurations", "Delete these 2 configurations?\n\nB\nA")]
+    assert set(th.configs(zeichen, "WitchOfPeter")) == {"C"}
+    assert dialog._selected() == (CURRENT, None) and gespeichert == [1]
+    # Rechtsklick außerhalb der Auswahl: nur dieser eine.
+    th.save_config(zeichen, "WitchOfPeter", "D", {"hashes": [10]}, level=30, ruthless=True,
+                   source="link")
+    dialog.refresh((CONFIG, "C"))
+    _item(dialog, (CURRENT, None)).setSelected(True)
+    fragen.clear()
+    dialog._list_menu(dialog.list.visualItemRect(_item(dialog, (CONFIG, "D"))).center())
+    assert fragen == [("Delete configuration", "Delete “D”?")]
+    assert set(th.configs(zeichen, "WitchOfPeter")) == {"C"} and dialog._selected() == (CONFIG, "C")
     dialog.close()

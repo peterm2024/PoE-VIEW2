@@ -9094,7 +9094,35 @@ mit nichts: `QLineEdit` meldet für Strg+Z/Strg+C/Strg+V selbst
 Konfiguration Show tree, Rename, Duplicate, Delete; bei aktuellem Baum
 und Verlauf Show tree und Save as configuration; beim Entwurf Save to
 “X”, Save as, Undo, Discard; dazu Planer, Link, Text, und immer
-Import. Ein Rechtsklick wählt den Eintrag unter der Maus.
+Import.
+
+**Rechtsklick wählt nicht aus.** Zuerst tat er es (Windows-üblich), und
+das Bild rechts wechselte mit. Peter, 2026-10-08: "Wenn ich auf eine
+Config rechtsklicke wird diese automatisch ausgewählt - Bug?" — und:
+"Wenn wir es rausnehmen, kann ich z.B. eine andere Config exportieren,
+löschen, ... ohne den Fokus des aktuellen Trees zu verlieren. Deine
+Entscheidung." Jetzt schluckt `_EntryList.mousePressEvent` die rechte
+Taste; das Menü wirkt auf den Eintrag unter der Maus (`_menu_keys`,
+gelesen über `_targets()`/`_target()`), der solange getönt ist. "Show
+tree" wählt ihn dann aus und zeigt das Bild. Nach einer Handlung bleibt
+die Auswahl (`_after`), außer sie galt dem Gewählten selbst. Die
+Tönung wird über den Schlüssel zurückgesetzt, nicht über das Item:
+Löschen und Umbenennen bauen die Liste neu (im Test als "Internal C++
+object already deleted" aufgefallen).
+
+**Mehrfachauswahl** (Strg-/Umschalt-Klick, `ExtendedSelection`; Idee 1
+nach dem Pohx-Import mit zehn Konfigurationen): Entf bzw. "Delete"
+löscht alle gewählten Konfigurationen nach einer Frage mit ihren
+Namen; aktueller Baum und Verlauf in der Auswahl bleiben. Ein
+Rechtsklick auf einen Eintrag der Auswahl gilt für alle, einer außerhalb
+nur für ihn. Gezeigt wird immer der aktuelle Eintrag.
+
+**Menüs öffnet `_exec_menu`**, nicht `QMenu.exec` direkt: Bei PySide6
+lässt sich `QMenu.exec` an der Klasse nicht ersetzen (die statische
+Überladung gleichen Namens geht vor, der Ersatz wird still übergangen),
+und ein echtes Menü wartet offscreen ewig — der Testlauf hing zweimal
+(FALLSTRICKE #99). `test_stash_tree.py` umgeht es aus demselben Grund
+mit einem Ersatz-QMenu.
 
 **Duplicate** speichert den gewählten Eintrag unter neuem Namen
 (Vorschlag "Fire (copy)" bzw. "Level 29 tree" beim Verlauf, mit dessen
