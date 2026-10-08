@@ -9352,12 +9352,23 @@ Der echte Baum zählt bewusst nicht: Wer abweicht, sieht es im Bild
 - Regler darunter (Peter, nach dem ersten Test: "ein Progress Bar den
   ich selbst bedienen kann mit den zur Verfügung stehenden Skillpoints,
   so dass ich sehen kann, wie sich der Tree von 0 bis 121 oder so
-  aufbaut"): 0 bis alle Schritte, steht auf den schon vergebenen Punkten
-  (Punkt 21 dran → 20). Gezogen zeigt das Bild den Baum nach den ersten
-  N Schritten (`leveling.passives_after`, samt Mastery-Effekten), die
-  Nummern ab N + 1 und "Preview: 60/103 points · level 61 without
-  quests"; "Now" — oder der Regler zurück auf den Stand — zeigt wieder
-  den Eintrag selbst, ein anderer Eintrag beendet die Vorschau. Nativ
+  aufbaut"): 0 bis alle Schritte, steht auf den verfügbaren Punkten wie
+  die Zeile darüber ("level 81 = 80 points" → 80). Zuerst standen dort
+  die schon vergebenen (79) — Peter las das als falsches Level. Gezogen
+  zeigt das Bild den Baum nach den ersten N Schritten
+  (`leveling.passives_after`, samt Mastery-Effekten), die Nummern ab
+  N + 1 und "Preview: 60/103 points · level 61 without quests"; "Now" —
+  oder der Regler zurück auf den Stand — zeigt wieder den Eintrag
+  selbst. Die Stellung bleibt beim Wechsel auf einen anderen Eintrag
+  (dort ist der Regler aus) und gilt zurück am aktuellen Baum oder Ziel
+  wieder (Peter: "die 79 erscheinen wenn ich z.B. von Ghazzy auf current
+  zurückschalte, obwohl ich vorher 103 ausgewählt hatte"). Ein Klick
+  neben den Schieber geht genau einen Punkt weiter (`setPageStep(1)`);
+  die Beschriftung hat eine feste Breite für den längsten Text, sonst
+  wuchs und schrumpfte der Regler beim Ziehen (nativ jetzt konstant
+  791 px). Falle im Test: Liegt der Reiter "Tree" nicht vorne, ist der
+  Regler unsichtbar und 15 px breit — Breite und Klick bewiesen nichts;
+  der Test schaltet den Reiter vor und prüft die Sichtbarkeit. Nativ
   ~30 ms je Schritt am echten Baum, flüssig beim Ziehen. Der Ausschnitt
   bleibt, wie er ist (wie beim Wechsel der Einträge): Was wächst, sieht
   man an Ort und Stelle; spätere Punkte liegen oft außerhalb, dafür
@@ -9396,7 +9407,7 @@ hielten zuerst — zwei zeigten überflüssigen Code (Aszendenz- und
 Start-Prüfung in der Breitensuche, die `erlaubt` schon ausschließt;
 eigenes Nachziehen des Baum-Fensters, das `set_level` schon macht),
 beide entfernt; für die dritte (Obergrenze 24) Tests verschärft.
-Regler: 9 Sabotagen, alle gefangen.
+Regler: 15 Sabotagen, alle gefangen.
 
 ---
 

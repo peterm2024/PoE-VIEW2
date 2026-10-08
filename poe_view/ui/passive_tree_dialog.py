@@ -218,8 +218,14 @@ class PassiveTreeDialog(QDialog):
         # ich sehen kann, wie sich der Tree von 0 bis 121 oder so aufbaut").
         self.plan_slider = QSlider(Qt.Orientation.Horizontal)
         self.plan_slider.setToolTip("Drag to watch the tree grow point by point")
+        # Ein Klick neben den Schieber: genau ein Punkt weiter (Peter).
+        self.plan_slider.setPageStep(1)
         self.plan_slider.valueChanged.connect(self._slider_moved)
         self.plan_slider_label = QLabel()
+        # Feste Breite für den längsten Text: Sonst wuchs und schrumpfte
+        # der Regler beim Ziehen mit der Beschriftung (Peter).
+        self.plan_slider_label.setFixedWidth(self.plan_slider_label.fontMetrics().horizontalAdvance(
+            "Preview: 888/888 points · level 888 without quests") + 8)
         self.plan_now_button = QPushButton("Now")
         self.plan_now_button.setToolTip("Back to the points you have now")
         self.plan_now_button.clicked.connect(lambda: self._set_preview(None))
@@ -652,7 +658,10 @@ class PassiveTreeDialog(QDialog):
         for w in (self.plan_slider, self.plan_slider_label, self.plan_now_button):
             w.setVisible(im_plan)
         if not im_plan:
-            self._preview = None
+            # Die Vorschau bleibt stehen: Zurück am aktuellen Baum oder am
+            # Ziel steht der Regler wieder dort (Peter: "die 79 erscheinen
+            # wenn ich z.B. von Ghazzy auf current zurückschalte, obwohl
+            # ich vorher 103 ausgewählt hatte").
             self.graph.set_markers({})
             self.plan_label.setText(f"Leveling towards “{ziel}” · {stand.points_text()} — "
                                     f"select “Current tree” or “{ziel}” to see the next points.")
@@ -661,14 +670,19 @@ class PassiveTreeDialog(QDialog):
         gesamt = len(stand.steps)
         if self._preview is not None:
             self._preview = min(self._preview, gesamt)
-        vergeben = self._preview if self._preview is not None else min(stand.index, gesamt)
+        # Der Regler zählt die verfügbaren Punkte wie die Zeile darüber
+        # ("level 81 = 80 points" → 80; zuerst standen hier die schon
+        # vergebenen, 79 — Peter las das als falsches Level). Ohne Vorschau
+        # sind die Nummern die von jetzt: Punkt 80 ist dran.
+        vergeben = self._preview if self._preview is not None else min(stand.points, gesamt)
         self.plan_slider.blockSignals(True)
         self.plan_slider.setRange(0, gesamt)
         self.plan_slider.setValue(vergeben)
         self.plan_slider.blockSignals(False)
         self.plan_now_button.setEnabled(self._preview is not None)
-        kommend = stand.steps[vergeben:vergeben + PLAN_MARKERS]
-        marken = {s.node: str(vergeben + i) for i, s in enumerate(kommend, start=1)}
+        ab = vergeben if self._preview is not None else stand.index
+        kommend = stand.steps[ab:ab + PLAN_MARKERS]
+        marken = {s.node: str(ab + i) for i, s in enumerate(kommend, start=1)}
         naechster = kommend[0] if kommend else None
         if self._preview is not None:
             # Vorschau: der Baum mit den ersten N Punkten des Plans.
@@ -697,7 +711,7 @@ class PassiveTreeDialog(QDialog):
         zeigt wieder den Eintrag selbst."""
         stand = leveling_view.progress(self._tree, self._characters, self._name, self._class,
                                        self._level) if self._tree is not None else None
-        if stand is not None and wert == min(stand.index, len(stand.steps)):
+        if stand is not None and wert == min(stand.points, len(stand.steps)):
             wert = None
         if wert == self._preview:
             return

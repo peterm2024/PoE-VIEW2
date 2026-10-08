@@ -6,7 +6,7 @@ import base64
 import zlib
 
 import pytest
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QPoint, Qt
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
@@ -742,31 +742,49 @@ def test_the_slider_previews_the_tree_point_by_point(qapp, baum) -> None:
     from poe_view.ui.passive_tree_dialog import CURRENT, HISTORY
     dialog, zeichen, gespeichert = _plan_fenster(qapp, baum)
     th.set_leveling(zeichen, "WitchOfPeter", "Build")
-    dialog.set_level(3)                                           # Punkt 2 dran, 1 vergeben
+    dialog.set_level(3)                                           # 2 Punkte, Punkt 2 dran
     dialog.refresh((CURRENT, None))
+    dialog.resize(1200, 800)
+    dialog._show_tree_tab()
+    dialog.show()
+    QApplication.processEvents()
     s = dialog.plan_slider
-    assert (s.minimum(), s.maximum(), s.value()) == (0, 7, 1)
-    assert dialog.plan_slider_label.text() == "1/7 points · drag to preview"
+    assert s.isVisible() and s.width() > 100                      # sonst bewiesen Breite/Klick nichts
+    # Der Regler zählt die verfügbaren Punkte wie die Zeile darüber — nicht
+    # die schon vergebenen (Peter las "1" bzw. "79" als falsches Level).
+    assert (s.minimum(), s.maximum(), s.value()) == (0, 7, 2)
+    assert "level 3 = 2 points" in dialog.plan_label.text()
+    assert dialog.plan_slider_label.text() == "2/7 points · drag to preview"
+    assert dialog.graph.marker_now == 11                          # ohne Vorschau: Punkt 2
     assert not dialog.plan_now_button.isEnabled()
+    breite = s.width()
     s.setValue(4)                                                 # Vorschau: 4 Punkte
     assert dialog._preview == 4 and dialog.graph._shown - {1} == {10, 11, 12, 14}
     assert dialog.graph.markers == {15: "5", 20: "6", 21: "7"} and dialog.graph.marker_now == 15
     assert dialog.plan_slider_label.text() == "Preview: 4/7 points · level 5 without quests"
     assert dialog.graph_points.text().startswith("Points used: 4 ")
     assert dialog.plan_now_button.isEnabled() and gespeichert == []
+    QApplication.processEvents()
+    assert s.width() == breite                                    # die Beschriftung schiebt nicht
+    # Ein Klick neben den Schieber: genau ein Punkt weiter.
+    QTest.mouseClick(s, Qt.MouseButton.LeftButton, pos=s.rect().center() + QPoint(s.width() // 3, 0))
+    assert s.value() == 5
     s.setValue(0)
     assert dialog.graph._shown - {1} == set() and dialog.graph.marker_now == 10
     s.setValue(7)                                                 # fertig
     assert dialog.graph._shown - {1} == {10, 11, 12, 14, 15, 20, 21} and dialog.graph.markers == {}
     dialog.plan_now_button.click()                                # zurück: der Eintrag selbst
-    assert dialog._preview is None and s.value() == 1
+    assert dialog._preview is None and s.value() == 2
     assert dialog.graph._shown - {1} == {10, 11, 12} and dialog.graph.marker_now == 11
     s.setValue(3)
-    s.setValue(1)                                                 # auf den Stand von jetzt
+    s.setValue(2)                                                 # auf den Stand von jetzt
     assert dialog._preview is None and dialog.graph._shown - {1} == {10, 11, 12}
     s.setValue(5)
-    dialog.refresh((HISTORY, 0))                                  # anderer Eintrag: Schluss
-    assert dialog._preview is None and dialog.plan_slider.isHidden()
+    dialog.refresh((HISTORY, 0))                                  # anderer Eintrag: Regler weg
+    assert dialog.plan_slider.isHidden() and dialog.graph._shown - {1} == {10, 11}
+    dialog.refresh((CURRENT, None))                               # zurück: Stellung bleibt
+    assert not dialog.plan_slider.isHidden() and s.value() == 5
+    assert dialog.graph._shown - {1} == {10, 11, 12, 14, 15}
     dialog.close()
 
 
