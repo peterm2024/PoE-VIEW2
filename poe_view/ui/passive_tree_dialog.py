@@ -113,9 +113,9 @@ class PassiveTreeDialog(QDialog):
         self._menu_group: str | None = None      # Gruppe unter der Maus (§4.60.12)
         self._collapsed: set[str] = set()        # zugeklappte Gruppen
         self._import_group = ""                  # Gruppe des letzten Mehrfach-Imports
-        # Leveling-Plan (§4.60.14): Level aus dem letzten API-Abruf und live
-        # aus der Client.txt — setzt das Hauptfenster (``set_levels``).
-        self._levels: tuple[int, int] | None = None
+        # Leveling-Plan (§4.60.14): Level aus API-Abruf bzw. live aus der
+        # Client.txt — setzt das Hauptfenster (``set_level``).
+        self._level: int | None = None
         self.plan_steps: list = []
         self._group_suggestion = ""
 
@@ -199,8 +199,14 @@ class PassiveTreeDialog(QDialog):
                                     "to put next to the game")
         self.mini_button.clicked.connect(lambda: self._on_mini_window and self._on_mini_window())
         self._on_mini_window = on_mini_window
+        # Quest-Punkte meldet weder Log noch API (Peter: "zwei Buttons um
+        # einen Skillpunkt bei Questabschluss manuell hinzuzufügen bzw. bei
+        # einem Fehlklick wieder zu entfernen").
+        self.quest_plus, self.quest_minus = leveling_view.quest_buttons(self._change_quest)
         plan_zeile = QHBoxLayout()
         plan_zeile.addWidget(self.plan_label, 1)
+        plan_zeile.addWidget(self.quest_minus)
+        plan_zeile.addWidget(self.quest_plus)
         plan_zeile.addWidget(self.order_button)
         plan_zeile.addWidget(self.mini_button)
         plan_zeile.addWidget(self.plan_stop_button)
@@ -347,7 +353,7 @@ class PassiveTreeDialog(QDialog):
         self.act_show = aktion("Show tree", "", self._show_target)
         self.act_compare = aktion("Compare with this", "", self._compare_with_target)
         self.act_move_group = aktion("Move to group…", "", self._move_to_group)
-        self.act_plan = aktion("Use as leveling plan", "", self._use_as_plan)
+        self.act_plan = aktion("Level towards this", "", self._use_as_plan)
         self.act_rename_group = aktion("Rename group…", "", self._rename_group)
         self.act_ungroup = aktion("Ungroup", "", self._ungroup)
         self.act_delete_group = aktion("Delete group…", "", self._delete_group)
@@ -437,8 +443,7 @@ class PassiveTreeDialog(QDialog):
         n = len(self._group_members(gruppe))
         self.act_delete_group.setText(f"Delete group and its {n} configuration"
                                       f"{'' if n == 1 else 's'}…")
-        for a in (self.act_rename_group, self.act_ungroup, self.act_plan,
-                  self.act_delete_group):
+        for a in (self.act_rename_group, self.act_ungroup, self.act_delete_group):
             menue.addAction(a)
         self._menu_group = gruppe
         try:
@@ -572,19 +577,14 @@ class PassiveTreeDialog(QDialog):
     # --- Leveling-Plan (§4.60.14) ------------------------------------------ #
 
     def _use_as_plan(self) -> None:
-        """Eine Gruppe (ihre Konfigurationen in Zahlenreihenfolge) oder die
-        gewählten Konfigurationen als Abschnitte des Plans."""
-        if self._menu_group:
-            namen, titel = self._group_members(self._menu_group), self._menu_group
-        else:
-            namen = sorted((k[1] for k in self._targets() if k and k[0] == CONFIG),
-                           key=config_order)
-            titel = namen[0] if len(namen) == 1 else ""
+        """Die Konfiguration unter der Maus (oder die gewählte) als Endziel —
+        gezeigt wird sie gleich, mit den ersten Punkten nummeriert."""
+        namen = [k[1] for k in self._targets() if k and k[0] == CONFIG]
         if not namen:
             return
-        tree_history.set_leveling(self._characters, self._name, namen, title=titel)
+        tree_history.set_leveling(self._characters, self._name, namen[0])
         self._on_change()
-        self.refresh((CURRENT, None))
+        self.refresh((CONFIG, namen[0]))
         self._show_tree_tab()
 
     def _stop_plan(self) -> None:
@@ -596,16 +596,24 @@ class PassiveTreeDialog(QDialog):
     def _plan(self) -> leveling.Plan | None:
         return leveling_view.build_plan(self._characters, self._name)
 
-    def set_levels(self, api_level: int, live_level: int) -> None:
-        """Vom Hauptfenster: Level beim letzten Abruf und live aus dem Log."""
-        self._levels = (api_level, live_level)
-        if self._selected() == (CURRENT, None):
-            self._update_plan((CURRENT, None))
+    def set_level(self, level: int) -> None:
+        """Vom Hauptfenster: das Level, live aus dem Log oder vom Abruf."""
+        self._level = level
+        self._update_plan(self._selected())
+
+    def _change_quest(self, delta: int) -> None:
+        jetzt = tree_history.quest_points(self._characters, self._name)
+        neu = min(max(jetzt + delta, 0), passive_tree.QUEST_POINTS)
+        if neu == jetzt:
+            return
+        tree_history.set_quest_points(self._characters, self._name, neu)
+        self._on_change()
+        self._update_plan(self._selected())
 
     def _update_plan(self, key) -> None:
-        """Plan-Zeile und Markierungen — nur am aktuellen Baum (dort steht
-        der Spieler); sonst ein Hinweis darauf. Rechnet wie Statusleiste und
-        Mini-Fenster (``leveling_view.progress``)."""
+        """Plan-Zeile und Markierungen — am aktuellen Baum (dort steht der
+        Spieler) und am Ziel; sonst ein Hinweis darauf. Rechnet wie
+        Statusleiste und Mini-Fenster (``leveling_view.progress``)."""
         roh = tree_history.leveling(self._characters, self._name) or {}
         plan = self._plan() if self._tree is not None else None
         self.plan_bar.setVisible(plan is not None)
@@ -613,35 +621,24 @@ class PassiveTreeDialog(QDialog):
         if plan is None:
             self.graph.set_markers({})
             return
-        if key != (CURRENT, None):
-            self.graph.set_markers({})
-            self.plan_label.setText(f"Leveling plan “{roh.get('title') or plan.stages[0].name}” "
-                                    "— select “Current tree” to see the next points.")
-            return
-        api, live = self._levels or (None, None)
+        ziel = roh.get("target", "")
         stand = leveling_view.progress(self._tree, self._characters, self._name, self._class,
-                                       api, live, limit=PLAN_MARKERS)
+                                       self._level)
+        leveling_view.update_quest_buttons(self.quest_plus, self.quest_minus, stand.quest)
+        if key not in ((CURRENT, None), (CONFIG, ziel)):
+            self.graph.set_markers({})
+            self.plan_label.setText(f"Leveling towards “{ziel}” · {stand.points_text()} — "
+                                    f"select “Current tree” or “{ziel}” to see the next points.")
+            return
         self.plan_steps = stand.steps
-        erledigt = stand.done
-        marken = {s.node: "✓" for s in stand.steps[:erledigt]}
-        marken.update({s.node: str(i) for i, s in enumerate(stand.upcoming, start=1)})
+        kommend = stand.upcoming[:PLAN_MARKERS]
+        marken = {s.node: str(stand.index + i) for i, s in enumerate(kommend, start=1)}
         jetzt = stand.now
-        self.graph.set_markers(marken, now=jetzt.node if jetzt else None,
-                               refund=[n.id for n in stand.refund])
-        teile = [f"Leveling “{stand.title}” · stage {stand.stage_index + 1}/{stand.stage_count} "
-                 f"“{stand.stage_name}”"]
-        if jetzt is None:
-            teile.append("plan complete")
-        else:
-            teile.append(f"next: {leveling_view.step_text(self._tree, jetzt)}")
-            danach = [self._tree.nodes[s.node].name for s in stand.upcoming[1:3]]
-            if danach:
-                teile.append("then " + ", ".join(danach))
-        if erledigt:
-            teile.append(f"{erledigt} {'point' if erledigt == 1 else 'points'} assumed spent "
-                         "since the last update")
-        if stand.refund:
-            teile.append(f"{len(stand.refund)} to refund (dashed red)")
+        self.graph.set_markers(marken, now=jetzt.node if jetzt else None)
+        teile = [f"Leveling towards “{ziel}”", stand.points_text(), stand.now_text(self._tree)]
+        danach = [self._tree.nodes[s.node].name for s in stand.upcoming[1:3]]
+        if jetzt is not None and danach:
+            teile.append("then " + ", ".join(danach))
         if self.order_button.isChecked():
             teile.append("click notables in the order you want them")
         self.plan_label.setText(" · ".join(teile))
@@ -656,8 +653,7 @@ class PassiveTreeDialog(QDialog):
         plan = self._plan()
         if plan is None:
             return set()
-        return set().union(*(leveling._haupt(self._tree, passive_tree.allocated(s.passives))
-                             for s in plan.stages))
+        return leveling._haupt(self._tree, passive_tree.allocated(plan.target))
 
     def _toggle_priority(self, node: int) -> None:
         roh = tree_history.leveling(self._characters, self._name)

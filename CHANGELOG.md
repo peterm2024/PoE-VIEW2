@@ -34,15 +34,15 @@ nach [SemVer](https://semver.org/lang/de/).
   „Lvl 81-90“ gegen „Lvl 61-80“ statt gegen den aktuellen Baum, mit
   Respec-Liste, Goldpreis, Grün/Rot im Bild und Punkten. Auch per
   Rechtsklick „Compare with this“.
-- **Leveling-Plan:** Rechtsklick auf eine Gruppe (etwa einen
-  importierten Build mit einem Baum je Levelabschnitt) → „Use as leveling
-  plan“. Am aktuellen Baum nummeriert das Bild die nächsten zehn Punkte
-  (zuerst der Weg zum nächsten Notable, Masteries sobald möglich,
-  Rücknahmen beim Umbau gestrichelt rot); „Set order“ stellt die
-  Reihenfolge per Klick um. Beim Levelaufstieg (aus der Client.txt) nennt
-  die Statusleiste den nächsten Punkt, und ein kleines, immer
-  obenliegendes Fenster („Mini window“) zeigt die nächsten sechs —
-  zwischen zwei Abrufen zählt der Plan live weiter.
+- **Leveling-Plan:** Rechtsklick auf eine Konfiguration → „Level towards
+  this“: Sie ist das Endziel, der Plan führt vom Klassenstart Punkt für
+  Punkt dorthin — jeder neben einem früheren, zuerst Schaden, dann
+  abwechselnd Schutz und Schaden, Masteries sobald möglich; „Set order“
+  stellt die Reihenfolge per Klick um. Ein Punkt je Level ab Stufe 2
+  (live aus der Client.txt), Quest-Punkte per „+1 quest“/„−1 quest“. Das
+  Bild nummeriert die nächsten zehn Punkte, die Statusleiste nennt beim
+  Levelaufstieg den jetzigen, und ein kleines, immer obenliegendes
+  Fenster („Mini window“) zeigt die nächsten sechs samt Quest-Knöpfen.
 - **Notizen je Konfiguration:** Reiter „Notes“ (speichert von selbst),
   Tooltip in der Liste. Beim Import eines Builds kommen seine PoB-Notizen
   mit (ohne Farbcodes).

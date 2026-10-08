@@ -4280,18 +4280,19 @@ class MainWindow(QMainWindow):
             char.name, char.class_, self._trees(), passive_tree.load(ruthless),
             on_change=geaendert, parent=self,
             on_mini_window=lambda: self._show_leveling_window(name))
-        api, live = self._levels_of(name)
-        if api:
-            self._tree_dialog.set_levels(api, live)
+        level = self._level_of(name)
+        if level:
+            self._tree_dialog.set_level(level)
         self._tree_dialog.show()
 
     # --- Leveling-Plan (§4.60.14) ---------------------------------------- #
 
-    def _levels_of(self, name: str) -> tuple[int, int]:
-        """(Level beim letzten Abruf, Level live aus der Client.txt)."""
+    def _level_of(self, name: str) -> int:
+        """Das Level eines Charakters: live aus der Client.txt, sonst vom
+        letzten Abruf."""
         char = next((c for c in self._all_characters if c.name == name), None)
         api = self._api_levels.get(name) or (char.level if char else 0) or 0
-        return api, max(self._live_levels.get(name, 0), api)
+        return max(self._live_levels.get(name, 0), api)
 
     def _note_api_level(self, name: str, level: int) -> None:
         if level and self._api_levels.get(name) != level:
@@ -4308,8 +4309,19 @@ class MainWindow(QMainWindow):
         self._leveling_char = name
         stand = self._update_leveling(name)
         if stand is not None and stand[1] is not None and stand[1].now is not None:
-            self._on_status(f"{name} reached level {level} — next passive: "
-                            f"{leveling_view.step_text(stand[0], stand[1].now)}")
+            self._on_status(f"{name} reached level {level} — "
+                            f"{stand[1].now_text(stand[0])}")
+
+    def _change_quest(self, name: str, delta: int) -> None:
+        """"+1 quest"/"−1 quest" im Mini-Fenster (§4.60.14)."""
+        baeume = self._trees()
+        jetzt = tree_history.quest_points(baeume, name)
+        neu = min(max(jetzt + delta, 0), passive_tree.QUEST_POINTS)
+        if neu == jetzt:
+            return
+        tree_history.set_quest_points(baeume, name, neu)
+        self._save_trees()
+        self._update_leveling(name)             # bringt auch ein offenes Baum-Fenster nach
 
     def _leveling_context(self, name: str):
         """Baum und Klasse eines Charakters für den Plan."""
@@ -4322,33 +4334,33 @@ class MainWindow(QMainWindow):
     def _update_leveling(self, name: str):
         """Statusleiste, Mini-Fenster und ein offenes Baum-Fenster auf den
         Stand des Plans von ``name`` bringen. Gibt (Baum, Stand) zurück."""
-        api, live = self._levels_of(name)
+        level = self._level_of(name)
         dialog = getattr(self, "_tree_dialog", None)
-        if dialog is not None and dialog.isVisible() and dialog._name == name and api:
-            dialog.set_levels(api, live)
+        if dialog is not None and dialog.isVisible() and dialog._name == name and level:
+            dialog.set_level(level)
         if tree_history.leveling(self._trees(), name) is None:
             if name == self._leveling_char:
                 self._plan_status.hide()
                 if self._leveling_window is not None:
-                    self._leveling_window.show_progress(None, name, live, None)
+                    self._leveling_window.show_progress(None, name, None)
             return None
         if not self._leveling_char:
             self._leveling_char = name
         if name != self._leveling_char:
             return None
         baum, klasse = self._leveling_context(name)
-        stand = (leveling_view.progress(baum, self._trees(), name, klasse, api, live)
+        stand = (leveling_view.progress(baum, self._trees(), name, klasse, level)
                  if baum is not None else None)
         text = leveling_view.status_text(baum, stand) if stand is not None else ""
         self._plan_status.setText(text)
         self._plan_status.setVisible(bool(text))
         if self._leveling_window is not None and self._leveling_window.isVisible():
-            self._leveling_window.show_progress(baum, name, live, stand)
+            self._leveling_window.show_progress(baum, name, stand)
         return baum, stand
 
     def _show_leveling_window(self, name: str) -> None:
         if self._leveling_window is None:
-            self._leveling_window = LevelingWindow(self)
+            self._leveling_window = LevelingWindow(self, on_quest=self._change_quest)
         self._leveling_char = name
         self._leveling_window.show()
         self._leveling_window.raise_()

@@ -215,7 +215,6 @@ class TreeGraph(QGraphicsView):
         # der jetzt dran ist, und was zurückzunehmen ist.
         self.markers: dict[int, str] = {}
         self.marker_now: int | None = None
-        self.marker_refund: set[int] = set()
         self._marker_items: list = []
         # Die Aszendenzen (§4.60.8): verschobene Knoten (Lage im Bild), ihre
         # Linien, die Inseln je Name; ``ascendancy`` ist die eigene.
@@ -629,12 +628,10 @@ class TreeGraph(QGraphicsView):
             painter.drawPath(welt.map(eigene.disc))
         painter.restore()
 
-    def set_markers(self, labels: dict[int, str], now: int | None = None,
-                    refund=()) -> None:
+    def set_markers(self, labels: dict[int, str], now: int | None = None) -> None:
         """Die Schritte des Leveling-Plans im Bild (§4.60.14): je Knoten ein
-        violetter Ring mit Nummer, der jetzt dran ist kräftiger, was
-        zurückzunehmen ist gestrichelt rot."""
-        self.markers, self.marker_now, self.marker_refund = dict(labels), now, set(refund)
+        violetter Ring mit Nummer, der jetzt dran ist kräftiger."""
+        self.markers, self.marker_now = dict(labels), now
         self._paint_markers()
 
     def _paint_markers(self) -> None:
@@ -667,18 +664,6 @@ class TreeGraph(QGraphicsView):
             nummer.setAcceptHoverEvents(False)
             self.scene().addItem(nummer)
             self._marker_items += [ring, nummer]
-        rot = QPen(QColor(tree_report.colour("loss", getattr(self, "_dark", True))), 2.0)
-        rot.setCosmetic(True)
-        rot.setStyle(Qt.PenStyle.DashLine)
-        for h in self.marker_refund:
-            if h not in self._items:
-                continue
-            n = self._lage(h)
-            r = _RADIUS.get(n.kind, _KLEIN) + 18.0
-            ring = self.scene().addEllipse(QRectF(n.x - r, n.y - r, 2 * r, 2 * r), rot)
-            ring.setZValue(3)
-            ring.setAcceptHoverEvents(False)
-            self._marker_items.append(ring)
 
     def _paint_rings(self) -> None:
         if self._tree is None:
@@ -703,16 +688,23 @@ class TreeGraph(QGraphicsView):
     # --- Ansicht -------------------------------------------------------- #
 
     def fit_allocated(self) -> None:
-        """Auf den vergebenen Teil zoomen (beim ersten Zeigen)."""
-        rechteck = QRectF()
-        for h in self._shown:
-            if h in self._items:
-                rechteck = rechteck.united(self._items[h].sceneBoundingRect())
+        """Auf den vergebenen Teil zoomen (beim ersten Zeigen) — samt den
+        nummerierten Punkten des Leveling-Plans: Ein frischer Charakter hat
+        nur den Start, seine nächsten Punkte lägen sonst außerhalb (nativ
+        gesehen, §4.60.14)."""
+        rechteck = self.fit_rect()
         if rechteck.isEmpty():
             rechteck = self.scene().sceneRect()
         rand = max(rechteck.width(), rechteck.height()) * 0.15 + 400
         self.fitInView(rechteck.adjusted(-rand, -rand, rand, rand),
                        Qt.AspectRatioMode.KeepAspectRatio)
+
+    def fit_rect(self) -> QRectF:
+        rechteck = QRectF()
+        for h in set(self._shown) | set(self.markers):
+            if h in self._items:
+                rechteck = rechteck.united(self._items[h].sceneBoundingRect())
+        return rechteck
 
     def _click_info(self, h: int) -> tuple[str | None, bool]:
         """(Zusatzzeile, klickbar) — einmal je Knoten unter der Maus

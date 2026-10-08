@@ -193,29 +193,46 @@ def rename_config(characters: dict, name: str, old: str, new: str) -> bool:
     if old not in alle or not new or new in alle:
         return False
     alle[new] = alle.pop(old)
-    # Ein Leveling-Plan (§4.60.14) nennt seine Abschnitte beim Namen.
+    # Ein Leveling-Plan (§4.60.14) nennt sein Ziel beim Namen.
     plan = (characters.get(name) or {}).get("leveling")
-    if isinstance(plan, dict):
-        plan["stages"] = [new if s == old else s for s in plan.get("stages") or ()]
+    if isinstance(plan, dict) and plan.get("target") == old:
+        plan["target"] = new
     return True
 
 
 # --- Leveling-Plan (§4.60.14) ------------------------------------------- #
 #
-# Je Charakter unter "leveling": die Abschnitte als Namen von
-# Konfigurationen (so wirken spätere Änderungen an ihnen gleich mit) und
-# die Vorrangliste angeklickter Knoten.
+# Je Charakter unter "leveling": das Ziel als Name einer Konfiguration
+# (so wirken spätere Änderungen an ihr gleich mit) und die Vorrangliste
+# angeklickter Knoten. Die Quest-Punkte stehen daneben unter
+# "quest_points" — sie gehören dem Charakter, nicht dem Plan, und bleiben
+# beim Wechsel des Ziels.
 
 def leveling(characters: dict, name: str) -> dict | None:
     plan = (characters.get(name) or {}).get("leveling")
-    return plan if isinstance(plan, dict) and plan.get("stages") else None
+    if not isinstance(plan, dict):
+        return None
+    if not plan.get("target") and plan.get("stages"):
+        # Die erste Fassung (nie veröffentlicht) hatte eine Kette von
+        # Abschnitten; deren letzter ist das Endziel.
+        plan["target"] = plan.pop("stages")[-1]
+        plan.pop("title", None)
+    return plan if plan.get("target") else None
 
 
-def set_leveling(characters: dict, name: str, stages: list[str],
-                 priority: list[int] | None = None, title: str = "") -> None:
+def set_leveling(characters: dict, name: str, target: str,
+                 priority: list[int] | None = None) -> None:
     characters.setdefault(name, {})["leveling"] = {
-        "stages": list(stages), "priority": list(priority or []),
-        "title": title or (stages[0] if stages else "")}
+        "target": target, "priority": list(priority or [])}
+
+
+def quest_points(characters: dict, name: str) -> int:
+    wert = (characters.get(name) or {}).get("quest_points")
+    return wert if isinstance(wert, int) and wert > 0 else 0
+
+
+def set_quest_points(characters: dict, name: str, points: int) -> None:
+    characters.setdefault(name, {})["quest_points"] = max(int(points), 0)
 
 
 def set_leveling_priority(characters: dict, name: str, priority: list[int]) -> None:

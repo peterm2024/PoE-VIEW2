@@ -78,7 +78,7 @@ def test_the_menu_fits_the_entry(qapp, baum) -> None:
     dialog.refresh((CONFIG, "Fire"))
     teile = ["—", "Open in planner", "Copy link", "Copy as text", "—", "Import…"]
     assert _texte(dialog._context_actions((CONFIG, "Fire"))) == [
-        "Show tree", "Rename…", "Duplicate…", "Move to group…", "Use as leveling plan",
+        "Show tree", "Rename…", "Duplicate…", "Move to group…", "Level towards this",
         "Delete"] + teile
     # Bei einem anderen als dem gezeigten Eintrag: "Compare with this" (§4.60.11).
     assert _texte(dialog._context_actions((CURRENT, None))) == [
@@ -286,7 +286,7 @@ def test_the_menu_acts_on_the_entry_under_the_mouse(qapp, baum, monkeypatch) -> 
     _menue_waehlt(monkeypatch, "act_rename", dialog, gesehen)
     dialog._list_menu(punkt)
     assert gesehen[0][:6] == ["Show tree", "Rename…", "Duplicate…", "Move to group…",
-                              "Use as leveling plan", "Delete"]
+                              "Level towards this", "Delete"]
     assert set(th.configs(zeichen, "WitchOfPeter")) == {"A", "B", "C2"}
     assert dialog._selected() == (CONFIG, "A")
     punkt = dialog.list.visualItemRect(_item(dialog, (CONFIG, "C2"))).center()
@@ -502,7 +502,7 @@ def test_move_rename_ungroup_and_delete_a_group(qapp, baum, monkeypatch) -> None
     monkeypatch.setattr(dialog, "_ask_name", lambda *a: "Pohx RF")
     _menue_waehlt(monkeypatch, "act_rename_group", dialog, gesehen)
     dialog._list_menu(kopf_punkt("Pohx"))
-    assert gesehen[0] == ["Rename group…", "Ungroup", "Use as leveling plan",
+    assert gesehen[0] == ["Rename group…", "Ungroup",
                           "Delete group and its 2 configurations…"]
     assert tree_groups(zeichen) == ["Pohx RF"]
     _menue_waehlt(monkeypatch, "act_ungroup", dialog)
@@ -657,39 +657,40 @@ def test_a_reimport_over_the_shown_configuration_keeps_its_new_notes(qapp, baum,
 # --- Leveling-Plan (§4.60.14) ---------------------------------------------- #
 
 def _plan_fenster(qapp, baum):
-    """Aktueller Baum 10, 11, 12 (Level 30); Gruppe "Build" mit zwei
-    Abschnitten: "S1" = 10, 11, 12, 20, 21 und "S2" = … 13, 14, 15."""
+    """Aktueller Baum 10, 11, 12 (Level 30); Ziel "Build" = 10, 11, 12, 14,
+    15, 20, 21. Reihenfolge vom Start: 10, 11, 12 (Iron Heart), 14, 15
+    (Far Away), 20, 21 (Sockel) — kein Schadens-Notable, also das
+    nächstgelegene; bei Gleichstand die kleinere Kennung."""
     dialog, zeichen, gespeichert = _fenster(qapp, baum)
-    th.save_config(zeichen, "WitchOfPeter", "S2", {"hashes": [10, 11, 12, 13, 14, 15]},
-                   level=30, ruthless=True, source="pob", group="Build")
-    th.save_config(zeichen, "WitchOfPeter", "S1", {"hashes": [10, 11, 12, 20, 21]},
-                   level=30, ruthless=True, source="pob", group="Build")
+    th.save_config(zeichen, "WitchOfPeter", "Build", {"hashes": [10, 11, 12, 14, 15, 20, 21]},
+                   level=30, ruthless=True, source="pob")
     dialog.refresh()
     return dialog, zeichen, gespeichert
 
 
-def test_a_group_becomes_the_leveling_plan(qapp, baum, monkeypatch) -> None:
-    """Peter, 2026-10-08: "Leveling-Mode … zeigt dann den zu vergebenden
-    Skill-Punkt im Tree an." Rechtsklick auf die Gruppe → Plan."""
-    from poe_view.ui import passive_tree_dialog as modul
-    from poe_view.ui.passive_tree_dialog import CONFIG, CURRENT
+def test_a_configuration_becomes_the_target(qapp, baum) -> None:
+    """Peter, 2026-10-08: "Der aktuell dargestellte Tree soll das Endziel
+    sein. Man startet am Klassenstart und es wird jeweils der nächste zu
+    nehmende Skillpunkt angezeigt." Level 3 = 2 Punkte: Punkt 2 ist dran."""
+    from poe_view.ui.passive_tree_dialog import CONFIG, CURRENT, HISTORY
     dialog, zeichen, gespeichert = _plan_fenster(qapp, baum)
-    dialog.refresh((CONFIG, "S2"))
-    dialog._menu_group = "Build"
+    dialog.set_level(3)
+    dialog.refresh((CONFIG, "Build"))
     dialog.act_plan.trigger()
-    dialog._menu_group = None
-    assert th.leveling(zeichen, "WitchOfPeter") == {"stages": ["S1", "S2"], "priority": [],
-                                                    "title": "Build"}
-    assert dialog._selected() == (CURRENT, None) and dialog.tabs.currentIndex() == 3
+    assert th.leveling(zeichen, "WitchOfPeter") == {"target": "Build", "priority": []}
+    assert dialog._selected() == (CONFIG, "Build") and dialog.tabs.currentIndex() == 3
     assert dialog.plan_bar.isVisibleTo(dialog) and gespeichert == [1]
-    text = dialog.plan_label.text()
-    assert text.startswith("Leveling “Build” · stage 1/2 “S1” · next: Life (towards Basic Jewel")
-    assert "then Basic Jewel Socket, Iron Will" in text
-    assert dialog.graph.markers == {20: "1", 21: "2", 13: "3", 14: "4", 15: "5"}
-    assert dialog.graph.marker_now == 20 and dialog.graph.marker_refund == set()
-    # Andere Einträge: kein Plan im Bild, nur der Hinweis.
-    dialog.refresh((CONFIG, "S1"))
-    assert dialog.graph.markers == {} and "select “Current tree”" in dialog.plan_label.text()
+    assert dialog.plan_label.text() == (
+        "Leveling towards “Build” · level 3 = 2 points · "
+        "Point 2/7: Strength (towards Iron Heart) · then Iron Heart, Life")
+    assert dialog.graph.markers == {11: "2", 12: "3", 14: "4", 15: "5", 20: "6", 21: "7"}
+    assert dialog.graph.marker_now == 11
+    # Am aktuellen Baum dasselbe, an anderen Einträgen nur der Hinweis.
+    dialog.refresh((CURRENT, None))
+    assert dialog.graph.markers[11] == "2" and dialog.graph.marker_now == 11
+    dialog.refresh((HISTORY, 0))
+    assert dialog.graph.markers == {}
+    assert "select “Current tree” or “Build”" in dialog.plan_label.text()
     # Stoppen.
     dialog.refresh((CURRENT, None))
     dialog.plan_stop_button.click()
@@ -698,40 +699,62 @@ def test_a_group_becomes_the_leveling_plan(qapp, baum, monkeypatch) -> None:
     dialog.close()
 
 
-def test_points_spent_since_the_last_update_are_ticked(qapp, baum) -> None:
-    """Zwischen zwei Abrufen zählt der Plan live weiter: zwei Aufstiege seit
-    dem letzten Abruf → der erste Punkt ist vermutlich vergeben (✓)."""
+def test_level_one_shows_the_first_point_and_the_end_says_complete(qapp, baum) -> None:
     dialog, zeichen, _ = _plan_fenster(qapp, baum)
-    th.set_leveling(zeichen, "WitchOfPeter", ["S1", "S2"], title="Build")
-    dialog.refresh()
-    dialog.set_levels(30, 32)
-    assert dialog.graph.markers == {20: "✓", 21: "1", 13: "2", 14: "3", 15: "4"}
-    assert dialog.graph.marker_now == 21
-    assert "next: Basic Jewel Socket" in dialog.plan_label.text()
-    assert "1 point assumed spent since the last update" in dialog.plan_label.text()
+    th.set_leveling(zeichen, "WitchOfPeter", "Build")
+    dialog.set_level(1)
+    assert "First point (level 2): Strength (towards Iron Heart)" in dialog.plan_label.text()
+    assert dialog.graph.markers[10] == "1" and dialog.graph.marker_now == 10
+    dialog.set_level(30)                                          # 29 Punkte, 7 Schritte
+    assert "plan complete (7 points)" in dialog.plan_label.text()
+    assert dialog.graph.markers == {} and dialog.graph.marker_now is None
     dialog.close()
 
 
-def test_the_order_is_set_by_clicking(qapp, baum, monkeypatch) -> None:
+def test_quest_points_are_added_and_taken_back_by_hand(qapp, baum) -> None:
+    """Peter: "zwei Buttons um einen Skillpunkt bei Questabschluss manuell
+    hinzuzufügen bzw. bei einem Fehlklick wieder zu entfernen"."""
+    dialog, zeichen, gespeichert = _plan_fenster(qapp, baum)
+    th.set_leveling(zeichen, "WitchOfPeter", "Build")
+    dialog.set_level(3)
+    assert not dialog.quest_minus.isEnabled() and dialog.quest_plus.isEnabled()
+    dialog.quest_plus.click()
+    assert th.quest_points(zeichen, "WitchOfPeter") == 1 and gespeichert == [1]
+    assert "level 3 + 1 quest = 3 points · Point 3/7: Iron Heart" in dialog.plan_label.text()
+    assert dialog.graph.marker_now == 12 and dialog.quest_minus.isEnabled()
+    dialog.quest_minus.click()
+    assert th.quest_points(zeichen, "WitchOfPeter") == 0
+    assert "Point 2/7" in dialog.plan_label.text()
+    dialog.quest_minus.click()                                    # gesperrt: nichts
+    assert th.quest_points(zeichen, "WitchOfPeter") == 0 and gespeichert == [1, 1]
+    th.set_quest_points(zeichen, "WitchOfPeter", 24)              # alle Quest-Punkte
+    dialog.set_level(3)
+    assert not dialog.quest_plus.isEnabled()
+    dialog._change_quest(1)
+    assert th.quest_points(zeichen, "WitchOfPeter") == 24
+    dialog.close()
+
+
+def test_the_order_is_set_by_clicking(qapp, baum) -> None:
     """"Set order": Klicks stellen die Reihenfolge um und bauen keinen
-    Entwurf; Knoten außerhalb des Plans sagen das."""
+    Entwurf; Knoten außerhalb des Ziels sagen das."""
     from poe_view.ui.passive_tree_dialog import _GESPERRT_PLAN
     dialog, zeichen, gespeichert = _plan_fenster(qapp, baum)
-    th.set_leveling(zeichen, "WitchOfPeter", ["S1", "S2"], title="Build")
-    dialog.refresh()
+    th.set_leveling(zeichen, "WitchOfPeter", "Build")
+    dialog.set_level(1)
     dialog.order_button.setChecked(True)
     assert dialog._click_hint(21) == "Click: take this as #1 in the leveling order"
     assert dialog._click_info(31) == (_GESPERRT_PLAN, False)
-    dialog.graph.node_clicked.emit(15, False)                    # erst Far Away
-    assert th.leveling(zeichen, "WitchOfPeter")["priority"] == [15]
+    dialog.graph.node_clicked.emit(21, False)                    # erst der Sockel
+    assert th.leveling(zeichen, "WitchOfPeter")["priority"] == [21]
     assert dialog._draft is None
-    assert dialog._click_hint(15) == "Click: remove from the leveling order (#1)"
-    # S1 ist noch offen (20, 21) — der Vorrang gilt im Abschnitt, in dem 15 liegt.
-    assert dialog.graph.markers == {20: "1", 21: "2", 14: "3", 15: "4", 13: "5"}
+    assert dialog._click_hint(21) == "Click: remove from the leveling order (#1)"
+    assert dialog.graph.markers == {10: "1", 20: "2", 21: "3", 11: "4", 12: "5", 14: "6",
+                                    15: "7"}
     assert "click notables in the order you want them" in dialog.plan_label.text()
-    dialog.graph.node_clicked.emit(15, False)                    # wieder heraus
+    dialog.graph.node_clicked.emit(21, False)                    # wieder heraus
     assert th.leveling(zeichen, "WitchOfPeter")["priority"] == []
-    dialog.graph.node_clicked.emit(31, False)                    # nicht im Plan: nichts
+    dialog.graph.node_clicked.emit(31, False)                    # nicht im Ziel: nichts
     assert th.leveling(zeichen, "WitchOfPeter")["priority"] == []
     dialog.order_button.setChecked(False)
     dialog.graph.node_clicked.emit(13, False)                    # wieder normal: Entwurf
@@ -740,34 +763,28 @@ def test_the_order_is_set_by_clicking(qapp, baum, monkeypatch) -> None:
     dialog.close()
 
 
-def test_selected_configurations_and_a_renamed_stage_stay_in_the_plan(qapp, baum,
-                                                                      monkeypatch) -> None:
-    from poe_view.ui.passive_tree_dialog import CONFIG
+def test_a_renamed_target_stays_and_a_deleted_one_ends_the_plan(qapp, baum) -> None:
     dialog, zeichen, _ = _plan_fenster(qapp, baum)
-    dialog.refresh((CONFIG, "S2"))
-    _item(dialog, (CONFIG, "S1")).setSelected(True)
-    dialog.act_plan.trigger()
-    assert th.leveling(zeichen, "WitchOfPeter")["stages"] == ["S1", "S2"]
-    assert th.rename_config(zeichen, "WitchOfPeter", "S1", "Act 1-5")
-    assert th.leveling(zeichen, "WitchOfPeter")["stages"] == ["Act 1-5", "S2"]
-    # Eine gelöschte Konfiguration fällt aus dem Plan; fehlen alle, gibt es keinen.
-    th.delete_config(zeichen, "WitchOfPeter", "Act 1-5")
-    assert [s.name for s in dialog._plan().stages] == ["S2"]
-    th.delete_config(zeichen, "WitchOfPeter", "S2")
+    th.set_leveling(zeichen, "WitchOfPeter", "Build")
+    assert th.rename_config(zeichen, "WitchOfPeter", "Build", "Act 1-10")
+    assert dialog._plan().target == {"hashes": [10, 11, 12, 14, 15, 20, 21]}
+    th.delete_config(zeichen, "WitchOfPeter", "Act 1-10")
     assert dialog._plan() is None
+    dialog.refresh()
+    assert not dialog.plan_bar.isVisibleTo(dialog)
     dialog.close()
 
 
 def test_plan_markers_are_drawn_and_the_current_step_stands_out(qapp) -> None:
     """Gemalt am Baum mit Lage: violetter Ring je Schritt, der jetzt dran
-    ist doppelt so kräftig; was zurückzunehmen ist, gestrichelt."""
+    ist doppelt so kräftig."""
     from PySide6.QtWidgets import QGraphicsEllipseItem, QGraphicsSimpleTextItem
     from poe_view.ui.tree_graph import _FARBEN, TreeGraph
     from tests.test_passive_tree import _aszendenz_baum
     g = TreeGraph()
     g.set_tree(_aszendenz_baum())
     g.show_tree({"hashes": [103]}, "Witch")
-    g.set_markers({300: "1", 106: "2"}, now=300, refund=[102])
+    g.set_markers({300: "1", 106: "2"}, now=300)
     ringe = [i for i in g._marker_items if isinstance(i, QGraphicsEllipseItem)]
     texte = sorted(i.text() for i in g._marker_items if isinstance(i, QGraphicsSimpleTextItem))
     assert texte == ["1", "2"]
@@ -775,8 +792,11 @@ def test_plan_markers_are_drawn_and_the_current_step_stands_out(qapp) -> None:
                for r in ringe}
     lage300 = round(g._lage(300).y)
     assert breiten[lage300] == (4.0, Qt.PenStyle.SolidLine, _FARBEN[True]["plan"])
-    assert sorted(b[0] for b in breiten.values()) == [2.0, 2.0, 4.0]
-    assert sum(1 for b in breiten.values() if b[1] == Qt.PenStyle.DashLine) == 1
+    assert sorted(b[0] for b in breiten.values()) == [2.0, 4.0]
+    # Der erste Ausschnitt schließt die Punkte ein (ein frischer Charakter
+    # hätte sonst nur seinen Start im Bild).
+    assert g.fit_rect().contains(g._items[106].sceneBoundingRect())
     g.set_markers({})
     assert g._marker_items == []
+    assert not g.fit_rect().contains(g._items[106].sceneBoundingRect())
     g.close()

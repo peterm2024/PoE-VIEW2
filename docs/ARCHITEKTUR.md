@@ -9124,6 +9124,21 @@ und ein echtes Menü wartet offscreen ewig — der Testlauf hing zweimal
 (FALLSTRICKE #99). `test_stash_tree.py` umgeht es aus demselben Grund
 mit einem Ersatz-QMenu.
 
+**Duplicate** speichert den gewählten Eintrag unter neuem Namen
+(Vorschlag "Fire (copy)" bzw. "Level 29 tree" beim Verlauf, mit dessen
+Level; `source="copy"`). Beim aktuellen Baum ist es "Save current as…".
+
+**Zwischenablage:** Was nach pobb.in/pastebin, Planer-Link oder Code
+(≥ 40 Zeichen Base64) aussieht, steht schon im Import-Feld
+(`_clipboard_import_text`); Strg+V in der Liste importiert es direkt —
+bei einem Baum bleibt nur die Namensfrage.
+
+Getestet mit echten Tastendrücken (offscreen lösen Kürzel aus, wenn
+das Fenster aktiv ist): F2/Entf in der Liste, Entf im Suchfeld löscht
+Text, Strg+C in Liste und Bild, Strg+Z/S/F/2, Strg+V. Nativ angesehen:
+das Menü einer Konfiguration. Gegenprobe mit 12 Sabotagen, alle
+gefangen.
+
 
 #### 4.60.11 Zwei Bäume miteinander vergleichen
 
@@ -9263,65 +9278,83 @@ bekannte Falle; Reparatur über ein Skript aus dem Write-Werkzeug).
 
 Peter, 2026-10-08: "Was nice wäre, wäre ein 'Leveling-Mode'. Das
 Programm überwacht ja eh schon den Char-Level und zeigt dann den zu
-vergebenden Skill-Punkt im Tree an. D.h. wir brauchen eine
-Node-ID-Liste die abgearbeitet wird." Entschieden (Auswahl im Dialog):
+vergebenden Skill-Punkt im Tree an." Entschieden (Auswahl im Dialog):
 Reihenfolge **automatisch + per Klick umstellbar**; Anzeige **im
 Baum-Bild, als Hinweis beim Levelaufstieg und in einem kleinen Fenster**.
 
-**Der Plan** ist eine Folge von Abschnitten — Konfigurationen, beim
-Namen genannt (`tree_history.set_leveling`, unter `"leveling"` je
-Charakter; Umbenennen zieht mit, Gelöschtes fällt heraus) — und eine
-Vorrangliste angeklickter Knoten. Entsteht per Rechtsklick "Use as
-leveling plan" auf eine Gruppe (ihre Konfigurationen in
-Zahlenreihenfolge, `config_order`) oder auf gewählte Konfigurationen.
+**Die erste Fassung war falsch verstanden** und ist ersetzt, bevor sie
+veröffentlicht wurde: eine Kette von Konfigurationen als Abschnitte
+(Pohx' "Lvl 01-30" → "RF Start" → …), gerechnet immer vom echten Baum
+aus, mit Rücknahmen beim Umbau und live "vermutet vergebenen" Punkten
+zwischen zwei Abrufen. Peter, am echten Baum (Level 81, voll vergeben,
+Plan "Fire Res"): "Der aktuell dargestellte Tree soll das Endziel sein.
+Man startet am Klassenstart und es wird jeweils der nächste zu nehmende
+Skillpunkt angezeigt. Mit jedem Level kommt, angefangen bei Stufe 1, ein
+Skillpunkt dazu. Zusätzlich noch zwei Buttons um einen Skillpunkt bei
+Questabschluss manuell hinzuzufügen bzw. bei einem Fehlklick wieder zu
+entfernen." Und zur Reihenfolge: "Priorität am Anfang hat natürlich
+Schaden und dann abwechselnd Defensive. Wenn dies nicht hinhaut, muss
+der Plan von Hand angelegt werden."
 
-**Die Schritte werden nicht gespeichert, sondern immer frisch gerechnet**
-(`services/leveling.next_steps`, ~3 ms für Pohx' 160 Schritte am echten
-Baum), vom echten Baum aus: Wer abweicht, bekommt den nächsten
-sinnvollen Punkt von dort. Im Abschnitt geht es nur über dessen Knoten
-(nicht über eine kürzere Abkürzung durch fremde): zuerst zum
-vorrangigen Ziel, sonst zum nächstgelegenen Notable, Keystone oder
-Jewel-Sockel (Gleichstand: kleinere Kennung), samt Weg; kleine Reste
-zuletzt; eine Mastery, sobald ihr Notable steht — auch ein
-Effekt-Wechsel in einem sonst fertigen Abschnitt. Danach geht die Liste
-im nächsten Abschnitt weiter. Was der aktuelle Abschnitt nicht mehr hat
-(Pohx' "RF Start" baut den Anfang um), ist "zurückzunehmen"
-(`to_refund`, gestrichelt rot) — wann, entscheidet der Spieler. Die
-Aszendenz bleibt draußen (Labyrinth-Punkte, §4.60.8).
+**Der Plan** ist ein Ziel — eine Konfiguration, beim Namen genannt
+(`tree_history.set_leveling`, unter `"leveling"` je Charakter;
+Umbenennen zieht mit, Löschen beendet den Plan) — und eine Vorrangliste
+angeklickter Knoten. Entsteht per Rechtsklick "Level towards this" auf
+eine Konfiguration; die wird gleich gezeigt, mit den ersten Punkten
+nummeriert. Ein Plan der ersten Fassung wird beim Lesen zu seinem
+letzten Abschnitt.
 
-**In welchem Abschnitt der Spieler steht** (`stage_index`): dem, zu dem
-sein Baum am besten passt (übereinstimmende minus fehlende Knoten,
-Gleichstand → der spätere); ist der fertig, der nächste. Zuerst stand
-hier "der erste, dem etwas fehlt" — nach einem Umbau fehlt dem früheren
-Abschnitt aber immer etwas, man landete wieder vorn (im Test gefunden).
+**Die Reihenfolge** (`services/leveling.sequence`, ~4 ms für 103
+Punkte am echten Baum) ist fest und hängt nicht vom echten Baum ab: vom
+Klassenstart aus, nur über Knoten des Ziels (keine kürzere Abkürzung
+durch fremde), jeder Schritt neben einem früheren. Zuerst das
+vorrangige Ziel (Vorrangliste), sonst das nächstgelegene Notable,
+Keystone oder Jewel-Sockel des **fälligen Themas** — Schaden, Schutz,
+Schaden, … —, jeweils samt Weg; gibt es keins des fälligen Themas mehr,
+das nächstgelegene überhaupt. Das Thema kommt aus `passive_tree.theme`
+(dasselbe, nach dem der Baum färbt): Angriff und Minions sind Schaden,
+Schutz ist Schutz, Nutzen und Sockel "anderes". Kleine Knoten, die auf
+keinem Weg lagen, zuletzt; eine Mastery, sobald ihr Notable steht. Die
+Aszendenz bleibt draußen (Labyrinth-Punkte, §4.60.8). Am echten Ziel
+"Fire Res" (Witch, Minions): Lord of the Dead, Heart and Soul,
+Arcanist's Dominion, Practical Application, … — alle 103 Schritte
+nebeneinander, keiner fehlt.
 
-**Live zählen** (`assumed_done`): Die API kennt den neuen Baum erst nach
-dem nächsten Abruf (meist beim Zonenwechsel). Der Zonen-Beobachter
-meldet jetzt auch "… (Chieftain) is now level N" (`level_up`). Auf dem
-Level des letzten Abrufs ist Schritt 1 dran; der erste Aufstieg bringt
-den Punkt dafür, erst jeder weitere heißt "der vorige ist vergeben" —
-also Level live − Level beim Abruf − 1 Schritte vermutet (✓ im Bild).
-Der Abruf-Level ist der des letzten Abrufs (`_note_api_level` aus jedem
-Snapshot), nicht der des gespeicherten Baums: Der wird nur bei einer
-Änderung neu geschrieben und wäre oft alt. Quest-Punkte sieht niemand,
-sie zählen nicht.
+Grenze: Die Themen kommen aus Schlüsselwörtern; Mischknoten (Holy
+Dominion: Resistenzen *und* Schaden) zählen zum Schutz. Wo das nicht
+passt, stellt "Set order" um.
+
+**Wie weit der Spieler ist**, sagt nur die Zahl seiner Punkte
+(`points_earned`): Level − 1 plus die von Hand gezählten Quest-Punkte.
+Das Level ist das live aus der Client.txt ("… is now level N",
+`ZoneWatcher.level_up`), sonst das vom letzten Abruf. Dran ist der
+Schritt mit dem zuletzt bekommenen Punkt (Level 12 → Punkt 11); auf
+Level 1 heißt es "First point (level 2)". Quest-Punkte meldet weder Log
+noch API: "+1 quest"/"−1 quest" im Baum- und im Mini-Fenster, 0 bis 24
+(`passive_tree.QUEST_POINTS`), gespeichert unter `"quest_points"` beim
+Charakter — sie bleiben, wenn das Ziel wechselt oder der Plan endet.
+Der echte Baum zählt bewusst nicht: Wer abweicht, sieht es im Bild
+(gefüllte Knoten gegen nummerierte Ringe).
 
 **Anzeige**, eine Rechnung für alle drei (`ui/leveling_view.progress`):
 
-- Baum-Fenster, am aktuellen Baum: Zeile "Leveling “Pohx RF” · stage
-  1/9 “Lvl 01-30 {1}” · next: … · then …" und die nächsten zehn Schritte
-  nummeriert im Bild (`TreeGraph.set_markers`: violetter Ring, der
-  jetzige doppelt so kräftig, Nummer in Pixeln daneben; Farbe gerechnet
-  dunkel ≥ 5,5:1, hell ≥ 6,9:1 gegen Grund und Tönung). An anderen
-  Einträgen nur der Hinweis, den aktuellen Baum zu wählen. "Set order":
-  Klicks setzen/entfernen Knoten der Vorrangliste statt einen Entwurf zu
-  bauen; Knoten außerhalb des Plans sagen es. "Stop plan".
-- Statusleiste: ein eigenes, festes Feld "Next passive: …" (das
-  Meldungsfeld überschreiben die Abrufe laufend), dazu beim Aufstieg die
-  Meldung "WitchOfPeter reached level 32 — next passive: …".
+- Baum-Fenster, am aktuellen Baum und am Ziel: Zeile "Leveling towards
+  “Fire Res” · level 20 + 2 quest = 21 points · Point 21/103:
+  Intelligence (towards Quick Recovery) · then …" und die nächsten zehn
+  Schritte im Bild mit ihrer Punktnummer (`TreeGraph.set_markers`:
+  violetter Ring, der jetzige doppelt so kräftig; Farbe gerechnet dunkel
+  ≥ 5,5:1, hell ≥ 6,9:1 gegen Grund und Tönung). Der erste Ausschnitt
+  schließt diese Punkte ein (`fit_rect`) — ein frischer Charakter hatte
+  sonst nur seinen Start im Bild (nativ gesehen). An anderen Einträgen
+  nur der Hinweis. "Set order": Klicks setzen/entfernen Knoten der
+  Vorrangliste statt einen Entwurf zu bauen; Knoten außerhalb des Ziels
+  sagen es. "Stop plan".
+- Statusleiste: ein eigenes, festes Feld "Leveling: Point 21/103: …"
+  (das Meldungsfeld überschreiben die Abrufe laufend), dazu beim
+  Aufstieg "WitchOfPeter reached level 21 — Point 20/103: …".
 - "Mini window" (`LevelingWindow`): klein, immer oben, ohne
-  Taskleisten-Eintrag; jetziger Punkt fett, fünf weitere, Zahl der
-  Rücknahmen. Gehört dem Hauptfenster, lebt also weiter, wenn das
+  Taskleisten-Eintrag; jetziger Punkt fett, fünf weitere mit Nummer,
+  die Quest-Knöpfe. Gehört dem Hauptfenster, lebt also weiter, wenn das
   Baum-Fenster zu ist.
 
 Statusleiste und Mini-Fenster folgen dem Charakter, der zuletzt mit Plan
@@ -9329,39 +9362,28 @@ aufgestiegen ist oder dessen Mini-Fenster geöffnet wurde
 (`_leveling_char`); ein Aufstieg ohne Plan (Mitspieler im Log, ein
 anderer Charakter) ändert nichts.
 
-**Zwei Qt-Fallen beim Bauen** (FALLSTRICKE #100): Ein vor dem Einhängen
-sichtbar geschalteter Knopf ("Mini window") war danach unsichtbar —
-Qt versteckt ein Widget beim Wechsel des Elternwidgets. Und ein
-übrig gebliebenes Hauptfenster aus einem Test blieb offscreen "aktiv"
-und schluckte die Tastenkürzel eines späteren Tests.
+**Zwei Qt-Fallen beim Bauen der ersten Fassung** (FALLSTRICKE #100): Ein
+vor dem Einhängen sichtbar geschalteter Knopf ("Mini window") war danach
+unsichtbar — Qt versteckt ein Widget beim Wechsel des Elternwidgets. Und
+ein übrig gebliebenes Hauptfenster aus einem Test blieb offscreen
+"aktiv" und schluckte die Tastenkürzel eines späteren Tests.
 
-Getestet: Logik (Ziele, Vorrang, echter Baum als Start, Abschnitte und
-Rücknahmen, Masteries samt Wechsel, Unerreichbares, Limit, Aszendenz,
-Abschnitts-Wahl inkl. Gleichstand, Weg nur über Abschnitts-Knoten,
-Zählung); Fenster (Plan aus Gruppe und Auswahl, Markierungen und ✓,
-Reihenfolge per Klick, Stoppen, Umbenennen/Löschen, gemalte Ringe);
-Hauptfenster (Aufstieg → Statusfeld und Meldung, Abruf setzt zurück,
-neuer Baum rückt weiter, fremder Charakter, Mini-Fenster, offenes
-Baum-Fenster bekommt die Level); Watcher (Aufstiegszeile). Nativ
-angesehen mit Pohx' Plan: Baum-Bild, Mini-Fenster. Gegenproben: Logik
-12 (zwei hielten zuerst, Tests verschärft), Fenster 12 (eine), live 10
-(vier; eine davon gleichwertig zum Original — das überflüssige `max`
-in `progress` ist weg).
+Getestet: Reihenfolge (nebeneinander vom Start, Schaden zuerst, dann
+abwechselnd, Minions als Schaden, Vorrang, unabhängig vom echten Baum,
+Masteries, Unerreichbares und Aszendenz, Weg nur über Ziel-Knoten),
+Punkte je Level und Quest, Speicherung (Ziel, Umbenennen, alte Pläne,
+Quest-Punkte beim Charakter); Fenster (Ziel per Menü, Nummern und Zeile
+an Ziel und aktuellem Baum, Level 1 und fertig, Quest-Knöpfe mit
+Grenzen, Reihenfolge per Klick, Löschen beendet, Ausschnitt mit
+Punkten); Hauptfenster (Aufstieg → Statusfeld und Meldung, Abruf mit
+höherem Level, echter Baum ändert nichts, Mini-Fenster mit Quest,
+offenes Baum-Fenster folgt). Nativ angesehen mit dem echten Ziel "Fire
+Res" auf Level 20 + 2: Baum-Bild, Mini-Fenster. Gegenproben 22: drei
+hielten zuerst — zwei zeigten überflüssigen Code (Aszendenz- und
+Start-Prüfung in der Breitensuche, die `erlaubt` schon ausschließt;
+eigenes Nachziehen des Baum-Fensters, das `set_level` schon macht),
+beide entfernt; für die dritte (Obergrenze 24) Tests verschärft.
 
-**Duplicate** speichert den gewählten Eintrag unter neuem Namen
-(Vorschlag "Fire (copy)" bzw. "Level 29 tree" beim Verlauf, mit dessen
-Level; `source="copy"`). Beim aktuellen Baum ist es "Save current as…".
-
-**Zwischenablage:** Was nach pobb.in/pastebin, Planer-Link oder Code
-(≥ 40 Zeichen Base64) aussieht, steht schon im Import-Feld
-(`_clipboard_import_text`); Strg+V in der Liste importiert es direkt —
-bei einem Baum bleibt nur die Namensfrage.
-
-Getestet mit echten Tastendrücken (offscreen lösen Kürzel aus, wenn
-das Fenster aktiv ist): F2/Entf in der Liste, Entf im Suchfeld löscht
-Text, Strg+C in Liste und Bild, Strg+Z/S/F/2, Strg+V. Nativ angesehen:
-das Menü einer Konfiguration. Gegenprobe mit 12 Sabotagen, alle
-gefangen.
 ---
 
 ## 8. Entwicklungsstand
