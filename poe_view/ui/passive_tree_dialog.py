@@ -23,8 +23,8 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from PySide6.QtCore import Qt, QUrl
-from PySide6.QtGui import (QBrush, QColor, QCursor, QDesktopServices, QGuiApplication,
-                           QPalette)
+from PySide6.QtGui import (QAction, QBrush, QColor, QCursor, QDesktopServices,
+                           QGuiApplication, QKeySequence, QPalette)
 from PySide6.QtWidgets import (QCheckBox, QDialog, QDialogButtonBox, QHBoxLayout, QHeaderView,
                                QInputDialog, QLabel,
                                QLineEdit, QListWidget, QListWidgetItem, QMenu, QMessageBox,
@@ -68,6 +68,10 @@ class PassiveTreeDialog(QDialog):
 
         self.list = QListWidget()
         self.list.currentItemChanged.connect(lambda *_: self._show_selected())
+        # Rechtsklick-Menü und Doppelklick/Enter → Bild (§4.60.10).
+        self.list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.list.customContextMenuRequested.connect(self._list_menu)
+        self.list.itemActivated.connect(lambda *_: self._show_tree_tab())
         # Rechts drei Reiter (§4.60.2, Peter: "Wir müssen unbedingt den Tree
         # übersichtlicher hinbekommen"): der Umbau (nur bei Konfiguration
         # und Verlauf), der Baum nach Themen, und die Reichweite als
@@ -173,8 +177,153 @@ class PassiveTreeDialog(QDialog):
         aufbau.addWidget(teiler, 1)
         aufbau.addWidget(self.hint)
         aufbau.addLayout(knoepfe)
+        self._build_actions()
         self.resize(1000, 700)
         self.refresh()
+
+    # --- Menü und Tastenkürzel (§4.60.10) ------------------------------- #
+
+    def _build_actions(self) -> None:
+        """Peter, 2026-10-08: "Folgende QoL wären für die Configurations
+        noch gut: Rechtsklick-Menüs und Shortcuts." Jede Handlung einmal als
+        QAction — im Menü steht ihr Kürzel daneben, die Knöpfe nennen es im
+        Tooltip. Die Handler prüfen selbst, ob sie gerade passen.
+
+        Fenster-weit: was nie mit einem Eingabefeld oder dem Bild kollidiert.
+        Nur in der Liste: Entf, F2, Strg+C, Strg+V — im Suchfeld löschen,
+        kopieren und einfügen sie Text, im Bild kopiert Strg+C den Knoten."""
+        def aktion(text, kuerzel, handler, nur_liste=False, knopf=None) -> QAction:
+            a = QAction(text, self)
+            a.setShortcut(QKeySequence(kuerzel))
+            a.triggered.connect(lambda *_: handler())
+            ziel = self.list if nur_liste else self
+            a.setShortcutContext(Qt.ShortcutContext.WidgetShortcut if nur_liste
+                                 else Qt.ShortcutContext.WindowShortcut)
+            ziel.addAction(a)
+            if knopf is not None:
+                knopf.setToolTip(a.shortcut().toString(QKeySequence.SequenceFormat.NativeText))
+            return a
+
+        def mit_baum(handler):
+            return lambda: handler() if self._tree is not None else None
+
+        self.act_save = aktion("Save", "Ctrl+S", self._save_quick, knopf=self.overwrite_button)
+        self.act_save_as = aktion("Save as…", "Ctrl+Shift+S", self._save_current,
+                                  knopf=self.save_button)
+        self.act_undo = aktion("Undo", "Ctrl+Z", self._undo_edit, knopf=self.undo_button)
+        self.act_discard = aktion("Discard changes", "", lambda: self._discard_draft(ask=True))
+        self.act_import = aktion("Import…", "Ctrl+I", mit_baum(self._import_link),
+                                 knopf=self.import_button)
+        self.act_paste = aktion("Import from clipboard", "Ctrl+V",
+                                mit_baum(lambda: self._import_link(from_clipboard=True)),
+                                nur_liste=True)
+        self.act_rename = aktion("Rename…", "F2", self._rename, nur_liste=True,
+                                 knopf=self.rename_button)
+        self.act_delete = aktion("Delete", "Del", self._delete, nur_liste=True,
+                                 knopf=self.delete_button)
+        self.act_duplicate = aktion("Duplicate…", "Ctrl+D", self._duplicate)
+        self.act_planner = aktion("Open in planner", "Ctrl+O", self._open_planner,
+                                  knopf=self.planner_button)
+        self.act_link = aktion("Copy link", "Ctrl+L", self._copy_link, knopf=self.link_button)
+        self.act_text = aktion("Copy as text", "Ctrl+C", self._copy_text, nur_liste=True,
+                               knopf=self.copy_button)
+        self.act_show = aktion("Show tree", "", self._show_tree_tab)
+        self.act_find = aktion("Find", "Ctrl+F", self._focus_search)
+        for nummer in range(4):
+            aktion(f"Tab {nummer + 1}", f"Ctrl+{nummer + 1}",
+                   lambda n=nummer: self._show_tab(n))
+
+    def _context_actions(self, key) -> list[QAction | None]:
+        """Was das Menü zu ``key`` zeigt (``None`` = Trennstrich)."""
+        art = key[0] if key else None
+        haupt: list[QAction | None] = []
+        if art == DRAFT:
+            herkunft = self._draft_from or (None, None)
+            if herkunft[0] == CONFIG:
+                self.act_save.setText(f"Save to “{herkunft[1]}”")
+                haupt.append(self.act_save)
+            haupt += [self.act_save_as, self.act_undo, self.act_discard]
+        elif art == CONFIG:
+            haupt += [self.act_show, self.act_rename, self.act_duplicate, self.act_delete]
+        elif art in (CURRENT, HISTORY):
+            haupt += [self.act_show, self.act_duplicate]
+        self.act_duplicate.setText("Duplicate…" if art == CONFIG else "Save as configuration…")
+        if self._entry(key) is not None:
+            haupt += [None, self.act_planner, self.act_link, self.act_text]
+        return haupt + ([None] if haupt else []) + [self.act_import]
+
+    def _list_menu(self, punkt) -> None:
+        item = self.list.itemAt(punkt)
+        if item is not None and item.data(Qt.ItemDataRole.UserRole):
+            self.list.setCurrentItem(item)
+        menue = QMenu(self)
+        for a in self._context_actions(self._selected()):
+            menue.addSeparator() if a is None else menue.addAction(a)
+        menue.exec(self.list.viewport().mapToGlobal(punkt))
+
+    def _save_quick(self) -> None:
+        """Strg+S: einen Entwurf aus einer Konfiguration dorthin zurück,
+        sonst wie "Save as…"."""
+        if self._draft is not None and self._draft_from and self._draft_from[0] == CONFIG:
+            self._save_draft_over()
+        else:
+            self._save_current()
+
+    def _duplicate(self) -> None:
+        """Den gewählten Eintrag als (neue) Konfiguration — Kopie einer
+        Konfiguration oder ein Stand aus dem Verlauf."""
+        key = self._selected()
+        eintrag = self._entry(key)
+        if eintrag is None or key[0] == DRAFT:
+            return
+        if key[0] == CURRENT:
+            self._save_current()
+            return
+        vorschlag = f"{key[1]} (copy)" if key[0] == CONFIG else \
+            f"Level {eintrag.get('level') or '?'} tree"
+        name = self._ask_name("Save as configuration", vorschlag)
+        if not name or not self._confirm_overwrite(name):
+            return
+        aktuell = tree_history.current(self._characters, self._name) or {}
+        tree_history.save_config(self._characters, self._name, name,
+                                 dict(eintrag.get("passives") or {}),
+                                 level=eintrag.get("level") or aktuell.get("level") or 0,
+                                 ruthless=bool(eintrag.get("ruthless", aktuell.get("ruthless"))),
+                                 source="copy")
+        self._on_change()
+        self.refresh((CONFIG, name))
+
+    def _show_tab(self, nummer: int) -> None:
+        if self.tabs.isTabVisible(nummer):
+            self.tabs.setCurrentIndex(nummer)
+
+    def _show_tree_tab(self) -> None:
+        self.tabs.setCurrentIndex(3)
+
+    def _focus_search(self) -> None:
+        """Strg+F: im Reiter "Within reach" dessen Filter, sonst das
+        Suchfeld über dem Bild."""
+        if self.tabs.currentIndex() == 2:
+            feld = self.reach_filter
+        else:
+            self._show_tree_tab()
+            feld = self.graph_search
+        feld.setFocus(Qt.FocusReason.ShortcutFocusReason)
+        feld.selectAll()
+
+    @staticmethod
+    def _clipboard_import_text() -> str:
+        """Was in der Zwischenablage nach Baum, Build oder pobb.in aussieht —
+        als Vorschlag im Import-Feld; sonst nichts."""
+        text = (QGuiApplication.clipboard().text() or "").strip()
+        if not text or len(text) > 2_000_000:
+            return ""
+        if pob_import.remote_url(text) or "passive-skill-tree/" in text:
+            return text
+        roh = "".join(text.split())
+        if len(roh) >= 40 and all(c.isalnum() or c in "-_=" for c in roh):
+            return text                                 # Code (Base64)
+        return ""
 
     # --- Liste ---------------------------------------------------------- #
 
@@ -440,6 +589,10 @@ class PassiveTreeDialog(QDialog):
             self.overwrite_button.setText(f"Save to “{herkunft[1]}”")
         self.undo_button.setVisible(ist_entwurf)
         self.undo_button.setEnabled(bool(self._undo))
+        # Die Aktionen (Menü, Kürzel) wie die Knöpfe (§4.60.10).
+        self.act_undo.setEnabled(bool(self._undo))
+        self.act_import.setEnabled(self._tree is not None)
+        self.act_paste.setEnabled(self._tree is not None)
         self.discard_button.setVisible(ist_entwurf)
         self.import_button.setEnabled(self._tree is not None)
         teile = ["Ruthless tree"] if self._tree is not None and self._tree.ruthless else []
@@ -643,14 +796,20 @@ class PassiveTreeDialog(QDialog):
         self._on_change()
         self.refresh((CONFIG, name))
 
-    def _import_link(self) -> None:
+    def _import_link(self, from_clipboard: bool = False) -> None:
         """Planer-Link, PoB-Code oder pobb.in-/pastebin-Link (§4.60.9;
         Peter, 2026-10-08: "Evtl. sollten wir die pobb.in Unterstützung
-        hinzufügen") — ein Build bringt oft mehrere Bäume mit."""
-        text, ok = QInputDialog.getText(
-            self, "Import tree",
-            "Paste a passive tree link (official planner or Path of Building),\n"
-            "a Path of Building code, or a pobb.in / pastebin link:")
+        hinzufügen") — ein Build bringt oft mehrere Bäume mit. Was in der
+        Zwischenablage danach aussieht, steht schon im Feld (§4.60.10);
+        Strg+V in der Liste importiert es ohne Nachfrage."""
+        vorschlag = self._clipboard_import_text()
+        if from_clipboard and vorschlag:
+            text, ok = vorschlag, True
+        else:
+            text, ok = QInputDialog.getText(
+                self, "Import tree",
+                "Paste a passive tree link (official planner or Path of Building),\n"
+                "a Path of Building code, or a pobb.in / pastebin link:", text=vorschlag)
         if not ok or not text.strip():
             return
         try:

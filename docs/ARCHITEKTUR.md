@@ -9052,6 +9052,64 @@ Nativ gesehen: Mit fester Höhe war im Auswahlfenster der zehnte Baum
 abgeschnitten, jetzt richtet sich die Höhe nach der Zahl. Gegenprobe
 mit 15 Sabotagen, alle gefangen — eine ließ den Lauf zuerst hängen
 (FALLSTRICKE #99).
+
+
+#### 4.60.10 Rechtsklick-Menü und Tastenkürzel
+
+Peter, 2026-10-08, nach dem ersten Import von Pohx' zehn Bäumen:
+"Folgende QoL wären für die Configurations noch gut: Rechtsklick-Menüs
+und Shortcuts."
+
+**Eine QAction je Handlung** (`_build_actions`): Menü, Kürzel und Knopf
+lösen dieselbe Methode aus; im Menü steht das Kürzel daneben, die
+Knöpfe nennen es im Tooltip. Die Handler prüfen selbst, ob sie gerade
+passen (Umbenennen nur bei einer Konfiguration usw.); `act_undo`,
+`act_import` und `act_paste` werden in `_show_selected` mit den Knöpfen
+an- und abgeschaltet — zuerst schaltete das Menü Undo ab, und Strg+Z
+blieb aus, bis es wieder aufging (beim Lesen gefunden).
+
+| Kürzel | Handlung | wo |
+|---|---|---|
+| Strg+S | Entwurf aus Konfiguration X → nach X, sonst "Save as…" | Fenster |
+| Strg+Umschalt+S | Save as… (Entwurf bzw. aktueller Baum) | Fenster |
+| Strg+Z | Undo im Entwurf | Fenster |
+| Strg+I | Import… (Feld mit der Zwischenablage vorbelegt) | Fenster |
+| Strg+D | Duplicate… / Save as configuration… (Verlauf) | Fenster |
+| Strg+O / Strg+L | Open in planner / Copy link | Fenster |
+| Strg+F | Suchfeld über dem Bild; im Reiter "Within reach" dessen Filter | Fenster |
+| Strg+1 … 4 | Reiter (ein ausgeblendeter Respec bleibt aus) | Fenster |
+| F2 / Entf | Rename… / Delete | Liste |
+| Strg+C | Copy as text | Liste |
+| Strg+V | Import aus der Zwischenablage, ohne Textfeld | Liste |
+| Enter, Doppelklick | zum Reiter "Tree" | Liste |
+
+**Warum manche nur in der Liste:** Entf, Strg+C und Strg+V brauchen
+die Suchfelder für Text, und im Bild kopiert Strg+C den Knoten unter
+der Maus (§4.60.6). Ein fensterweites Kürzel ginge vor — Qt fragt
+Kürzel vor dem `keyPressEvent` des Widgets ab. Die übrigen kollidieren
+mit nichts: `QLineEdit` meldet für Strg+Z/Strg+C/Strg+V selbst
+"ShortcutOverride" an und behält sie.
+
+**Das Menü** (`_context_actions`, testbar ohne es zu öffnen): bei einer
+Konfiguration Show tree, Rename, Duplicate, Delete; bei aktuellem Baum
+und Verlauf Show tree und Save as configuration; beim Entwurf Save to
+“X”, Save as, Undo, Discard; dazu Planer, Link, Text, und immer
+Import. Ein Rechtsklick wählt den Eintrag unter der Maus.
+
+**Duplicate** speichert den gewählten Eintrag unter neuem Namen
+(Vorschlag "Fire (copy)" bzw. "Level 29 tree" beim Verlauf, mit dessen
+Level; `source="copy"`). Beim aktuellen Baum ist es "Save current as…".
+
+**Zwischenablage:** Was nach pobb.in/pastebin, Planer-Link oder Code
+(≥ 40 Zeichen Base64) aussieht, steht schon im Import-Feld
+(`_clipboard_import_text`); Strg+V in der Liste importiert es direkt —
+bei einem Baum bleibt nur die Namensfrage.
+
+Getestet mit echten Tastendrücken (offscreen lösen Kürzel aus, wenn
+das Fenster aktiv ist): F2/Entf in der Liste, Entf im Suchfeld löscht
+Text, Strg+C in Liste und Bild, Strg+Z/S/F/2, Strg+V. Nativ angesehen:
+das Menü einer Konfiguration. Gegenprobe mit 12 Sabotagen, alle
+gefangen.
 ---
 
 ## 8. Entwicklungsstand

@@ -20,6 +20,12 @@ nach [SemVer](https://semver.org/lang/de/).
   Build mehrere Bäume (Pohx' Guide: neun Levelabschnitte und ein
   Info-Baum), wählt man sie per Häkchen aus; jeder wird eine
   Konfiguration mit dem Titel aus PoB.
+- **Baum-Fenster: Rechtsklick-Menü und Tastenkürzel** — Ctrl+S
+  speichern, Ctrl+Z Undo, F2 umbenennen, Entf löschen, Ctrl+D
+  duplizieren (auch einen Stand aus dem Verlauf), Ctrl+I importieren,
+  Ctrl+V in der Liste importiert aus der Zwischenablage, Ctrl+L/Ctrl+O
+  Link/Planer, Ctrl+F Suche, Ctrl+1–4 Reiter, Doppelklick zum Bild.
+  Steht im Import-Feld schon, was in der Zwischenablage liegt.
 
 ## [0.25.0] - 2026-10-08
 

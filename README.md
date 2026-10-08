@@ -214,7 +214,10 @@ the tree you are in.
   the current tree as one, or import a link from the official tree
   planner, a Path of Building code or a **pobb.in** / pastebin link —
   a build with several trees (one per levelling stage, say) becomes
-  one configuration per tree you tick. For each configuration you get the
+  one configuration per tree you tick. Right-click a configuration for
+  rename, duplicate, delete and the rest; the usual shortcuts work
+  (Ctrl+S, Ctrl+Z, F2, Del, Ctrl+D, and Ctrl+V in the list imports
+  whatever tree or build link is on the clipboard). For each configuration you get the
   respec as a to-do list against your current tree (refund, allocate,
   change mastery, number of points and the gold it costs at your level)
   and what it gains and loses in
