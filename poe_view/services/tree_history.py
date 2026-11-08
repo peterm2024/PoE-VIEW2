@@ -77,7 +77,7 @@ def _signature(passives: dict) -> str:
 
 
 def record(characters: dict, name: str, passives: dict, *, level: int,
-           ruthless: bool, now: datetime | None = None) -> bool:
+           ruthless: bool, now: datetime | None = None, tree: str | None = None) -> bool:
     """Den Baum eintragen; liefert, ob sich etwas geändert hat (dann muss
     gespeichert werden). Ein leeres ``passives`` (Feld fehlte) ändert
     nichts — sonst sähe ein Abruf ohne Baum aus wie ein Komplett-Respec."""
@@ -96,6 +96,8 @@ def record(characters: dict, name: str, passives: dict, *, level: int,
         return False
     neu = {"at": (now or datetime.now()).isoformat(timespec="seconds"),
            "level": level, "ruthless": ruthless, "passives": passives}
+    if tree:
+        neu["tree"] = tree                  # Kennung des Baums (§4.60.15)
     eintrag["current"] = neu
     verlauf = eintrag.setdefault("history", [])
     verlauf.append(dict(neu))   # eigene Kopie: "current" wird spaeter fortgeschrieben
@@ -123,10 +125,11 @@ def configs(characters: dict, name: str) -> dict[str, dict]:
 def save_config(characters: dict, name: str, config_name: str, passives: dict, *,
                 level: int, ruthless: bool, source: str,
                 now: datetime | None = None, group: str | None = None,
-                notes: str | None = None) -> None:
+                notes: str | None = None, tree: str | None = None) -> None:
     """Anlegen oder überschreiben. ``group`` und ``notes``: None behält
     Gruppe bzw. Notizen einer überschriebenen Konfiguration ("Save to X"
-    soll sie nicht verlieren), "" nimmt sie heraus."""
+    soll sie nicht verlieren), "" nimmt sie heraus. ``tree``: Kennung des
+    Baums, zu dem die Knoten gehören (§4.60.15)."""
     config_name = config_name.strip()
     if not config_name:
         raise ValueError("Konfiguration ohne Namen")
@@ -138,6 +141,8 @@ def save_config(characters: dict, name: str, config_name: str, passives: dict, *
     eintrag = {"at": (now or datetime.now()).isoformat(timespec="seconds"),
                "level": level, "ruthless": ruthless, "source": source,
                "passives": passives}
+    if tree:
+        eintrag["tree"] = tree
     if group.strip():
         eintrag["group"] = group.strip()
     if notes.strip():

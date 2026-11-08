@@ -9423,6 +9423,78 @@ Regler: 15 Sabotagen, alle gefangen.
 Gesehene Quest-Punkte: 6 Sabotagen, eine hielt — eine doppelte
 Obergrenze, entfernt.
 
+#### 4.60.15 Ältere Bäume bleiben ansehbar (Season-Wechsel)
+
+Anlass: Ende der Allflame-Season (9.11.2026), Covens of Umbra (3.30.0)
+ab 13.11. Peter, 2026-11-08: "Ich würde gerne die alten Trees als
+'Read-Only' behalten, falls das geht. Dann kann man nachschauen, wie man
+mal geskillt hatte." Dazu, von ihm abgenickt: einen neuen Baum sofort
+holen statt nach bis zu einer Woche.
+
+**Kennung eines Baums.** GGGs Daten tragen keine Versionsnummer
+(`"tree": "Default"` in jeder Fassung). Kennung ist deshalb ein
+Fingerabdruck beider Dateien (`_content_id`, sha256 über data.json und
+ruthless.json, 12 Zeichen), im Manifest vermerkt; ein Bestand von vorher
+bekommt sie beim ersten `current_id()`. Der Name ("3.29.1") kommt aus
+den Commit-Meldungen des `skilltree-export` (GitHub-API, die Fassung,
+die zum Download-Zeitpunkt dort stand); ohne Antwort "tree of
+2026-10-05". Er ist Beiwerk: Ein Fehler beim Namen stört den Download
+nicht.
+
+**Archiv.** Bringt `fetch` einen anderen Baum, wandert der bisherige
+nach `passive-tree/archive/<kennung>/` (beide Dateien, Manifest mit
+Name). Derselbe Baum noch einmal legt nichts ab. `load(ruthless,
+tree_id)` lädt einen archivierten.
+
+**Wem ein Eintrag gehört.** `record` und `save_config` schreiben die
+Kennung des aktuellen Baums mit (`"tree"`), Duplizieren behält die des
+Originals. Einträge ohne Kennung entstanden vorher und gehören zum
+ältesten bekannten Baum (`entry_tree_id` → `oldest_id`) — bei Peter
+alle auf 3.29.1. Der Eintrag "Current tree" gehört immer zum heutigen
+Baum: Er zeigt, was die API jetzt meldet.
+
+**Im Baum-Fenster** gibt es zwei Bäume: `_live_tree` (heute) und
+`_tree` (der des gezeigten Eintrags, beim Wechsel der Auswahl gesetzt).
+Alles Zeigen — Bild, Overview, Within reach, Tooltips — rechnet mit
+`_tree`; Planen, Import und Leveling mit `_live_tree`. Ein Eintrag auf
+einem älteren Baum ist nur anzusehen:
+
+- Liste " · 3.29.1" hinter dem Namen, Hinweiszeile "Read-only: made on
+  the 3.29.1 tree, shown on that tree", Legende ohne "click: allocate".
+- Klicks bauen keinen Entwurf (`_editing_base` → None) und stellen auch
+  keine Plan-Reihenfolge um.
+- Kein "Open in planner"/"Copy link": GGGs Planer zeigt immer den
+  heutigen Baum, das gäbe ein falsches Bild. "Copy as text" bleibt.
+- Kein Vergleich über Fassungen hinweg (`_base` → None, auch nicht mit
+  einer von Hand gewählten Basis): Dieselbe Kennung kann im neuen Baum
+  ein anderer Knoten sein. Zwei Stände desselben alten Baums
+  vergleichen sich weiter.
+- Kein "Level towards this", und ein Plan mit altem Ziel läuft nicht
+  (`build_plan` → None).
+
+**Neuer Baum sofort.** Trägt ein abgerufener Charakter Knoten, die der
+gespeicherte Baum nicht kennt (`unknown_nodes`, ohne die Cluster-Knoten
+aus `hashes_ex`), reiht das Hauptfenster `FetchPassiveTreeJob` ein —
+einmal je Sitzung, damit unbekannte Knoten ohne neuen Baum nicht jeden
+Abruf zum Download machen. Bringt er einen neuen Baum, meldet die
+Statusleiste das, und ein offenes Baum-Fenster rechnet mit ihm weiter
+(`set_live_tree`).
+
+Getestet: Archiv (neuer Baum legt ab, gleicher nicht, Name aus dem
+passenden Commit, Ersatzname ohne GitHub, Bestand ohne Kennung),
+Zugehörigkeit (alt → ältester, Kennung in Verlauf/Konfiguration),
+unbekannte Knoten; Fenster (alter Stand auf altem Baum, Hinweis, Liste,
+Legende, keine Klicks, keine Reihenfolge, Planer/Link aus, Vergleich nur
+innerhalb einer Fassung, kein Plan, Duplikat behält Baum; neuer Stand
+bearbeitbar; neuer Baum im offenen Fenster); Hauptfenster (Kennung beim
+Aufzeichnen, Nachladen einmal und nur bei unbekannten Knoten, Meldung).
+Nativ mit Peters echten Daten in einer Kopie (echter 3.29.1-Baum ins
+Archiv, ein veränderter als "neuer"): alle Konfigurationen und der
+Verlauf mit " · 3.29.1", Bild aus dem Archiv, Planer aus. Gegenprobe 26
+Sabotagen; drei hielten zuerst — eine doppelte Sperre im Klick-Hinweis
+(entfernt), dazu Tests für "Set order" auf altem Stand und Vergleiche
+über Fassungen ergänzt.
+
 ---
 
 ## 8. Entwicklungsstand

@@ -6,6 +6,17 @@ nach [SemVer](https://semver.org/lang/de/).
 
 ## [Unveröffentlicht]
 
+### Neu
+
+- **Ältere Passiv-Bäume bleiben ansehbar:** Bringt GGG einen neuen Baum
+  (etwa zu Covens of Umbra), bleiben Verlauf und Konfigurationen vom
+  alten Baum auf diesem zu sehen — schreibgeschützt und in der Liste mit
+  „· 3.29.1“ gekennzeichnet. Bearbeiten, Planer-Link, Leveling-Plan und
+  Vergleiche mit dem neuen Baum gibt es für sie nicht.
+- **Neuer Baum sofort:** Trägt ein Charakter Knoten, die der gespeicherte
+  Baum nicht kennt, lädt das Programm die Baumdaten gleich neu statt
+  nach bis zu einer Woche.
+
 ## [0.26.0] - 2026-10-09
 
 ### Neu

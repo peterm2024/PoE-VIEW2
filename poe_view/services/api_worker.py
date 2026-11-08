@@ -172,6 +172,14 @@ class FetchModKnowledgeJob:
 
 
 @dataclass
+class FetchPassiveTreeJob:
+    """Lädt GGGs Baumdaten sofort neu, ohne die Wochenfrist abzuwarten —
+    das MainWindow reiht ihn ein, wenn ein Charakter Knoten trägt, die der
+    gespeicherte Baum nicht kennt (§4.60.15: neue Season, neuer Baum). Kein
+    Auth, wie ``FetchModKnowledgeJob``."""
+
+
+@dataclass
 class CheckUpdateJob:
     """Fragt GitHub nach dem neuesten Release (§4.57,
     ``services/update_check.py``). Kein Auth, kein GGG-Budget — wie
@@ -286,6 +294,7 @@ class ApiWorker(QThread):
     prices_loaded = Signal(str, object)        # league, PriceIndex
     poe2_probe_loaded = Signal(object)         # poe2_probe.Probe
     mod_knowledge_loaded = Signal(object)      # mod_knowledge.Knowledge | None
+    passive_tree_updated = Signal(bool)        # neuer Baum geladen? (§4.60.15)
     # Nur bei einem NEUEREN Release — "keins" und "Frage gescheitert"
     # bleiben stumm, die Statusleiste hat dafür nichts zu sagen.
     update_available = Signal(object)          # update_check.Release
@@ -528,6 +537,10 @@ class ApiWorker(QThread):
                 # GGG-Daten ohne Lizenz zum Mitliefern, ebenfalls eine Woche.
                 passive_tree.ensure_fresh(self._repoe_http)
                 self.mod_knowledge_loaded.emit(mod_knowledge.get(rebuild=True))
+            case FetchPassiveTreeJob():
+                vorher = passive_tree.current_id()
+                ok = passive_tree.fetch(self._repoe_http)
+                self.passive_tree_updated.emit(ok and passive_tree.current_id() != vorher)
             case CheckUpdateJob():
                 release = update_check.check(self._github_http)
                 if release is not None:

@@ -232,7 +232,9 @@ the tree you are in.
   *+1 quest* / *−1 quest*. The tree numbers the next ten points, and on
   every level-up the status bar and a small always-on-top window name the
   point to take now; a slider lets you watch the tree grow from 0 points
-  to the goal.
+  to the goal. When GGG ships a new tree, trees and configurations from
+  the old one stay viewable on the tree they were made on (read-only,
+  marked e.g. "· 3.29.1").
   For each configuration you get the
   respec as a to-do list against your current tree (refund, allocate,
   change mastery, number of points and the gold it costs at your level)

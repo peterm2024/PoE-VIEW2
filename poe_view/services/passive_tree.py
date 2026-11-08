@@ -27,9 +27,12 @@ Was die API zum Baum liefert (``/character/<name>``, Feld ``passives``):
 from __future__ import annotations
 
 import json
+import hashlib
 import logging
 import re
+import shutil
 import time
+from datetime import datetime
 from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -43,6 +46,14 @@ log = logging.getLogger(__name__)
 _BASE_URL = "https://raw.githubusercontent.com/grindinggear/skilltree-export/master"
 _FILE = {False: "data.json", True: "ruthless.json"}
 _DIR_NAME = "passive-tree"
+# Ältere Bäume, je Kennung ein Ordner (§4.60.15): Peter, 2026-11-08,
+# vor Covens of Umbra: "Ich würde gerne die alten Trees als 'Read-Only'
+# behalten, falls das geht. Dann kann man nachschauen, wie man mal
+# geskillt hatte."
+_ARCHIVE = "archive"
+# Woher der Name eines Baums kommt ("3.29.1"): die Commit-Meldungen des
+# Exports. GGGs Daten selbst tragen keine Versionsnummer.
+_COMMITS_URL = "https://api.github.com/repos/grindinggear/skilltree-export/commits"
 # Wie beim Mod-Wissen: Der Baum ändert sich mit Patches, nicht mit Sitzungen.
 TTL_SECONDS = 7 * 24 * 3600
 CACHE_VERSION = 1
@@ -60,11 +71,114 @@ def _manifest_path() -> Path:
     return tree_dir() / "manifest.json"
 
 
-def is_fresh() -> bool:
+def _read_manifest(ordner: Path) -> dict:
     try:
-        manifest = json.loads(_manifest_path().read_text(encoding="utf-8"))
+        roh = json.loads((ordner / "manifest.json").read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
-        return False
+        return {}
+    return roh if isinstance(roh, dict) else {}
+
+
+def _content_id(inhalte: dict[str, bytes]) -> str:
+    """Die Kennung eines Baums: Fingerabdruck beider Dateien. GGGs Daten
+    tragen keine Versionsnummer ("tree": "Default" in jeder Fassung)."""
+    h = hashlib.sha256()
+    for name in sorted(inhalte):
+        h.update(name.encode())
+        h.update(inhalte[name])
+    return h.hexdigest()[:12]
+
+
+def current_id() -> str | None:
+    """Kennung des aktuellen Baums; beim ersten Mal aus den Dateien
+    gerechnet und im Manifest vermerkt (Bestand von vor §4.60.15)."""
+    manifest = _read_manifest(tree_dir())
+    if manifest.get("id"):
+        return manifest["id"]
+    try:
+        inhalte = {name: (tree_dir() / name).read_bytes() for name in _FILE.values()}
+    except OSError:
+        return None
+    manifest["id"] = _content_id(inhalte)
+    try:
+        _manifest_path().write_text(json.dumps(manifest), encoding="utf-8")
+    except OSError:
+        pass
+    return manifest["id"]
+
+
+def _archive_dir(tree_id: str) -> Path:
+    return tree_dir() / _ARCHIVE / tree_id
+
+
+def archived_ids() -> list[str]:
+    """Die archivierten Bäume, ältester zuerst."""
+    try:
+        ordner = [p for p in (tree_dir() / _ARCHIVE).iterdir() if p.is_dir()]
+    except OSError:
+        return []
+    return [p.name for p in sorted(ordner, key=lambda p: _read_manifest(p).get("fetched_at", 0))]
+
+
+def oldest_id() -> str | None:
+    """Der älteste bekannte Baum — dem gehören Einträge ohne Kennung (sie
+    entstanden, bevor es Kennungen gab)."""
+    alte = archived_ids()
+    return alte[0] if alte else current_id()
+
+
+def tree_label(tree_id: str | None) -> str:
+    """"3.29.1" bzw. "tree of 2026-10-05", wenn der Name fehlt."""
+    if not tree_id:
+        return "unknown tree"
+    ordner = tree_dir() if tree_id == current_id() else _archive_dir(tree_id)
+    manifest = _read_manifest(ordner)
+    if manifest.get("label"):
+        return str(manifest["label"])
+    wann = manifest.get("fetched_at")
+    return f"tree of {datetime.fromtimestamp(wann):%Y-%m-%d}" if wann else "older tree"
+
+
+def entry_tree_id(entry: dict | None) -> str | None:
+    """Zu welchem Baum ein gespeicherter Eintrag gehört."""
+    return (entry or {}).get("tree") or oldest_id()
+
+
+def _label_from_github(client: httpx.Client, before: float | None) -> str | None:
+    """Die Commit-Meldung der Fassung, die zum Zeitpunkt ``before`` (bzw.
+    jetzt) im Export stand — "3.29.1". Ohne Antwort ``None``: Der Name ist
+    Beiwerk, ein Fehler hier darf den Download nicht stören."""
+    try:
+        resp = client.get(_COMMITS_URL, params={"path": _FILE[False], "per_page": 30})
+        if resp.status_code != 200:
+            return None
+        for eintrag in resp.json():
+            commit = eintrag.get("commit") or {}
+            datum = datetime.fromisoformat(
+                str((commit.get("committer") or {}).get("date")).replace("Z", "+00:00"))
+            if before is None or datum.timestamp() <= before:
+                return str(commit.get("message") or "").split("\n")[0].strip() or None
+    except Exception:  # noqa: BLE001 — Beiwerk, siehe oben
+        log.info("Passiv-Baum: Name der Fassung nicht ermittelbar", exc_info=True)
+    return None
+
+
+def _archive_current(client: httpx.Client, alt_id: str) -> None:
+    """Den bisherigen Baum unter seiner Kennung beiseitelegen, samt Namen."""
+    ziel = _archive_dir(alt_id)
+    ziel.mkdir(parents=True, exist_ok=True)
+    manifest = _read_manifest(tree_dir())
+    manifest["id"] = alt_id
+    if not manifest.get("label"):
+        manifest["label"] = _label_from_github(client, manifest.get("fetched_at"))
+    for name in _FILE.values():
+        shutil.copy2(tree_dir() / name, ziel / name)
+    (ziel / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    log.info("Passiv-Baum: bisheriger Baum %s (%s) archiviert", alt_id, manifest.get("label"))
+
+
+def is_fresh() -> bool:
+    manifest = _read_manifest(tree_dir())
     if manifest.get("version") != CACHE_VERSION:
         return False
     if not all((tree_dir() / name).is_file() for name in _FILE.values()):
@@ -75,7 +189,8 @@ def is_fresh() -> bool:
 def fetch(http: httpx.Client | None = None) -> bool:
     """Beide Bäume neu laden; erst schreiben, wenn beide da sind
     (dieselbe Regel wie §mod_knowledge.fetch). Ein Fehler lässt den
-    bisherigen Stand stehen."""
+    bisherigen Stand stehen. Ist der neue Baum ein anderer, wandert der
+    bisherige ins Archiv (§4.60.15)."""
     owns_client = http is None
     client = http or httpx.Client(
         timeout=60.0, headers={"User-Agent": config.user_agent()}, follow_redirects=True)
@@ -88,16 +203,24 @@ def fetch(http: httpx.Client | None = None) -> bool:
                             name, resp.status_code)
                 return False
             payloads[name] = resp.content
+        neu_id = _content_id(payloads)
+        alt_id = current_id()
+        alt_manifest = _read_manifest(tree_dir())
+        if alt_id and alt_id != neu_id:
+            _archive_current(client, alt_id)
         ziel = tree_dir()
         ziel.mkdir(parents=True, exist_ok=True)
         for name, data in payloads.items():
             tmp = ziel / f"{name}.tmp"
             tmp.write_bytes(data)
             tmp.replace(ziel / name)
-        _manifest_path().write_text(
-            json.dumps({"version": CACHE_VERSION, "fetched_at": time.time()}), encoding="utf-8")
+        label = (alt_manifest.get("label") if alt_id == neu_id
+                 else _label_from_github(client, None))
+        _manifest_path().write_text(json.dumps({
+            "version": CACHE_VERSION, "fetched_at": time.time(), "id": neu_id,
+            "label": label}), encoding="utf-8")
         _LOADED.clear()
-        log.info("Passiv-Baum: Daten neu geladen (%s).", ", ".join(_FILE.values()))
+        log.info("Passiv-Baum: Daten neu geladen (%s, %s).", neu_id, label)
         return True
     except (httpx.HTTPError, OSError):
         log.exception("Passiv-Baum: Download fehlgeschlagen")
@@ -300,25 +423,38 @@ def parse_tree(roh: dict, ruthless: bool) -> Tree:
 
 # Geparst wird einmal je Datei-Stand: (Pfad, Änderungszeit) → Baum. Ein
 # neuer Download oder ein anderes Datenverzeichnis (Tests) lädt neu.
-_LOADED: dict[bool, tuple[Path, float, Tree]] = {}
+_LOADED: dict[tuple[bool, str | None], tuple[Path, float, Tree]] = {}
 
 
-def load(ruthless: bool) -> Tree | None:
-    """Den Baum aus dem lokalen Vorrat; ``None``, solange er fehlt."""
-    pfad = tree_dir() / _FILE[ruthless]
+def load(ruthless: bool, tree_id: str | None = None) -> Tree | None:
+    """Den Baum aus dem lokalen Vorrat; ``None``, solange er fehlt. Mit
+    ``tree_id`` ein archivierter (§4.60.15) — oder der aktuelle, wenn es
+    dessen Kennung ist."""
+    ordner = tree_dir()
+    if tree_id is not None and tree_id != current_id():
+        ordner = _archive_dir(tree_id)
+    pfad = ordner / _FILE[ruthless]
     try:
         stand = pfad.stat().st_mtime
     except OSError:
         return None
-    vorrat = _LOADED.get(ruthless)
+    schluessel = (ruthless, None if ordner == tree_dir() else tree_id)
+    vorrat = _LOADED.get(schluessel)
     if vorrat and vorrat[0] == pfad and vorrat[1] == stand:
         return vorrat[2]
     try:
         roh = json.loads(pfad.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None
-    _LOADED[ruthless] = (pfad, stand, parse_tree(roh, ruthless))
-    return _LOADED[ruthless][2]
+    _LOADED[schluessel] = (pfad, stand, parse_tree(roh, ruthless))
+    return _LOADED[schluessel][2]
+
+
+def unknown_nodes(tree: Tree, passives: dict) -> set[int]:
+    """Knoten eines Charakters, die der Baum nicht kennt — ein Zeichen,
+    dass GGG einen neuen Baum hat (Cluster-Knoten in ``hashes_ex`` stehen
+    nie im Baum und zählen nicht)."""
+    return {h for h in allocated(passives) if h not in tree.nodes}
 
 
 # --- Der Baum eines Charakters ------------------------------------------- #

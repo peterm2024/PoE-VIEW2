@@ -103,6 +103,12 @@ class PassiveTreeDialog(QDialog):
         self._name = name
         self._class = class_name
         self._characters = characters
+        # Der aktuelle Baum von GGG — und der des gezeigten Eintrags, der
+        # bei einem älteren Eintrag ein archivierter ist (§4.60.15: Peter,
+        # "die alten Trees als 'Read-Only' behalten ... nachschauen, wie man
+        # mal geskillt hatte"). Alles Zeigen rechnet mit ``_tree``, alles
+        # Planen mit ``_live_tree``.
+        self._live_tree = tree
         self._tree = tree
         self._on_change = on_change
         self._draft: dict | None = None          # passives des Entwurfs
@@ -425,8 +431,9 @@ class PassiveTreeDialog(QDialog):
                 haupt.append(self.act_save)
             haupt += [self.act_save_as, self.act_undo, self.act_discard]
         elif art == CONFIG:
-            haupt += [self.act_show, self.act_rename, self.act_duplicate, self.act_move_group,
-                      self.act_plan, self.act_delete]
+            haupt += [self.act_show, self.act_rename, self.act_duplicate, self.act_move_group]
+            haupt += [] if self._read_only(key) else [self.act_plan]
+            haupt += [self.act_delete]
         elif art in (CURRENT, HISTORY):
             haupt += [self.act_show, self.act_duplicate]
         self.act_duplicate.setText("Duplicate…" if art == CONFIG else "Save as configuration…")
@@ -606,8 +613,10 @@ class PassiveTreeDialog(QDialog):
 
     def _use_as_plan(self) -> None:
         """Die Konfiguration unter der Maus (oder die gewählte) als Endziel —
-        gezeigt wird sie gleich, mit den ersten Punkten nummeriert."""
-        namen = [k[1] for k in self._targets() if k and k[0] == CONFIG]
+        gezeigt wird sie gleich, mit den ersten Punkten nummeriert. Eine
+        aus einem älteren Baum taugt nicht (§4.60.15)."""
+        namen = [k[1] for k in self._targets()
+                 if k and k[0] == CONFIG and not self._read_only(k)]
         if not namen:
             return
         tree_history.set_leveling(self._characters, self._name, namen[0])
@@ -630,7 +639,7 @@ class PassiveTreeDialog(QDialog):
         self._update_plan(self._selected())
 
     def _change_quest(self, delta: int) -> None:
-        stand = leveling_view.progress(self._tree, self._characters, self._name, self._class,
+        stand = leveling_view.progress(self._live_tree, self._characters, self._name, self._class,
                                        self._level)
         if stand is None or not leveling_view.change_quest(self._characters, self._name,
                                                            stand, delta):
@@ -643,7 +652,7 @@ class PassiveTreeDialog(QDialog):
         steht der Spieler) und am Ziel; sonst ein Hinweis darauf. Rechnet
         wie Statusleiste und Mini-Fenster (``leveling_view.progress``)."""
         roh = tree_history.leveling(self._characters, self._name) or {}
-        plan = self._plan() if self._tree is not None else None
+        plan = self._plan() if self._live_tree is not None else None
         self.plan_bar.setVisible(plan is not None)
         self.plan_steps = []
         if plan is None:
@@ -651,7 +660,7 @@ class PassiveTreeDialog(QDialog):
             self.graph.set_markers({})
             return
         ziel = roh.get("target", "")
-        stand = leveling_view.progress(self._tree, self._characters, self._name, self._class,
+        stand = leveling_view.progress(self._live_tree, self._characters, self._name, self._class,
                                        self._level)
         leveling_view.update_quest_buttons(self.quest_plus, self.quest_minus, stand)
         im_plan = key in ((CURRENT, None), (CONFIG, ziel))
@@ -689,14 +698,14 @@ class PassiveTreeDialog(QDialog):
             vorschau = leveling.passives_after(stand.steps, vergeben)
             self.graph.show_tree(vorschau, self._class, show_reach=False, dark=self._dark())
             self.graph.highlight(self.graph_search.text())
-            self.graph_points.setText(tree_report.points_text(self._tree, vorschau))
+            self.graph_points.setText(tree_report.points_text(self._live_tree, vorschau))
             self.plan_slider_label.setText(
                 f"Preview: {vergeben}/{gesamt} points · level {vergeben + 1} without quests")
         else:
             self.plan_slider_label.setText(f"{vergeben}/{gesamt} points · drag to preview")
         self.graph.set_markers(marken, now=naechster.node if naechster else None)
-        teile = [f"Leveling towards “{ziel}”", stand.points_text(), stand.now_text(self._tree)]
-        danach = [self._tree.nodes[s.node].name for s in stand.upcoming[1:3]]
+        teile = [f"Leveling towards “{ziel}”", stand.points_text(), stand.now_text(self._live_tree)]
+        danach = [self._live_tree.nodes[s.node].name for s in stand.upcoming[1:3]]
         if stand.now is not None and danach:
             teile.append("then " + ", ".join(danach))
         if self.order_button.isChecked():
@@ -709,8 +718,8 @@ class PassiveTreeDialog(QDialog):
     def _set_preview(self, wert: int | None) -> None:
         """Vorschau auf ``wert`` Punkte; None (oder der Stand von jetzt)
         zeigt wieder den Eintrag selbst."""
-        stand = leveling_view.progress(self._tree, self._characters, self._name, self._class,
-                                       self._level) if self._tree is not None else None
+        stand = leveling_view.progress(self._live_tree, self._characters, self._name, self._class,
+                                       self._level) if self._live_tree is not None else None
         if stand is not None and wert == min(stand.points, len(stand.steps)):
             wert = None
         if wert == self._preview:
@@ -733,7 +742,7 @@ class PassiveTreeDialog(QDialog):
         plan = self._plan()
         if plan is None:
             return set()
-        return leveling._haupt(self._tree, passive_tree.allocated(plan.target))
+        return leveling._haupt(self._live_tree, passive_tree.allocated(plan.target))
 
     def _toggle_priority(self, node: int) -> None:
         roh = tree_history.leveling(self._characters, self._name)
@@ -785,7 +794,7 @@ class PassiveTreeDialog(QDialog):
                                  level=eintrag.get("level") or aktuell.get("level") or 0,
                                  ruthless=bool(eintrag.get("ruthless", aktuell.get("ruthless"))),
                                  source="copy", group=eintrag.get("group", ""),
-                                 notes=eintrag.get("notes", ""))
+                                 notes=eintrag.get("notes", ""), tree=self._tree_id_of(key))
         self._on_change()
         self._after(key, (CONFIG, name))
 
@@ -853,20 +862,22 @@ class PassiveTreeDialog(QDialog):
             for name in sorted(konfigs, key=config_order):
                 je_gruppe.setdefault(konfigs[name].get("group", ""), []).append(name)
             for name in je_gruppe.pop("", []):
-                self._add(f"  {name}", (CONFIG, name), tooltip=self._notes_preview(name))
+                self._add(f"  {name}{self._old_mark((CONFIG, name))}", (CONFIG, name),
+                          tooltip=self._notes_preview(name))
             for gruppe in sorted(je_gruppe, key=config_order):
                 zu = gruppe in self._collapsed
                 self._group_header(gruppe, len(je_gruppe[gruppe]), zu)
                 if not zu:
                     for name in je_gruppe[gruppe]:
-                        self._add(f"      {name}", (CONFIG, name),
-                                  tooltip=self._notes_preview(name))
+                        self._add(f"      {name}{self._old_mark((CONFIG, name))}",
+                                  (CONFIG, name), tooltip=self._notes_preview(name))
         verlauf = tree_history.history(self._characters, self._name)
         if verlauf:
             self._header("History")
             for index in range(len(verlauf) - 1, -1, -1):
                 eintrag = verlauf[index]
-                self._add(f"  {self._history_caption(verlauf, index)}", (HISTORY, index))
+                self._add(f"  {self._history_caption(verlauf, index)}"
+                          f"{self._old_mark((HISTORY, index))}", (HISTORY, index))
         self.list.blockSignals(False)
         self._fill_compare_box(aktuell, konfigs, verlauf)
         # Überschriften tragen keinen Schlüssel — ohne ``alt`` darf die
@@ -926,16 +937,22 @@ class PassiveTreeDialog(QDialog):
         Konfiguration und Entwurf gegen den aktuellen Baum, Verlauf gegen
         den Eintrag davor (§4.60.11)."""
         gewaehlt = self._compare_key()
+        hier = self._tree_id_of(key)
         if gewaehlt and gewaehlt != key and self._entry(gewaehlt) is not None:
+            # Zwei Bäume verschiedener Fassungen vergleicht man nicht —
+            # dieselbe Kennung kann dort etwas anderes sein (§4.60.15).
+            if self._tree_id_of(gewaehlt) != hier:
+                return None
             return (self._entry(gewaehlt).get("passives") or {}, self._label(gewaehlt), True)
         art = key[0] if key else None
         if art in (CONFIG, DRAFT):
             aktuell = tree_history.current(self._characters, self._name)
-            if aktuell:
+            if aktuell and hier == passive_tree.current_id():
                 return aktuell.get("passives") or {}, "current tree", True
         if art == HISTORY and key[1] > 0:
             davor = tree_history.history(self._characters, self._name)[key[1] - 1]
-            return davor.get("passives") or {}, "the tree before", False
+            if passive_tree.entry_tree_id(davor) == hier:
+                return davor.get("passives") or {}, "the tree before", False
         return None
 
     def _compare_with_target(self) -> None:
@@ -978,6 +995,10 @@ class PassiveTreeDialog(QDialog):
         item.setFont(schrift)
         self.list.addItem(item)
 
+    def _old_mark(self, key) -> str:
+        """" · 3.29.1" hinter Einträgen eines älteren Baums."""
+        return f" · {passive_tree.tree_label(self._tree_id_of(key))}" if self._read_only(key) else ""
+
     def _history_caption(self, verlauf: list[dict], index: int) -> str:
         eintrag = verlauf[index]
         zeit = str(eintrag.get("at", "")).replace("T", " ")[:16]
@@ -987,6 +1008,36 @@ class PassiveTreeDialog(QDialog):
         jetzt = passive_tree.allocated(eintrag.get("passives") or {})
         vorher = passive_tree.allocated(verlauf[index - 1].get("passives") or {})
         return f"{kopf} · +{len(jetzt - vorher)} / −{len(vorher - jetzt)}"
+
+    # --- Ältere Bäume (§4.60.15) ----------------------------------------- #
+
+    def _tree_id_of(self, key) -> str | None:
+        """Zu welchem Baum ``key`` gehört: aktueller Baum und Entwurf zum
+        heutigen, gespeicherte Einträge zu dem, auf dem sie entstanden."""
+        if not key or key[0] in (CURRENT, DRAFT):
+            return passive_tree.current_id()
+        return passive_tree.entry_tree_id(self._entry(key))
+
+    def _old_tree(self, key) -> Tree | None:
+        """Der archivierte Baum von ``key`` — ``None``, wenn es der
+        aktuelle ist oder das Archiv fehlt (dann bleibt nur der heutige)."""
+        if self._live_tree is None:
+            return None
+        kennung = self._tree_id_of(key)
+        if not kennung or kennung == passive_tree.current_id():
+            return None
+        return passive_tree.load(self._live_tree.ruthless, kennung)
+
+    def _read_only(self, key) -> bool:
+        return self._old_tree(key) is not None
+
+    def set_live_tree(self, tree: Tree | None) -> None:
+        """Vom Hauptfenster, wenn GGG einen neuen Baum hat: ab jetzt der
+        aktuelle; was auf dem alten entstand, ist nur noch anzusehen."""
+        if tree is None:
+            return
+        self._live_tree = self._tree = tree
+        self.refresh(self._selected())
 
     def _selected(self) -> tuple[str, object] | None:
         item = self.list.currentItem()
@@ -1116,8 +1167,10 @@ class PassiveTreeDialog(QDialog):
         self.graph_legend.setText(
             ("Green: allocate · red: refund · white: unchanged · " if vergleich is not None
              else "Filled: allocated (colour = theme) · ring: within reach · ")
-            + "hollow: not allocated · yellow ring: search match · wheel: zoom · drag: move · "
-            "click: allocate · right-click: refund\n"
+            + "hollow: not allocated · yellow ring: search match · wheel: zoom · drag: move"
+            # Ein älterer Baum ist nur anzusehen (§4.60.15).
+            + ("" if self._read_only(key) else " · click: allocate · right-click: refund")
+            + "\n"
             + "Background: red Strength · green Dexterity · blue Intelligence · "
             "striped: hybrid classes")
         if fit:
@@ -1152,6 +1205,7 @@ class PassiveTreeDialog(QDialog):
     def _show_selected(self) -> None:
         self._commit_notes()
         key = self._selected()
+        self._tree = self._old_tree(key) or self._live_tree
         self._show_notes(key)
         dunkel = self._dark()
         umbau = self._respec_blocks(key)
@@ -1174,9 +1228,14 @@ class PassiveTreeDialog(QDialog):
         ist_konfig = bool(key) and key[0] == CONFIG
         self.rename_button.setEnabled(ist_konfig)
         self.delete_button.setEnabled(ist_konfig)
-        hat_baum = self._entry(key) is not None and self._tree is not None
+        # Planer und Link zeigen immer GGGs heutigen Baum — für einen
+        # älteren Stand gäbe das ein falsches Bild (§4.60.15).
+        alt = self._read_only(key)
+        hat_baum = self._entry(key) is not None and self._tree is not None and not alt
         self.planner_button.setEnabled(hat_baum)
         self.link_button.setEnabled(hat_baum)
+        self.act_planner.setEnabled(hat_baum)
+        self.act_link.setEnabled(hat_baum)
         self.copy_button.setEnabled(self._entry(key) is not None)
         ist_entwurf = bool(key) and key[0] == DRAFT
         self.save_button.setText("Save as…" if ist_entwurf else "Save current as…")
@@ -1195,6 +1254,9 @@ class PassiveTreeDialog(QDialog):
         self.discard_button.setVisible(ist_entwurf)
         self.import_button.setEnabled(self._tree is not None)
         teile = ["Ruthless tree"] if self._tree is not None and self._tree.ruthless else []
+        if alt:
+            teile.append(f"Read-only: made on the {passive_tree.tree_label(self._tree_id_of(key))} "
+                         "tree, shown on that tree")
         if ist_entwurf and self._tree is not None:
             aktuell = tree_history.current(self._characters, self._name) or {}
             vorher = aktuell.get("passives") or {}
@@ -1233,6 +1295,8 @@ class PassiveTreeDialog(QDialog):
         key = self._selected()
         if key and key[0] == DRAFT:
             return self._draft
+        if self._read_only(key):
+            return None                       # älterer Baum: nur ansehen (§4.60.15)
         eintrag = self._entry(key)
         return None if eintrag is None else (eintrag.get("passives") or {})
 
@@ -1292,6 +1356,10 @@ class PassiveTreeDialog(QDialog):
         return aktionen.get(gewaehlt)
 
     def _on_node_clicked(self, node: int, right: bool) -> None:
+        # Älterer Baum: nur ansehen (§4.60.15) — auch keine Reihenfolge des
+        # Plans, der zum heutigen Baum gehört.
+        if self._read_only(self._selected()):
+            return
         if self._tree is not None and self.order_button.isChecked():
             self._toggle_priority(node)             # Reihenfolge (§4.60.14)
             return
@@ -1372,7 +1440,7 @@ class PassiveTreeDialog(QDialog):
         tree_history.save_config(self._characters, self._name, name, dict(self._draft),
                                  level=aktuell.get("level") or 0,
                                  ruthless=self._tree.ruthless if self._tree else False,
-                                 source="edited")
+                                 source="edited", tree=passive_tree.current_id())
         self._draft, self._draft_from, self._undo, self._status = None, None, [], ""
         self._on_change()
         self.refresh((CONFIG, name))
@@ -1403,7 +1471,8 @@ class PassiveTreeDialog(QDialog):
         tree_history.save_config(self._characters, self._name, name,
                                  dict(aktuell.get("passives") or {}),
                                  level=aktuell.get("level") or 0,
-                                 ruthless=bool(aktuell.get("ruthless")), source="current")
+                                 ruthless=bool(aktuell.get("ruthless")), source="current",
+                                 tree=passive_tree.current_id())
         self._on_change()
         self.refresh((CONFIG, name))
 
@@ -1434,8 +1503,8 @@ class PassiveTreeDialog(QDialog):
             baeume = self._choose_trees(baeume)
             if not baeume:
                 return
-        eigene = self._tree.class_ids.get(self._class, (None, None))[0]
-        fremd = sorted({passive_tree.class_name_of(self._tree, b.link.class_index,
+        eigene = self._live_tree.class_ids.get(self._class, (None, None))[0]
+        fremd = sorted({passive_tree.class_name_of(self._live_tree, b.link.class_index,
                                                    b.link.ascendancy_index) or "different class"
                         for b in baeume if eigene is not None and b.link.class_index != eigene})
         if fremd and QMessageBox.question(
@@ -1462,10 +1531,10 @@ class PassiveTreeDialog(QDialog):
         for name, baum in zip(namen, baeume):
             tree_history.save_config(self._characters, self._name, name, baum.link.passives,
                                      level=aktuell.get("level") or 0,
-                                     ruthless=self._tree.ruthless,
+                                     ruthless=self._live_tree.ruthless,
                                      source="link" if not baum.title else "pob",
                                      group=self._import_group if len(baeume) > 1 else "",
-                                     notes=baum.notes)
+                                     notes=baum.notes, tree=passive_tree.current_id())
         self._on_change()
         self.refresh((CONFIG, namen[0]))
 
@@ -1488,8 +1557,8 @@ class PassiveTreeDialog(QDialog):
         aktiven (sonst letzten) Baums, bei pobb.in/pastebin mit der Adresse —
         "Chieftain (pobb.in/KMJMGblyFcI7)"; umbenennen kann man ihn."""
         baum = next((b for b in baeume if b.active and passive_tree.main_points(
-            self._tree, b.link.passives)), baeume[-1])
-        klasse = passive_tree.class_name_of(self._tree, baum.link.class_index,
+            self._live_tree, b.link.passives)), baeume[-1])
+        klasse = passive_tree.class_name_of(self._live_tree, baum.link.class_index,
                                             baum.link.ascendancy_index) or "Build"
         roh = pob_import.remote_url(text)
         if roh:
@@ -1514,8 +1583,8 @@ class PassiveTreeDialog(QDialog):
         fenster.setWindowTitle("Import trees from build")
         liste = QListWidget()
         for baum in baeume:
-            punkte = tree_report.used_points(self._tree, baum.link.passives)[0]   # wie "Points used"
-            klasse = passive_tree.class_name_of(self._tree, baum.link.class_index,
+            punkte = tree_report.used_points(self._live_tree, baum.link.passives)[0]   # wie "Points used"
+            klasse = passive_tree.class_name_of(self._live_tree, baum.link.class_index,
                                                 baum.link.ascendancy_index) or "?"
             item = QListWidgetItem(f"{baum.title} — {klasse}, {punkte} points"
                                    + (" (active in Path of Building)" if baum.active else ""))

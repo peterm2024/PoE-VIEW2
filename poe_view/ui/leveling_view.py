@@ -30,6 +30,10 @@ def build_plan(characters: dict, name: str) -> Plan | None:
     ziel = tree_history.configs(characters, name).get(roh["target"])
     if ziel is None:
         return None
+    # Ein Ziel aus einem älteren Baum passt nicht zum heutigen (§4.60.15):
+    # dieselbe Knoten-Kennung kann dort etwas anderes sein.
+    if passive_tree.entry_tree_id(ziel) != passive_tree.current_id():
+        return None
     return Plan(ziel.get("passives") or {}, [int(h) for h in roh.get("priority") or ()])
 
 

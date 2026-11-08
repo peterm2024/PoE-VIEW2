@@ -51,6 +51,7 @@ from poe_view.services.api_worker import (ApiWorker, BootstrapJob,
                                           FetchCharacterItemsJob,
                                           FetchCharactersJob, FetchIconJob,
                                           FetchLeaguesJob, FetchModKnowledgeJob,
+                                          FetchPassiveTreeJob,
                                           FetchPricesJob, FetchStashItemsJob,
                                           FetchStashListJob, LOGIN_EXPIRED,
                                           LOGIN_NO_TOKEN, LoginJob,
@@ -770,6 +771,7 @@ class MainWindow(QMainWindow):
         self._live_levels: dict[str, int] = {}
         self._leveling_char = ""
         self._leveling_window: LevelingWindow | None = None
+        self._tree_refetch_requested = False     # §4.60.15, einmal je Sitzung
         # Charakter-Item-Verlauf (Peter, 2026-08-02): letzte 120 Items, die
         # neu im Inventar aufgetaucht oder daraus verschwunden sind — über
         # ALLE Charaktere hinweg, unabhängig davon, welcher gerade angezeigt
@@ -2624,6 +2626,7 @@ class MainWindow(QMainWindow):
         w.offline_changed.connect(self._on_offline_changed)
         w.prices_loaded.connect(self._on_prices_loaded)
         w.mod_knowledge_loaded.connect(self._on_mod_knowledge_loaded)
+        w.passive_tree_updated.connect(self._on_passive_tree_updated)
         w.update_available.connect(self._on_update_available)
 
     # --- Worker-Slots (Main-Thread) ------------------------------------ #
@@ -4249,14 +4252,43 @@ class MainWindow(QMainWindow):
             ruthless = passive_tree.is_ruthless({}, char.league if char else "")
         watch = self._xp_watch.get(name)
         level = watch.level if watch and watch.level else (char.level if char else 0)
+        self._check_tree_version(passives, ruthless)
         baeume = self._trees()
-        if not tree_history.record(baeume, name, passives, level=level, ruthless=ruthless):
+        if not tree_history.record(baeume, name, passives, level=level, ruthless=ruthless,
+                                   tree=passive_tree.current_id()):
             return
         self._save_trees()
         dialog = getattr(self, "_tree_dialog", None)
         if dialog is not None and dialog.isVisible() and dialog._name == name:
             dialog.refresh()
         self._update_leveling(name)
+
+    def _check_tree_version(self, passives: dict, ruthless: bool) -> None:
+        """Trägt ein Charakter Knoten, die der gespeicherte Baum nicht
+        kennt, hat GGG einen neuen — sofort holen statt bis zu einer Woche
+        zu warten (§4.60.15). Einmal je Sitzung: Bringt der Download nichts
+        Neues (Knoten wirklich unbekannt), wird nicht jeder Abruf zum
+        Download."""
+        if self._tree_refetch_requested:
+            return
+        baum = passive_tree.load(bool(ruthless))
+        if baum is None or not passive_tree.unknown_nodes(baum, passives):
+            return
+        self._tree_refetch_requested = True
+        log.info("Passiv-Baum: Charakter trägt unbekannte Knoten — lade die Baumdaten neu")
+        self.worker.submit(FetchPassiveTreeJob())
+
+    def _on_passive_tree_updated(self, neu: bool) -> None:
+        """Ein neuer Baum ist da: Der alte liegt im Archiv (§4.60.15), ein
+        offenes Baum-Fenster rechnet ab jetzt mit dem neuen."""
+        if not neu:
+            return
+        self._on_status("A new passive tree from GGG was loaded — older trees stay viewable "
+                        "(read-only).")
+        dialog = getattr(self, "_tree_dialog", None)
+        if dialog is not None and dialog.isVisible():
+            dialog.set_live_tree(passive_tree.load(
+                dialog._live_tree.ruthless if dialog._live_tree is not None else False))
 
     def _save_trees(self) -> None:
         try:
