@@ -77,6 +77,21 @@ Details zur Handhabung im Projekt: ARCHITEKTUR.md §7.1.
 Liga-Namen enthalten Leerzeichen (`SSF Ruthless`), Pfadsegmente müssen
 daher URL-encodiert werden (`urllib.parse.quote`).
 
+**`/character/<name>` ohne `ruthless` seit Covens (gemessen 2026-11-15).**
+Bis Allflame trug die Antwort ein Feld `ruthless` (Log vom 2026-10-09).
+Am ersten Covens-Abruf fehlte es, bei einem Standard-Charakter. Der Code
+fällt dann auf den Liga-Namen zurück (`passive_tree.is_ruthless`, Muster
+"Ruthless"/"R" als Wort), was für alle heutigen Liga-Namen reicht. Ob das
+Feld nur bei Nicht-Ruthless-Charakteren fehlt oder ganz entfallen ist, ist
+noch offen.
+
+**Knoten, die kein Baum kennt.** Ein lange nicht gespielter
+Standard-Charakter (Level 80) trug am 2026-11-15 den Knoten 19140, der
+weder im 3.29.1- noch im 3.30-Baum noch in `alternate.json` steht —
+vermutlich ein Überbleibsel eines älteren Baums. Folge im Programm: Die
+Prüfung auf unbekannte Knoten (ARCHITEKTUR §4.60.15) lädt einmal je
+Sitzung die Baumdaten neu, ohne Ergebnis. Harmlos, deshalb so belassen.
+
 ### Realm (PoE2, Konsolen)
 
 Welches Spiel und welche Plattform gemeint ist, steuert ein

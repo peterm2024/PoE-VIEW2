@@ -386,3 +386,30 @@ def test_merge_exchange_line_without_matching_item_is_skipped(monkeypatch) -> No
     index = PriceIndex()
     _merge_exchange(index, http=None, league="Standard", item_type="DivinationCard")
     assert index._simple == {"Chaos Orb": 1.0}
+
+
+def test_threads_of_covens_are_priced_from_the_exchange_fragments() -> None:
+    """Covens of Umbra (3.30.0): Threads ersetzen Scarabs. poe.ninja führt
+    sie in der Exchange-Kategorie "Fragment" — gemessen 2026-11-15; die
+    ältere Fragment-Abfrage kennt sie nicht. Leere Kategorien (Scarab,
+    HelmetEnchant) werden nicht mehr abgefragt."""
+    import httpx
+
+    from poe_view.api import ninja
+
+    gefragt = []
+
+    def handler(request):
+        art = request.url.params["type"]
+        gefragt.append((request.url.path.rsplit("/", 2)[-2], art))
+        if "exchange" in request.url.path and art == "Fragment":
+            return httpx.Response(200, json={
+                "items": [{"id": "abyss-thread", "name": "Abyss Thread"}],
+                "lines": [{"id": "abyss-thread", "primaryValue": 0.73}]})
+        return httpx.Response(200, json={"lines": [], "items": []})
+
+    index = ninja.fetch_price_index("Covens", httpx.Client(transport=httpx.MockTransport(handler)))
+    assert index._simple["Abyss Thread"] == 0.73
+    arten = {art for _, art in gefragt}
+    assert {"Fragment", "Astrolabe", "Runegraft"} <= arten
+    assert not {"Scarab", "HelmetEnchant"} & arten

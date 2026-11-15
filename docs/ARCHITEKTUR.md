@@ -1723,6 +1723,21 @@ Traffic ist gering: alle ~30 Requests zusammen ≈ 1,2 MB komprimiert pro
 Liga (real gemessen), da jede Anfrage eine ganze Kategorie statt eines
 Einzel-Items liefert.
 
+**Die Kategorien wandern mit den Seasons.** Covens of Umbra (3.30.0,
+gemessen 2026-11-15): Scarabs gibt es nicht mehr, "Scarab" und
+"HelmetEnchant" waren in Covens und Standard leer und fielen heraus. Die
+Threads, die die Scarabs ersetzen, stehen in der EXCHANGE-Kategorie
+"Fragment" (76 Einträge); die Stash-Route mit `type=Fragment` kennt nur
+10 Fragmente ohne Threads. "Astrolabe" und "Runegraft" gab es schon
+länger und fehlten. "AllflameEmber" hat auch nach Allflame noch
+Einträge und bleibt. **Falle:** Eine unbekannte Kategorie liefert 200
+mit leerer Liste, keinen Fehler — geratene Namen fallen nicht auf. Die
+Threads fanden sich erst über die Exchange-Route mit `type=Fragment`;
+die Seite selbst lädt ihre Kategorien per Skript, im HTML stehen sie
+nicht. Nach jedem Season-Start: jede Kategorie gegen die neue Liga
+zählen (Einträge je `type`), leere prüfen, neue Item-Arten der Season
+über die Exchange-Route suchen.
+
 **Drei Fälle, in denen der Item-Name allein nicht zum richtigen Preis
 führt** (`PriceIndex`, drei getrennte interne Dicts: `_simple`/`_gems`/
 `_links`):

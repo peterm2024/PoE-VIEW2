@@ -29,9 +29,18 @@ _ITEM_TYPES = (
     "UniqueWeapon", "UniqueArmour", "UniqueAccessory", "SkillGem",
     "ClusterJewel", "Vial", "Invitation", "UniqueRelic",
 )
+# Stand Covens of Umbra (3.30.0), gemessen 2026-11-15 gegen poe.ninja:
+# "Scarab" und "HelmetEnchant" sind in Covens UND Standard leer (Scarabs
+# gibt es nicht mehr, durch Threads ersetzt) und fielen heraus. Die
+# Threads stehen in der Exchange-Kategorie "Fragment" (76 Einträge) —
+# die ältere Fragment-Abfrage über ``_CURRENCY_TYPES`` kennt nur 10
+# Fragmente ohne Threads. "Astrolabe" und "Runegraft" fehlten bisher.
+# Eine unbekannte Kategorie liefert bei poe.ninja 200 mit leerer Liste,
+# kein Fehler — Raten fällt also nicht auf; Namen am Seiten-Code prüfen.
 _EXCHANGE_TYPES = (
-    "DivinationCard", "Oil", "Scarab", "Fossil", "Resonator", "Essence",
-    "HelmetEnchant", "DeliriumOrb", "Omen", "AllflameEmber", "Artifact", "Tattoo",
+    "DivinationCard", "Oil", "Fossil", "Resonator", "Essence",
+    "DeliriumOrb", "Omen", "AllflameEmber", "Artifact", "Tattoo",
+    "Fragment", "Astrolabe", "Runegraft",
 )
 
 # poe.ninja führt nur 5-/6-Link separat; alles andere (0-4 Links oder gar

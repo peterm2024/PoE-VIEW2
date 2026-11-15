@@ -6,6 +6,8 @@ nach [SemVer](https://semver.org/lang/de/).
 
 ## [Unveröffentlicht]
 
+## [0.27.0] - 2026-11-15
+
 ### Neu
 
 - **Ältere Passiv-Bäume bleiben ansehbar:** Bringt GGG einen neuen Baum
@@ -16,6 +18,10 @@ nach [SemVer](https://semver.org/lang/de/).
 - **Neuer Baum sofort:** Trägt ein Charakter Knoten, die der gespeicherte
   Baum nicht kennt, lädt das Programm die Baumdaten gleich neu statt
   nach bis zu einer Woche.
+- **Preise für Covens of Umbra:** Threads (Ersatz der Scarabs),
+  Astrolabes und Runegrafts haben jetzt Preise von poe.ninja. Die
+  leeren Kategorien Scarab und Helmet Enchant werden nicht mehr
+  abgefragt.
 
 ## [0.26.0] - 2026-10-09
 
